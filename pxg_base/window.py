@@ -27,14 +27,15 @@ def wait_ready(port: int, timeout: float = 20) -> bool:
     return False
 
 
-def run(browser: bool = False, port: int = 0) -> int:
+def run(browser: bool = False, port: int = 0, title: str = "База ПХГ", app_factory=None) -> int:
     import uvicorn
 
-    from .api import build_app
+    if app_factory is None:
+        from .api import build_app as app_factory
 
     port = port or free_port()
     url = "http://127.0.0.1:%d/" % port
-    server = uvicorn.Server(uvicorn.Config(build_app(), host="127.0.0.1", port=port, log_level="warning"))
+    server = uvicorn.Server(uvicorn.Config(app_factory(), host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     if not wait_ready(port):
@@ -53,14 +54,14 @@ def run(browser: bool = False, port: int = 0) -> int:
         except (AttributeError, TypeError):
             pass
         try:
-            webview.create_window("База ПХГ", url, width=1280, height=860, min_size=(900, 600))
+            webview.create_window(title, url, width=1280, height=860, min_size=(900, 600))
             webview.start()
             server.should_exit = True
             return 0
         except Exception as error:  # например, нет WebView2
             print("Окно приложения не открылось (%s), открываю в браузере" % error)
     webbrowser.open(url)
-    print("База ПХГ: %s  (остановка: Ctrl+C)" % url)
+    print("%s: %s  (остановка: Ctrl+C)" % (title, url))
     try:
         thread.join()
     except KeyboardInterrupt:
