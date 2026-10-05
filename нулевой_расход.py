@@ -733,8 +733,14 @@ def find_mismatch_cases(production_data, injection_data):
     if all_data:
         combined_mismatch = pd.concat(all_data, ignore_index=True)
         
-        # Сортируем по типу несоответствия, скважине и дате
-        combined_mismatch = combined_mismatch.sort_values(['Тип_несоответствия', 'Скважина', 'Дата'])
+        # Преобразуем столбец 'Дата' в строку для безопасной сортировки (даты могут быть разных типов)
+        combined_mismatch['Дата_строка'] = combined_mismatch['Дата'].astype(str)
+
+        # Сортируем по типу несоответствия, скважине и дате (как строке)
+        combined_mismatch = combined_mismatch.sort_values(['Тип_несоответствия', 'Скважина', 'Дата_строка'])
+
+        # Удаляем временный столбец
+        combined_mismatch = combined_mismatch.drop('Дата_строка', axis=1)
         
         print(f"\n✅ Всего найдено несоответствий: {len(combined_mismatch)}")
         
@@ -749,7 +755,7 @@ def find_mismatch_cases(production_data, injection_data):
         print("❌ Несоответствий не найдено")
         return None
 
-def process_all_data(main_root_folder, output_path='Сводка_закачка_отбор_обновленный_скрипт.xlsx'):
+def process_all_data(main_root_folder, output_path='Сводка_закачка_отбор_обновленный_скрипт.xlsx', only_mismatch=False):
     """
     Обрабатывает все данные (отборы и закачку) и сохраняет в один файл на разных листах
     """
@@ -778,50 +784,53 @@ def process_all_data(main_root_folder, output_path='Сводка_закачка_
         print("-" * 40)
         injection_data = process_all_seasons_injection(injection_folder)
     
-    # Сохраняем результаты в один файл на разных листах
-    print(f"\n💾 СОХРАНЕНИЕ РЕЗУЛЬТАТОВ")
-    print("-" * 40)
+    if only_mismatch:
+        print("\n(режим «только несоответствия»: основной файл не создаётся)")
+    else:
+        # Сохраняем результаты в один файл на разных листах
+        print(f"\n💾 СОХРАНЕНИЕ РЕЗУЛЬТАТОВ")
+        print("-" * 40)
     
-    try:
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        try:
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                if production_data is not None and len(production_data) > 0:
+                    production_data.to_excel(writer, sheet_name='Отборы', index=False)
+                    print(f"✅ Лист 'Отборы' сохранен: {len(production_data)} строк")
+                    print(f"   Месяцы в данных: {sorted(production_data['Месяц'].unique())}")
+                else:
+                    print("❌ Нет данных для листа 'Отборы'")
+                
+                if injection_data is not None and len(injection_data) > 0:
+                    injection_data.to_excel(writer, sheet_name='Закачка', index=False)
+                    print(f"✅ Лист 'Закачка' сохранен: {len(injection_data)} строк")
+                    print(f"   Месяцы в данных: {sorted(injection_data['Месяц'].unique())}")
+                else:
+                    print("❌ Нет данных для листа 'Закачка'")
+        
+            print(f"\n✅ Все данные успешно сохранены в файл: {output_path}")
+        
+            # Сводная статистика
+            print("\n📈 СВОДНАЯ СТАТИСТИКА:")
+            print("-" * 30)
             if production_data is not None and len(production_data) > 0:
-                production_data.to_excel(writer, sheet_name='Отборы', index=False)
-                print(f"✅ Лист 'Отборы' сохранен: {len(production_data)} строк")
-                print(f"   Месяцы в данных: {sorted(production_data['Месяц'].unique())}")
-            else:
-                print("❌ Нет данных для листа 'Отборы'")
-                
+                print(f"Отборы: {len(production_data)} строк")
+                print(f"  Уникальных скважин: {production_data['Скважина'].nunique()}")
+                print(f"  Уникальных источников: {production_data['Источник'].nunique()}")
+                print(f"  Месяцы: {sorted(production_data['Месяц'].unique())}")
+                if 'Год' in production_data.columns:
+                    print(f"  Годы: {sorted(production_data['Год'].unique())}")
+        
             if injection_data is not None and len(injection_data) > 0:
-                injection_data.to_excel(writer, sheet_name='Закачка', index=False)
-                print(f"✅ Лист 'Закачка' сохранен: {len(injection_data)} строк")
-                print(f"   Месяцы в данных: {sorted(injection_data['Месяц'].unique())}")
-            else:
-                print("❌ Нет данных для листа 'Закачка'")
-        
-        print(f"\n✅ Все данные успешно сохранены в файл: {output_path}")
-        
-        # Сводная статистика
-        print("\n📈 СВОДНАЯ СТАТИСТИКА:")
-        print("-" * 30)
-        if production_data is not None and len(production_data) > 0:
-            print(f"Отборы: {len(production_data)} строк")
-            print(f"  Уникальных скважин: {production_data['Скважина'].nunique()}")
-            print(f"  Уникальных источников: {production_data['Источник'].nunique()}")
-            print(f"  Месяцы: {sorted(production_data['Месяц'].unique())}")
-            if 'Год' in production_data.columns:
-                print(f"  Годы: {sorted(production_data['Год'].unique())}")
-        
-        if injection_data is not None and len(injection_data) > 0:
-            print(f"Закачка: {len(injection_data)} строк")
-            print(f"  Уникальных скважин: {injection_data['Скважина'].nunique()}")
-            print(f"  Уникальных источников: {injection_data['Источник'].nunique()}")
-            print(f"  Месяцы: {sorted(injection_data['Месяц'].unique())}")
-            if 'Год' in injection_data.columns:
-                print(f"  Годы: {sorted(injection_data['Год'].unique())}")
+                print(f"Закачка: {len(injection_data)} строк")
+                print(f"  Уникальных скважин: {injection_data['Скважина'].nunique()}")
+                print(f"  Уникальных источников: {injection_data['Источник'].nunique()}")
+                print(f"  Месяцы: {sorted(injection_data['Месяц'].unique())}")
+                if 'Год' in injection_data.columns:
+                    print(f"  Годы: {sorted(injection_data['Год'].unique())}")
                 
-    except Exception as e:
-        print(f"❌ Ошибка при сохранении файла: {e}")
-        return None
+        except Exception as e:
+            print(f"❌ Ошибка при сохранении файла: {e}")
+            return None
     
     # Поиск несоответствий и сохранение отдельного файла
     print(f"\n🔍 СОЗДАНИЕ ФАЙЛА С НЕСООТВЕТСТВИЯМИ")
@@ -886,9 +895,14 @@ if __name__ == "__main__":
         print(f"❌ Указанная папка не существует: {main_root_folder}")
         exit(1)
     
+    print("\nРежим работы:")
+    print("  1 - полная обработка (лист 'Отборы', лист 'Закачка' и файл несоответствий)")
+    print("  2 - только файл несоответствий")
+    only_mismatch = input("Выберите режим [1]: ").strip() == "2"
+
     # Запускаем обработку
-    result = process_all_data(main_root_folder, "Сводка_закачка_отбор_обновленный_скрипт.xlsx")
-    
+    result = process_all_data(main_root_folder, "Сводка_закачка_отбор_обновленный_скрипт.xlsx", only_mismatch=only_mismatch)
+
     if result is None:
         print("\n❌ Обработка завершена с ошибками")
     else:
