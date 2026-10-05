@@ -2,11 +2,11 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayou
 import type { GspData } from './api'
 import { PAINTS, GAS, MONTH_COLOR, type PaintData, paintFor, rampColor, type Paint, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
 
-export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint }
+export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
 interface Props {
   g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number
-  options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; title: string
+  options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; title: string
 }
 interface View { k: number; tx: number; ty: number }
 interface Tip { x: number; y: number; well: number }
@@ -15,16 +15,16 @@ const css = (name: string) => getComputedStyle(document.documentElement).getProp
 
 const Glyph = memo(function Glyph(p: {
   well: number; x: number; y: number; r: number; rmax: number; total: number; share: number; months: number[]; order: number[]
-  sectors: boolean; paint?: { color: string; label: string } | null; water: { factor: number | null; flow: number | null }[]; maxFlow: number; showShare: boolean; selected: boolean
+  sectors: boolean; paint?: { color: string; label: string } | null; water: { factor: number | null; flow: number | null }[]; maxFlow: number; showShare: boolean; selected: boolean; label: string; dim: boolean
 }) {
   const { x, y, r, rmax } = p
   if (p.paint !== undefined) {
     const pc = p.paint, rr = rmax * 0.8, fs0 = rmax * 0.44
     return (
-      <g className="glyph" data-well={p.well}>
+      <g className="glyph" data-well={p.well} opacity={p.dim ? 0.25 : 1}>
         {p.selected && <circle cx={x} cy={y} r={rr + rmax * 0.3} fill="none" stroke="var(--accent)" strokeWidth={rmax * 0.1} strokeDasharray={`${rmax * 0.3} ${rmax * 0.18}`} />}
         <circle cx={x} cy={y} r={rr} fill={pc ? pc.color : '#c5cdd0'} fillOpacity={pc ? 0.95 : 0.5} stroke={pc ? '#fff' : '#8a979c'} strokeWidth={rmax * 0.05} />
-        <text x={x} y={y - (pc ? rmax * 0.16 : 0)} fontSize={fs0} textAnchor="middle" dominantBaseline="central" fontWeight={700} fill="#fff" stroke="#0b1418" strokeWidth={fs0 * 0.2} paintOrder="stroke" strokeLinejoin="round">{p.well}</text>
+        <text x={x} y={y - (pc ? rmax * 0.16 : 0)} fontSize={fs0} textAnchor="middle" dominantBaseline="central" fontWeight={700} fill="#fff" stroke="#0b1418" strokeWidth={fs0 * 0.2} paintOrder="stroke" strokeLinejoin="round">{p.label}</text>
         {pc && <text x={x} y={y + rmax * 0.34} fontSize={rmax * 0.32} textAnchor="middle" dominantBaseline="central" fontWeight={700} fill="#fff" stroke="#0b1418" strokeWidth={rmax * 0.06} paintOrder="stroke" strokeLinejoin="round">{pc.label}</text>}
       </g>
     )
@@ -61,13 +61,13 @@ const Glyph = memo(function Glyph(p: {
         <text x={bx} y={by} fontSize={fs} textAnchor="middle" dominantBaseline="central" fill="#fff" fontWeight={700}>{Math.round(wf)}</text></g>)
     }
   }
-  const fs = Math.max(rmax * 0.52, 0.0001)
+  const fs = Math.max(rmax * (p.label.length > 4 ? 0.36 : 0.52), 0.0001)
   return (
-    <g className="glyph" data-well={p.well}>
+    <g className="glyph" data-well={p.well} opacity={p.dim ? 0.25 : 1}>
       {p.selected && <circle cx={x} cy={y} r={Math.max(r, rmax * 0.3) + rmax * 0.32} fill="none" stroke="var(--accent)" strokeWidth={rmax * 0.1} strokeDasharray={`${rmax * 0.3} ${rmax * 0.18}`} />}
       {els}
       <text x={x} y={y} fontSize={fs} textAnchor="middle" dominantBaseline="central" fontWeight={700}
-        fill={idle ? '#26343a' : '#fff'} stroke={idle ? '#fff' : '#0b1418'} strokeWidth={fs * 0.2} paintOrder="stroke" strokeLinejoin="round">{p.well}</text>
+        fill={idle ? '#26343a' : '#fff'} stroke={idle ? '#fff' : '#0b1418'} strokeWidth={fs * 0.2} paintOrder="stroke" strokeLinejoin="round">{p.label}</text>
       {idle && <text x={x + Math.max(r, rmax * 0.3) * 0.8} y={y - Math.max(r, rmax * 0.3) * 0.8} fontSize={rmax * 0.5} fontWeight={700} textAnchor="middle" dominantBaseline="central" fill="#d92d20" stroke="#fff" strokeWidth={rmax * 0.1} paintOrder="stroke">✕</text>}
       {!idle && p.showShare && p.share >= 0.02 && (
         <g><rect x={x + r + rmax * 0.08} y={y - rmax * 0.19} width={rmax * 0.95} height={rmax * 0.38} rx={rmax * 0.1} fill="#fff" fillOpacity={0.92} stroke="#8b1d27" strokeWidth={rmax * 0.025} />
@@ -77,13 +77,14 @@ const Glyph = memo(function Glyph(p: {
   )
 })
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, title }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
   const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 })
   const [tip, setTip] = useState<Tip | null>(null)
-  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  const drag = useRef<{ x: number; y: number; moved: boolean; box?: boolean; x0?: number; y0?: number } | null>(null)
+  const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
 
   useLayoutEffect(() => {
     const el = wrap.current
@@ -178,7 +179,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const unit = g.layout.mode === 'xy' ? 'м' : ''
   const bar = niceStep(160 / (fit.s * view.k))
   // опорные круги легенды: тот же масштаб, что на карте, но не крупнее 34 px
-  const Rpx = rmax * fit.s * view.k
+  const Rpx = rmax * options.scale * fit.s * view.k
   const vTop = (() => {
     const raw = win.scaleMax * Math.min(1, (34 / Rpx) ** 2), p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p
     return (f >= 5 ? 5 : f >= 2 ? 2 : 1) * p
@@ -192,24 +193,40 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   return (
     <div className="map-wrap" ref={wrap}>
       <svg ref={svg} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} fontFamily="'PT Sans','Segoe UI',sans-serif"
-        onPointerDown={e => { drag.current = { x: e.clientX, y: e.clientY, moved: false }; (e.currentTarget as Element).setPointerCapture(e.pointerId) }}
+        onPointerDown={e => {
+          const r = wrap.current!.getBoundingClientRect(), bx = e.clientX - r.left, by = e.clientY - r.top
+          drag.current = { x: e.clientX, y: e.clientY, moved: false, box: e.shiftKey, x0: bx, y0: by };
+          (e.currentTarget as Element).setPointerCapture(e.pointerId)
+        }}
         onPointerMove={e => {
           const d = drag.current
           if (d) {
             const dx = e.clientX - d.x, dy = e.clientY - d.y
             if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
-            if (d.moved) { d.x = e.clientX; d.y = e.clientY; setView(v => ({ ...v, tx: v.tx + dx, ty: v.ty + dy })); setTip(null) }
+            if (d.moved && d.box) { const r = wrap.current!.getBoundingClientRect(); setBox({ x0: d.x0!, y0: d.y0!, x1: e.clientX - r.left, y1: e.clientY - r.top }); setTip(null) }
+            else if (d.moved) { d.x = e.clientX; d.y = e.clientY; setView(v => ({ ...v, tx: v.tx + dx, ty: v.ty + dy })); setTip(null) }
           } else if (tip) {
             const r = wrap.current!.getBoundingClientRect(); setTip({ ...tip, x: e.clientX - r.left, y: e.clientY - r.top })
           }
         }}
         onPointerUp={e => {
-          const moved = drag.current?.moved
+          const d = drag.current, moved = d?.moved
           drag.current = null
-          if (!moved) {
+          if (moved && d?.box && box) {
+            const xa = Math.min(box.x0, box.x1), xb = Math.max(box.x0, box.x1), ya = Math.min(box.y0, box.y1), yb = Math.max(box.y0, box.y1)
+            const inside = placed.filter(p => { const sx = view.k * (fit.s * p.x + fit.ox) + view.tx, sy = view.k * (fit.s * p.y + fit.oy) + view.ty; return sx >= xa && sx <= xb && sy >= ya && sy <= yb }).map(p => p.well)
+            const base = e.ctrlKey || e.metaKey ? group : []
+            onGroup(Array.from(new Set([...base, ...inside])))
+            if (inside.length === 1 && !base.length) onSelect(inside[0])
+          } else if (!moved) {
             const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-well]')
-            onSelect(t ? Number(t.getAttribute('data-well')) : null)
+            const w = t ? Number(t.getAttribute('data-well')) : null
+            if (w !== null && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+              const cur = group.length ? group : selected !== null ? [selected] : []
+              onGroup(cur.includes(w) ? cur.filter(x => x !== w) : [...cur, w])
+            } else onSelect(w)
           }
+          setBox(null)
         }}
         onPointerLeave={() => setTip(null)}
         onPointerOver={e => {
@@ -221,14 +238,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <rect width={size.w} height={size.h} fill={bg} className="map-bg" />
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
-            {placed.map((p, n) => (
+            {placed.map((p, n) => (!paintData && ((options.hideIdle && !(win.stats[n].total > 0)) || (options.minValue > 0 && win.stats[n].total < options.minValue * 1e6)) && selected !== p.well && !group.includes(p.well) ? null :
               <Glyph key={p.well} well={p.well} x={p.x} y={p.y} rmax={rmax} total={win.stats[n].total}
-                r={win.stats[n].total > 0 ? rmax * Math.sqrt(win.stats[n].total / win.scaleMax) : rmax * 0.25}
+                r={win.stats[n].total > 0 ? rmax * options.scale * Math.sqrt(win.stats[n].total / win.scaleMax) : rmax * 0.25}
                 share={win.stats[n].total > 0 ? win.stats[n].total / win.sumAll : 0}
                 months={win.months[n] || []} order={win.order} sectors={options.sectors === 'months'}
                 paint={paintData ? (paintData.vals.has(p.well) ? { color: rampColor(paintData.stops, (paintData.vals.get(p.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)), label: paintData.vals.get(p.well)!.label } : null) : undefined}
                 water={options.water ? water.get(p.well) || [] : []} maxFlow={maxFlow} showShare={options.share}
-                selected={selected === p.well} />
+                selected={selected === p.well || group.includes(p.well)} dim={!!tip && tip.well !== p.well && !group.includes(p.well)} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(p.well)} />
             ))}
           </g>
         </g>
@@ -275,10 +292,19 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         {!paintData && <><div className="segmented" role="radiogroup" aria-label="Секторы на круге">
           <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
           <button type="button" role="radio" aria-checked={options.sectors === 'plain'} onClick={() => onOptions({ sectors: 'plain' })}>Один цвет</button></div>
+        <label className="sel" title="Множитель размера кругов"><span>Размер</span>
+          <input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
+        <label className="sel" title="Что писать на круге"><span>Подпись</span>
+          <select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
+        <label className="check" title="Скрыть скважины без расхода в окне"><input type="checkbox" checked={options.hideIdle} onChange={e => onOptions({ hideIdle: e.target.checked })} />Только работающие</label>
+        <label className="sel" title="Скрыть скважины с расходом ниже порога"><span>Порог, млн м³</span>
+          <input type="number" min={0} step={0.5} className="thr" value={options.minValue} onChange={e => onOptions({ minValue: Math.max(0, Number(e.target.value) || 0) })} /></label>
         <label className="check"><input type="checkbox" checked={options.water} onChange={e => onOptions({ water: e.target.checked })} />Вода</label>
         <label className="check"><input type="checkbox" checked={options.share} onChange={e => onOptions({ share: e.target.checked })} />Доли</label>
         <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Масштаб сезона</label></>}
       </div>
+      {box && <div className="selbox no-export" style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}
+      {group.length > 1 && <div className="group-chip no-export">Выбрано: {group.length} <button type="button" className="quiet" onClick={() => onGroup([])}>Сбросить</button></div>}
       <div className="map-tools no-export">
         <button type="button" className="icon" title="Приблизить" onClick={() => zoomBy(1.5)}>+</button>
         <button type="button" className="icon" title="Отдалить" onClick={() => zoomBy(1 / 1.5)}>−</button>
@@ -289,6 +315,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <div className="tip" style={{ left: Math.min(tip.x + 14, size.w - 230), top: Math.min(tip.y + 14, size.h - 150) }}>
           <b>Скважина {tipWell.well}</b>{tipWell.dir && <span className="muted"> · {tipWell.dir}</span>}
           <div className="tip-grid">
+            <svg viewBox="0 0 200 34" className="tip-spark" aria-hidden="true">{(() => { const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || [], mx = Math.max(1, ...row), bw = 200 / Math.max(1, row.length)
+              return <><rect x={a * bw} width={Math.max(1, (b - a + 1) * bw)} height={34} className="daily-win" />{row.map((v, j) => v > 0 && <rect key={j} x={j * bw} width={Math.max(0.5, bw - 0.3)} y={34 - (v / mx) * 32} height={(v / mx) * 32} fill={GAS} opacity={j >= a && j <= b ? 1 : 0.4} />)}</> })()}</svg>
             <span>Накоплено</span><b>{fmtMln(win.stats[tipIdx].total)} млн м³</b>
             <span>Среднее за день с расходом</span><b>{fmtTh(win.stats[tipIdx].mean)} тыс. м³</b>
             <span>Дней с расходом</span><b>{win.stats[tipIdx].days}</b>
