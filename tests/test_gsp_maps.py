@@ -21,15 +21,19 @@ from gsp_maps.store import KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of  # noqa
 
 OLD = next((ROOT / "apps" / "map_dashboards").glob("Секторные_диаграммы*.py"))
 _NEEDED = {"get_season_from_month", "process_main_data", "load_water_files", "load_map_file", "load_pressure_file",
-           "load_seasons_file", "analyze_trends", "load_perforation_depths"}
+           "load_seasons_file", "analyze_trends", "load_perforation_depths", "integrate_water_data",
+           "create_well_share_analysis", "_format_header", "_color_season_groups"}
 
 
 @pytest.fixture(scope="module")
 def old():
     """Старые функции в своём пространстве имён (остальной модуль с побочными эффектами не выполняется)."""
     from openpyxl import load_workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
     tree = ast.parse(OLD.read_text(encoding="utf-8"))
-    ns = {"pd": pd, "np": np, "re": re, "os": os, "datetime": datetime, "load_workbook": load_workbook}
+    ns = {"pd": pd, "np": np, "re": re, "os": os, "datetime": datetime, "load_workbook": load_workbook,
+          "Alignment": Alignment, "Border": Border, "Font": Font, "PatternFill": PatternFill, "Side": Side, "get_column_letter": get_column_letter}
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in _NEEDED:
             exec(compile(ast.Module([node], []), str(OLD), "exec"), ns)
@@ -298,3 +302,44 @@ def test_api_flow(db, tmp_path, monkeypatch):
     assert c.get("/api/work", params={"name": "нет"}).status_code == 404
     assert c.get("/api/files/" + ex["name"]).status_code == 200
     assert c.get("/api/files/../x").status_code == 404
+
+
+@pytest.mark.parametrize("with_water", [False, True])
+def test_share_tables_match_old(old, db, tmp_path, monkeypatch, with_water):
+    monkeypatch.setenv("GSP_MAPS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
+    from gsp_maps.project import Project
+    path, o, z = db
+    paths = {"db": str(path)}
+    df_water = None
+    if with_water:
+        wd = tmp_path / "вода"
+        wd.mkdir()
+        for name, k in (("ноябрь 2022", 1), ("январь 2023", 2)):
+            rows = [["№", "Вынос", "Расход газа", "Вода, л/ч"]] + [[w, "%d/1000" % (10 * k + w % 5), 20000, 100.0 * k] for w in (11, 12, 13)]
+            pd.DataFrame(rows).to_excel(str(wd / ("ГСП замеры %s.xlsx" % name)), index=False, header=False)
+        paths["water"] = str(wd)
+        df_water = old["load_water_files"]([str(f) for f in sorted(wd.iterdir())])
+    pr = Project()
+    pr.set_paths(paths, str(tmp_path / "out"))
+    pr.store = Store.open(str(path))
+    dirs = {11: "Север", 12: "Юг", 13: "Север", 14: "Восток"}
+    mine = pr.share_tables("ГСП 1", dirs)
+    old_o, old_z = old["process_main_data"](o.copy(), z.copy(), "ГСП 1")
+    if df_water is not None:
+        old_o = old["integrate_water_data"](old_o, df_water)
+    book = tmp_path / "old.xlsx"
+    with pd.ExcelWriter(str(book), engine="openpyxl") as writer:
+        old["create_well_share_analysis"](old_o, old_z, dirs, writer)
+    ref = pd.read_excel(str(book), sheet_name=None)
+    assert set(mine) == set(ref)
+    for name, df in mine.items():
+        r = ref[name]
+        assert list(df.columns) == list(r.columns), name
+        key = ["Сезон", "Направление"] if name == "Направления_по_сезонам" else ["Скважина"]
+        a, b = df.sort_values(key).reset_index(drop=True), r.sort_values(key).reset_index(drop=True)
+        for col in df.columns:
+            if not pd.api.types.is_numeric_dtype(a[col]):
+                assert list(a[col]) == list(b[col]), (name, col)
+            else:
+                assert np.allclose(a[col].to_numpy(dtype=float), b[col].to_numpy(dtype=float), equal_nan=True), (name, col)

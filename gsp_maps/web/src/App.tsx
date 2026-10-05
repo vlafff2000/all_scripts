@@ -3,6 +3,7 @@ import { exportExcel, getGsp, getSeason, getState, saveImage, type AppState, typ
 import Inspector from './Inspector'
 import MapView, { type MapHandle } from './MapView'
 import { SeasonCalc, fmtDay } from './model'
+import SharesPage from './SharesPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
 import { fixedScale, inspectorOpen, lastGsp, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
@@ -11,6 +12,7 @@ import Timeline from './Timeline'
 const PAGES = [
   { id: 'map', title: 'Карта', icon: 'M8 1.5a4.5 4.5 0 0 1 4.5 4.5c0 3-4.5 8.5-4.5 8.5S3.5 9 3.5 6A4.5 4.5 0 0 1 8 1.5Zm0 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z' },
   { id: 'work', title: 'Работа скважин', icon: 'M2 3h12M2 8h12M2 13h12M4 3v0M7 8v0M10 13v0M3 5.5h5M6 10.5h7' },
+  { id: 'shares', title: 'Доли', icon: 'M8 2a6 6 0 1 0 6 6H8zM9.5 1.5A5 5 0 0 1 14.5 6.5H9.5z' },
   { id: 'table', title: 'Таблица', icon: 'M2 3h12v10H2zM2 6.5h12M2 10h12M6 3v10' },
   { id: 'pressure', title: 'Давление', icon: 'M2 13V3M2 13h12M4 10l3-3 2 2 4-5' },
   { id: 'trends', title: 'Тренды', icon: 'M2 12l4-4 3 2 5-6M10 4h4v4' },
@@ -125,6 +127,7 @@ export default function App() {
     if (page === 'table') return <TablePage g={g} calc={calc} kind={kind} season={season} a={a} b={b} />
     if (page === 'pressure') return <PressurePage g={g} kind={kind} season={season} range={[calc.days[a], calc.days[b]]} />
     if (page === 'work') return <WorkPage g={g} calc={calc} kind={kind} season={season} selected={selected} onSelect={setSelected} />
+    if (page === 'shares') return <SharesPage g={g} kind={kind} selected={selected} onSelect={setSelected} />
     if (page === 'trends') return <TrendsPage g={g} />
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
