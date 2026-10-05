@@ -148,3 +148,5 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .cum-legend button { background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink); display: inline-flex; align-items: center; gap: 4px; }
 .cum-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .inspector > * { flex-shrink: 0; }
+.tip-spark { grid-column: 1 / -1; width: 100%; height: 34px; }
+.layers .thr { width: 64px; }
