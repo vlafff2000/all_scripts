@@ -44,6 +44,8 @@ export default function App() {
   const [gErr, setGErr] = useState('')
   const [seasonKey, setSeasonKey] = useState('')
   const [calc, setCalc] = useState<SeasonCalc | null>(null)
+  const [calcKey, setCalcKey] = useState('')
+  const [batch, setBatch] = useState<{ keys: string[]; i: number } | null>(null)
   const [win, setWin] = useState<[number, number]>([0, 0])
   const [selected, setSelected] = useState<number | null>(null)
   const [find, setFind] = useState('')
@@ -82,7 +84,7 @@ export default function App() {
     getSeason(g.gsp, kind, season).then(d => {
       if (!live) return
       const c = new SeasonCalc(d)
-      setCalc(c); setWin([0, Math.max(0, c.nd - 1)])
+      setCalc(c); setCalcKey(season); setWin([0, Math.max(0, c.nd - 1)])
     }).catch(e => live && setGErr(String(e.message || e)))
     return () => { live = false }
   }, [g, kind, season])
@@ -102,6 +104,28 @@ export default function App() {
       }
     } catch (e) { flash(String((e as Error).message || e)) }
   }
+  const savePng = async (name: string) => {
+    const blob = await map.current!.toPng()
+    try { await saveImage(name, blob) } catch {
+      const u = URL.createObjectURL(blob), el = document.createElement('a'); el.href = u; el.download = name; el.click(); URL.revokeObjectURL(u)
+    }
+  }
+  const pngAll = () => { if (seasons.length) setBatch({ keys: seasons.map(s => s.key), i: 0 }) }
+  useEffect(() => {
+    if (!batch) return
+    const key = batch.keys[batch.i]
+    if (season !== key) { setSeasonKey(key); return }
+    if (calcKey !== key || !calc) return
+    let live = true
+    const t = setTimeout(async () => {
+      try { await savePng(`Карта_${gsp.replace(/\s/g, '_')}_${kind}_${key}.png`) } catch (e) { if (live) { flash(String((e as Error).message || e)); setBatch(null) } return }
+      if (!live) return
+      if (batch.i + 1 < batch.keys.length) setBatch({ keys: batch.keys, i: batch.i + 1 })
+      else { setBatch(null); flash(`Сохранено картинок: ${batch.keys.length} (папка результатов)`) }
+    }, 400)
+    return () => { live = false; clearTimeout(t) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch, season, calcKey, calc])
   const excel = async () => { try { const r = await exportExcel(gsp, mode); flash('Excel сохранён: ' + r.path) } catch (e) { flash(String((e as Error).message || e)) } }
   const goFind = (v: string) => {
     setFind(v)
@@ -175,6 +199,7 @@ export default function App() {
               <span className="spacer" />
               {g && <Issues notes={g.layout.notes} warnings={g.warnings} />}
               <button type="button" className="quiet" onClick={png} title="Сохранить карту как картинку">PNG</button>
+              <button type="button" className="quiet" onClick={pngAll} disabled={!!batch} title="Сохранить картинки карты по всем сезонам выбранного вида">{batch ? `PNG ${batch.i + 1}/${batch.keys.length}` : 'PNG все сезоны'}</button>
               <button type="button" className="quiet" onClick={excel} title="Выгрузить таблицы в Excel">Excel</button>
               <button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сведений">Сведения</button>
             </>}
