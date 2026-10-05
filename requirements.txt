@@ -1,0 +1,10 @@
+# Запуск из исходников (CPython 3.8+). Для переносной сборки версии закреплены в requirements-lock-py38.txt.
+pandas
+numpy
+openpyxl
+xlsxwriter
+xlrd
+odfpy
+starlette
+uvicorn
+pywebview; sys_platform == "win32"
