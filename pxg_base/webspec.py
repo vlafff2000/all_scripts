@@ -202,12 +202,6 @@ SPECS: List[WebSpec] = [
         env=_LEVEL_ENV,
     ),
     WebSpec(
-        module="Зеркальная_таблица_давлений_2016_2026",
-        params=(Param("root", "Корневая папка с вложенными папками", "folder", required=True),),
-        stdin=lambda v: "1\n%s\nда\n" % (v.get("root") or "").strip(),
-        note="Результат — папка «результаты_обработки» с объединённой таблицей и сводкой.",
-    ),
-    WebSpec(
         module="Итоговая_таблица_давлений_2006_2025",
         params=(Param("file", "Файл с давлениями", "file", required=True, hint="Таблица: дата, затем пары «устьевое/пластовое» по скважинам"),),
         answers=("file",),

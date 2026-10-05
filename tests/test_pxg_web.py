@@ -17,7 +17,7 @@ from pxg_base.api import app  # noqa: E402
 def test_modules_and_validation():
     c = TestClient(app)
     mods = c.get("/api/modules").json()["modules"]
-    assert sum(1 for m in mods if m["web"]) == 22 and all(m["command"] for m in mods)
+    assert sum(1 for m in mods if m["web"]) == 21 and all(m["command"] for m in mods)
     r = c.post("/api/jobs", json={"module": "Нулевые_расходы_и_несоответствия_часов", "params": {}})
     assert r.status_code == 400 and "Корневая папка" in r.json()["error"]
     assert c.post("/api/jobs", json={"module": "нет_такого", "params": {}}).status_code == 404
