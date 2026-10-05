@@ -1,4 +1,4 @@
-"""Запуск «Базы ПХГ»: python -m pxg_base  (меню)  или  python -m pxg_base <номер|имя модуля>."""
+"""Запуск «Базы ПХГ»: python -m pxg_base (меню), python -m pxg_base <номер|имя модуля>, python -m pxg_base --server (веб-интерфейс)."""
 from __future__ import annotations
 
 import runpy
@@ -31,8 +31,17 @@ def pick(arg: str):
     return None
 
 
+def serve(port: int = 8766) -> int:
+    import uvicorn
+    print("«База ПХГ» открыта на http://127.0.0.1:%d (остановить: Ctrl+C)" % port)
+    uvicorn.run("pxg_base.api:app", host="127.0.0.1", port=port, log_level="warning")
+    return 0
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "--server":
+        return serve(int(argv[1]) if len(argv) > 1 else 8766)
     if argv:
         choice = pick(argv[0])
     else:
