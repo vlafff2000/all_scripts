@@ -96,19 +96,24 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   }, [])
 
   const geo = useMemo(() => place(g, calc), [g, calc])
-  const { placed, spacing, bounds } = geo
+  const [frameAll, setFrameAll] = useState(false)
+  const [layersOpen, setLayersOpen] = useState(false)
+  const { placed, spacing, far } = geo
+  const bounds = frameAll ? geo.boundsAll : geo.bounds
   const rmax = useMemo(() => {
     const span = Math.max(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0, 1)
-    return Math.min(spacing * 0.58, span * 0.09)
+    // в плотных кустах медианный шаг крошечный: круг не меньше 2,2 % размаха карты (перекрытие лечат зум и порядок отрисовки)
+    return Math.min(Math.max(spacing * 0.58, span * 0.022), span * 0.09)
   }, [spacing, bounds])
 
   // подгонка карты под окно
-  const M = 70, top = 54
+  const M = 70, top = layersOpen ? 190 : 54
   const bw = bounds.x1 - bounds.x0 + rmax * 4, bh = bounds.y1 - bounds.y0 + rmax * 4
   const s0 = Math.min((size.w - 2 * M) / bw, (size.h - top - M) / bh)
   const fit = { s: s0, ox: size.w / 2 - s0 * ((bounds.x0 + bounds.x1) / 2), oy: top + (size.h - top - M * 0.5) / 2 - s0 * ((bounds.y0 + bounds.y1) / 2) }
   const resetView = useCallback(() => setView({ k: 1, tx: 0, ty: 0 }), [])
-  useEffect(resetView, [g, resetView])
+  useEffect(resetView, [g, resetView, frameAll])
+  useEffect(() => setFrameAll(false), [g])
 
   // итоги окна
   const win = useMemo(() => {
@@ -238,7 +243,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <rect width={size.w} height={size.h} fill={bg} className="map-bg" />
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
-            {placed.map((p, n) => (!paintData && ((options.hideIdle && !(win.stats[n].total > 0)) || (options.minValue > 0 && win.stats[n].total < options.minValue * 1e6)) && selected !== p.well && !group.includes(p.well) ? null :
+            {placed.map((p, n) => ({ p, n })).sort((u, v) => win.stats[v.n].total - win.stats[u.n].total).map(({ p, n }) => (!paintData && ((options.hideIdle && !(win.stats[n].total > 0)) || (options.minValue > 0 && win.stats[n].total < options.minValue * 1e6)) && selected !== p.well && !group.includes(p.well) ? null :
               <Glyph key={p.well} well={p.well} x={p.x} y={p.y} rmax={rmax} total={win.stats[n].total}
                 r={win.stats[n].total > 0 ? rmax * options.scale * Math.sqrt(win.stats[n].total / win.scaleMax) : rmax * 0.25}
                 share={win.stats[n].total > 0 ? win.stats[n].total / win.sumAll : 0}
@@ -286,7 +291,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           <path d={`M0,0V-6H${bar * fit.s * view.k}V0`} fill="none" stroke={ink} strokeWidth={1.5} />
           <text y={-10} fontSize={11} fill={ink}>{bar >= 1000 ? fmt1(bar / 1000) + ' км' : bar + ' м'}</text></g>}
       </svg>
-      <div className="layers no-export">
+      <button type="button" className="quiet layers-toggle no-export" onClick={() => setLayersOpen(v => !v)} aria-expanded={layersOpen}>{layersOpen ? 'Скрыть настройки' : 'Настройки карты'}</button>
+      {layersOpen && <div className="layers no-export">
         <label className="sel paintsel" title="Чем красить скважины"><span>Раскраска</span>
           <select value={options.paint} onChange={e => onOptions({ paint: e.target.value as Paint })}>{PAINTS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
         {!paintData && <><div className="segmented" role="radiogroup" aria-label="Секторы на круге">
@@ -302,7 +308,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <label className="check"><input type="checkbox" checked={options.water} onChange={e => onOptions({ water: e.target.checked })} />Вода</label>
         <label className="check"><input type="checkbox" checked={options.share} onChange={e => onOptions({ share: e.target.checked })} />Доли</label>
         <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Масштаб сезона</label></>}
-      </div>
+      </div>}
       {box && <div className="selbox no-export" style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}
       {group.length > 1 && <div className="group-chip no-export">Выбрано: {group.length} <button type="button" className="quiet" onClick={() => onGroup([])}>Сбросить</button></div>}
       <div className="map-tools no-export">
@@ -328,6 +334,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           </div>
         </div>
       )}
+      {far.length > 0 && <div className="far-chip no-export" title={'Далёкие скважины: ' + far.join(', ')}>{frameAll ? 'Показаны все скважины' : `За кадром: ${far.length} далёк. скв.`} <button type="button" className="quiet" onClick={() => setFrameAll(v => !v)}>{frameAll ? 'Только основная группа' : 'Показать все'}</button></div>}
       {geo.unplaced.length > 0 && <div className="unplaced no-export" title={geo.unplaced.join(', ')}>Без координат: {geo.unplaced.length} скв. (есть в таблице)</div>}
       {!placed.length && <div className="empty-map">Для этого ГСП нет положений скважин. Задайте карту-сетку или файл XY в разделе «Данные».</div>}
       <span className="sr-only">{fmtDay(calc.days[a])} — {fmtDay(calc.days[b])}</span>
