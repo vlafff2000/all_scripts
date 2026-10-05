@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import glob
 from pathlib import Path
+from pxg_core.расходы_файлы import get_excel_files_from_folder
 
 def find_header_row(df_raw):
     """Находит строку с заголовком таблицы (пропускает пустые строки в начале)"""
@@ -10,16 +11,6 @@ def find_header_row(df_raw):
         if not row.isnull().all():
             return idx
     return 0
-
-def get_excel_files_from_folder(folder_path):
-    """Получает все Excel файлы из папки"""
-    excel_patterns = ['*.xlsx', '*.xls', '*.xlsm']
-    excel_files = []
-    
-    for pattern in excel_patterns:
-        excel_files.extend(glob.glob(os.path.join(folder_path, pattern)))
-    
-    return excel_files
 
 def display_columns_for_selection(df, sheet_name, file_name):
     """Отображает список столбцов для выбора"""
