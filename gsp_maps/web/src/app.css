@@ -206,3 +206,26 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .stat-grid b { font-size: 21px; letter-spacing: -.01em; }
 .daily rect:not(.daily-win) { rx: 1px; }
 .timeline { border-radius: 10px; box-shadow: 0 1px 2px var(--shadow); }
+
+/* сравнение двух сезонов */
+.cmp-page { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; }
+.cmp-page.no-insp { grid-template-columns: minmax(0, 1fr); }
+.cmp-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
+.cmp-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cmp-hint { font-size: 13px; margin-left: auto; }
+.cmp-maps { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cmp-cell { position: relative; display: flex; min-width: 0; min-height: 0; }
+.cmp-cell .map-wrap { flex: 1; min-width: 0; }
+.cmp-line-a { stroke: #8a979c; stroke-dasharray: 5 3; fill: none; }
+.cmp-key-a { border: 1.5px dashed #8a979c; background: none !important; border-radius: 0 !important; height: 0 !important; width: 14px !important; display: inline-block; vertical-align: middle; }
+.cmp-table th { text-align: left; font-weight: 400; color: var(--ink); font-size: 13px; } .cmp-table thead th { color: var(--muted); font-size: 12px; }
+.cmp-table small { color: var(--muted); font-size: 11px; font-weight: 400; } .cmp-table th small { display: block; } .cmp-table .delta small { display: block; text-align: right; } .cmp-table th { white-space: nowrap; }
+.cmp-table td { font-size: 13px; } .cmp-table .delta { font-weight: 700; }
+.cmp-top button { grid-template-columns: 38px 1fr 64px; }
+.cmp-top button.on { background: var(--accent-soft); }
+.dvbar { position: relative; height: 8px; background: var(--line-soft); border-radius: 4px; }
+.dvbar::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line-strong); }
+.dvbar i { position: absolute; top: 0; height: 100%; }
+.dvbar i.pos { background: var(--accent); border-radius: 0 4px 4px 0; } .dvbar i.neg { background: #8a979c; border-radius: 4px 0 0 4px; }
+@media (max-width: 1100px) { .cmp-page { grid-template-columns: 1fr; } .cmp-maps { grid-template-columns: 1fr; } .cmp-cell .map-wrap { min-height: 420px; } }
+.cmp-cell .view-label { display: none; } .cmp-cell .view-btn { padding: 0 9px; }

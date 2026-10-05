@@ -7,8 +7,10 @@ export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus:
 interface Props {
   g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number
   options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; title: string
+  /** Режим сравнения: общий масштаб кругов и общий вид (зум/сдвиг) у двух карт. */
+  compact?: boolean; scaleMax?: number; view?: View; onView?: (v: View) => void
 }
-interface View { k: number; tx: number; ty: number }
+export interface View { k: number; tx: number; ty: number }
 interface Tip { x: number; y: number; well: number }
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -89,11 +91,18 @@ const Glyph = memo(function Glyph(p: {
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, compact, scaleMax, view: viewProp, onView }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
-  const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 })
+  const [viewOwn, setViewOwn] = useState<View>({ k: 1, tx: 0, ty: 0 })
+  const view = viewProp || viewOwn
+  const viewNow = useRef(view); viewNow.current = view
+  const setView = useCallback((u: View | ((v: View) => View)) => {
+    const n = typeof u === 'function' ? u(viewNow.current) : u
+    viewNow.current = n; setViewOwn(n); onView?.(n)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onView])
   const [tip, setTip] = useState<Tip | null>(null)
   const drag = useRef<{ x: number; y: number; moved: boolean; box?: boolean; x0?: number; y0?: number } | null>(null)
   const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
@@ -136,8 +145,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const first = monthOf(calc.days[a])
     const order = Array.from({ length: 12 }, (_, i) => (first + i) % 12)
     const months = options.sectors === 'months' ? placed.map(p => calc.monthly(p.i, a, b)) : []
-    return { stats, sumAll, scaleMax: options.fixed ? maxSeason : maxWin, order, months }
-  }, [placed, calc, a, b, options.sectors, options.fixed])
+    return { stats, sumAll, scaleMax: scaleMax || (options.fixed ? maxSeason : maxWin), order, months }
+  }, [placed, calc, a, b, options.sectors, options.fixed, scaleMax])
 
   const water = useMemo(() => waterByWell(g.water, kind, season, calc.days[a], calc.days[b]), [g.water, kind, season, calc, a, b])
   const paintData: PaintData | null = useMemo(() => paintFor(options.paint, g, calc, kind, season, a, b), [options.paint, g, calc, kind, season, a, b])
@@ -233,7 +242,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   refs.forEach((c, i) => { const want = 34 + 2 * R0 - 2 * c.r; labY.push(i ? Math.max(want, labY[i - 1] + 14) : want) })
   const sizeH = Math.max(2 * R0, labY[labY.length - 1] - 34 + 6)
   const LW = 248
-  const legH = 46 + sizeH + (!paintData && usedMonths.length > 1 ? 44 : 0) + (!paintData && options.water ? 26 : 0)
+  const legH = 46 + sizeH + (!paintData && !compact && usedMonths.length > 1 ? 44 : 0) + (!paintData && !compact && options.water ? 26 : 0)
   const tipWell = tip ? placed.find(q => q.well === tip.well) : null
   const tipIdx = tipWell ? placed.indexOf(tipWell) : -1
   const [t1, t2] = [title.split(' · ').slice(0, 2).join(' · '), title.split(' · ')[2] || '']
@@ -308,8 +317,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           </g>
         </g>
         {/* заголовок и легенда рисуются в координатах экрана, поэтому попадают и в PNG */}
-        <text x={18} y={32} fontSize={18} fontWeight={700} fill={pal.ink} stroke={pal.bg} strokeWidth={5} paintOrder="stroke" strokeLinejoin="round">{t1}</text>
-        <text x={18} y={51} fontSize={13} fill={pal.muted} stroke={pal.bg} strokeWidth={4} paintOrder="stroke" strokeLinejoin="round">{t2}</text>
+        <text x={18} y={32} fontSize={compact ? 15 : 18} fontWeight={700} fill={pal.ink} stroke={pal.bg} strokeWidth={5} paintOrder="stroke" strokeLinejoin="round">{t1}</text>
+        <text x={18} y={compact ? 49 : 51} fontSize={compact ? 12 : 13} fill={pal.muted} stroke={pal.bg} strokeWidth={4} paintOrder="stroke" strokeLinejoin="round">{t2}</text>
         <g transform={`translate(14 ${size.h - 14 - (paintData ? 92 : legH)})`}>
           <rect width={LW} height={paintData ? 92 : legH} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
           {paintData ? <>
@@ -329,14 +338,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 <text x={14 + 2 * R0 + 18} y={labY[i]} fontSize={11} fill={pal.ink} dominantBaseline="central">{fmtMln(c.v)}</text>
               </g>
             ))}
-            {usedMonths.length > 1 && <g transform={`translate(14 ${46 + sizeH})`}>
+            {!compact && usedMonths.length > 1 && <g transform={`translate(14 ${46 + sizeH})`}>
               <text y={0} fontSize={11} fill={pal.muted}>Секторы — месяцы окна, раньше светлее</text>
               {usedMonths.map((m, i) => {
                 const w = (LW - 28) / usedMonths.length
                 return <g key={m} transform={`translate(${i * w} 8)`}><rect width={w - 2} height={10} rx={3} fill={monthColors[m]} /><text x={(w - 2) / 2} y={25} fontSize={10.5} fill={pal.ink} textAnchor="middle">{MONTH_SHORT[m]}</text></g>
               })}
             </g>}
-            {options.water && <g transform={`translate(14 ${legH - 14})`}>
+            {!compact && options.water && <g transform={`translate(14 ${legH - 14})`}>
               <path d={sectorPath(8, -4, 8, -1.2, 1.2, 5.5)} fill={pal.water} /><circle cx={16} cy={-9} r={4.5} fill={pal.water} />
               <text x={26} y={0} fontSize={11} fill={pal.muted}>вода: кольцо — л/ч, кружок — ВФ</text>
             </g>}
@@ -355,7 +364,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       </svg>
       <div className="map-view-ctl no-export">
         <button type="button" className={'view-btn' + (layersOpen ? ' on' : '')} onClick={() => setLayersOpen(v => !v)} aria-expanded={layersOpen} title="Как показывать скважины">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 1.5 5.5 8 9l6.5-3.5L8 2ZM1.5 8.5 8 12l6.5-3.5M1.5 11.5 8 15l6.5-3.5" /></svg>Вид карты</button>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 1.5 5.5 8 9l6.5-3.5L8 2ZM1.5 8.5 8 12l6.5-3.5M1.5 11.5 8 15l6.5-3.5" /></svg><span className="view-label">Вид карты</span></button>
         {layersOpen && <div className="layers" role="dialog" aria-label="Вид карты">
           <section><h4>Цвет</h4>
             <select value={options.paint} onChange={e => onOptions({ paint: e.target.value as Paint })} aria-label="Раскраска">{PAINTS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>

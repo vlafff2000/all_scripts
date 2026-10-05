@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { exportExcel, getGsp, getSeason, getState, saveImage, type AppState, type GspData } from './api'
+import Compare from './Compare'
 import Inspector from './Inspector'
 import MapView, { type MapHandle } from './MapView'
 import { SeasonCalc, fmtDay } from './model'
@@ -11,6 +12,7 @@ import Timeline from './Timeline'
 
 const PAGES = [
   { id: 'map', title: 'Карта', icon: 'M8 1.5a4.5 4.5 0 0 1 4.5 4.5c0 3-4.5 8.5-4.5 8.5S3.5 9 3.5 6A4.5 4.5 0 0 1 8 1.5Zm0 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z' },
+  { id: 'compare', title: 'Сравнение', icon: 'M2 3h5v10H2zM9 3h5v10H9zM4.5 6v4M11.5 6v4' },
   { id: 'work', title: 'Работа скважин', icon: 'M2 3h12M2 8h12M2 13h12M4 3v0M7 8v0M10 13v0M3 5.5h5M6 10.5h7' },
   { id: 'shares', title: 'Доли', icon: 'M8 2a6 6 0 1 0 6 6H8zM9.5 1.5A5 5 0 0 1 14.5 6.5H9.5z' },
   { id: 'table', title: 'Таблица', icon: 'M2 3h12v10H2zM2 6.5h12M2 10h12M6 3v10' },
@@ -160,6 +162,9 @@ export default function App() {
         {app.state === 'error' && <pre className="log">{app.log.join('\n')}</pre>}
         <p className="muted">Откройте раздел «Данные»: выберите папку с файлами или укажите БД_расходы.xlsx.</p>
         <p><a className="primary linkbtn" href="#/data">Перейти к данным</a></p></section>)
+    if (g && page === 'compare') return (
+      <Compare g={g} kind={kind} inspector={insp} options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
+        onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />)
     if (!g || !calc) return gErr ? <div className="note warning">{gErr}</div> : <p className="muted">Считаю…</p>
     if (page === 'table') return <TablePage g={g} calc={calc} kind={kind} season={season} a={a} b={b} mode={mode} />
     if (page === 'pressure') return <PressurePage g={g} kind={kind} season={season} range={[calc.days[a], calc.days[b]]} />
@@ -198,15 +203,16 @@ export default function App() {
               <span className="side-label">{label}</span></button>))}
         </div>
       </aside>
-      <main className={'workspace' + (page === 'map' ? ' wide' : '')}>
+      <main className={'workspace' + (page === 'map' || page === 'compare' ? ' wide' : '')}>
         {showBar && (
           <div className="topbar">
             <label className="sel"><span>ГСП</span>
               <select value={gsp} onChange={e => lastGsp.set(e.target.value)}>{app!.gsps.map(x => <option key={x} value={x}>{x}{app!.gspMeta[x] && !app!.gspMeta[x].grid && !app!.gspMeta[x].xy ? ' · нет карты' : ''}</option>)}</select></label>
             <div className="segmented" role="radiogroup" aria-label="Вид">
               {['Отбор', 'Закачка'].map(k => <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => lastKind.set(k)}>{k}</button>)}</div>
-            <label className="sel"><span>Сезон</span>
-              <select value={season} onChange={e => setSeasonKey(e.target.value)}>{seasons.map(s => <option key={s.key}>{s.key}</option>)}</select></label>
+            {page !== 'compare' && <label className="sel"><span>Сезон</span>
+              <select value={season} onChange={e => setSeasonKey(e.target.value)}>{seasons.map(s => <option key={s.key}>{s.key}</option>)}</select></label>}
+            {page === 'compare' && <><span className="spacer" /><button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сравнения">Сведения</button></>}
             {page === 'map' && <>
               <input className="find" inputMode="numeric" placeholder="Скважина №" aria-label="Найти скважину" value={find} onChange={e => goFind(e.target.value)} />
               <span className="spacer" />
