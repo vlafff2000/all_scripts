@@ -1,0 +1,30 @@
+:root { --bg: #f6f7f9; --panel: #fff; --text: #1d2733; --muted: #66727f; --accent: #1f6feb; --line: #d9dee4; --ok: #1a7f37; --bad: #c4291c; --log: #0f1720; --log-text: #d7e0ea; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #11161c; --panel: #1a212a; --text: #e6ebf0; --muted: #93a0ad; --accent: #5aa2ff; --line: #2c3641; --ok: #4cc26a; --bad: #ff7b72; --log: #0a0e13; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+.app { display: grid; grid-template-columns: 300px 1fr; min-height: 100vh; }
+.menu { background: var(--panel); border-right: 1px solid var(--line); padding: 16px; overflow-y: auto; }
+.menu h1 { font-size: 18px; margin: 0 0 12px; }
+.menu h2 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 16px 0 6px; }
+.item { display: block; width: 100%; text-align: left; border: 0; background: none; color: inherit; padding: 6px 8px; border-radius: 6px; cursor: pointer; font: inherit; word-break: break-word; }
+.item:hover { background: var(--bg); }
+.item.active { background: var(--accent); color: #fff; }
+.tag { margin-left: 6px; font-size: 11px; opacity: .7; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }
+main { padding: 24px; max-width: 900px; }
+main h2 { margin-top: 0; }
+.muted { color: var(--muted); }
+.note { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.form { display: grid; gap: 14px; margin: 16px 0; }
+.form label { display: grid; gap: 4px; }
+.form span { font-weight: 600; }
+.form small { color: var(--muted); }
+input, select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); width: 100%; }
+.run { justify-self: start; font: inherit; padding: 9px 22px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+.run:disabled { opacity: .6; cursor: default; }
+.error { color: var(--bad); }
+.running { color: var(--accent); } .done { color: var(--ok); } .failed { color: var(--bad); }
+.log { background: var(--log); color: var(--log-text); padding: 12px; border-radius: 8px; max-height: 420px; overflow: auto; white-space: pre-wrap; font: 13px/1.4 ui-monospace, Consolas, monospace; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+@media (max-width: 800px) { .app { grid-template-columns: 1fr; } .menu { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; } }
