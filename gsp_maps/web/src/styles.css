@@ -1,0 +1,190 @@
+/* Карты ГСП: тот же стиль, что у Газового атласа: тёмная боковая панель, светлая рабочая область,
+   бирюзовый акцент #149ba5 из палитры проекта. Шрифт PT Sans (ParaType) встроен, работает без сети. */
+:root {
+  --side: #1f2d35;
+  --side-raised: #283a43;
+  --side-ink: #d3dfe3;
+  --side-muted: #8aa0a8;
+  --accent: #149ba5;
+  --accent-strong: #0f7d86;
+  --accent-soft: #e6f4f5;
+  --bg: #f3f6f6;
+  --surface: #ffffff;
+  --ink: #1b2a31;
+  --muted: #5f7178;
+  --line: #dbe3e5;
+  --warn: #7d520a;
+  --warn-soft: #fcf3e1;
+  --accent-hover: #0b6a72;
+  --line-soft: #edf1f2;
+  --line-strong: #b9c7cb;
+  --head-bg: #f8fafa;
+  --row-hover: #f6fafa;
+  --changed: #fff7ef;
+  --info-ink: #0d5a61;
+  --danger: #c2410c;
+  --danger-ink: #9a3412;
+  --danger-soft: #fff4ec;
+  --danger-line: #f0b48f;
+  --bad: #b42318;
+  --good: #15803d;
+  --bar: rgba(20, 155, 165, .16);
+  --bar-negative: rgba(194, 65, 12, .16);
+  --shadow: rgba(27, 42, 49, .14);
+  --shadow-strong: rgba(27, 42, 49, .25);
+  --radius: 6px;
+  font-family: 'PT Sans', 'Segoe UI', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+/* тёмная тема: те же роли цветов; переключатель — внизу боковой панели */
+:root[data-theme='dark'] {
+  --side: #10181c;
+  --side-raised: #1c282e;
+  --side-ink: #c9d6db;
+  --side-muted: #7f939a;
+  --accent: #2bb3bd;
+  --accent-strong: #1f9aa4;
+  --accent-hover: #24aab4;
+  --accent-soft: #15353a;
+  --bg: #0f1619;
+  --surface: #172025;
+  --ink: #e2eaed;
+  --muted: #98aab0;
+  --line: #2b383e;
+  --line-soft: #222d32;
+  --line-strong: #435259;
+  --head-bg: #1b252a;
+  --row-hover: #1d292e;
+  --changed: #33291c;
+  --info-ink: #a5e0e4;
+  --warn: #f0c46c;
+  --warn-soft: #33290f;
+  --danger: #f07c4a;
+  --danger-ink: #ffb08c;
+  --danger-soft: #3a2218;
+  --danger-line: #8a4524;
+  --bad: #ff8a7a;
+  --good: #4ade80;
+  --bar: rgba(43, 179, 189, .24);
+  --bar-negative: rgba(240, 124, 74, .24);
+  --shadow: rgba(0, 0, 0, .45);
+  --shadow-strong: rgba(0, 0, 0, .6);
+  --chart-ink: #e2eaed;
+  --chart-muted: #9db0b6;
+  --chart-faint: #74878d;
+  --chart-grid: #243037;
+  --chart-axis: #3a4950;
+  --chart-surface: #172025;
+  --chart-accent: #3cc2cb;
+}
+body { background: var(--bg); color: var(--ink); margin: 0; }
+* { box-sizing: border-box; }
+h1, h2, h3, p { margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.muted { color: var(--muted); }
+code { font-family: ui-monospace, Consolas, 'DejaVu Sans Mono', monospace; font-size: 13px; }
+
+.shell { display: grid; grid-template-columns: 252px minmax(0, 1fr); min-height: 100vh; transition: grid-template-columns .15s ease; }
+.shell.collapsed { grid-template-columns: 60px minmax(0, 1fr); }
+
+/* ---------- боковая панель ---------- */
+.sidebar {
+  background: var(--side); color: var(--side-ink); position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  padding: 18px 14px 20px; display: flex; flex-direction: column; gap: 20px;
+}
+.sidebar > * { flex-shrink: 0; }
+.sidebar svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
+.brand-link { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; color: #fff; text-decoration: none; font-size: 18px; font-weight: 700; }
+.brand-name { white-space: nowrap; overflow: hidden; }
+.brand-mark {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  background: radial-gradient(circle, var(--accent) 0 3px, transparent 3.5px 6px, var(--accent) 6.5px 7.5px, transparent 8px 10px, var(--accent) 10.5px 11px);
+}
+.side-toggle, .side-search, .theme-switch button { color: var(--side-muted); }
+.side-toggle { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius); background: none; cursor: pointer; flex-shrink: 0; }
+.side-toggle:hover, .side-search:hover { background: var(--side-raised); color: var(--side-ink); }
+.side-search { display: flex; align-items: center; gap: 8px; margin: -8px 0 0; padding: 7px 10px; border: 1px solid #34474f; border-radius: var(--radius); background: none; cursor: pointer; font-size: 14px; text-align: left; }
+.side-search span { flex: 1; }
+kbd { font-family: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 4px; border: 1px solid currentColor; opacity: .75; }
+.sidebar nav { display: grid; gap: 18px; }
+.sidebar h2 { font-size: 13px; font-weight: 400; color: var(--side-muted); padding: 0 6px 6px; }
+.sidebar ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.sidebar nav a { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: var(--radius); color: var(--side-ink); text-decoration: none; border-left: 3px solid transparent; }
+.sidebar nav a:hover { background: var(--side-raised); }
+.sidebar nav a[aria-current='page'] { background: var(--side-raised); color: #fff; border-left-color: var(--accent); }
+.badge { font-style: normal; font-size: 11px; color: var(--side-muted); border: 1px solid #3a4f59; border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+.theme-switch { margin-top: auto; display: flex; background: var(--side-raised); border: 1px solid #34474f; border-radius: var(--radius); padding: 2px; gap: 2px; }
+.theme-switch button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 4px; font-size: 12px; background: none; border: 0; border-radius: 4px; cursor: pointer; }
+.theme-switch button[aria-checked='true'] { background: var(--side); color: var(--side-ink); }
+.theme-switch button:hover { color: var(--side-ink); }
+.shell.collapsed .sidebar { padding: 18px 8px 20px; align-items: center; }
+.shell.collapsed .brand { flex-direction: column; padding: 0; gap: 12px; }
+.shell.collapsed .brand-name, .shell.collapsed .side-label, .shell.collapsed .sidebar nav { display: none; }
+.shell.collapsed .side-search { margin: 0; padding: 8px; justify-content: center; }
+.shell.collapsed .theme-switch { flex-direction: column; align-self: center; }
+
+/* ---------- рабочая область ---------- */
+.workspace { padding: 22px 28px 48px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.module-head h1 { font-size: 26px; line-height: 1.2; }
+.crumb { font-size: 13px; color: var(--muted); margin-bottom: 2px; }
+.lede { color: var(--muted); max-width: 72ch; margin-top: 4px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.note { border-radius: var(--radius); padding: 9px 14px; max-width: 110ch; }
+.note.info { background: var(--accent-soft); color: var(--info-ink); }
+.note.warning { background: var(--warn-soft); color: var(--warn); }
+
+button.primary { background: var(--accent-strong); color: #fff; border: 0; border-radius: var(--radius); padding: 8px 18px; font-weight: 700; cursor: pointer; }
+button.primary:hover { background: var(--accent-hover); }
+button.primary:disabled { opacity: .6; cursor: default; }
+button.quiet { background: none; border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 10px; color: var(--muted); cursor: pointer; font-size: 14px; white-space: nowrap; }
+button.quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); }
+
+/* ---------- форма ---------- */
+.param-card { display: grid; gap: 14px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.field { display: grid; gap: 3px; align-content: start; background: var(--bg); border: 1px solid transparent; border-radius: var(--radius); padding: 7px 10px; }
+.field.wide { grid-column: 1 / -1; }
+.field:hover, .field:focus-within { border-color: var(--line); }
+.field:focus-within { border-color: var(--accent); background: var(--surface); }
+.field.invalid { border-color: var(--danger); background: var(--danger-soft); }
+.field-label { font-size: 12px; color: var(--muted); }
+.req { color: var(--danger); }
+.field input, .field select { border: 0; background: transparent; padding: 2px 0; font-weight: 700; outline: none; width: 100%; min-width: 0; }
+.field textarea { border: 0; background: transparent; padding: 2px 0; font: inherit; font-weight: 700; outline: none; width: 100%; resize: vertical; }
+.path-row textarea { flex: 1; min-width: 0; }
+.path-row input { flex: 1; }
+.check { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent-strong); }
+.field select option { font-weight: 400; background: var(--surface); }
+.path-row { display: flex; gap: 8px; align-items: center; }
+.hint { font-size: 12px; color: var(--muted); }
+.field-error { font-size: 13px; color: var(--danger); }
+.advanced summary { cursor: pointer; color: var(--muted); font-size: 14px; margin-bottom: 8px; }
+.advanced[open] summary { color: var(--ink); }
+.actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.keys { font-size: 13px; }
+
+/* ---------- поиск модуля ---------- */
+.overlay { position: fixed; inset: 0; z-index: 60; background: rgba(10, 18, 22, .38); display: grid; justify-items: center; align-items: start; padding-top: 14vh; }
+.palette { width: min(560px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 18px 48px var(--shadow-strong); overflow: hidden; }
+.palette input { width: 100%; border: 0; border-bottom: 1px solid var(--line); padding: 14px 16px; font-size: 17px; background: transparent; outline: none; }
+.palette ul { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow-y: auto; }
+.palette li button { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius); background: none; cursor: pointer; text-align: left; }
+.palette li button.on { background: var(--accent-soft); }
+.palette li .muted { font-size: 12px; white-space: nowrap; }
+.palette .none { padding: 10px; }
+.fatal { max-width: 60ch; margin: 20vh auto; display: grid; gap: 8px; padding: 0 16px; }
+
+@media (max-width: 900px) {
+  .shell, .shell.collapsed { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; }
+  .workspace { padding: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .dot { animation: none; } .shell { transition: none; } }
+

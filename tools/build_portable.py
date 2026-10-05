@@ -46,13 +46,15 @@ RUNTIMES = {
 }
 
 # Tracked application files that go into the folder (tests, interface sources and dev scripts stay out).
-INCLUDE = ['pxg_base', 'pxg_core', 'README.md', 'requirements.txt']
+INCLUDE = ['pxg_base', 'gsp_maps', 'pxg_core', 'README.md', 'requirements.txt']
 SDIST_ONLY = {'proxy-tools', 'odfpy'}  # чистый Python, опубликован только исходниками
 SKIP_TOOLS = set()
 
 WINDOWS_LAUNCHERS = {
     'PXG_Base.bat': 'rem База ПХГ: окно приложения (или браузер, если окно недоступно).\r\n'
                     '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base --app %*',
+    'Karty_GSP.bat': 'rem Карты ГСП: окно приложения (или браузер, если окно недоступно).\r\n'
+                     '"%~dp0python\\python.exe" -s -X utf8 -m gsp_maps %*',
     'PXG_Base_console.bat': 'rem База ПХГ: консольное меню модулей.\r\n'
                             '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base %*',
 }
@@ -62,6 +64,7 @@ WINDOWS_SUFFIX = '\r\nif errorlevel 1 pause\r\n'
 
 LINUX_LAUNCHERS = {
     'pxg_base.sh': '# База ПХГ в браузере.\nexec "$PY" -s -X utf8 -m pxg_base --browser "$@"',
+    'karty_gsp.sh': '# Карты ГСП в браузере.\nexec "$PY" -s -X utf8 -m gsp_maps --browser "$@"',
     'pxg_base_console.sh': '# База ПХГ: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
@@ -77,9 +80,13 @@ README = '''База ПХГ — переносная версия ({target})
    (например, {example}).
 2. Запустите {six} — окно приложения: выбираете модуль, заполняете форму, запускаете.
    {five} — консольное меню тех же модулей.
+3. {maps} — «Карты ГСП»: секторные диаграммы расходов газа и воды по скважинам на карте с бегунком времени.
+   Положение скважин берётся из карты-сетки Excel и/или из координат X, Y (tNavigator).
 
-Результаты запусков складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
+Результаты запусков «Базы ПХГ» складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
 Другая папка результатов по умолчанию: переменная окружения PXG_RUNS_DIR.
+«Карты ГСП» сохраняют Excel и картинки в папку «Результаты карт ГСП» рядом с БД_расходы.xlsx (меняется на странице «Данные»);
+кэш базы расходов лежит в папке .gsp_maps вашего профиля (переменная GSP_MAPS_CACHE меняет место).
 {note}'''
 
 WINDOWS_NOTE = '''
@@ -167,7 +174,7 @@ def write_launchers(target, folder):
         for name, body in WINDOWS_LAUNCHERS.items():
             (folder / name).write_bytes((WINDOWS_PREFIX + body + WINDOWS_SUFFIX).encode('utf-8'))
         text = README.format(target='Windows', example='C:\\GasAtlas', six='PXG_Base.bat',
-                             five='PXG_Base_console.bat', note=WINDOWS_NOTE)
+                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', note=WINDOWS_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_bytes(text.replace('\n', '\r\n').encode('utf-8-sig'))
     else:
         for name, body in LINUX_LAUNCHERS.items():
@@ -175,7 +182,7 @@ def write_launchers(target, folder):
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
-                             six='pxg_base.sh', five='pxg_base_console.sh', note=LINUX_NOTE)
+                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')
 
 
@@ -202,7 +209,7 @@ def smoke_test(folder):
     env.update(PYTHONNOUSERSITE='1', MPLBACKEND='Agg')
     code = ('import sys, tkinter, pandas, numpy, openpyxl, xlsxwriter, xlrd, python_calamine, odf, starlette, uvicorn, pxg_core.расходы_файлы;'
             + ('import webview, win32api;' if os.name == 'nt' else '') +
-            'import pxg_base.api as a;a.build_app();'
+            'import pxg_base.api as a;a.build_app();import gsp_maps.api as m;m.build_app();'
             'assert sys.prefix.startswith({!r}), sys.prefix;print("ok", sys.version.split()[0])').format(str(folder))
     subprocess.check_call([str(python), '-s', '-c', code], cwd=str(folder), env=env)
 

@@ -46,6 +46,11 @@ jobs:
           for i in $(seq 60); do curl -sf http://127.0.0.1:8766/api/modules > modules.json && ok=1 && break; sleep 1; done
           cat server.log
           test -n "$ok" && head -c 200 modules.json
+          "$PY" -s -m gsp_maps --server 8767 > maps.log 2>&1 &
+          ok=
+          for i in $(seq 60); do curl -sf http://127.0.0.1:8767/api/state > state.json && ok=1 && break; sleep 1; done
+          cat maps.log
+          test -n "$ok" && head -c 200 state.json
       - uses: actions/upload-artifact@v4
         with:
           name: PXG_Base_portable_${{ matrix.target }}
