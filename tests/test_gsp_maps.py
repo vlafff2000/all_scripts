@@ -288,6 +288,13 @@ def test_api_flow(db, tmp_path, monkeypatch):
     assert c.get("/api/gsp", params={"name": "нет"}).status_code == 404
     ex = c.post("/api/export", json={"gsp": "ГСП 1", "mode": "auto"}).json()
     book = pd.ExcelFile(ex["path"])
-    assert {"Отбор по сезонам", "Закачка по сезонам", "Скважины"} <= set(book.sheet_names)
+    assert {"Отбор по сезонам", "Закачка по сезонам", "Скважины", "Работа по сезонам", "Работа по месяцам", "Очерёдность ввода"} <= set(book.sheet_names)
+    wk = c.get("/api/work", params={"name": "ГСП 1"}).json()
+    assert wk["wells"] == [11, 12, 13, 14] and len(wk["seasons"]) == 2 and len(wk["monthFlow"]) == 4
+    assert wk["months"][0] == 2022 * 12 + 9 and wk["months"][-1] == 2023 * 12 + 8
+    # дни работы по месяцам складываются в дни сезона
+    o = next(s for s in wk["seasons"] if s["kind"] == "Отбор")
+    assert sum(wk["monthDays"][0][:7]) == o["days"][0]
+    assert c.get("/api/work", params={"name": "нет"}).status_code == 404
     assert c.get("/api/files/" + ex["name"]).status_code == 200
     assert c.get("/api/files/../x").status_code == 404
