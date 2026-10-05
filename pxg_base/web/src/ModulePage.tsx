@@ -11,9 +11,13 @@ const when = (t: number) => new Date(t * 1000).toLocaleString('ru-RU', { day: '2
 function PathField({ param, value, onChange, invalid }: { param: Param; value: string; onChange: (v: string) => void; invalid: boolean }) {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState('')
-  const browse = async () => {
+  const browse = async (as: 'folder' | 'file') => {
     setBusy(true); setProblem('')
-    try { const p = await pickPath(param.kind as 'folder' | 'file', value); if (p) onChange(p) }
+    try {
+      const many = param.kind === 'paths'
+      const p = await pickPath(many ? as : (param.kind as 'folder' | 'file'), many ? '' : value)
+      if (p) onChange(many ? (value.trim() ? value.replace(/\s*$/, '') + '\n' : '') + p : p)
+    }
     catch (e) { setProblem((e as Error).message) }
     finally { setBusy(false) }
   }
@@ -21,9 +25,21 @@ function PathField({ param, value, onChange, invalid }: { param: Param; value: s
     <div className={'field wide' + (invalid ? ' invalid' : '')}>
       <label className="field-label" htmlFor={'f-' + param.id}>{param.label}{param.required && <b className="req"> *</b>}</label>
       <div className="path-row">
-        <input id={'f-' + param.id} value={value} spellCheck={false} onChange={e => onChange(e.target.value)}
-          placeholder={param.kind === 'folder' ? 'Путь к папке' : 'Путь к файлу'} />
-        <button type="button" className="quiet" onClick={browse} disabled={busy}>{busy ? 'Выбор…' : 'Обзор…'}</button>
+        {param.kind === 'paths' ? (
+          <textarea id={'f-' + param.id} value={value} spellCheck={false} rows={3} onChange={e => onChange(e.target.value)}
+            placeholder={'По одному пути в строке'} />
+        ) : (
+          <input id={'f-' + param.id} value={value} spellCheck={false} onChange={e => onChange(e.target.value)}
+            placeholder={param.kind === 'folder' ? 'Путь к папке' : 'Путь к файлу'} />
+        )}
+        {param.kind === 'paths' ? (
+          <span className="pick-pair">
+            <button type="button" className="quiet" onClick={() => browse('file')} disabled={busy}>Добавить файл…</button>
+            <button type="button" className="quiet" onClick={() => browse('folder')} disabled={busy}>Добавить папку…</button>
+          </span>
+        ) : (
+          <button type="button" className="quiet" onClick={() => browse(param.kind as 'folder' | 'file')} disabled={busy}>{busy ? 'Выбор…' : 'Обзор…'}</button>
+        )}
       </div>
       {param.hint && <span className="hint">{param.hint}</span>}
       {problem && <span className="field-error">{problem}</span>}
@@ -68,7 +84,8 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
 
   useEffect(() => { const el = logRef.current; if (el && running) el.scrollTop = el.scrollHeight }, [log, running])
 
-  const missing = useMemo(() => module.params.filter(p => p.required && !(values[p.id] || '').trim()).map(p => p.id), [module, values])
+  const visible = (p: Param) => { if (!p.when) return true; const [k, v] = p.when.split('='); return values[k] === v }
+  const missing = useMemo(() => module.params.filter(p => visible(p) && p.required && !(values[p.id] || '').trim()).map(p => p.id), [module, values])
   const [touched, setTouched] = useState(false)
 
   const run = async () => {
@@ -107,13 +124,18 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
           onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run() }}>
           {module.note && <p className="note info">{module.note}</p>}
           <div className="fields">
-            {module.params.map(p => p.kind === 'folder' || p.kind === 'file' ? (
+            {module.params.filter(visible).map(p => p.kind === 'folder' || p.kind === 'file' || p.kind === 'paths' ? (
               <PathField key={p.id} param={p} value={values[p.id]} invalid={touched && missing.includes(p.id)}
                 onChange={v => setValues(o => ({ ...o, [p.id]: v }))} />
             ) : (
-              <div key={p.id} className={'field' + (p.kind === 'choice' ? ' wide' : '') + (touched && missing.includes(p.id) ? ' invalid' : '')}>
+              <div key={p.id} className={'field' + (p.kind === 'choice' || p.kind === 'lines' ? ' wide' : '') + (touched && missing.includes(p.id) ? ' invalid' : '')}>
                 <label className="field-label" htmlFor={'f-' + p.id}>{p.label}{p.required && <b className="req"> *</b>}</label>
-                {p.kind === 'choice' ? (
+                {p.kind === 'bool' ? (
+                  <label className="check"><input id={'f-' + p.id} type="checkbox" checked={!!values[p.id]}
+                    onChange={e => setValues(o => ({ ...o, [p.id]: e.target.checked ? '1' : '' }))} /><span>Да</span></label>
+                ) : p.kind === 'lines' ? (
+                  <textarea id={'f-' + p.id} rows={3} value={values[p.id]} onChange={e => setValues(o => ({ ...o, [p.id]: e.target.value }))} />
+                ) : p.kind === 'choice' ? (
                   <select id={'f-' + p.id} value={values[p.id]} onChange={e => setValues(o => ({ ...o, [p.id]: e.target.value }))}>
                     {p.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
@@ -127,7 +149,7 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
           <details className="advanced">
             <summary>Дополнительно</summary>
             <PathField param={{ id: 'out_dir', label: 'Папка результатов', kind: 'folder', default: '', required: false,
-              hint: 'Пусто — каждый запуск пишет в новую папку pxg_runs/<дата и время>', options: [] }}
+              hint: 'Пусто — каждый запуск пишет в новую папку pxg_runs/<дата и время>', when: '', options: [] }}
               value={outDir} onChange={setOutDir} invalid={false} />
           </details>
           <div className="actions">

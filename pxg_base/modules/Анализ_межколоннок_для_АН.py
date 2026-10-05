@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 from tkinter import Tk, filedialog
@@ -42,6 +43,15 @@ def select_season(df):
     for i, season in enumerate(seasons, 1):
         count = len(df[df['сезон'] == season])
         print(f"{i}. {season} (количество записей: {count})")
+
+    if os.environ.get("PXG_WEB"):  # веб-запуск: сезоны заданы в форме (пусто — все)
+        wanted = [x.strip().lower() for x in os.environ.get("PXG_SEASONS", "").split(",") if x.strip()]
+        picked = [s for s in seasons if not wanted or str(s).lower() in wanted]
+        if not picked:
+            print("Среди сезонов нет ни одного из указанных:", wanted)
+            return None
+        print(f"\nВыбраны сезоны: {picked}")
+        return picked
 
     # Интерактивный выбор сезонов
     print("\nВведите номера сезонов через пробел (например: 1 2 3):")

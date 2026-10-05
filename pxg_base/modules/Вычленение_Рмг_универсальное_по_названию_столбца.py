@@ -126,7 +126,7 @@ def process_files_simple():
     final_df = pd.concat(all_data, ignore_index=True)
     
     # Сохраняем результат
-    script_dir = Path(__file__).parent
+    script_dir = Path.cwd()  # результат — в рабочей папке (в веб-запуске это папка результатов)
     output_file = script_dir / "ГИС_Касимов_данные.xlsx"
     
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:

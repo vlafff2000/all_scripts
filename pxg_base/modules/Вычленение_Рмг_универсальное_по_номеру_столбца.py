@@ -179,7 +179,7 @@ def process_selected_columns():
     final_df = pd.concat(all_data, ignore_index=True)
     
     # Сохраняем результат
-    script_dir = Path(__file__).parent
+    script_dir = Path.cwd()  # результат — в рабочей папке (в веб-запуске это папка результатов)
     output_file = script_dir / "Универсальная_выборка_данных.xlsx"
     
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:

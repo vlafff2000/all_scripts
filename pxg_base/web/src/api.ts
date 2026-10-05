@@ -1,7 +1,7 @@
 export interface ParamOption { value: string; label: string }
 export interface Param {
-  id: string; label: string; kind: 'folder' | 'file' | 'choice' | 'text'
-  default: string; required: boolean; hint: string; options: ParamOption[]
+  id: string; label: string; kind: 'folder' | 'file' | 'paths' | 'lines' | 'choice' | 'bool' | 'text'
+  default: string; required: boolean; hint: string; when: string; options: ParamOption[]
 }
 export interface ModuleInfo {
   id: string; group: string; title: string; description: string

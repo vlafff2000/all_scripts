@@ -17,10 +17,10 @@ from pxg_base.api import app  # noqa: E402
 def test_modules_and_validation():
     c = TestClient(app)
     mods = c.get("/api/modules").json()["modules"]
-    assert [m["id"] for m in mods if m["web"]] == ["создание_БД_расходов", "нулевой_расход"]
+    assert all(m["web"] for m in mods) and len(mods) == 14
     r = c.post("/api/jobs", json={"module": "нулевой_расход", "params": {}})
     assert r.status_code == 400 and "Корневая папка" in r.json()["error"]
-    assert c.post("/api/jobs", json={"module": "впр", "params": {}}).status_code == 404
+    assert c.post("/api/jobs", json={"module": "нет_такого", "params": {}}).status_code == 404
 
 
 def test_run_zero_flow_on_empty_folders(tmp_path, monkeypatch):

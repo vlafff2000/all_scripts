@@ -1,6 +1,7 @@
 """Запуск консольных модулей как фоновых задач: подпроцесс, ввод из формы, журнал, файлы результата."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .registry import MODULES
-from .webspec import WebSpec, get as get_spec
+from .webspec import WebSpec, get as get_spec, lines_of
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODULES_DIR = Path(__file__).resolve().parent / "modules"
@@ -60,10 +61,13 @@ def _run(job: Job, spec: WebSpec) -> None:
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PXG_WEB"] = "1"
+    env["PXG_DIALOGS"] = json.dumps(spec.dialog_config(job.values), ensure_ascii=False)
+    env.update(spec.env_values(job.values))
     code = -1
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-u", str(path)], cwd=str(job.out_dir), env=env,
+            [sys.executable, "-u", str(Path(__file__).with_name("runner.py")), str(path)], cwd=str(job.out_dir), env=env,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             universal_newlines=True, encoding="utf-8", errors="replace")
         try:
@@ -92,6 +96,10 @@ def start(module: str, values: Dict[str, str]) -> Job:
     for p in spec.params:
         if p.required and not (values.get(p.id) or "").strip():
             raise ValueError("Заполните поле «%s»." % p.label)
+        if p.kind == "paths":
+            for line in lines_of(values.get(p.id, "")):
+                if not os.path.exists(line):
+                    raise ValueError("«%s»: путь не найден: %s" % (p.label, line))
         if p.kind in ("folder", "file") and (values.get(p.id) or "").strip():
             v = values[p.id].strip()
             ok = os.path.isdir(v) if p.kind == "folder" else os.path.isfile(v)
@@ -105,6 +113,8 @@ def start(module: str, values: Dict[str, str]) -> Job:
     for p in spec.params:
         if p.kind in ("folder", "file") and (vals.get(p.id) or "").strip():
             vals[p.id] = os.path.abspath(vals[p.id].strip())
+        elif p.kind == "paths":
+            vals[p.id] = "\n".join(os.path.abspath(x) for x in lines_of(vals.get(p.id, "")))
     job = Job(module, vals, base.resolve())
     JOBS[job.id] = job
     threading.Thread(target=_run, args=(job, spec), daemon=True).start()

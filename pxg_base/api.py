@@ -14,7 +14,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import jobs
-from .registry import MODULES
+from .registry import MODULES, TITLES
 from .webspec import get as get_spec
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -29,10 +29,10 @@ async def modules(request: Request):
     for group, name, desc in MODULES:
         s = get_spec(name)
         out.append({
-            "id": name, "group": group, "title": name.replace("_", " ")[:1].upper() + name.replace("_", " ")[1:], "description": desc,
+            "id": name, "group": group, "title": TITLES.get(name) or name.replace("_", " ")[:1].upper() + name.replace("_", " ")[1:], "description": desc,
             "web": s is not None, "note": s.note if s else "",
             "params": [{"id": p.id, "label": p.label, "kind": p.kind, "default": p.default,
-                        "required": p.required, "hint": p.hint,
+                        "required": p.required, "hint": p.hint, "when": p.when,
                         "options": [{"value": v, "label": l} for v, l in p.options]}
                        for p in (s.params if s else ())],
         })

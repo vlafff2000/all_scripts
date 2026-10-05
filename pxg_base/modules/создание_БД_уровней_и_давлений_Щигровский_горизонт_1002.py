@@ -1468,8 +1468,23 @@ def main_enhanced():
     input("\nНажмите Enter для выхода...")
 
 
+def main_web():
+    """Запуск из веб-формы «Базы ПХГ»: параметры приходят переменными окружения, окон и вопросов нет."""
+    extractor = ExcelDataExtractor(debug_mode=True, simple_mode=bool(os.environ.get("PXG_SIMPLE")))
+    # файлы альтитуд и перфораций process_folder спрашивает сам: ответы приходят на стандартный ввод
+    output_file = os.environ.get("PXG_OUTPUT") or "результаты.xlsx"
+    result = extractor.process_folder(Path(os.environ["PXG_INPUT_DIR"]), output_file,
+                                      recursive=bool(os.environ.get("PXG_RECURSIVE")))
+    if result is not None and not result.empty:
+        print(f"\n✓ Обработка завершена! Результат сохранен в: {output_file}")
+    else:
+        print("\nДанных для сохранения не найдено.")
+
+
 def main():
     """Главная функция"""
+    if os.environ.get("PXG_WEB"):
+        return main_web()
     try:
         # Пробуем запустить GUI
         gui = EnhancedGUI()
