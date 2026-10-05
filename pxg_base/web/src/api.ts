@@ -5,7 +5,7 @@ export interface Param {
 }
 export interface ModuleInfo {
   id: string; group: string; title: string; description: string
-  web: boolean; note: string; params: Param[]
+  web: boolean; note: string; command: string; params: Param[]
 }
 export interface Job {
   id: string; module: string; status: 'running' | 'done' | 'failed'

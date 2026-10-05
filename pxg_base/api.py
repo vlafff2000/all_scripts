@@ -14,7 +14,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import jobs
-from .registry import MODULES, TITLES
+from .registry import MODULES, PLANNED, TITLES
 from .webspec import get as get_spec
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -30,12 +30,16 @@ async def modules(request: Request):
         s = get_spec(name)
         out.append({
             "id": name, "group": group, "title": TITLES.get(name) or name.replace("_", " ")[:1].upper() + name.replace("_", " ")[1:], "description": desc,
-            "web": s is not None, "note": s.note if s else "",
+            "web": s is not None, "note": s.note if s else "", "command": "python -m pxg_base " + name,
             "params": [{"id": p.id, "label": p.label, "kind": p.kind, "default": p.default,
                         "required": p.required, "hint": p.hint, "when": p.when,
                         "options": [{"value": v, "label": l} for v, l in p.options]}
                        for p in (s.params if s else ())],
         })
+    for group, path, desc in PLANNED:
+        stem = Path(path).stem
+        out.append({"id": stem, "group": group, "title": stem.replace("_", " ")[:1].upper() + stem.replace("_", " ")[1:],
+                    "description": desc, "web": False, "note": "", "params": [], "command": "python " + path})
     return JSONResponse({"modules": out})
 
 

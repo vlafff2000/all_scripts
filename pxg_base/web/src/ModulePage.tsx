@@ -115,9 +115,9 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
       {!module.web ? (
         <div className="card console-card">
           <h3>Этот модуль пока работает только из консоли</h3>
-          <p className="muted">Веб-форма появится позже. Запуск сейчас:</p>
-          <div className="cmd"><code>python -m pxg_base {module.id}</code>
-            <button className="quiet" onClick={() => copy('cmd', 'python -m pxg_base ' + module.id)}>{copied === 'cmd' ? 'Скопировано' : 'Копировать'}</button></div>
+          <p className="muted">Скрипт пока без веб-формы: его параметры ещё спрашивают окна или консоль. Запуск сейчас (из папки репозитория):</p>
+          <div className="cmd"><code>{module.command}</code>
+            <button className="quiet" onClick={() => copy('cmd', module.command)}>{copied === 'cmd' ? 'Скопировано' : 'Копировать'}</button></div>
         </div>
       ) : (
         <form className="card param-card" onSubmit={e => { e.preventDefault(); run() }}
