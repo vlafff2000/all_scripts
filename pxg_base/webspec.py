@@ -229,6 +229,32 @@ SPECS: List[WebSpec] = [
         dialogs=("db",), env=(("seasons", "PXG_SEASONS"),),
         stdin=lambda v: "да\n",
     ),
+    WebSpec(
+        module="include_давления_наблюдалки_1002",
+        params=(Param("file", "Файл с данными из новой базы", "file", required=True,
+                      hint="Excel или CSV: скважина, дата, давление Рпл на верх перфораций (бар)"),),
+        answers=("file",),
+        note="Результат — папка «output_new_database» с include-файлами для tNavigator.",
+    ),
+    WebSpec(
+        module="include_давления_наблюдалки_с_пересчетом2",
+        params=(
+            Param("file", "Основной файл с данными", "file", required=True),
+            Param("md", "Файл с MD (глубинами)", "file", required=True),
+            Param("convert", "Перевести давление из кгс/см² в бар", "bool", default="1"),
+        ),
+        answers=("file", "md", "convert"),
+        note="Результат — папка «output_shirovsky_new_logic».",
+    ),
+    WebSpec(
+        module="include_давления_эксплуатационки",
+        params=(
+            Param("file", "Файл с давлениями", "file", required=True, hint="Excel, CSV или текст: скважина, дата, давления"),
+            Param("convert", "Перевести давление из кгс/см² в бар", "bool", default="1"),
+        ),
+        stdin=lambda v: v.get("file", "").strip() + "\n" + ("y" if v.get("convert") in ("1", "true", "y") else "n") + "\n\n",
+        note="Результат — папка «output» с тремя файлами для tNavigator.",
+    ),
 ]
 
 BY_MODULE: Dict[str, WebSpec] = {s.module: s for s in SPECS}

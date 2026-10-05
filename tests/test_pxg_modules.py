@@ -97,3 +97,32 @@ def test_update_flow_db_with_new_files(tmp_path):
     job = run_module("дополнение_БД_расходов", {"db": str(db), "max_date": "01.12.2023", "periods": str(tree.periods_file),
                                              "kind": "отбор", "folder": str(folder)}, tmp_path / "upd")
     assert any("[выбор]" in line for line in job["log"]) and any("ГОТОВО" in line for line in job["log"])
+
+
+def test_include_pressure_observation_1002(tmp_path):
+    src = tmp_path / "base.xlsx"
+    pd.DataFrame({"Скважина": ["56", "56", "83"], "Дата": ["01.01.2024", "01.02.2024", "01.01.2024"],
+                  "Рпл пересчет на верх перфораций, бар": [100.5, 101.5, 99.0]}).to_excel(src, index=False)
+    out = tmp_path / "o"
+    job = run_module("include_давления_наблюдалки_1002", {"file": str(src)}, out)
+    files = list((out / "output_new_database").glob("*"))
+    assert files, "\n".join(job["log"][-15:])
+
+
+def test_include_pressure_production_wells(tmp_path):
+    src = tmp_path / "p.xlsx"
+    pd.DataFrame({"Скважина": ["56", "56", "83"], "Дата": ["01.01.2024", "01.02.2024", "01.01.2024"],
+                  "Устьевое давление": [10.0, 11.0, 12.0], "Пластовое давление": [20.0, 21.0, 22.0]}).to_excel(src, index=False)
+    out = tmp_path / "o"
+    job = run_module("include_давления_эксплуатационки", {"file": str(src), "convert": "1"}, out)
+    assert list((out / "output").glob("*")), "\n".join(job["log"][-15:])
+
+
+def test_include_pressure_observation_with_md(tmp_path):
+    src, md = tmp_path / "data.xlsx", tmp_path / "md.xlsx"
+    pd.DataFrame({"Скважина": ["17", "17", "56"], "Дата": ["01.01.2024", "01.02.2024", "01.01.2024"],
+                  "Уровень жидкости": [-50.0, 20.0, 0.0], "Пластовое давление": [100.0, 101.0, 99.0]}).to_excel(src, index=False)
+    pd.DataFrame({"Скважина": ["17", "56"], "MD": [1200.0, 1300.0]}).to_excel(md, index=False)
+    out = tmp_path / "o"
+    job = run_module("include_давления_наблюдалки_с_пересчетом2", {"file": str(src), "md": str(md), "convert": "1"}, out)
+    assert list((out / "output_shirovsky_new_logic").glob("*")), "\n".join(job["log"][-15:])
