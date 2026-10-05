@@ -573,10 +573,9 @@ class ExcelDataExtractor:
                     cell1 = df_raw.iloc[i, j]
                     cell2 = df_raw.iloc[i, j + 1]
 
-                    if pd.notna(cell1) and self.is_date(cell1):
-                        old_format_indicators += 1
-                    if pd.notna(cell2) and self.is_numeric(cell2):
-                        old_format_indicators += 1
+                    # признак старого формата — именно пара «дата, число»; одни числа есть и в новом формате
+                    if pd.notna(cell1) and self.is_date(cell1) and pd.notna(cell2) and self.is_numeric(cell2):
+                        old_format_indicators += 2
 
         self.log(f"Признаков старого формата: {old_format_indicators}")
 
@@ -1236,8 +1235,22 @@ def main_simple():
     input("\nНажмите Enter для выхода...")
 
 
+def main_web():
+    """Запуск из веб-формы «Базы ПХГ»: параметры приходят переменными окружения, окон и вопросов нет."""
+    extractor = ExcelDataExtractor(debug_mode=True)
+    output_file = os.environ.get("PXG_OUTPUT") or "результаты.xlsx"
+    result = extractor.process_folder(Path(os.environ["PXG_INPUT_DIR"]), output_file,
+                                      recursive=bool(os.environ.get("PXG_RECURSIVE")))
+    if result is not None and not result.empty:
+        print(f"\n✓ Обработка завершена! Результат сохранен в: {output_file}")
+    else:
+        print("\nДанных для сохранения не найдено.")
+
+
 def main():
     """Главная функция"""
+    if os.environ.get("PXG_WEB"):
+        return main_web()
     try:
         # Пробуем запустить GUI
         gui = SimpleGUI()

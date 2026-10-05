@@ -1,16 +1,20 @@
 """HTTP/JSON для веб-интерфейса «Базы ПХГ» (Starlette, как в Атласе 6)."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import jobs
-from .registry import MODULES
+from .registry import MODULES, PLANNED, TITLES
 from .webspec import get as get_spec
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -25,13 +29,17 @@ async def modules(request: Request):
     for group, name, desc in MODULES:
         s = get_spec(name)
         out.append({
-            "id": name, "group": group, "title": name.replace("_", " "), "description": desc,
-            "web": s is not None, "note": s.note if s else "",
+            "id": name, "group": group, "title": TITLES.get(name) or name.replace("_", " ")[:1].upper() + name.replace("_", " ")[1:], "description": desc,
+            "web": s is not None, "note": s.note if s else "", "command": "python -m pxg_base " + name,
             "params": [{"id": p.id, "label": p.label, "kind": p.kind, "default": p.default,
-                        "required": p.required, "hint": p.hint,
+                        "required": p.required, "hint": p.hint, "when": p.when,
                         "options": [{"value": v, "label": l} for v, l in p.options]}
                        for p in (s.params if s else ())],
         })
+    for group, path, desc in PLANNED:
+        stem = Path(path).stem
+        out.append({"id": stem, "group": group, "title": stem.replace("_", " ")[:1].upper() + stem.replace("_", " ")[1:],
+                    "description": desc, "web": False, "note": "", "params": [], "command": "python " + path})
     return JSONResponse({"modules": out})
 
 
@@ -74,12 +82,59 @@ async def job_list(request: Request):
     return JSONResponse({"jobs": [j.view(len(j.log)) for j in sorted(jobs.JOBS.values(), key=lambda j: -j.started)]})
 
 
+_PICK = (
+    "import sys, tkinter\nfrom tkinter import filedialog\n"
+    "kind, start = sys.argv[1], sys.argv[2]\n"
+    "root = tkinter.Tk(); root.withdraw(); root.attributes('-topmost', True)\n"
+    "opts = {'initialdir': start} if start else {}\n"
+    "if kind == 'folder':\n    path = filedialog.askdirectory(mustexist=True, **opts)\n"
+    "else:\n    path = filedialog.askopenfilename(filetypes=[('Таблицы', '*.xlsx *.xlsm *.xls *.ods'), ('Все файлы', '*.*')], **opts)\n"
+    "sys.stdout.buffer.write((path or '').encode('utf-8'))\n"
+)
+
+
+def _pick(kind: str, start: str) -> str:
+    start = start if start and os.path.isdir(start) else (os.path.dirname(start) if start and os.path.isdir(os.path.dirname(start)) else "")
+    done = subprocess.run([sys.executable, "-c", _PICK, kind, start], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=900)
+    if done.returncode != 0:
+        lines = done.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise RuntimeError(lines[-1] if lines else "диалог недоступен")
+    return done.stdout.decode("utf-8", "replace").strip()
+
+
+async def pick(request: Request):
+    """Системный диалог выбора файла или папки (сервер локальный, поэтому окно появляется на экране пользователя)."""
+    kind = "folder" if request.query_params.get("kind") == "folder" else "file"
+    try:
+        path = await run_in_threadpool(_pick, kind, request.query_params.get("start") or "")
+    except Exception as e:
+        return _err("Окно выбора недоступно (%s). Введите путь вручную." % e, 501)
+    return JSONResponse({"path": os.path.normpath(path) if path else ""})
+
+
+async def open_folder(request: Request):
+    job = jobs.JOBS.get(request.path_params["id"])
+    if job is None:
+        return _err("Запуск не найден.", 404)
+    try:
+        if os.name == "nt":
+            os.startfile(str(job.out_dir))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(job.out_dir)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return _err("Не удалось открыть папку: %s" % e, 501)
+    return JSONResponse({"ok": True})
+
+
 def build_app() -> Starlette:
     routes = [
         Route("/api/modules", modules),
         Route("/api/jobs", start_job, methods=["POST"]),
         Route("/api/jobs", job_list, methods=["GET"]),
+        Route("/api/pick", pick),
         Route("/api/jobs/{id}", job_status),
+        Route("/api/jobs/{id}/open", open_folder, methods=["POST"]),
         Route("/api/jobs/{id}/files/{name:path}", job_file),
     ]
     if DIST.is_dir():

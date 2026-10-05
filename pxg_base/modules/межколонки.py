@@ -313,7 +313,7 @@ def main():
     final_df = final_df[final_columns]
     
     # Сохраняем результат
-    output_file = os.path.join(root_directory, "БД_межколонки.xlsx")
+    output_file = "БД_межколонки.xlsx" if os.environ.get("PXG_WEB") else os.path.join(root_directory, "БД_межколонки.xlsx")
     final_df.to_excel(output_file, index=False)
     
     print(f"\nОбработка завершена!")
