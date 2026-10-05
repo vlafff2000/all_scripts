@@ -282,26 +282,30 @@ def main():
         output_file = os.path.join(output_folder, f"{base_name}_schedule.inc")
 
         # Показываем окно прогресса
-        progress_window, progress_bar = show_progress_window(
-            "Обработка...",
-            f"Обрабатывается файл:\n{os.path.basename(input_file)}"
-        )
+        if os.environ.get("PXG_WEB"):
+            progress_window = None  # в веб-запуске окна прогресса нет
+        else:
+            progress_window, progress_bar = show_progress_window(
+                "Обработка...",
+                f"Обрабатывается файл:\n{os.path.basename(input_file)}"
+            )
 
-        # Обновляем окно
-        progress_window.update()
+            # Обновляем окно
+            progress_window.update()
 
         # Выполняем конвертацию
         success, message = excel_to_include(input_file, output_file, progress_window)
 
         # Закрываем окно прогресса
-        progress_window.destroy()
+        if progress_window:
+            progress_window.destroy()
 
         # Показываем результат
         if success:
             messagebox.showinfo("Успех", message)
 
             # Спрашиваем, открыть ли папку с результатом
-            if messagebox.askyesno("Открыть папку", "Открыть папку с результатом?"):
+            if not os.environ.get("PXG_WEB") and messagebox.askyesno("Открыть папку", "Открыть папку с результатом?"):
                 os.startfile(output_folder)
         else:
             messagebox.showerror("Ошибка", message)
@@ -428,4 +432,8 @@ def simple_selection():
 
 
 if __name__ == "__main__":
-    simple_selection()
+    # в веб-запуске окон нет: пути файла и папки подаются через диалоги, которые подменяет runner
+    if os.environ.get("PXG_WEB"):
+        main()
+    else:
+        simple_selection()

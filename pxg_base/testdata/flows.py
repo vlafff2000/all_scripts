@@ -1,4 +1,4 @@
-"""Генератор тестовых исходников для модулей расходов («создание_БД_расходов», «нулевой_расход»).
+"""Генератор тестовых исходников для модулей расходов («Создание_базы_данных_расходов», «Нулевые_расходы_и_несоответствия_часов»).
 
 Структура строится по тому, что ожидают скрипты:
 
@@ -43,7 +43,7 @@ class Manifest:
     wells: List[str]
     # (отбор|закачка, дата, скважина, вид) — вид: «Время есть, расход 0» или «Расход есть, время 0»
     planted: List[Tuple[str, date, str, str]] = field(default_factory=list)
-    # те же случаи, но только в периодах, которые не отсекает файл периодов (для «создание_БД_расходов»)
+    # те же случаи, но только в периодах, которые не отсекает файл периодов (для «Создание_базы_данных_расходов»)
     planted_after_periods: List[Tuple[str, date, str, str]] = field(default_factory=list)
     # число строк «скважина × день» по каждому виду данных до фильтрации по периодам
     rows: Dict[str, int] = field(default_factory=dict)
@@ -165,7 +165,7 @@ def make_flow_tree(root, *, wells: Optional[List[str]] = None, season: str = "20
                         neutral += len(wells)
         manifest.rows_after_periods[kind] = after
         manifest.neutral_rows += neutral
-    # несоответствия вне подходящих периодов «создание_БД_расходов» отфильтрует вместе со строками
+    # несоответствия вне подходящих периодов «Создание_базы_данных_расходов» отфильтрует вместе со строками
     keep_map = {"отбор": ("prod", "none"), "закачка": ("inj", "none")}
     manifest.planted_after_periods = [x for x in manifest.planted
                         if _period_of(x[1], parsed) is None or _period_of(x[1], parsed) in keep_map[x[0]]]

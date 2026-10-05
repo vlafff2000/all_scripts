@@ -42,7 +42,7 @@ function Home({ groups, modules }: { groups: [string, ModuleInfo[]][]; modules: 
       <header className="module-head"><div>
         <h1>База ПХГ</h1>
         <p className="lede">Скрипты подготовки и анализа данных ПХГ в одном окне: выберите модуль слева или найдите его по Ctrl+K.
-          С веб-формой работают {ready} из {modules.length}: это «База ПХГ». Остальное — скрипты будущих приложений («Схедул ТР», «ГИС и ГВК», «Отчёты и файлы»), они лежат в папке apps и пока запускаются из консоли.</p>
+          С веб-формой работают {ready} из {modules.length}. Остальное — скрипты будущих приложений («ГИС и ГВК», «Карты ГСП», «Отчёты и файлы», часть «Схедул ТР»), они лежат в папке apps и пока запускаются из консоли.</p>
       </div></header>
       {groups.map(([group, items]) => (
         <section key={group} className="group">

@@ -38,7 +38,7 @@ jobs:
           "$PY" -s -m pxg_base.testdata.flows data
           mkdir run && cd run
           DATA="$(cd ../data && pwd)"; command -v cygpath >/dev/null && DATA="$(cygpath -m "$DATA")"
-          printf '%s\n%s\n' "$DATA" 2 | "$PY" -s -m pxg_base нулевой_расход | tail -5
+          printf '%s\n%s\n' "$DATA" 2 | "$PY" -s -m pxg_base Нулевые_расходы_и_несоответствия_часов | tail -5
           test -f 'Часы_ненулевые_расход_нулевой.xlsx'
           cd ..
           "$PY" -s -m pxg_base --server 8766 > server.log 2>&1 &
