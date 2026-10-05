@@ -1,4 +1,4 @@
-"""Build a portable «База ПХГ» folder: its own CPython 3.14 + the latest libraries + the application.
+"""Build a portable «База ПХГ» folder: its own CPython (3.14 for Windows, 3.13 for Linux) + the newest libraries that exist for it + the application.
 
     python tools/build_portable.py windows   ->  dist/PXG_Base_portable_windows_x64.zip
     python tools/build_portable.py linux     ->  dist/PXG_Base_portable_linux_x64.tar.gz
@@ -10,7 +10,8 @@ of the unpacked folder.
 
 Runtimes (python-build-standalone, pinned by sha256; both include tkinter):
 - Windows: CPython 3.14.8 x86_64 msvc, Windows 10 or newer.
-- Linux: CPython 3.14.8 x86_64 gnu; wheels are limited to manylinux_2_28 and older (glibc 2.28+, e.g. РЕД ОС 8, Astra 1.7).
+- Linux: CPython 3.13.16 x86_64 gnu (glibc 2.17+, РЕД ОС 7.3); wheels are limited to manylinux2014, so pip takes the newest
+  releases that still have them (numpy 2.2, pandas 2.3: later ones need glibc 2.27/2.28, i.e. РЕД ОС 8).
 """
 import argparse
 import hashlib
@@ -28,21 +29,20 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS = ROOT / 'requirements.txt'
 NAME = 'PXG_Base'
 PBS = ('https://github.com/astral-sh/python-build-standalone/releases/download/20261003/'
-       'cpython-3.14.8%2B20261003-{}-install_only.tar.gz')
+       'cpython-{}%2B20261003-{}-install_only.tar.gz')
 
 RUNTIMES = {
     'windows': dict(
-        url=PBS.format('x86_64-pc-windows-msvc'),
+        url=PBS.format('3.14.8', 'x86_64-pc-windows-msvc'), pyver='3.14',
         sha256='74fd19aac6ef6014be21e5de293c68ae4e54608cf19f6bf559f185943eb35b3a',
         site='Lib/site-packages', platforms=['win_amd64'], exe='python.exe',
         # pip evaluates markers for the build machine, so the Windows-only packages of pywebview are listed here
         extra=['pywebview', 'pythonnet', 'clr-loader', 'cffi', 'pycparser', 'bottle', 'proxy-tools', 'colorama', 'pywin32']),
     'linux': dict(
-        url=PBS.format('x86_64-unknown-linux-gnu'),
-        sha256='371b6c281bbb09b29279e9e3a2996bab4ae2ea03cca52bf869f8bd89286b0ae8',
-        site='lib/python3.14/site-packages', exe='bin/python3.14', extra=[],
-        platforms=['manylinux_2_28_x86_64', 'manylinux_2_27_x86_64', 'manylinux_2_17_x86_64',
-                   'manylinux2014_x86_64']),
+        url=PBS.format('3.13.16', 'x86_64-unknown-linux-gnu'), pyver='3.13',
+        sha256='0a0272910b10417c659a9312fb3f2d7a6d774da7bd510999be7a3ba83273dc1f',
+        site='lib/python3.13/site-packages', exe='bin/python3.13', extra=[],
+        platforms=['manylinux_2_17_x86_64', 'manylinux2014_x86_64']),
 }
 
 # Tracked application files that go into the folder (tests, interface sources and dev scripts stay out).
@@ -65,12 +65,12 @@ LINUX_LAUNCHERS = {
     'pxg_base_console.sh': '# База ПХГ: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
-                'unset PYTHONHOME PYTHONPATH\nexport PYTHONNOUSERSITE=1 PYTHONUTF8=1\nPY=python/bin/python3.14\n')
+                'unset PYTHONHOME PYTHONPATH\nexport PYTHONNOUSERSITE=1 PYTHONUTF8=1\nPY=python/bin/python3.13\n')
 
 README = '''База ПХГ — переносная версия ({target})
 =========================================
 
-Ничего устанавливать не нужно: Python 3.14 и все библиотеки уже лежат в папке python.
+Ничего устанавливать не нужно: Python и все библиотеки уже лежат в папке python.
 Интернет не нужен.
 
 1. Распакуйте архив в любую папку, куда у вас есть права на запись
@@ -138,7 +138,7 @@ def install_packages(target, site, workdir):
     wheels.mkdir(exist_ok=True)
     command = [sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-compile',
                '--target', str(site), '--upgrade', '--only-binary=:all:',
-               '--python-version', '3.14', '--implementation', 'cp', '--abi', 'cp314', '--find-links', str(wheels)]
+               '--python-version', spec['pyver'], '--implementation', 'cp', '--abi', 'cp' + spec['pyver'].replace('.', ''), '--find-links', str(wheels)]
     for platform in spec['platforms']:
         command += ['--platform', platform]
     command += chosen
