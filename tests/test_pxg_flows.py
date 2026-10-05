@@ -39,8 +39,9 @@ def tree(tmp_path_factory):
 
 
 def real_rows(df):
-    """«Итого» в таблице расходов скрипт читает как ещё одну «скважину»; для сверки убираем."""
-    return df[df["Скважина"].astype(str) != "Итого"]
+    """Строки «Итого» под таблицами расходов в базу попадать не должны."""
+    assert not (df["Скважина"].astype(str).str.lower().str.startswith("итого")).any()
+    return df
 
 
 def test_generator_is_deterministic(tmp_path):

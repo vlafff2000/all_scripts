@@ -141,7 +141,7 @@ class IndicatorDiagramPlotter:
 
 # Использование
 def main():
-    plotter = IndicatorDiagramPlotter('/home/ev_fomichev@vng.gazprom.ru/Kasim/Касимовское/КРС_АН_2025/финальные_данные_индикаторные_диаграммы.xlsx')
+    plotter = IndicatorDiagramPlotter(input("Путь к файлу с данными индикаторных диаграмм (.xlsx): ").strip().strip('"'))
     
     if plotter.df is not None:
         # Строим все диаграммы

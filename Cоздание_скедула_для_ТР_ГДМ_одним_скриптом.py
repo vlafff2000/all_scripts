@@ -1424,7 +1424,7 @@ def main():
         messagebox.showerror("Ошибка", "Конечная дата не указана")
         return
 
-    periods_file = "/home/ev_fomichev@VNG/Kasim/python/Вспомогательные файлы для работы скриптов/period_of_work.txt"
+    periods_file = ""  # путь выбирается в окне ниже
     if not os.path.exists(periods_file):
         periods_file = filedialog.askopenfilename(
             title="Выберите файл с периодами (period_of_work.txt)",

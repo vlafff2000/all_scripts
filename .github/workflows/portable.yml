@@ -26,15 +26,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Build portable folder (own Python 3.8, no install needed)
+      - name: Build portable folder (own Python, no install needed)
         run: python tools/build_portable.py ${{ matrix.target }}
       - name: Run from the unpacked archive on generated source files
         run: |
           mkdir t && cd t
           python -c "import sys,zipfile,tarfile; p=sys.argv[1]; zipfile.ZipFile(p).extractall('.') if p.endswith('.zip') else tarfile.open(p).extractall('.')" ../dist/PXG_Base_portable_*
           cd PXG_Base
-          PY=python/bin/python3.8; [ -f python/python.exe ] && PY=python/python.exe
-          export PYTHONNOUSERSITE=1
+          PY="$PWD/python/bin/python3.13"; [ -f python/python.exe ] && PY="$PWD/python/python.exe"
+          export PYTHONNOUSERSITE=1 PYTHONPATH="$PWD"
           "$PY" -s -m pxg_base.testdata.flows data
           mkdir run && cd run
           printf '%s\n%s\n' "$PWD/../data" 2 | "$PY" -s -m pxg_base нулевой_расход | tail -5

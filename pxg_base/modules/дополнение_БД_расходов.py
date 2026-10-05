@@ -202,6 +202,8 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
 
         # Преобразуем столбец скважин в строковый тип
         df['Скважины'] = df['Скважины'].astype(str).str.strip()
+        # строки итогов под таблицей («Итого», «Всего») не скважины
+        df = df[~df['Скважины'].str.lower().str.startswith(('итого', 'всего', 'total'))]
 
         # Преобразуем в длинный формат
         df_long = df.melt(id_vars=['Скважины'],
@@ -250,7 +252,7 @@ def is_empty_sheet(file_path, sheet_name, data_type, periods):
         # Проверяем наличие ключевых заголовков
         header_found = False
         for i in range(min(5, len(df_sample))):
-            row_values = df_sample.iloc[i].astype(str).str.lower().tolist()
+            row_values = [str(v).lower() for v in df_sample.iloc[i].tolist()]
             for cell in row_values:
                 if any(keyword in cell for keyword in ['скважин', 'n скв', '№ скв', 'скв.']):
                     header_found = True

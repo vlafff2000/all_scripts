@@ -197,7 +197,10 @@ class WellDataProcessor:
 # Пример использования
 def main():
     # Инициализация процессора
-    processor = WellDataProcessor('/home/ev_fomichev@vng.gazprom.ru/Kasim/Касимовское/КРС_АН_2025/Наличие_ГДИ_по_скважинам_в_КРС.xlsx', '/home/ev_fomichev@vng.gazprom.ru/Kasim/python/БД_ВСЕ/ГДИ_БД.xlsx')
+    krs_file = input("Путь к файлу «Наличие ГДИ по скважинам в КРС» (.xlsx): ").strip().strip('"')
+    gdi_file = input("Путь к базе ГДИ (.xlsx): ").strip().strip('"')
+    output_file = input("Куда сохранить итоговую таблицу (.xlsx): ").strip().strip('"')
+    processor = WellDataProcessor(krs_file, gdi_file)
     
     # Предобработка данных
     processor.preprocess_data()
@@ -209,7 +212,7 @@ def main():
     processor.create_summary_report(final_data)
     
     # Сохранение результатов
-    processor.save_to_excel(final_data, '/home/ev_fomichev@vng.gazprom.ru/Kasim/Касимовское/КРС_АН_2025/финальные_данные_индикаторные_диаграммы.xlsx')
+    processor.save_to_excel(final_data, output_file)
     
     # Построение диаграмм для скважин с данными ГДИ (первые 5)
     wells_with_data = final_data[final_data['Примечание'] == 'Данные ГДИ найдены']['№ скважины'].unique()

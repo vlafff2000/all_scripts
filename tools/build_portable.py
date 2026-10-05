@@ -1,16 +1,17 @@
-"""Build a portable «База ПХГ» folder: its own CPython 3.8 + all packages + the application.
+"""Build a portable «База ПХГ» folder: its own CPython (3.14 for Windows, 3.13 for Linux) + the newest libraries that exist for it + the application.
 
     python tools/build_portable.py windows   ->  dist/PXG_Base_portable_windows_x64.zip
     python tools/build_portable.py linux     ->  dist/PXG_Base_portable_linux_x64.tar.gz
 
 The target computer needs neither Python, nor pip, nor the internet: unpack and start the launcher.
-The build machine needs the internet and pip (any OS, Python 3.8+); packages are taken from
-requirements-lock-py38.txt as binary wheels for the target platform, nothing is compiled.
+The build machine needs the internet and pip (any OS, Python 3.9+). Packages are the newest releases of
+requirements.txt (binary wheels for the target platform, nothing is compiled); to freeze a working set, use pip freeze
+of the unpacked folder.
 
-Runtimes (pinned by sha256):
-- Windows: the official python.org CPython 3.8.10 x64 from nuget.org (PSF-signed, runs on Windows 7 SP1+).
-- Linux: python-build-standalone CPython 3.8.20 x86_64 (needs glibc 2.17+, e.g. РЕД ОС 7.3+);
-  wheels are limited to manylinux2014 (glibc 2.17) for the same reason.
+Runtimes (python-build-standalone, pinned by sha256; both include tkinter):
+- Windows: CPython 3.14.8 x86_64 msvc, Windows 10 or newer.
+- Linux: CPython 3.13.16 x86_64 gnu (glibc 2.17+, РЕД ОС 7.3); wheels are limited to manylinux2014, so pip takes the newest
+  releases that still have them (numpy 2.2, pandas 2.3: later ones need glibc 2.27/2.28, i.e. РЕД ОС 8).
 """
 import argparse
 import hashlib
@@ -25,26 +26,27 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCK = ROOT / 'requirements-lock-py38.txt'
+REQUIREMENTS = ROOT / 'requirements.txt'
 NAME = 'PXG_Base'
+PBS = ('https://github.com/astral-sh/python-build-standalone/releases/download/20261003/'
+       'cpython-{}%2B20261003-{}-install_only.tar.gz')
 
 RUNTIMES = {
     'windows': dict(
-        url='https://api.nuget.org/v3-flatcontainer/python/3.8.10/python.3.8.10.nupkg',
-        sha256='c63a2fc8fc62612b5abd391fda99ae1d90bad42ed8a9e99b1bd81c7ffdb4fefa',
-        site='Lib/site-packages', platforms=['win_amd64'],
-        marker_env={'sys_platform': 'win32', 'platform_system': 'Windows', 'os_name': 'nt'}),
+        url=PBS.format('3.14.8', 'x86_64-pc-windows-msvc'), pyver='3.14',
+        sha256='74fd19aac6ef6014be21e5de293c68ae4e54608cf19f6bf559f185943eb35b3a',
+        site='Lib/site-packages', platforms=['win_amd64'], exe='python.exe',
+        # pip evaluates markers for the build machine, so the Windows-only packages of pywebview are listed here
+        extra=['pywebview', 'pythonnet', 'clr-loader', 'cffi', 'pycparser', 'bottle', 'proxy-tools', 'colorama', 'pywin32']),
     'linux': dict(
-        url='https://github.com/astral-sh/python-build-standalone/releases/download/20241002/'
-            'cpython-3.8.20%2B20241002-x86_64-unknown-linux-gnu-install_only.tar.gz',
-        sha256='285e141c36f88b2e9357654c5f77d1f8fb29cc25132698fe35bb30d787f38e87',
-        site='lib/python3.8/site-packages',
-        platforms=['manylinux2014_x86_64', 'manylinux2010_x86_64', 'manylinux1_x86_64'],
-        marker_env={'sys_platform': 'linux', 'platform_system': 'Linux', 'os_name': 'posix'}),
+        url=PBS.format('3.13.16', 'x86_64-unknown-linux-gnu'), pyver='3.13',
+        sha256='0a0272910b10417c659a9312fb3f2d7a6d774da7bd510999be7a3ba83273dc1f',
+        site='lib/python3.13/site-packages', exe='bin/python3.13', extra=[],
+        platforms=['manylinux_2_17_x86_64', 'manylinux2014_x86_64']),
 }
 
 # Tracked application files that go into the folder (tests, interface sources and dev scripts stay out).
-INCLUDE = ['pxg_base', 'pxg_core', 'README.md', 'requirements-lock-py38.txt']
+INCLUDE = ['pxg_base', 'pxg_core', 'README.md', 'requirements.txt']
 SDIST_ONLY = {'proxy-tools', 'odfpy'}  # чистый Python, опубликован только исходниками
 SKIP_TOOLS = set()
 
@@ -63,12 +65,12 @@ LINUX_LAUNCHERS = {
     'pxg_base_console.sh': '# База ПХГ: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
-                'unset PYTHONHOME PYTHONPATH\nexport PYTHONNOUSERSITE=1 PYTHONUTF8=1\nPY=python/bin/python3.8\n')
+                'unset PYTHONHOME PYTHONPATH\nexport PYTHONNOUSERSITE=1 PYTHONUTF8=1\nPY=python/bin/python3.13\n')
 
 README = '''База ПХГ — переносная версия ({target})
 =========================================
 
-Ничего устанавливать не нужно: Python 3.8 и все библиотеки уже лежат в папке python.
+Ничего устанавливать не нужно: Python и все библиотеки уже лежат в папке python.
 Интернет не нужен.
 
 1. Распакуйте архив в любую папку, куда у вас есть права на запись
@@ -84,7 +86,7 @@ WINDOWS_NOTE = '''
 Если окно приложения не открылось (нет компонента Microsoft Edge WebView2),
 приложение откроется в браузере по умолчанию — это нормально.
 Если запуск заблокирован политикой безопасности, попросите ИТ разрешить
-python\\python.exe в этой папке (файл подписан Python Software Foundation).
+python\\python.exe в этой папке (сборка python-build-standalone, python.org не используется).
 '''
 LINUX_NOTE = '''
 Приложение открывается в браузере по умолчанию. Если браузер не открылся,
@@ -112,56 +114,39 @@ def fetch(url, sha256, cache):
 
 
 def unpack_runtime(target, archive, python_dir):
-    if target == 'windows':  # nupkg = zip; the interpreter is in tools/
-        with zipfile.ZipFile(str(archive)) as z:
-            for item in z.infolist():
-                if item.filename.startswith('tools/') and not item.is_dir():
-                    dest = python_dir / item.filename[len('tools/'):]
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    with z.open(item) as src, open(str(dest), 'wb') as out:
-                        shutil.copyfileobj(src, out)
-    else:  # install_only tarball: python/...
-        with tarfile.open(str(archive)) as t:
-            t.extractall(str(python_dir.parent))
+    with tarfile.open(str(archive)) as t:  # install_only tarball: python/...
+        t.extractall(str(python_dir.parent))
 
 
 def requirements_for(target):
-    try:
-        from packaging.requirements import Requirement
-    except ImportError:
-        from pip._vendor.packaging.requirements import Requirement
-    env = dict(RUNTIMES[target]['marker_env'], python_version='3.8', python_full_version='3.8.10',
-               implementation_name='cpython', platform_python_implementation='CPython', platform_machine='')
-    chosen = []
-    for line in LOCK.read_text(encoding='utf-8').splitlines():
+    names = []
+    for line in REQUIREMENTS.read_text(encoding='utf-8').splitlines():
         line = line.split('#', 1)[0].strip()
-        if not line:
-            continue
-        req = Requirement(line)
-        if req.marker is None or req.marker.evaluate(env):
-            chosen.append('{}{}'.format(req.name, req.specifier))
-    return chosen
+        if line and ';' not in line:  # platform markers are evaluated for the build machine: Windows extras are explicit
+            names.append(line)
+    return names + RUNTIMES[target]['extra']
 
 
 def install_packages(target, site, workdir):
     spec = RUNTIMES[target]
-    reqs = workdir / 'requirements.txt'
     chosen = requirements_for(target)
-    reqs.write_text('\n'.join(chosen) + '\n', encoding='utf-8')
     wheels = workdir / 'wheels'  # pure-Python packages published only as source: build a universal wheel here
-    for line in chosen:
-        if line.split('=')[0] in SDIST_ONLY:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'wheel', '--disable-pip-version-check', '--no-deps', '--use-pep517',
-                                   '-w', str(wheels), line])
+    for name in chosen:
+        if name in SDIST_ONLY:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'wheel', '--disable-pip-version-check', '--no-deps',
+                                   '--use-pep517', '-w', str(wheels), name])
+    wheels.mkdir(exist_ok=True)
     command = [sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-compile',
-               '--target', str(site), '--upgrade', '--no-deps', '--only-binary=:all:',
-               '--python-version', '3.8', '--implementation', 'cp', '--abi', 'cp38', '--find-links', str(wheels),
-               '-r', str(reqs)]
+               '--target', str(site), '--upgrade', '--only-binary=:all:',
+               '--python-version', spec['pyver'], '--implementation', 'cp', '--abi', 'cp' + spec['pyver'].replace('.', ''), '--find-links', str(wheels)]
     for platform in spec['platforms']:
         command += ['--platform', platform]
-    log('Ставлю пакеты для {} ({} шт.)'.format(target, len(reqs.read_text().split())))
+    command += chosen
+    log('Ставлю пакеты для {}: {}'.format(target, ', '.join(chosen)))
     subprocess.check_call(command)
     shutil.rmtree(str(site / 'bin'), ignore_errors=True)  # host-style console scripts; the app runs with -m
+    for cache in site.rglob('__pycache__'):
+        shutil.rmtree(str(cache), ignore_errors=True)
 
 
 def copy_application(folder):
@@ -212,7 +197,7 @@ def archive(target, folder, out):
 
 def smoke_test(folder):
     """Import the app with the bundled interpreter, isolated from the host (only when building on the target OS)."""
-    python = folder / 'python' / ('python.exe' if os.name == 'nt' else 'bin/python3.8')
+    python = folder / 'python' / RUNTIMES['windows' if os.name == 'nt' else 'linux']['exe']
     env = {k: v for k, v in os.environ.items() if not k.startswith('PYTHON')}
     env.update(PYTHONNOUSERSITE='1', MPLBACKEND='Agg')
     code = ('import sys, tkinter, pandas, numpy, openpyxl, xlsxwriter, xlrd, odf, starlette, uvicorn, pxg_core.расходы_файлы;'
