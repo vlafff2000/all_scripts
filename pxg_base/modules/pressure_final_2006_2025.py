@@ -99,8 +99,7 @@ def simple_excel_converter(file_path):
 
 # Пример использования
 if __name__ == "__main__":
-    # Укажите путь к вашему файлу
-    file_path = "/home/ev_fomichev@VNG/Kasim/Касимовское/Касимовское ПХГ/ФАЙЛ_ДЛЯ_СКРИПТА.xlsx"
+    file_path = input("Путь к файлу с давлениями (.xlsx): ").strip().strip('"')
     
     try:
         # Используем упрощенную версию

@@ -184,6 +184,8 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
         
         # Преобразуем столбец скважин в строковый тип
         df['Скважины'] = df['Скважины'].astype(str).str.strip()
+        # строки итогов под таблицей («Итого», «Всего») не скважины
+        df = df[~df['Скважины'].str.lower().str.startswith(('итого', 'всего', 'total'))]
         
         # Преобразуем в длинный формат
         df_long = df.melt(id_vars=['Скважины'], 

@@ -333,7 +333,7 @@ def check_calculations(df):
         print(f"Совпадение: {abs(monthly_total - final_monthly) < 0.001}")
 
 def main():
-    base_path = "/home/e_karimova@vng.gazprom.ru/Документы/Увяз/Журнал уч.работыскважин ПХГ (прил.4)"
+    base_path = input("Путь к папке «Журнал учёта работы скважин ПХГ (прил.4)»: ").strip().strip('"')
     
     all_data = []
     
