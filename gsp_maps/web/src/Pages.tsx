@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { exportExcel, openFolder, pickPath, saveConfig, scanFolder, type AppState, type GspData } from './api'
+import { useEffect, useMemo, useState } from 'react'
+import { exportExcel, getSummary, openFolder, pickPath, saveConfig, scanFolder, type AppState, type GspData, type SummaryData } from './api'
 import { SeasonCalc, WATER, niceStep, fmt1, fmtDay, fmtInt, fmtMln, fmtPct, fmtTh, waterByWell } from './model'
 
 type SortKey = string
@@ -16,7 +16,60 @@ function useSort<T>(rows: T[], init: SortKey, get: (r: T, k: SortKey) => number 
   return { sorted, th }
 }
 
-export function TablePage({ g, calc, kind, season, a, b }: { g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number }) {
+export function TablePage({ g, calc, kind, season, a, b, mode }: { g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number; mode: string }) {
+  const [view, setView] = useState<'window' | 'season' | 'all'>('window')
+  const tabs = (
+    <div className="segmented" role="radiogroup" aria-label="Что показывать">
+      {([['window', 'Окно времени'], ['season', 'Сезон, все столбцы'], ['all', 'Все сезоны']] as const).map(([k, t]) => <button key={k} type="button" role="radio" aria-checked={view === k} onClick={() => setView(k)}>{t}</button>)}
+    </div>)
+  if (view !== 'window') return <SummaryTable g={g} kind={kind} season={view === 'all' ? '*' : season} mode={mode} tabs={tabs} />
+  return <WindowTable g={g} calc={calc} kind={kind} season={season} a={a} b={b} tabs={tabs} />
+}
+
+const COL_LABEL: Record<string, string> = {
+  Скважина: 'Скв.', Тип: 'Вид', Сезон: 'Сезон', Накопленный_расход_газа: 'Накоплено, м³', Накопленный_расход_газа_закачка: 'Накоплено, м³', Средний_суточный_расход: 'Средний, м³/сут',
+  Средний_суточный_расход_закачка: 'Средний, м³/сут', Количество_дней: 'Дней с расходом', Количество_дней_закачка: 'Дней с расходом', Суммарное_время_работы: 'Время работы, ч',
+  Суммарное_время_работы_закачка: 'Время работы, ч', Среднее_время_работы: 'Среднее время работы, ч/сут', Дней_с_простоем: 'Дней простоя (часы есть, расхода нет)',
+  Сред_давл_ГСП_бар: 'Давление ГСП, бар', Сред_давл_Объект_бар: 'Давление объекта, бар', Направление: 'Направление',
+}
+const colLabel = (c: string) => COL_LABEL[c] || (c.startsWith('Водный_фактор_') ? 'ВФ ' + c.slice(14) : c.startsWith('Расход_воды_') ? 'Вода ' + c.slice(12).replace(/_лч$/, '') + ', л/ч' : c.replace(/_/g, ' '))
+
+function SummaryTable({ g, kind, season, mode, tabs }: { g: GspData; kind: string; season: string; mode: string; tabs: React.ReactNode }) {
+  const [data, setData] = useState<SummaryData | null>(null), [err, setErr] = useState('')
+  useEffect(() => {
+    let live = true
+    setData(null); setErr('')
+    getSummary(g.gsp, kind, season, mode).then(d => live && setData(d)).catch(e => live && setErr(String(e.message || e)))
+    return () => { live = false }
+  }, [g.gsp, kind, season, mode])
+  const [key, setKey] = useState<number>(-1), [desc, setDesc] = useState(true)
+  const rows = useMemo(() => {
+    if (!data) return []
+    if (key < 0) return data.rows
+    return [...data.rows].sort((p, q) => {
+      const x = p[key], y = q[key], c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x ?? '').localeCompare(String(y ?? ''), 'ru')
+      return desc ? -c : c
+    })
+  }, [data, key, desc])
+  const fmtCell = (v: string | number | null, c: string) => v === null || v === '' ? '—' : typeof v === 'number' ? (/дней|Дней|Скважина|Замеров/.test(c) ? fmtInt(v) : fmt1(v)) : v
+  return (
+    <section className="card table-card">
+      {tabs}
+      <p className="muted">{g.gsp} · {kind}{season === '*' ? ', все сезоны' : ' ' + season}. Столбцы те же, что на листах «{season === '*' ? 'Сводка все сезоны' : 'Отбор/Закачка <сезон>'}» старого Excel: время работы, давление, замеры воды.</p>
+      {err && <div className="note warning">{err}</div>}
+      {!data && !err && <p className="muted">Считаю…</p>}
+      {data && !data.rows.length && <p className="muted">За выбранный сезон нет данных.</p>}
+      {data && data.rows.length > 0 && <div className="scroll"><table className="data">
+        <thead><tr>{data.columns.map((c, i) => (
+          <th key={c} className={i > 1 ? 'number sortable' : 'sortable'} aria-sort={key === i ? (desc ? 'descending' : 'ascending') : 'none'}>
+            <button type="button" onClick={() => (key === i ? setDesc(!desc) : (setKey(i), setDesc(true)))}>{colLabel(c)}{key === i ? (desc ? ' ↓' : ' ↑') : ''}</button></th>))}</tr></thead>
+        <tbody>{rows.map((r, n) => <tr key={n}>{r.map((v, i) => <td key={i} className={typeof v === 'number' ? 'number' : ''}>{i === 0 ? <b>{fmtCell(v, data.columns[i])}</b> : fmtCell(v, data.columns[i])}</td>)}</tr>)}</tbody>
+      </table></div>}
+    </section>
+  )
+}
+
+function WindowTable({ g, calc, kind, season, a, b, tabs }: { g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number; tabs: React.ReactNode }) {
   const water = useMemo(() => waterByWell(g.water, kind, season, calc.days[a], calc.days[b]), [g.water, kind, season, calc, a, b])
   const rows = useMemo(() => {
     const out = calc.wells.map((w, i) => ({ w, dir: g.layout.wells[String(w)]?.dir || '', ...calc.stat(i, a, b), wf: Math.max(0, ...(water.get(w) || []).map(x => x.factor ?? 0)), fl: Math.max(0, ...(water.get(w) || []).map(x => x.flow ?? 0)) }))
@@ -28,9 +81,10 @@ export function TablePage({ g, calc, kind, season, a, b }: { g: GspData; calc: S
   const mx = Math.max(1, ...rows.map(r => r.total))
   return (
     <section className="card table-card">
+      {tabs}
       <p className="muted">{g.gsp} · {kind} {season} · {fmtDay(calc.days[a])} — {fmtDay(calc.days[b])}. Окно времени задаётся на странице «Карта».</p>
       <div className="scroll"><table className="data">
-        <thead><tr>{th('w', 'Скв.')}{th('dir', 'Направление', false)}{th('total', 'Накоплено, млн м³')}{th('mean', 'Средний, тыс. м³/сут')}{th('days', 'Дней')}{th('share', 'Доля')}{th('fl', 'Вода, л/ч')}{th('wf', 'ВФ')}</tr></thead>
+        <thead><tr>{th('w', 'Скв.')}{th('dir', 'Направление', false)}{th('total', 'Накоплено, млн м³')}{th('mean', 'Средний, м³/сут')}{th('days', 'Дней')}{th('share', 'Доля')}{th('fl', 'Вода, л/ч')}{th('wf', 'ВФ')}</tr></thead>
         <tbody>{sorted.map(r => (
           <tr key={r.w}><td className="number"><b>{r.w}</b></td><td>{r.dir}</td>
             <td className="number barcell"><i style={{ width: Math.max(0, r.total / mx) * 100 + '%' }} /><span>{fmtMln(r.total)}</span></td>
@@ -46,8 +100,9 @@ export function PressurePage({ g, kind, season, range }: { g: GspData; kind: str
   const [hover, setHover] = useState<number | null>(null)
   const W = 1000, H = 340, L = 54, R = 16, T = 14, B = 34
   const sers = (['gsp', 'obj'] as const).map(k => ({ k, s: g.pressure[k] })).filter(x => x.s)
-  if (!sers.length) return <section className="card"><p className="muted">Файлы давления не заданы. Добавьте их в разделе «Данные»: «Давление по ГСП» и «Давление по объекту».</p></section>
-  const allDays = sers.flatMap(x => x.s!.days), allBar = sers.flatMap(x => x.s!.bar)
+  const fl = g.gspFlow
+  if (!sers.length && !fl.days.length) return <section className="card"><p className="muted">Файлы давления не заданы. Добавьте их в разделе «Данные»: «Давление по ГСП» и «Давление по объекту».</p></section>
+  const allDays = [...sers.flatMap(x => x.s!.days), ...fl.days], allBar = sers.length ? sers.flatMap(x => x.s!.bar) : [0, 1]
   const d0 = Math.min(...allDays), d1 = Math.max(...allDays)
   const lo = Math.min(...allBar), hi = Math.max(...allBar), pad = (hi - lo) * 0.06 || 1
   const x = (d: number) => L + ((d - d0) / (d1 - d0 || 1)) * (W - L - R)
@@ -64,9 +119,9 @@ export function PressurePage({ g, kind, season, range }: { g: GspData; kind: str
   const hd = hover ?? null
   return (
     <section className="card">
-      <div className="p-legend">{sers.map(sr => <span key={sr.k}><i style={{ background: colors[sr.k] }} />{labels[sr.k]}</span>)}
+      <div className="p-legend">{sers.length === 0 && <span className="muted">Файлы давления не заданы — показан только расход ГСП.</span>}{sers.map(sr => <span key={sr.k}><i style={{ background: colors[sr.k] }} />{labels[sr.k]}</span>)}
         {Object.entries(BAND).map(([k, v]) => <span key={k}><i className={'band ' + k} />{v}</span>)}<span><i className="win" />выбранный сезон</span></div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="pchart" onPointerMove={e => { const r = e.currentTarget.getBoundingClientRect(); const d = d0 + (((e.clientX - r.left) / r.width) * W - L) / (W - L - R) * (d1 - d0); setHover(Math.max(d0, Math.min(d1, d))) }} onPointerLeave={() => setHover(null)}>
+      <svg style={sers.length ? undefined : { display: "none" }} viewBox={`0 0 ${W} ${H}`} className="pchart" onPointerMove={e => { const r = e.currentTarget.getBoundingClientRect(); const d = d0 + (((e.clientX - r.left) / r.width) * W - L) / (W - L - R) * (d1 - d0); setHover(Math.max(d0, Math.min(d1, d))) }} onPointerLeave={() => setHover(null)}>
         {g.periods.map((p, i) => { const e = i + 1 < g.periods.length ? g.periods[i + 1].day : d1; const s0 = Math.max(p.day, d0), e0 = Math.min(e, d1); return e0 > s0 ? <rect key={i} x={x(s0)} width={x(e0) - x(s0)} y={T} height={H - T - B} className={'band ' + p.type} opacity={0.13} /> : null })}
         <rect x={x(Math.max(d0, range[0]))} width={Math.max(2, x(Math.min(d1, range[1])) - x(Math.max(d0, range[0])))} y={T} height={H - T - B} className="win-rect" />
         {ticks.map(v => { const i = v; return <g key={i}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" /><text x={L - 6} y={y(v)} textAnchor="end" dominantBaseline="central" className="ax">{fmt1(v)}</text></g> })}
@@ -81,6 +136,24 @@ export function PressurePage({ g, kind, season, range }: { g: GspData; kind: str
         {hd !== null && <g><line x1={x(hd)} x2={x(hd)} y1={T} y2={H - B} className="cross" />
           {sers.map(sr => { const i = near(sr.s!, hd); return <g key={sr.k}><circle cx={x(sr.s!.days[i])} cy={y(sr.s!.bar[i])} r={4} fill={colors[sr.k]} stroke="#fff" /></g> })}</g>}
       </svg>
+      {fl.days.length > 0 && (() => {
+        const FH = 130, fb = fl.bar.map(v => v / 1000), fmax = Math.max(1, ...fb), fy = (v: number) => 8 + (1 - v / fmax) * (FH - 8 - 24)
+        const pts = fl.days.map((d, i) => `${x(d).toFixed(1)},${fy(fb[i]).toFixed(1)}`)
+        const base = fy(0).toFixed(1)
+        const fstep = niceStep(fmax, 3)
+        const fticks: number[] = []
+        for (let v = 0; v <= fmax; v += fstep) fticks.push(v)
+        return <>
+          <h3>Суточный расход ГСП (отбор и закачка вместе), тыс. м³/сут</h3>
+          <svg viewBox={`0 0 ${W} ${FH}`} className="pchart" onPointerMove={e => { const r = e.currentTarget.getBoundingClientRect(); const d = d0 + (((e.clientX - r.left) / r.width) * W - L) / (W - L - R) * (d1 - d0); setHover(Math.max(d0, Math.min(d1, d))) }} onPointerLeave={() => setHover(null)}>
+            <rect x={x(Math.max(d0, range[0]))} width={Math.max(2, x(Math.min(d1, range[1])) - x(Math.max(d0, range[0])))} y={8} height={FH - 32} className="win-rect" />
+            {fticks.map(v => <g key={v}><line x1={L} x2={W - R} y1={fy(v)} y2={fy(v)} className="grid" /><text x={L - 6} y={fy(v)} textAnchor="end" dominantBaseline="central" className="ax">{fmt1(v)}</text></g>)}
+            {years.filter(yr => yday(yr) >= d0 && yday(yr) <= d1).map(yr => <text key={yr} x={x(yday(yr))} y={FH - 8} textAnchor="middle" className="ax">{yr}</text>)}
+            <polygon points={`${x(fl.days[0]).toFixed(1)},${base} ${pts.join(' ')} ${x(fl.days[fl.days.length - 1]).toFixed(1)},${base}`} fill="#e63946" fillOpacity={0.22} />
+            <polyline points={pts.join(' ')} fill="none" stroke="#e63946" strokeWidth={1.2} strokeLinejoin="round" />
+            {hd !== null && <line x1={x(hd)} x2={x(hd)} y1={8} y2={FH - 24} className="cross" />}
+          </svg></>
+      })()}
       {hd !== null && <div className="p-read">{fmtDay(Math.round(hd))}: {sers.map(sr => { const i = near(sr.s!, hd); return <span key={sr.k}><i style={{ background: colors[sr.k] }} /> {fmt1(sr.s!.bar[i])} бар ({fmtDay(sr.s!.days[i])})</span> })}</div>}
       <h3>Средние давления по сезонам · {kind} {season}</h3>
       <p>{(['gsp', 'obj'] as const).map(k => g.seasonPressure[k][kind + '|' + season] !== undefined && <span key={k} className="pill"><i style={{ background: colors[k] }} />{labels[k]}: <b>{fmt1(g.seasonPressure[k][kind + '|' + season])} бар</b></span>)}

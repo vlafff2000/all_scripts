@@ -25,6 +25,7 @@ export const usePref = <T,>(p: Pref<T>): T => useSyncExternalStore(p.subscribe, 
 
 export type Theme = 'light' | 'dark' | 'system'
 export const theme = pref<Theme>('gsp.theme', 'system', raw => (raw === 'dark' || raw === 'light' ? raw : 'system'))
+export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'wfall'>('gsp.paint', 'flow', raw => (['entry', 'depth', 'wf', 'wfall'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
 export const sidebarCollapsed = pref<boolean>('gsp.sidebar.collapsed', false)
 
 const media = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null

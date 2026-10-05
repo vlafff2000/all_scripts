@@ -9,7 +9,7 @@ export interface Series { days: number[]; bar: number[] }
 export interface GspData {
   gsp: string; wells: number[]; layout: Layout; seasons: Record<'Отбор' | 'Закачка', SeasonInfo[]>
   periods: { day: number; type: string }[]; water: WaterRec[]
-  pressure: { gsp?: Series; obj?: Series }; seasonPressure: { gsp: Record<string, number>; obj: Record<string, number> }
+  gspFlow: Series; pressure: { gsp?: Series; obj?: Series }; seasonPressure: { gsp: Record<string, number>; obj: Record<string, number> }
   warnings: string[]; trends: TrendRow[]; depths: Record<string, [number, number]>; altitude: Record<string, number>
 }
 export interface SeasonData { wells: number[]; days: number[]; flow: number[][] }
@@ -39,3 +39,7 @@ export const saveImage = (name: string, blob: Blob) =>
 export interface WorkSeason { kind: 'Отбор' | 'Закачка'; key: string; total: number[]; days: number[]; first: number[]; idle: number[]; start: number; end: number }
 export interface WorkData { wells: number[]; seasons: WorkSeason[]; months: number[]; monthFlow: number[][]; monthDays: number[][]; monthWater: number[][] }
 export const getWork = (gsp: string) => call<WorkData>('/api/work?name=' + encodeURIComponent(gsp))
+
+export interface SummaryData { columns: string[]; rows: (string | number | null)[][] }
+export const getSummary = (gsp: string, kind: string, season: string, mode: string) =>
+  call<SummaryData>('/api/summary?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season) + '&mode=' + mode)

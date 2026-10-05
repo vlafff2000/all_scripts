@@ -336,10 +336,23 @@ class Project:
         dirs = {w: v["dir"] for w, v in lay["wells"].items()}
         tr = self.trends([self.season_frame(gsp, OTBOR, s, dirs) for s in st.seasons(gsp, OTBOR)])
         trends = tr.to_dict("records") if len(tr) else []
+        fd, ff = self.daily_flow(gsp)
         return {"gsp": gsp, "wells": wells, "layout": lay, "seasons": seasons, "periods": periods, "water": water,
+                "gspFlow": {"days": fd.tolist(), "bar": [round(float(v), 1) for v in ff]},
                 "pressure": series, "seasonPressure": sp, "warnings": warnings, "trends": trends,
                 "depths": {str(w): list(v) for w, v in depths.items() if w in set(wells)},
                 "altitude": {str(w): v for w, v in alt.items() if w in set(wells)}}
+
+    def summary_payload(self, gsp: str, kind: str, season: str, mode: str = "auto") -> dict:
+        """Таблица итогов сезона со всеми столбцами старого листа (время работы, давление, замеры воды)."""
+        lay = self.layout_for(gsp, mode)
+        dirs = {w: v["dir"] for w, v in lay["wells"].items()}
+        k = KIND_BY_NAME[kind]
+        df = self.season_frame(gsp, k, season, dirs) if season != "*" else pd.concat(
+            [self.season_frame(gsp, k, s, dirs) for s in self.store.seasons(gsp, k)], ignore_index=True, sort=False)  # type: ignore[union-attr]
+        df = df.sort_values(["Сезон", "Скважина"]) if len(df) else df
+        rows = df.astype(object).where(df.notna(), None).values.tolist()
+        return {"columns": [str(c) for c in df.columns], "rows": [[v.item() if hasattr(v, "item") else v for v in r] for r in rows]}
 
     def season_payload(self, gsp: str, kind: str, season: str) -> dict:
         assert self.store is not None
@@ -554,6 +567,56 @@ class Project:
                 out["Доли_закачка_по_сезонам"] = d
         return out
 
+    def daily_flow(self, gsp: str) -> Tuple[np.ndarray, np.ndarray]:
+        """Суточный расход всего ГСП (отбор и закачка вместе): дни от эпохи и сумма по скважинам."""
+        assert self.store is not None
+        st = self.store
+        days, flows = [], []
+        for (g, k, s), (lo, hi) in st.segments.items():
+            if g == gsp:
+                days.append(st.day[lo:hi])
+                flows.append(np.where(np.isfinite(st.flow[lo:hi]), st.flow[lo:hi], 0.0))
+        if not days:
+            return np.zeros(0, dtype="int64"), np.zeros(0)
+        d, f = np.concatenate(days), np.concatenate(flows)
+        u, inv = np.unique(d, return_inverse=True)
+        return u, np.bincount(inv, weights=f, minlength=len(u))
+
+    def pressure_flow_table(self, gsp: str) -> pd.DataFrame:
+        """«Данные_для_графика_давления»: давление ГСП и объекта вместе с суточным расходом ГСП по датам."""
+        days, flow = self.daily_flow(gsp)
+        fl = {int(d): float(v) for d, v in zip(days, flow)}
+        pg, po = self.pressure("gsp")[0], self.pressure("obj")[0]
+        press = {}
+        for key, df in (("gsp", pg), ("obj", po)):
+            press[key] = {inputs.day_of(t): float(v) for t, v in zip(df["Дата"], df["Давление_бар"])} if len(df) else {}
+        alld = sorted(set(fl) | set(press["gsp"]) | set(press["obj"]))
+        rows = []
+        for d in alld:
+            r = {"Дата": inputs.iso(d)[8:10] + "." + inputs.iso(d)[5:7] + "." + inputs.iso(d)[:4]}
+            if len(pg):
+                r["Давление_ГСП_бар"] = round(press["gsp"][d], 2) if d in press["gsp"] else ""
+            if len(po):
+                r["Давление_объекта_бар"] = round(press["obj"][d], 2) if d in press["obj"] else ""
+            r["Суточный_расход_ГСП_тыс_м3"] = round(fl[d], 1) if d in fl else 0
+            rows.append(r)
+        cols = ["Дата"] + (["Давление_ГСП_бар"] if len(pg) else []) + (["Давление_объекта_бар"] if len(po) else []) + ["Суточный_расход_ГСП_тыс_м3"]
+        return pd.DataFrame(rows, columns=cols)
+
+    def summary_tables(self, frames: Dict[int, List[pd.DataFrame]]) -> Dict[str, pd.DataFrame]:
+        """«Сводка_все_сезоны» и «Вода_по_направлениям» из итогов сезонов (как create_output_excel)."""
+        out: Dict[str, pd.DataFrame] = {}
+        parts = [f for k in (OTBOR, ZAKACHKA) for f in frames[k] if len(f)]
+        if parts:
+            out["Сводка_все_сезоны"] = pd.concat(parts, ignore_index=True, sort=False).sort_values(["Тип", "Сезон", "Скважина"])
+        otb = [f for f in frames[OTBOR] if len(f)]
+        if otb:
+            o_all = pd.concat(otb, ignore_index=True, sort=False)
+            wcols = [c for c in o_all.columns if "Водный_фактор_" in c or "Расход_воды_" in c]
+            if "Направление" in o_all.columns and wcols:
+                out["Вода_по_направлениям"] = o_all.groupby("Направление")[wcols].mean().reset_index()
+        return out
+
     def export_excel(self, gsp: str, mode: str = "auto") -> Path:
         assert self.store is not None
         lay = self.layout_for(gsp, mode)
@@ -599,6 +662,10 @@ class Project:
                              "Низ перфорации, м (абс.)": depths.get(wl, (None, None))[1], "Альтитуда, м": alt.get(wl)})
             put(pd.DataFrame(rows), "Скважины")
             self._work_sheets(gsp, put)
+            for key, df in self.summary_tables(frames).items():
+                put(df, key.replace("_", " "))
+            if len(self.pressure("gsp")[0]) or len(self.pressure("obj")[0]):
+                put(self.pressure_flow_table(gsp), "Давление и расход ГСП")
             names = {"Доли_отбор_по_сезонам": "Доли отбор по сезонам", "Доли_закачка_по_сезонам": "Доли закачка по сезонам",
                      "Сводка_долей": "Сводка долей", "Направления_по_сезонам": "Направления по сезонам"}
             for key, df in self.share_tables(gsp, dirs).items():

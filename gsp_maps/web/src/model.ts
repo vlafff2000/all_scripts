@@ -130,3 +130,60 @@ export function niceStep(span: number, target = 5) {
   const raw = span / target, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p
 }
+
+/** Раскраска карты: по умолчанию круги по расходу газа, остальные режимы красят скважины одной шкалой. */
+export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'wfall'
+export const PAINTS: [Paint, string][] = [
+  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость (окно)'], ['wfall', 'Обводнённость (все сезоны)'],
+]
+export interface PaintVal { v: number; label: string; tip: string }
+export interface PaintData { vals: Map<number, PaintVal>; lo: number; hi: number; stops: string[]; title: string; fmt: (v: number) => string; note: string }
+
+export function rampColor(stops: string[], t: number): string {
+  const x = Math.max(0, Math.min(1, t)) * (stops.length - 1), i = Math.min(stops.length - 2, Math.floor(x)), f = x - i
+  const c = (s: string) => [1, 3, 5].map(k => parseInt(s.slice(k, k + 2), 16))
+  const p = c(stops[i]), q = c(stops[i + 1])
+  return '#' + p.map((v, k) => Math.round(v + (q[k] - v) * f).toString(16).padStart(2, '0')).join('')
+}
+const ENTRY_STOPS = ['#1b7f5f', '#e6ab02', '#d95f02', '#7a1c1c']
+const DEPTH_STOPS = ['#ffe600', '#ff9500', '#d12f6e', '#2a2ad4']
+const WF_STOPS = ['#d6e8fa', '#6fa8e0', '#1f5fb0', '#08306b']
+
+/** Значения выбранной раскраски по скважинам сезона. Скважины без значения в карту не попадают (рисуются серыми). */
+export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: string, season: string, a: number, b: number): PaintData | null {
+  if (paint === 'flow') return null
+  const vals = new Map<number, PaintVal>()
+  if (paint === 'entry') {
+    const first: [number, number][] = []
+    calc.wells.forEach((w, i) => { const j = calc.flow[i].findIndex(v => v > 0); if (j >= 0) first.push([calc.days[j], w]) })
+    first.sort((p, q) => p[0] - q[0])
+    first.forEach(([d, w], r) => vals.set(w, { v: d, label: fmtDay(d).slice(0, 5), tip: `Ввод ${r + 1}-й: ${fmtDay(d)}` + (r ? `, позже первой на ${d - first[0][0]} дн.` : '') }))
+    const lo = first.length ? first[0][0] : 0, hi = first.length ? first[first.length - 1][0] : 1
+    return { vals, lo, hi: hi === lo ? lo + 1 : hi, stops: ENTRY_STOPS, title: `Первый день с расходом, ${kind.toLowerCase()} ${season}`, fmt: fmtDay, note: 'число на круге — дата ввода (дд.мм)' }
+  }
+  if (paint === 'depth') {
+    let lo = Infinity, hi = -Infinity
+    const ok: [number, number, number][] = []
+    for (const w of calc.wells) {
+      const d = g.depths[String(w)]
+      if (!d || d[0] < 100 || d[0] > 5000 || d[1] < 100 || d[1] > 5000 || d[0] > d[1]) continue
+      ok.push([w, d[0], d[1]]); lo = Math.min(lo, d[0]); hi = Math.max(hi, d[0])
+    }
+    for (const [w, top, bot] of ok) vals.set(w, { v: top, label: String(Math.round(top)), tip: `Перфорация: ${Math.round(top)} — ${Math.round(bot)} м` })
+    if (!ok.length) { lo = 0; hi = 1 }
+    return { vals, lo, hi: hi === lo ? lo + 10 : hi, stops: DEPTH_STOPS, title: 'Глубина верха перфорации, м', fmt: v => String(Math.round(v)), note: 'число на круге — верх перфорации, м' }
+  }
+  const src = paint === 'wf' ? [...waterByWell(g.water, kind, season, calc.days[a], calc.days[b]).entries()]
+    : (() => { const m = new Map<number, WaterPoint[]>(); for (const r of g.water) { const arr = m.get(r.well) || []; arr.push({ month: r.month - 1, year: r.year, factor: r.factor, flow: r.flow, note: r.note }); m.set(r.well, arr) } return [...m.entries()] })()
+  const have = new Set(calc.wells)
+  let hi = 0
+  for (const [w, pts] of src) {
+    if (!have.has(w)) continue
+    const f = pts.map(p => p.factor).filter((v): v is number => v !== null)
+    if (!f.length) continue
+    const mx = Math.max(...f), n = f.filter(v => v > 0).length
+    hi = Math.max(hi, mx)
+    vals.set(w, { v: mx, label: String(Math.round(mx)), tip: `Водный фактор: максимум ${Math.round(mx)} л/1000 м³, замеров с водой ${n} из ${f.length}` })
+  }
+  return { vals, lo: 0, hi: hi || 1, stops: WF_STOPS, title: paint === 'wf' ? 'Макс. водный фактор в окне, л/1000 м³' : 'Макс. водный фактор за все сезоны, л/1000 м³', fmt: v => String(Math.round(v)), note: 'число на круге — водный фактор' }
+}

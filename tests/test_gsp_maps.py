@@ -1,4 +1,5 @@
 """«Карты ГСП»: паритет со старыми функциями скрипта карт (достаются через ast, сам скрипт не импортируется), XY, API."""
+import json
 import ast
 import os
 import re
@@ -22,7 +23,7 @@ from gsp_maps.store import KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of  # noqa
 OLD = next((ROOT / "apps" / "map_dashboards").glob("Секторные_диаграммы*.py"))
 _NEEDED = {"get_season_from_month", "process_main_data", "load_water_files", "load_map_file", "load_pressure_file",
            "load_seasons_file", "analyze_trends", "load_perforation_depths", "integrate_water_data",
-           "create_well_share_analysis", "_format_header", "_color_season_groups"}
+           "create_well_share_analysis", "create_pressure_flow_sheet", "_format_header", "_color_season_groups"}
 
 
 @pytest.fixture(scope="module")
@@ -343,3 +344,58 @@ def test_share_tables_match_old(old, db, tmp_path, monkeypatch, with_water):
                 assert list(a[col]) == list(b[col]), (name, col)
             else:
                 assert np.allclose(a[col].to_numpy(dtype=float), b[col].to_numpy(dtype=float), equal_nan=True), (name, col)
+
+
+def _project(tmp_path, monkeypatch, path):
+    monkeypatch.setenv("GSP_MAPS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
+    from gsp_maps.project import Project
+    pr = Project()
+    pr.set_paths({"db": str(path)}, str(tmp_path / "out"))
+    pr.store = Store.open(str(path))
+    return pr
+
+
+def test_pressure_flow_table_matches_old(old, db, tmp_path, monkeypatch):
+    path, o, z = db
+    pr = _project(tmp_path, monkeypatch, path)
+    days = pd.date_range("2022-09-25", "2023-02-10", freq="5D")
+    pg = pd.DataFrame({"Дата": days, "Давление_бар": np.linspace(80, 60, len(days))})
+    po = pd.DataFrame({"Дата": days[::2] + pd.Timedelta(days=1), "Давление_бар": np.linspace(70, 50, len(days[::2]))})
+    pr.pressure = lambda which: ((pg if which == "gsp" else po), [])  # type: ignore[assignment]
+    mine = pr.pressure_flow_table("ГСП 1")
+    book = tmp_path / "old.xlsx"
+    with pd.ExcelWriter(str(book), engine="openpyxl") as writer:
+        # старая функция берёт первый столбец «…расход…газ…», то есть часовой («Часовой расход газа»), и подписывает его суточным:
+        # это ошибка старого листа, здесь расход суточный; для сверки убираем часовой столбец
+        old["create_pressure_flow_sheet"](writer, o.drop(columns="Часовой расход газа"), z.drop(columns="Часовой расход газа"), pg, po, "ГСП 1")
+    ref = pd.read_excel(str(book), sheet_name="Данные_для_графика_давления", header=3)
+    assert list(mine.columns) == list(ref.columns)
+    assert len(mine) == len(ref)
+    assert list(mine["Дата"]) == [str(v) for v in ref["Дата"]]
+    for col in mine.columns[1:]:
+        a = pd.to_numeric(mine[col].replace("", np.nan)).to_numpy(dtype=float)
+        b = pd.to_numeric(ref[col].replace("", np.nan)).to_numpy(dtype=float)
+        assert np.allclose(a, b, equal_nan=True), col
+
+
+def test_summary_tables_and_summary_payload(old, db, tmp_path, monkeypatch):
+    path, o, z = db
+    pr = _project(tmp_path, monkeypatch, path)
+    dirs = {11: "Север", 12: "Юг", 13: "Север", 14: "Восток"}
+    frames = {k: [pr.season_frame("ГСП 1", k, s, dirs) for s in pr.store.seasons("ГСП 1", k)] for k in (OTBOR, ZAKACHKA)}
+    t = pr.summary_tables(frames)
+    old_o, old_z = old["process_main_data"](o.copy(), z.copy(), "ГСП 1")
+    ref = pd.concat([old_o, old_z], ignore_index=True, sort=False).sort_values(["Тип", "Сезон", "Скважина"])
+    mine = t["Сводка_все_сезоны"]
+    assert len(mine) == len(ref)
+    for col in ("Накопленный_расход_газа", "Средний_суточный_расход", "Количество_дней", "Суммарное_время_работы", "Накопленный_расход_газа_закачка"):
+        assert np.allclose(mine[col].to_numpy(dtype=float), ref[col].to_numpy(dtype=float), equal_nan=True), col
+    assert "Вода_по_направлениям" not in t  # воды нет — листа нет, как и в старом скрипте
+    sp = pr.summary_payload("ГСП 1", "Отбор", "2022-2023")
+    assert "Суммарное_время_работы" in sp["columns"] and len(sp["rows"]) == 4
+    allp = pr.summary_payload("ГСП 1", "Отбор", "*")
+    assert len(allp["rows"]) == 4 * len(pr.store.seasons("ГСП 1", OTBOR))
+    json.dumps(sp), json.dumps(allp)
+    gp = pr.gsp_payload("ГСП 1", "grid")
+    assert len(gp["gspFlow"]["days"]) == len(gp["gspFlow"]["bar"]) > 0
