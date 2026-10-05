@@ -3,7 +3,7 @@ import type { GspData } from './api'
 import { GAS, MONTH_NAME, SeasonCalc, WATER, fmt1, fmtDay, fmtInt, fmtMln, fmtPct, fmtTh, place, waterByWell } from './model'
 
 interface Props {
-  g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number
+  g: GspData; calc: SeasonCalc; prev: SeasonCalc | null; prevKey: string; kind: string; season: string; a: number; b: number
   selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; onFocus: (w: number) => void
 }
 
@@ -24,7 +24,7 @@ function DailyBars({ row, days, a, b }: { row: number[]; days: number[]; a: numb
 const LINES = ['#d1495b', '#2e86ab', '#3b8b5a', '#e0a100', '#7b5ea7', '#1b998b', '#c7522a', '#5f7178']
 
 /** Накопленный расход по дням сезона: по одной линии на скважину (до 8) и, если нужно, суммарная. */
-function CumChart({ calc, wells, a, b, total }: { calc: SeasonCalc; wells: number[]; a: number; b: number; total?: boolean }) {
+function CumChart({ calc, wells, a, b, total, prev }: { calc: SeasonCalc; wells: number[]; a: number; b: number; total?: boolean; prev?: SeasonCalc | null }) {
   const W = 300, H = 120, nd = calc.nd
   const series = wells.filter(w => calc.index.has(w)).slice(0, 8).map((w, k) => {
     let c = 0
@@ -34,23 +34,27 @@ function CumChart({ calc, wells, a, b, total }: { calc: SeasonCalc; wells: numbe
     let c = 0
     series.unshift({ w: -1, color: '#1b2a31', y: Array.from({ length: nd }, (_, j) => (c += wells.reduce((s, w) => s + Math.max(0, calc.index.has(w) ? calc.flow[calc.index.get(w)!][j] : 0), 0))) })
   }
-  const mx = Math.max(1, ...series.map(s => s.y[nd - 1] || 0)), x = (j: number) => (nd > 1 ? (j / (nd - 1)) * W : 0)
+  // прошлый сезон (пунктир): та же скважина, по номеру дня от начала сезона
+  const old = prev && wells.length === 1 && prev.index.has(wells[0]) ? (() => { let c = 0; return prev.flow[prev.index.get(wells[0])!].map(v => (c += Math.max(0, v))) })() : null
+  const mx = Math.max(1, ...series.map(s => s.y[nd - 1] || 0), ...(old ? [old[old.length - 1] || 0] : [])), x = (j: number) => (nd > 1 ? (j / (nd - 1)) * W : 0)
   return (
     <>
       <svg viewBox={`0 0 ${W} ${H + 14}`} className="cum" role="img" aria-label="Накопленный расход по дням сезона">
         <rect x={x(a)} width={Math.max(1, x(b) - x(a))} y={0} height={H} className="daily-win" />
+        {old && <polyline fill="none" stroke="#8a979c" strokeWidth={1.4} strokeDasharray="4 3" points={old.slice(0, nd).map((v, j) => x(j).toFixed(1) + ',' + (H - (v / mx) * H).toFixed(1)).join(' ')} />}
         {series.map(s => <polyline key={s.w} fill="none" stroke={s.color} strokeWidth={s.w === -1 ? 2.2 : 1.6} strokeLinejoin="round" points={s.y.map((v, j) => x(j).toFixed(1) + ',' + (H - (v / mx) * H).toFixed(1)).join(' ')} />)}
         <line x1={0} x2={W} y1={H} y2={H} className="daily-axis" />
         <text x={0} y={H + 11} className="daily-t">{fmtDay(calc.days[0])}</text>
         <text x={W} y={H + 11} textAnchor="end" className="daily-t">{fmtDay(calc.days[nd - 1])}</text>
         <text x={W} y={9} textAnchor="end" className="daily-t">макс. {fmtMln(mx)} млн м³</text>
       </svg>
+      {old && <div className="cum-legend"><span><i style={{ background: series[0]?.color }} />этот сезон</span><span><i style={{ background: '#8a979c' }} />прошлый сезон</span></div>}
       {series.length > 1 && <div className="cum-legend">{series.map(s => <span key={s.w}><i style={{ background: s.color }} />{s.w === -1 ? 'сумма' : s.w}</span>)}</div>}
     </>
   )
 }
 
-export default function Inspector({ g, calc, kind, season, a, b, selected, onSelect, group, onGroup, onFocus }: Props) {
+export default function Inspector({ g, calc, prev, prevKey, kind, season, a, b, selected, onSelect, group, onGroup, onFocus }: Props) {
   const { placed } = useMemo(() => place(g, calc), [g, calc])
   const rows = useMemo(() => calc.wells.map((w, i) => ({ w, i, ...calc.stat(i, a, b) })), [calc, a, b])
   const sum = rows.reduce((s, r) => s + Math.max(0, r.total), 0)
@@ -104,9 +108,10 @@ export default function Inspector({ g, calc, kind, season, a, b, selected, onSel
         <h3>Расход по дням сезона</h3>
         <DailyBars row={calc.flow[i]} days={calc.days} a={a} b={b} />
         <h3>Накопленный расход</h3>
-        <CumChart calc={calc} wells={[selected]} a={a} b={b} />
+        <CumChart calc={calc} wells={[selected]} a={a} b={b} prev={prev} />
         <dl className="facts">
           <dt>За весь сезон</dt><dd>{fmtMln(full.total)} млн м³, {full.days} дн.</dd>
+          {prev && prev.index.has(selected) && (() => { const o = prev.stat(prev.index.get(selected)!, 0, prev.nd - 1).total, d = full.total - o; return <><dt>Прошлый сезон ({prevKey})</dt><dd>{fmtMln(o)} млн м³{o > 0 ? <>, {d >= 0 ? '+' : '−'}{fmtPct(Math.abs(d) / o)}</> : ''}</dd></> })()}
           {first >= 0 && <><dt>Первый расход</dt><dd>{fmtDay(calc.days[first])}</dd></>}
           {dep && <><dt>Перфорация</dt><dd>{fmt1(dep[0])} – {fmt1(dep[1])} м (абс.)</dd></>}
           {alt !== undefined && <><dt>Альтитуда</dt><dd>{fmt1(alt)} м</dd></>}
