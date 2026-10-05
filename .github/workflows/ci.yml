@@ -11,17 +11,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.8', '3.11']
+        python: ['3.11', '3.14']
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Install (versions of the portable build)
+      - name: Install (latest versions, as in the portable build)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pandas==2.0.3 numpy==1.24.4 openpyxl==3.1.5 xlsxwriter==3.2.0 xlrd==2.0.1 odfpy==1.4.1 \
-            starlette==0.44.0 uvicorn==0.33.0 pytest httpx
+          python -m pip install pandas numpy openpyxl xlsxwriter xlrd odfpy starlette uvicorn pytest httpx
       - name: Tests on generated source files
         run: python -m pytest -q tests
