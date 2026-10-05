@@ -33,6 +33,10 @@
   --shadow: rgba(27, 42, 49, .14);
   --shadow-strong: rgba(27, 42, 49, .25);
   --radius: 6px;
+  --map-bg: #f6f8f8;
+  --map-grid: #e4eaeb;
+  --map-water: #2a78d6;
+  --map-gas: #e63946;
   font-family: 'PT Sans', 'Segoe UI', system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.45;
@@ -80,6 +84,10 @@
   --chart-axis: #3a4950;
   --chart-surface: #172025;
   --chart-accent: #3cc2cb;
+  --map-bg: #121a1e;
+  --map-grid: #1f2a2f;
+  --map-water: #3987e5;
+  --map-gas: #ef5260;
 }
 body { background: var(--bg); color: var(--ink); margin: 0; }
 * { box-sizing: border-box; }

@@ -138,6 +138,7 @@ export default function App() {
     return () => { live = false; clearTimeout(t) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batch, season, calcKey, calc])
+  const exportRef = useRef<HTMLDetailsElement>(null)
   const excel = async () => { try { const r = await exportExcel(gsp, mode); flash('Excel сохранён: ' + r.path) } catch (e) { flash(String((e as Error).message || e)) } }
   const goFind = (v: string) => {
     setFind(v)
@@ -210,9 +211,14 @@ export default function App() {
               <input className="find" inputMode="numeric" placeholder="Скважина №" aria-label="Найти скважину" value={find} onChange={e => goFind(e.target.value)} />
               <span className="spacer" />
               {g && <Issues notes={g.layout.notes} warnings={g.warnings} />}
-              <button type="button" className="quiet" onClick={png} title="Сохранить карту как картинку">PNG</button>
-              <button type="button" className="quiet" onClick={pngAll} disabled={!!batch} title="Сохранить картинки карты по всем сезонам выбранного вида">{batch ? `PNG ${batch.i + 1}/${batch.keys.length}` : 'PNG все сезоны'}</button>
-              <button type="button" className="quiet" onClick={excel} title="Выгрузить таблицы в Excel">Excel</button>
+              <details className="export-menu" ref={exportRef}>
+                <summary><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11" /></svg>{batch ? `PNG ${batch.i + 1}/${batch.keys.length}` : 'Выгрузка'}</summary>
+                <div className="menu" onClick={() => exportRef.current?.removeAttribute('open')}>
+                  <button type="button" onClick={excel}>Excel<small>Таблицы сезона, доли, давление</small></button>
+                  <button type="button" onClick={png}>Картинка карты<small>PNG текущего вида</small></button>
+                  <button type="button" onClick={pngAll} disabled={!!batch}>Картинки всех сезонов<small>PNG по каждому сезону вида</small></button>
+                </div>
+              </details>
               <button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сведений">Сведения</button>
             </>}
           </div>)}
