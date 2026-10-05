@@ -1,4 +1,4 @@
-"""Запуск «Базы ПХГ»: python -m pxg_base (меню), python -m pxg_base <номер|имя модуля>, python -m pxg_base --server (веб-интерфейс)."""
+"""Запуск «Базы ПХГ»: python -m pxg_base (меню), python -m pxg_base <номер|имя модуля>, python -m pxg_base --app (окно приложения), --browser (в браузере), --server (только сервер)."""
 from __future__ import annotations
 
 import runpy
@@ -42,6 +42,9 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "--server":
         return serve(int(argv[1]) if len(argv) > 1 else 8766)
+    if argv and argv[0] in ("--app", "--browser"):
+        from .window import run
+        return run(browser=argv[0] == "--browser")
     if argv:
         choice = pick(argv[0])
     else:
