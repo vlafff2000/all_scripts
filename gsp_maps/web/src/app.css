@@ -140,3 +140,11 @@ td.st.prod { background: #c8e6c9; color: #1b4d1f; } td.st.inj { background: #bbd
 table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62px; padding: 0 6px; white-space: nowrap; } .matrix.shares td { min-width: 52px; padding: 0 6px; } .matrix.shares td.dir { text-align: left; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .dirname { text-align: left !important; padding: 0 8px !important; white-space: nowrap; } .dirname i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
 .matrix.shares .stick { min-width: 58px; }
+.selbox { position: absolute; z-index: 4; pointer-events: none; border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.group-chip { position: absolute; left: 60px; top: 66px; z-index: 4; background: var(--surface); border: 1px solid var(--accent); border-radius: 8px; padding: 3px 4px 3px 10px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.layers input[type=range] { width: 90px; vertical-align: middle; }
+.cum { width: 100%; height: auto; display: block; }
+.cum-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; margin: 4px 0 8px; }
+.cum-legend button { background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink); display: inline-flex; align-items: center; gap: 4px; }
+.cum-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.inspector > * { flex-shrink: 0; }
