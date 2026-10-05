@@ -10,7 +10,7 @@ export interface ModuleInfo {
 export interface Job {
   id: string; module: string; status: 'running' | 'done' | 'failed'
   started: number; finished: number | null; out_dir: string
-  files: string[]; log: string[]; log_len: number
+  files: string[]; sizes: Record<string, number>; values: Record<string, string>; log: string[]; log_len: number
 }
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -29,3 +29,7 @@ export const startJob = (module: string, params: Record<string, string>) =>
 export const getJob = (id: string, since: number) => call<Job>(`/api/jobs/${id}?since=${since}`)
 export const fileUrl = (id: string, name: string) =>
   `/api/jobs/${id}/files/${name.split('/').map(encodeURIComponent).join('/')}`
+export const getJobs = () => call<{ jobs: Job[] }>('/api/jobs').then(r => r.jobs)
+export const pickPath = (kind: 'folder' | 'file', start: string) =>
+  call<{ path: string }>(`/api/pick?kind=${kind}&start=${encodeURIComponent(start)}`).then(r => r.path)
+export const openFolder = (id: string) => call<{ ok: boolean }>(`/api/jobs/${id}/open`, { method: 'POST' })

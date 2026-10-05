@@ -33,6 +33,7 @@ class Job:
         self.started = time.time()
         self.finished: Optional[float] = None
         self.files: List[str] = []
+        self.sizes: Dict[str, int] = {}
         self.lock = threading.Lock()
 
     def view(self, since: int = 0) -> dict:
@@ -40,7 +41,8 @@ class Job:
             return {
                 "id": self.id, "module": self.module, "status": self.status,
                 "started": self.started, "finished": self.finished,
-                "out_dir": str(self.out_dir), "files": list(self.files),
+                "out_dir": str(self.out_dir), "files": list(self.files), "sizes": dict(self.sizes),
+                "values": dict(self.values),
                 "log": self.log[since:], "log_len": len(self.log),
             }
 
@@ -78,6 +80,7 @@ def _run(job: Job, spec: WebSpec) -> None:
             job.log.append("Не удалось запустить модуль: %s" % e)
     with job.lock:
         job.files = sorted(_snapshot(job.out_dir))
+        job.sizes = {f: (job.out_dir / f).stat().st_size for f in job.files}
         job.status = "done" if code == 0 else "failed"
         job.finished = time.time()
 
