@@ -81,6 +81,16 @@ async def work(request: Request):
     return JSONResponse(await run_in_threadpool(PROJECT.work_payload, name))
 
 
+async def summary(request: Request):
+    if PROJECT.store is None:
+        return _err("База расходов ещё не загружена.", 409)
+    q = request.query_params
+    name = q.get("gsp") or ""
+    if name not in PROJECT.store.gsp_names:
+        return _err("Нет такого ГСП: %s" % name, 404)
+    return JSONResponse(await run_in_threadpool(PROJECT.summary_payload, name, q.get("kind") or "Отбор", q.get("season") or "*", q.get("mode") or "auto"))
+
+
 async def season(request: Request):
     if PROJECT.store is None:
         return _err("База расходов ещё не загружена.", 409)
@@ -165,6 +175,7 @@ def build_app() -> Starlette:
         Route("/api/gsp", gsp),
         Route("/api/season", season),
         Route("/api/work", work),
+        Route("/api/summary", summary),
         Route("/api/export", export, methods=["POST"]),
         Route("/api/image", save_image, methods=["POST"]),
         Route("/api/pick", pick),
