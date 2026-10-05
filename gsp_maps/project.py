@@ -432,10 +432,127 @@ class Project:
                 wv = wd["_wf"].dropna().to_numpy()
                 if len(wv) >= 2:
                     wt = float(np.polyfit(range(len(wv)), wv, 1)[0])
-            rows.append({"Скважина": int(well), "Направление": wd["Направление"].iloc[0] if "Направление" in wd else "",
+            rows.append({"Скважина": int(well), "Направление": (lambda v: v if isinstance(v, str) else "")(wd["Направление"].iloc[0]) if "Направление" in wd else "",
                          "Тренд_расхода": round(ft, 2), "Тренд_воды": round(wt, 2),
                          "Средний_расход": round(float(flow.mean()), 1) if len(flow) else 0.0})
         return pd.DataFrame(rows)
+
+    def share_tables(self, gsp: str, dirs: Dict[int, str]) -> Dict[str, pd.DataFrame]:
+        """Доли скважин и направлений по сезонам (листы старого create_well_share_analysis, те же названия столбцов)."""
+        assert self.store is not None
+        st = self.store
+        out: Dict[str, pd.DataFrame] = {}
+        any_water = len(self.water()[0]) > 0
+        otbor, zak = [], []
+        for kind, bucket in ((OTBOR, otbor), (ZAKACHKA, zak)):
+            for s in st.seasons(gsp, kind):
+                bucket.append(self.season_frame(gsp, kind, s, dirs))
+        o_all = pd.concat(otbor, ignore_index=True) if otbor else pd.DataFrame()
+        z_all = pd.concat(zak, ignore_index=True) if zak else pd.DataFrame()
+
+        def detail(frames, flow, mean, days, with_water):
+            data: Dict[int, dict] = {}
+            seasons = []
+            for df in frames:
+                if not len(df):
+                    continue
+                season = str(df["Сезон"].iloc[0])
+                total = df[flow].sum()
+                if total == 0:
+                    continue
+                seasons.append(season)
+                share = (df[flow] / total * 100).round(1)
+                wf = [c for c in df.columns if c.startswith("Водный_фактор_")]
+                fl = [c for c in df.columns if c.startswith("Расход_воды_")]
+                for i, w in enumerate(df["Скважина"].astype(int)):
+                    row = data.setdefault(w, {"Скважина": w})
+                    row[season + "_Доля_%"] = share.iloc[i]
+                    row[season + "_Накоп_расход"] = round(df[flow].iloc[i])
+                    row[season + "_Сред_сут_расход"] = round(df[mean].iloc[i])
+                    row[season + "_Дней"] = df[days].iloc[i]
+                    if with_water:
+                        if wf:
+                            vals = df[wf].iloc[i]
+                            row[season + "_Вод_фактор_сред"] = round(vals.mean(), 1) if vals.notna().any() else np.nan
+                            row[season + "_Вод_фактор_макс"] = round(vals.max(), 1) if vals.notna().any() else np.nan
+                            row[season + "_Замеров_с_водой"] = int((vals > 0).sum())
+                            row[season + "_Расход_воды_лч"] = round(df[fl].iloc[i].sum(), 1) if fl else 0
+                        elif any_water:
+                            row[season + "_Вод_фактор_сред"] = np.nan
+                            row[season + "_Вод_фактор_макс"] = np.nan
+                            row[season + "_Замеров_с_водой"] = 0
+                            row[season + "_Расход_воды_лч"] = 0
+            if not data:
+                return pd.DataFrame(), seasons
+            frame = pd.DataFrame(list(data.values()))
+            metrics = ["Доля_%", "Накоп_расход", "Сред_сут_расход", "Дней"] + (
+                ["Вод_фактор_сред", "Вод_фактор_макс", "Замеров_с_водой", "Расход_воды_лч"] if with_water else [])
+            cols = ["Скважина"] + [s + "_" + m for m in metrics for s in sorted(seasons) if s + "_" + m in frame.columns]
+            frame = frame[cols]
+            if dirs:
+                frame.insert(1, "Направление", frame["Скважина"].map(dirs))
+            first = sorted(seasons)[0] + "_Доля_%"
+            return frame.sort_values(first, ascending=False), seasons
+
+        if len(o_all):
+            d, seasons_o = detail(otbor, "Накопленный_расход_газа", "Средний_суточный_расход", "Количество_дней", True)
+            if len(d):
+                out["Доли_отбор_по_сезонам"] = d
+            summary = o_all.groupby("Скважина").agg(
+                Средняя_доля_отбор_проц=("Накопленный_расход_газа", lambda x: round(x.sum() / o_all["Накопленный_расход_газа"].sum() * 100, 1) if o_all["Накопленный_расход_газа"].sum() > 0 else 0),
+                Суммарный_отбор_тыс_м3=("Накопленный_расход_газа", "sum"),
+                Средний_сут_расход_отбор=("Средний_суточный_расход", "mean"),
+                Сезонов_отбора=("Сезон", "nunique"),
+                Дней_работы_отбор=("Количество_дней", "sum")).reset_index()
+            if len(z_all):
+                zs = z_all.groupby("Скважина").agg(
+                    Средняя_доля_закачка_проц=("Накопленный_расход_газа_закачка", lambda x: round(x.sum() / z_all["Накопленный_расход_газа_закачка"].sum() * 100, 1) if z_all["Накопленный_расход_газа_закачка"].sum() > 0 else 0),
+                    Суммарная_закачка_тыс_м3=("Накопленный_расход_газа_закачка", "sum"),
+                    Средний_сут_расход_закачка=("Средний_суточный_расход_закачка", "mean"),
+                    Сезонов_закачки=("Сезон", "nunique"),
+                    Дней_работы_закачка=("Количество_дней_закачка", "sum")).reset_index()
+                summary = summary.merge(zs, on="Скважина", how="left").fillna(0)
+            wcols = [c for c in o_all.columns if c.startswith("Водный_фактор_")]
+            if wcols:
+                avg = o_all.groupby("Скважина")[wcols].mean().mean(axis=1).reset_index()
+                avg.columns = ["Скважина", "Сред_водный_фактор"]
+                cnt = o_all.groupby("Скважина")[wcols].apply(lambda x: (x > 0).sum().sum()).reset_index()
+                cnt.columns = ["Скважина", "Всего_замеров_с_водой"]
+                summary = summary.merge(avg, on="Скважина", how="left").merge(cnt, on="Скважина", how="left")
+            if dirs:
+                summary["Направление"] = summary["Скважина"].map(dirs)
+            out["Сводка_долей"] = summary.sort_values("Средняя_доля_отбор_проц", ascending=False)
+            if dirs:
+                rows = []
+                for df in otbor:
+                    if not len(df):
+                        continue
+                    df = df.copy()
+                    df["Направление"] = df["Скважина"].map(dirs)
+                    total = df["Накопленный_расход_газа"].sum()
+                    if total == 0:
+                        continue
+                    stats = df.groupby("Направление").agg(
+                        Скважин=("Скважина", "nunique"),
+                        Сумм_доля_проц=("Накопленный_расход_газа", lambda x: round(x.sum() / total * 100, 1)),
+                        Сумм_отбор=("Накопленный_расход_газа", "sum"),
+                        Сред_расход=("Средний_суточный_расход", "mean")).reset_index()
+                    wc = [c for c in df.columns if c.startswith("Водный_фактор_")]
+                    if wc:
+                        wd = df.groupby("Направление")[wc].apply(lambda x: (x > 0).sum().sum()).reset_index()
+                        wd.columns = ["Направление", "Замеров_с_водой"]
+                        stats = stats.merge(wd, on="Направление", how="left")
+                    else:
+                        stats["Замеров_с_водой"] = 0
+                    stats["Сезон"] = "Отбор_" + str(df["Сезон"].iloc[0])
+                    rows.append(stats)
+                if rows:
+                    out["Направления_по_сезонам"] = pd.concat(rows, ignore_index=True)
+        if len(z_all):
+            d, _ = detail(zak, "Накопленный_расход_газа_закачка", "Средний_суточный_расход_закачка", "Количество_дней_закачка", False)
+            if len(d):
+                out["Доли_закачка_по_сезонам"] = d
+        return out
 
     def export_excel(self, gsp: str, mode: str = "auto") -> Path:
         assert self.store is not None
@@ -482,6 +599,10 @@ class Project:
                              "Низ перфорации, м (абс.)": depths.get(wl, (None, None))[1], "Альтитуда, м": alt.get(wl)})
             put(pd.DataFrame(rows), "Скважины")
             self._work_sheets(gsp, put)
+            names = {"Доли_отбор_по_сезонам": "Доли отбор по сезонам", "Доли_закачка_по_сезонам": "Доли закачка по сезонам",
+                     "Сводка_долей": "Сводка долей", "Направления_по_сезонам": "Направления по сезонам"}
+            for key, df in self.share_tables(gsp, dirs).items():
+                put(df, names[key])
         return path
 
     def _work_sheets(self, gsp: str, put) -> None:
