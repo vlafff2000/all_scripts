@@ -136,7 +136,7 @@ _LEVEL_ENV = (("input_dir", "PXG_INPUT_DIR"), ("recursive", "PXG_RECURSIVE"), ("
 
 SPECS: List[WebSpec] = [
     WebSpec(
-        module="создание_БД_расходов",
+        module="Создание_базы_данных_расходов",
         params=(
             ROOT,
             Param("periods", "Файл с периодами", "file",
@@ -146,7 +146,7 @@ SPECS: List[WebSpec] = [
         note="Итоговая «Сводка_закачка_отбор_обновленный_скрипт.xlsx» сохраняется в папку результатов.",
     ),
     WebSpec(
-        module="нулевой_расход",
+        module="Нулевые_расходы_и_несоответствия_часов",
         params=(
             ROOT,
             Param("mode", "Режим", "choice", default="1", options=(
@@ -157,7 +157,7 @@ SPECS: List[WebSpec] = [
         note="Файл «Часы_ненулевые_расход_нулевой.xlsx» — часы с расходом при нулевом режиме.",
     ),
     WebSpec(
-        module="дополнение_БД_расходов",
+        module="Дополнение_базы_данных_расходов",
         params=(
             Param("db", "Файл базы расходов", "file", required=True, hint="Книга с листами «Отборы» и «Закачка»"),
             Param("max_date", "Оставить данные до даты", default="", required=True,
@@ -171,7 +171,7 @@ SPECS: List[WebSpec] = [
         note="База не меняется на месте: обновлённая копия лежит в папке результатов.",
     ),
     WebSpec(
-        module="обработка_БД_таблица_по_среднесуточной",
+        module="Таблица_среднесуточных_расходов_из_базы",
         params=(
             Param("year", "Год", default="2024", required=True, hint="Берутся данные за апрель–октябрь этого года"),
             Param("file", "Файл базы расходов", "file", required=True),
@@ -180,14 +180,14 @@ SPECS: List[WebSpec] = [
         answers=("year", "file", "sheet"),
     ),
     WebSpec(
-        module="otbor_zakachka_uvyaz_2019_01_2024_04",
+        module="Журнал_отбора_и_закачки_2019_2024",
         params=(Param("root", "Папка «Журнал учёта работы скважин ПХГ (прил.4)»", "folder", required=True,
                       hint="Внутри — папки по годам 2019–2024 с файлами ГГГГ_ММ.xlsx"),),
         answers=("root",),
         note="Результат — «daily_well_data_2019_01_2024_04.xlsx» с листами «Отбор» и «Закачка».",
     ),
     WebSpec(
-        module="создание_БД_уровней_и_давлений_Щигровский_горизонт_1002",
+        module="Создание_базы_уровней_и_давлений_Щигровский_горизонт",
         params=_LEVEL_PARAMS + (
             Param("simple", "Простой формат (4 столбца без пересчётов)", "bool", default=""),
             Param("altitude", "Файл с альтитудами", "file", hint="Необязательно"),
@@ -197,34 +197,34 @@ SPECS: List[WebSpec] = [
         answers=("altitude", "perforation"),
     ),
     WebSpec(
-        module="создание_БД_уровней_и_давлений_контрольные_горизонты",
+        module="Создание_базы_уровней_и_давлений_контрольные_горизонты",
         params=_LEVEL_PARAMS,
         env=_LEVEL_ENV,
     ),
     WebSpec(
-        module="зеркальная_таблица_давлений_2016_2026",
+        module="Зеркальная_таблица_давлений_2016_2026",
         params=(Param("root", "Корневая папка с вложенными папками", "folder", required=True),),
         stdin=lambda v: "1\n%s\nда\n" % (v.get("root") or "").strip(),
         note="Результат — папка «результаты_обработки» с объединённой таблицей и сводкой.",
     ),
     WebSpec(
-        module="pressure_final_2006_2025",
+        module="Итоговая_таблица_давлений_2006_2025",
         params=(Param("file", "Файл с давлениями", "file", required=True, hint="Таблица: дата, затем пары «устьевое/пластовое» по скважинам"),),
         answers=("file",),
     ),
     WebSpec(
-        module="Вычленение_Рмг_универсальное_по_номеру_столбца",
+        module="Выделение_Рмг_по_номерам_столбцов",
         params=(EXCEL_PATHS, Param("columns", "Номера столбцов", required=True,
                                    hint="Через пробел, нумерация с 0 по первому файлу (например 0 2 5 10). Не знаете номеров — возьмите вариант «по названию»")),
         answers=("paths", "columns"),
     ),
     WebSpec(
-        module="Вычленение_Рмг_универсальное_по_названию_столбца",
+        module="Выделение_Рмг_по_названиям_столбцов",
         params=(EXCEL_PATHS,),
         answers=("paths",),
     ),
     WebSpec(
-        module="впр",
+        module="Сопоставление_таблиц_ВПР",
         params=(
             Param("main_file", "Основной файл", "file", required=True),
             Param("lookup_file", "Файл с данными для поиска", "file", required=True),
@@ -239,13 +239,13 @@ SPECS: List[WebSpec] = [
         stdin=_vlookup_stdin,
     ),
     WebSpec(
-        module="межколонки",
+        module="Сбор_данных_по_межколонным_давлениям",
         params=(Param("root", "Корневая папка с данными", "folder", required=True),),
         dialogs=("root",),
         note="Результат — «БД_межколонки.xlsx».",
     ),
     WebSpec(
-        module="Анализ_межколоннок_для_АН",
+        module="Анализ_межколонных_давлений_для_авторского_надзора",
         params=(
             Param("db", "Файл базы межколонок", "file", required=True, hint="Результат модуля «Межколонки» (колонки «сезон», «номер_скважины», …)"),
             Param("seasons", "Сезоны", hint="Названия через запятую; пусто — все сезоны"),
@@ -254,14 +254,14 @@ SPECS: List[WebSpec] = [
         stdin=lambda v: "да\n",
     ),
     WebSpec(
-        module="include_давления_наблюдалки_1002",
+        module="Include_давлений_наблюдательных_скважин_горизонт_1002",
         params=(Param("file", "Файл с данными из новой базы", "file", required=True,
                       hint="Excel или CSV: скважина, дата, давление Рпл на верх перфораций (бар)"),),
         answers=("file",),
         note="Результат — папка «output_new_database» с include-файлами для tNavigator.",
     ),
     WebSpec(
-        module="include_давления_наблюдалки_с_пересчетом2",
+        module="Include_давлений_наблюдательных_скважин_с_пересчётом_по_MD",
         params=(
             Param("file", "Основной файл с данными", "file", required=True),
             Param("md", "Файл с MD (глубинами)", "file", required=True),
@@ -271,7 +271,7 @@ SPECS: List[WebSpec] = [
         note="Результат — папка «output_shirovsky_new_logic».",
     ),
     WebSpec(
-        module="include_давления_эксплуатационки",
+        module="Include_давлений_эксплуатационных_скважин",
         params=(
             Param("file", "Файл с давлениями", "file", required=True, hint="Excel, CSV или текст: скважина, дата, давления"),
             Param("convert", "Перевести давление из кгс/см² в бар", "bool", default="1"),
@@ -280,7 +280,7 @@ SPECS: List[WebSpec] = [
         note="Результат — папка «output» с тремя файлами для tNavigator.",
     ),
     WebSpec(
-        module="Создание_include_schedule_факт_из_модели_как_исторические",
+        module="Include_факта_из_модели_как_исторических_данных",
         params=(
             Param("file", "Excel-файл с данными из модели", "file", required=True,
                   hint="Первый лист: даты в первом столбце, столбцы вида «…:номер:Дебит газа…» и «…:номер:Приёмистость газа…»"),
@@ -290,7 +290,7 @@ SPECS: List[WebSpec] = [
         note="Результат — «<имя файла>_schedule.inc» в выбранной папке.",
     ),
     WebSpec(
-        module="Лена_перекидывать_в_процентах",
+        module="Перераспределение_отборов_в_процентах",
         params=(
             Param("file", "Excel-файл с данными", "file", required=True, hint="Листы: даты в первом столбце, столбцы «номер:Дебит газа (И), ст.м3/сут» и «номер:Приёмистость газа (И), ст.м3/сут»"),
             Param("seasons", "Файл с сезонами", "file", required=True, hint="Строки «ДД.ММ.ГГГГ prod|inj|none»"),
@@ -305,7 +305,7 @@ SPECS: List[WebSpec] = [
         note="Результат «<имя файла>_перераспределено.xlsx» создаётся рядом с исходным файлом.",
     ),
     WebSpec(
-        module="Лена_перекидывать_400_тысяч_в_сутки",
+        module="Перераспределение_отборов_по_сезонам_или_режиму_EI",
         params=(
             Param("file", "Excel-файл с данными", "file", required=True),
             Param("work_mode", "Режим", "choice", default="1", options=(
@@ -323,13 +323,26 @@ SPECS: List[WebSpec] = [
         note="Результат «<имя файла>_перераспределено….xlsx» создаётся рядом с исходным файлом.",
     ),
     WebSpec(
-        module="экстракция_ключевых_слов_в_юзер_файл",
+        module="Извлечение_ключевых_слов_из_schedule",
         params=(
             Param("file", "Входной файл (schedule-секция)", "file", required=True),
             Param("output", "Имя выходного файла", default="extracted_keywords.inc"),
         ),
         stdin=lambda v: v.get("file", "").strip() + "\n" + ((v.get("output") or "").strip() or "extracted_keywords.inc") + "\ny\n\n",
         note="Выходной файл сохраняется в папку результатов.",
+    ),
+    WebSpec(
+        module="Преобразование_исходных_таблиц_ГДИ_в_базу",
+        params=(
+            Param("files", "Исходные файлы ГДИ", "paths", required=True,
+                  hint="По одному пути в строке: файл Excel, папка с файлами или маска, например C:/data/*.xlsx"),
+            Param("periods", "Файл с периодами", "file", hint="Строки «ДД.ММ.ГГГГ prod|inj|none». Пусто — сезоны определяются по данным"),
+            Param("gsp", "Файл распределения скважин по ГСП", "file", hint="Excel: номер ГСП и номера скважин через запятую. Пусто — только данные из файлов"),
+            Param("output", "Имя итогового файла", default="БД_ГДИ_объединенная.xlsx"),
+        ),
+        stdin=lambda v: "".join(x + "\n" for x in lines_of(v.get("files", ""))) + "\n" + (v.get("periods") or "").strip() + "\n"
+        + (v.get("gsp") or "").strip() + "\n" + ((v.get("output") or "").strip() or "БД_ГДИ_объединенная.xlsx") + "\ny\nn\n",
+        note="Результат — единая база ГДИ в папке результатов (с листом исправлений дат).",
     ),
 ]
 

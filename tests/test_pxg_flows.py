@@ -55,7 +55,7 @@ def test_generator_is_deterministic(tmp_path):
 
 def test_zero_flow_finds_exactly_planted_cases(tree, tmp_path, monkeypatch):
     monkeypatch.setenv("PXG_RUNS_DIR", str(tmp_path / "runs"))
-    job = run_module(TestClient(app), "нулевой_расход", {"root": str(tree.root), "mode": "1"})
+    job = run_module(TestClient(app), "Нулевые_расходы_и_несоответствия_часов", {"root": str(tree.root), "mode": "1"})
     assert job["status"] == "done", "\n".join(job["log"][-15:])
     assert {SUMMARY, MISMATCH} <= set(job["files"])
     out = job["out_dir"]
@@ -70,14 +70,14 @@ def test_zero_flow_finds_exactly_planted_cases(tree, tmp_path, monkeypatch):
 
 def test_zero_flow_only_mismatch_mode(tree, tmp_path, monkeypatch):
     monkeypatch.setenv("PXG_RUNS_DIR", str(tmp_path / "runs"))
-    job = run_module(TestClient(app), "нулевой_расход", {"root": str(tree.root), "mode": "2"})
+    job = run_module(TestClient(app), "Нулевые_расходы_и_несоответствия_часов", {"root": str(tree.root), "mode": "2"})
     assert job["status"] == "done"
     assert MISMATCH in job["files"] and SUMMARY not in job["files"]
 
 
 def test_create_db_applies_periods(tree, tmp_path, monkeypatch):
     monkeypatch.setenv("PXG_RUNS_DIR", str(tmp_path / "runs"))
-    job = run_module(TestClient(app), "создание_БД_расходов",
+    job = run_module(TestClient(app), "Создание_базы_данных_расходов",
                      {"root": str(tree.root), "periods": str(tree.periods_file)})
     assert job["status"] == "done", "\n".join(job["log"][-15:])
     book = pd.read_excel(os.path.join(job["out_dir"], SUMMARY), sheet_name=None)

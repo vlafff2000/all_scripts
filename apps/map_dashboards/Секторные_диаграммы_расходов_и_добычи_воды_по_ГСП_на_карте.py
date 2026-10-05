@@ -30,7 +30,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # В конце main(), после создания Excel:
-from html_generator import generate_html_from_excel
+from Генератор_интерактивной_html_карты import generate_html_from_excel
 
 # Если нужно сгенерировать HTML из только что созданного Excel:
 html_path = generate_html_from_excel(
