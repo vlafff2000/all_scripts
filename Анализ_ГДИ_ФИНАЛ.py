@@ -17,7 +17,7 @@ from pandas import Timestamp
 import re
 import warnings
 # Настраиваемый порог R² – исследования с меньшим значением считаются неадекватными
-R2_THRESHOLD = 0.75
+R2_THRESHOLD = 0.95
 warnings.filterwarnings('ignore')
 
 # Настройка matplotlib для работы без GUI
@@ -660,25 +660,46 @@ class IndicatorDiagramPlotter:
         if df is None:
             self.load_data()
 
-    def _get_last_good_study(self, well_data, n_studies=None, selected_dates=None):
+    def _fit_simple_line(self, q_vals, dp2_vals):
         """
-        Находит последние N исследований с хорошим качеством (R² >= R2_THRESHOLD).
-        Если самое свежее имеет плохой R² — пропускает его и берёт следующее.
+        Строит простую прямую через точки (линейная регрессия).
+        Используется для исследований с плохим качеством кривой тренда.
+        Уравнение: ΔP² = k·Q (без свободного члена, через 0)
+        """
+        q = np.array(q_vals, dtype=float).flatten()
+        dp2 = np.array(dp2_vals, dtype=float).flatten()
 
-        Args:
-            well_data: DataFrame с данными скважины
-            n_studies: сколько исследований нужно (None = все хорошие)
-            selected_dates: список дат для фильтрации (опционально)
+        mask = (q > 0) & (~np.isnan(q)) & (~np.isnan(dp2))
+        q_clean = q[mask]
+        dp2_clean = dp2[mask]
+
+        if len(q_clean) < 2:
+            return None, None
+
+        # Линейная регрессия через (0,0): ΔP² = k·Q
+        # k = Σ(Q·ΔP²) / Σ(Q²)
+        k = np.sum(q_clean * dp2_clean) / np.sum(q_clean ** 2)
+
+        # R²
+        y_pred = k * q_clean
+        ss_res = np.sum((dp2_clean - y_pred) ** 2)
+        ss_tot = np.sum((dp2_clean - np.mean(dp2_clean)) ** 2)
+        r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+
+        return k, r2
+
+    def _get_studies_with_quality(self, well_data, n_studies=None):
+        """
+        Возвращает список дат исследований с пометкой о качестве.
+        Берёт N последних исследований (или все), но не пропускает плохие —
+        просто помечает их.
 
         Returns:
-            list: список дат с хорошим качеством
+            list of tuples: [(date, is_good, r2, source), ...]
         """
-        if selected_dates is None:
-            all_dates = sorted(well_data['Дата ГДИ'].dt.date.unique(), reverse=True)
-        else:
-            all_dates = sorted(selected_dates, reverse=True)
+        all_dates = sorted(well_data['Дата ГДИ'].dt.date.unique(), reverse=True)
 
-        good_dates = []
+        studies = []
 
         for date in all_dates:
             date_data = well_data[well_data['Дата ГДИ'].dt.date == date]
@@ -689,28 +710,26 @@ class IndicatorDiagramPlotter:
             q_vals = date_data['Qгаза тыс.м3/сут'].values
             dp2_vals = date_data['Рпл2-Рз2'].values
 
-            # Проверяем качество через анализатор
+            is_good = False
+            r2 = None
+            source = 'неизвестно'
+
             if hasattr(self, 'analyzer') and self.analyzer is not None:
-                # Получаем коэффициенты (БД или расчёт)
                 a, b, r2, source = self.analyzer.get_coefficients(date_data, q_vals, dp2_vals)
-
-                if r2 is not None and r2 >= R2_THRESHOLD:
-                    good_dates.append(date)
-                else:
-                    print(
-                        f"  ⚠️ Скв. {well_data['№ скважины'].iloc[0]}: исследование {date.strftime('%d.%m.%Y')} исключено (R²={r2:.3f})")
+                is_good = (r2 is not None and r2 >= R2_THRESHOLD)
             else:
-                # Если анализатора нет — считаем сами
                 a_calc, b_calc, r2_calc = self._fit_trend_line_unified(q_vals, dp2_vals)
-                if r2_calc is not None and r2_calc >= R2_THRESHOLD:
-                    good_dates.append(date)
+                r2 = r2_calc
+                source = 'расчёт'
+                is_good = (r2 is not None and r2 >= R2_THRESHOLD)
 
-            # Если набрали нужное количество — останавливаемся
-            if n_studies and len(good_dates) >= n_studies:
+            studies.append((date, is_good, r2, source))
+
+            if n_studies and len(studies) >= n_studies:
                 break
 
         # Возвращаем в хронологическом порядке (от старых к новым)
-        return sorted(good_dates)
+        return sorted(studies, key=lambda x: x[0])
 
     def _get_best_fit_curve(self, date_data, q_vals, dp2_vals):
         """
@@ -1481,8 +1500,10 @@ class IndicatorDiagramPlotter:
     def fit_trend_line_through_origin(self, x_data, y_data):
         """
         Строит кривую тренда через (0,0) по уравнению ΔP² = a·Q + b·Q².
-        Возвращает (x_smooth, y_smooth) – только для графиков.
+        Использует прямую нелинейную регрессию.
         """
+        from scipy.optimize import curve_fit
+
         if len(x_data) < 2:
             return None
 
@@ -1494,46 +1515,60 @@ class IndicatorDiagramPlotter:
             x_clean, y_clean = x, y
 
         try:
-            # Добавляем (0,0) с большим весом
-            x_aug = np.append([0], x_clean)
-            y_aug = np.append([0], y_clean)
-            weights = np.ones(len(x_aug))
-            weights[0] = len(x_clean) * 2
+            mask = (x_clean > 0) & (y_clean > 0)
+            if mask.sum() >= 2:
+                x_clean = x_clean[mask]
+                y_clean = y_clean[mask]
 
-            # Правильная матрица: [Q, Q²]
-            X = np.column_stack([x_aug, x_aug ** 2])
-            model = LinearRegression(fit_intercept=False)
-            model.fit(X, y_aug, sample_weight=weights)
-            a, b = model.coef_  # a при Q, b при Q²
+            # Функция для подгонки
+            def model(Q, a, b):
+                return a * Q + b * Q ** 2
 
-            if a < 0 or b < 0:
-                mask = x_clean > 0
-                if mask.sum() >= 2:
-                    y_lin = y_clean[mask] / x_clean[mask]
-                    coeffs = np.polyfit(x_clean[mask], y_lin, 1)
-                    b = max(coeffs[0], 1e-6)
-                    a = max(coeffs[1], 1e-6)
-                else:
-                    a, b = 0.001, 0.000001
-            a = max(a, 1e-6)
-            b = max(b, 1e-6)
+            # Начальные приближения
+            k = np.mean(y_clean / x_clean)
+            a_init = k * 0.5
+            b_init = k * 0.5 / max(x_clean) if max(x_clean) > 0 else 1e-10
+
+            try:
+                bounds = ([1e-10, 1e-10], [np.inf, np.inf])
+                popt, _ = curve_fit(model, x_clean, y_clean,
+                                    p0=[a_init, b_init],
+                                    bounds=bounds,
+                                    maxfev=5000)
+                a, b = popt[0], popt[1]
+            except:
+                # Fallback: взвешенная линейная регрессия
+                x_aug = np.append([0], x_clean)
+                y_aug = np.append([0], y_clean)
+                weights = np.ones(len(x_aug))
+                weights[0] = len(x_clean)
+                X = np.column_stack([x_aug, x_aug ** 2])
+                model_lr = LinearRegression(fit_intercept=False)
+                model_lr.fit(X, y_aug, sample_weight=weights)
+                a, b = model_lr.coef_
+
+            a = max(a, 1e-10)
+            b = max(b, 1e-10)
 
             x_smooth = np.linspace(0, x_clean.max() * 1.05, 200)
             y_smooth = a * x_smooth + b * x_smooth ** 2
             y_smooth = np.maximum(y_smooth, 0)
 
+            # Монотонность
             for i in range(1, len(y_smooth)):
                 if y_smooth[i] < y_smooth[i - 1]:
                     y_smooth[i] = y_smooth[i - 1]
+
             return (x_smooth, y_smooth)
+
         except Exception:
+            # Самый простой fallback
             mask = x > 0
             if mask.sum() >= 2:
-                y_lin = y[mask] / x[mask]
-                coeffs = np.polyfit(x[mask], y_lin, 1)
-                a, b = max(coeffs[1], 0.001), max(coeffs[0], 1e-6)
+                k = np.mean(y[mask] / x[mask])
+                a, b = k * 0.5, k * 0.5 / max(x[mask])
             else:
-                a, b = 0.001, 1e-6
+                a, b = 0.001, 0.000001
             x_smooth = np.linspace(0, x.max() * 1.05, 100)
             y_smooth = a * x_smooth + b * x_smooth ** 2
             return (x_smooth, y_smooth)
@@ -1742,7 +1777,10 @@ class IndicatorDiagramPlotter:
             return False
 
         # Получаем N последних исследований с хорошим качеством
-        selected_dates = self._get_last_good_study(well_data, n_studies=n_studies)
+        # Получаем N последних исследований с пометкой о качестве
+        studies = self._get_studies_with_quality(well_data, n_studies=n_studies)
+        selected_dates = [s[0] for s in studies]
+        quality_map = {s[0]: (s[1], s[2], s[3]) for s in studies}  # дата -> (is_good, r2, source)
 
         if len(selected_dates) < 2:
             return False
@@ -1755,8 +1793,7 @@ class IndicatorDiagramPlotter:
             return False
 
         # Выводим информацию для отладки
-        print(
-            f"    Скв. {well_name}: показаны исследования {', '.join([d.strftime('%d.%m.%Y') for d in selected_dates])}")
+        print(f"    Скв. {well_name}: показаны исследования {', '.join([d.strftime('%d.%m.%Y') for d in selected_dates])}")
 
         date_colors = self.get_colors_for_dates(selected_dates)
 
@@ -1789,27 +1826,116 @@ class IndicatorDiagramPlotter:
                     legend_elements[date_label] = scatter
 
                 if len(all_points) >= 2:
+                    # Проверяем качество для этого исследования
+                    is_good, r2, src = quality_map.get(date, (False, None, 'неизвестно'))
+
                     q_vals = all_points['Qгаза тыс.м3/сут'].values
                     dp2_vals = all_points['Рпл2-Рз2'].values
+                    q_max = max(q_vals.max(), 1)
+                    # ============ ОТЛАДКА ДЛЯ СКВАЖИНЫ 99 ============
+                    if well_name == 99:
+                        print(f"\n{'=' * 60}")
+                        print(f"ОТЛАДКА: скв. {well_name}, дата: {date_label}")
+                        print(f"{'=' * 60}")
 
-                    # Используем get_coefficients из анализатора (приоритет БД)
-                    if hasattr(self, 'analyzer') and self.analyzer is not None:
-                        a_best, b_best, r2_best, source = self.analyzer.get_coefficients(
-                            date_data, q_vals, dp2_vals
-                        )
+                        # 1. Фактические точки
+                        print(f"\n1. ФАКТИЧЕСКИЕ ТОЧКИ:")
+                        for i in range(len(q_vals)):
+                            print(f"   Q={q_vals[i]:.2f}, ΔP²={dp2_vals[i]:.2f}")
+
+                        # 2. Проверяем коэффициенты из БД
+                        a_db, b_db = None, None
+                        for col in date_data.columns:
+                            if str(col).strip().lower() == 'a':
+                                a_db = date_data[col].dropna().iloc[0] if len(date_data[col].dropna()) > 0 else None
+                            if str(col).strip().lower() == 'b':
+                                b_db = date_data[col].dropna().iloc[0] if len(date_data[col].dropna()) > 0 else None
+
+                        if a_db is not None and b_db is not None:
+                            print(f"\n2. КОЭФФИЦИЕНТЫ ИЗ БД: a={a_db:.8f}, b={b_db:.8f}")
+                            y_pred_db = a_db * q_vals + b_db * q_vals ** 2
+                            ss_res_db = np.sum((dp2_vals - y_pred_db) ** 2)
+                            ss_tot = np.sum((dp2_vals - np.mean(dp2_vals)) ** 2)
+                            r2_db = 1 - (ss_res_db / ss_tot) if ss_tot != 0 else 0
+                            print(f"   R² (БД) = {r2_db:.6f}")
+                            print(f"   Значения кривой БД:")
+                            for i in range(len(q_vals)):
+                                print(
+                                    f"     Q={q_vals[i]:.1f}: факт={dp2_vals[i]:.2f}, БД={y_pred_db[i]:.2f}, разница={y_pred_db[i] - dp2_vals[i]:+.2f}")
+
+                        # 3. Расчёт через curve_fit (новый метод)
+                        from scipy.optimize import curve_fit
+                        def model(Q, a, b):
+                            return a * Q + b * Q ** 2
+
+                        mask = (q_vals > 0) & (~np.isnan(q_vals)) & (~np.isnan(dp2_vals)) & (dp2_vals > 0)
+                        q_clean = q_vals[mask]
+                        dp2_clean = dp2_vals[mask]
+
+                        if len(q_clean) >= 2:
+                            # Начальные приближения
+                            y_lin = dp2_clean / q_clean
+                            coeffs_init = np.polyfit(q_clean, y_lin, 1)
+                            b_init = max(coeffs_init[0], 1e-10)
+                            a_init = max(coeffs_init[1], 1e-10)
+
+                            print(f"\n3. НАЧАЛЬНЫЕ ПРИБЛИЖЕНИЯ (линеаризация):")
+                            print(f"   a_init={a_init:.8f}, b_init={b_init:.8f}")
+
+                            # curve_fit
+                            try:
+                                bounds = ([1e-10, 1e-10], [np.inf, np.inf])
+                                popt, pcov = curve_fit(model, q_clean, dp2_clean,
+                                                       p0=[a_init, b_init],
+                                                       bounds=bounds,
+                                                       maxfev=5000)
+                                a_cf, b_cf = popt[0], popt[1]
+                                print(f"\n4. CURVE_FIT РЕЗУЛЬТАТ:")
+                                print(f"   a={a_cf:.8f}, b={b_cf:.8f}")
+
+                                y_pred_cf = a_cf * q_clean + b_cf * q_clean ** 2
+                                ss_res_cf = np.sum((dp2_clean - y_pred_cf) ** 2)
+                                r2_cf = 1 - (ss_res_cf / ss_tot) if ss_tot != 0 else 0
+                                print(f"   R² (curve_fit) = {r2_cf:.6f}")
+                                print(f"   Значения кривой curve_fit:")
+                                for i in range(len(q_clean)):
+                                    print(
+                                        f"     Q={q_clean[i]:.1f}: факт={dp2_clean[i]:.2f}, curve_fit={y_pred_cf[i]:.2f}, разница={y_pred_cf[i] - dp2_clean[i]:+.2f}")
+                            except Exception as e:
+                                print(f"   ОШИБКА curve_fit: {e}")
+
+                        print(f"{'=' * 60}\n")
+                    # ============ КОНЕЦ ОТЛАДКИ ============
+
+                    if is_good:
+                        # Хорошее качество — строим кривую тренда
+                        if hasattr(self, 'analyzer') and self.analyzer is not None:
+                            a_best, b_best, r2_best, source = self.analyzer.get_coefficients(
+                                date_data, q_vals, dp2_vals
+                            )
+                        else:
+                            a_best, b_best, r2_best = self._fit_trend_line_unified(q_vals, dp2_vals)
+                            source = 'расчёт'
+
+                        if a_best is not None and b_best is not None:
+                            x_trend = np.linspace(0, q_max * 1.05, 200)
+                            y_trend = a_best * x_trend + b_best * x_trend ** 2
+                            ax.plot(x_trend, y_trend, color=color, linestyle='-',
+                                    linewidth=2.5, alpha=0.9, zorder=3)
                     else:
-                        a_best, b_best, r2_best = self._fit_trend_line_unified(q_vals, dp2_vals)
-                        source = 'расчёт'
+                        # Плохое качество — строим простую прямую
+                        k, r2_line = self._fit_simple_line(q_vals, dp2_vals)
+                        if k is not None:
+                            x_line = np.array([0, q_max * 1.05])
+                            y_line = k * x_line
+                            ax.plot(x_line, y_line, color=color, linestyle='-',
+                                    linewidth=2.5, alpha=0.9, zorder=3,
+                                    label=f"{date_label} (прямая, R²={r2_line:.3f})" if r2_line else None)
 
-                    if a_best is not None and b_best is not None:
-                        q_max = max(q_vals.max(), 1)
-                        x_trend = np.linspace(0, q_max * 1.05, 200)
-                        y_trend = a_best * x_trend + b_best * x_trend ** 2
-                        ax.plot(x_trend, y_trend, color=color, linestyle='-',
-                                linewidth=2.5, alpha=0.9, zorder=3)
-                        ax.plot([0], [0], 'o', color=color, markersize=6,
-                                alpha=0.9, zorder=4, markeredgecolor='black',
-                                markeredgewidth=0.5)
+                    # Точка (0,0) рисуется всегда
+                    ax.plot([0], [0], 'o', color=color, markersize=6,
+                            alpha=0.9, zorder=4, markeredgecolor='black',
+                            markeredgewidth=0.5)
 
         x_max = max(well_data['Qгаза тыс.м3/сут'].max() * 1.1, 1)
         y_max = max(well_data['Рпл2-Рз2'].max() * 1.1, 1)
@@ -2613,8 +2739,10 @@ class GDIAnalyzer:
     def fit_trend_line(self, q, dp2):
         """
         Аппроксимация данных уравнением DP^2 = a*Q + b*Q^2
-        с гарантией положительных коэффициентов и прохождением через (0,0).
+        Использует прямую нелинейную регрессию с ограничениями a>0, b>0.
         """
+        from scipy.optimize import curve_fit
+
         q = np.array(q, dtype=float).flatten()
         dp2 = np.array(dp2, dtype=float).flatten()
 
@@ -2634,75 +2762,46 @@ class GDIAnalyzer:
             q_clean = q[mask]
             dp2_clean = dp2[mask]
 
-            # Метод 1: Линеаризация с принудительным прохождением через (0,0)
-            # Уравнение: DP^2 = a*Q + b*Q^2
-            # Делим на Q: DP^2/Q = a + b*Q
-            # Это линейная функция y = a + b*x, где y = DP^2/Q, x = Q
+            # Функция для подгонки: ΔP² = a·Q + b·Q²
+            def model(Q, a, b):
+                return a * Q + b * Q ** 2
 
-            y = dp2_clean / q_clean
-            x = q_clean
+            # Начальные приближения через линеаризацию
+            y_lin = dp2_clean / q_clean
+            coeffs_init = np.polyfit(q_clean, y_lin, 1)
+            b_init = max(coeffs_init[0], 1e-10)
+            a_init = max(coeffs_init[1], 1e-10)
 
-            # Линейная регрессия
-            coeffs = np.polyfit(x, y, 1)
-            b_raw = coeffs[0]  # наклон
-            a_raw = coeffs[1]  # пересечение с осью Y
+            # Если начальные коэффициенты отрицательные — используем запасные
+            if a_init <= 0 or b_init <= 0:
+                # Простая оценка: k = среднее(ΔP²/Q)
+                k = np.mean(dp2_clean / q_clean)
+                a_init = k * 0.5
+                b_init = k * 0.5 / max(q_clean)
 
-            # Проверяем физический смысл: оба коэффициента должны быть > 0
-            # Если a < 0, это означает, что кривая "прижата" к оси X на малых Q
-            # Решение: принудительно проводим через (0,0)
+            try:
+                # Прямая нелинейная регрессия с ограничениями
+                bounds = ([1e-10, 1e-10], [np.inf, np.inf])
+                popt, pcov = curve_fit(model, q_clean, dp2_clean,
+                                       p0=[a_init, b_init],
+                                       bounds=bounds,
+                                       maxfev=5000)
+                a, b = popt[0], popt[1]
+            except:
+                # Если не получилось — используем линеаризацию
+                coeffs = np.polyfit(q_clean, y_lin, 1)
+                b = max(coeffs[0], 1e-10)
+                a = max(coeffs[1], 1e-10)
 
-            if a_raw < 0 or b_raw < 0:
-                # Метод 2: Принудительное прохождение через (0,0)
-                # Добавляем точку (0,0) с большим весом
-                x_aug = np.append([0], x)
-                y_aug = np.append([0], y)
-                weights = np.ones(len(x) + 1)
-                weights[0] = len(x)  # Точка (0,0) имеет вес, равный количеству точек
+            # Гарантируем положительность
+            a = max(a, 1e-10)
+            b = max(b, 1e-10)
 
-                # Взвешенная линейная регрессия
-                coeffs_weighted = np.polyfit(x_aug, y_aug, 1, w=weights)
-                b = coeffs_weighted[0]
-                a = coeffs_weighted[1]
-
-                # Гарантируем положительность
-                if a < 0:
-                    # Если всё равно отрицательное - используем только точку (0,0) и среднюю точку
-                    x_mid = np.array([0, np.mean(x)])
-                    y_mid = np.array([0, np.mean(y)])
-                    coeffs_mid = np.polyfit(x_mid, y_mid, 1)
-                    b = max(coeffs_mid[0], 0.0000000001)
-                    a = max(coeffs_mid[1], 0.0000000001)
-
-                if b < 0:
-                    b = abs(b) * 0.01  # Маленькое положительное значение
-            else:
-                a = a_raw
-                b = b_raw
-
-            # Финальная гарантия положительности
-            a = max(a, 0.0000000001)
-            b = max(b, 0.0000000001)
-
-            # Расчет R^2
+            # R²
             y_pred = a * q_clean + b * q_clean ** 2
             ss_res = np.sum((dp2_clean - y_pred) ** 2)
             ss_tot = np.sum((dp2_clean - np.mean(dp2_clean)) ** 2)
             r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-
-            # Если R^2 очень маленький - значит, модель плохая
-            # Пробуем ещё раз с другими параметрами
-            if r2 < 0.5:
-                # Метод 3: Только точка (0,0) и самая дальняя точка
-                x_end = np.array([0, x.max()])
-                y_end = np.array([0, y.max()])
-                coeffs_end = np.polyfit(x_end, y_end, 1)
-                b = max(coeffs_end[0], 0.0000000001)
-                a = max(coeffs_end[1], 0.0000000001)
-
-                # Пересчитываем R^2
-                y_pred = a * q_clean + b * q_clean ** 2
-                ss_res = np.sum((dp2_clean - y_pred) ** 2)
-                r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
 
             return a, b, r2
 

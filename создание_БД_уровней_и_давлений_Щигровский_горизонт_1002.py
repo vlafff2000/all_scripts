@@ -17,8 +17,11 @@ warnings.filterwarnings('ignore')
 class ExcelDataExtractor:
     """Класс для извлечения данных из Excel файлов с данными по скважинам"""
 
-    def __init__(self, debug_mode=False):
+    def __init__(self, debug_mode=False, simple_mode=False):
         self.debug_mode = debug_mode
+        # Простой режим (формат прежнего скрипта «Исходные_данные_из_таблицы_устьевых_давлений…»):
+        # без обогащения и пересчётов, 4 столбца: скважина, дата, замер на устье, пластовое давление
+        self.simple_mode = simple_mode
         self.file_counter = 0
         self.altitude_data = None  # Данные по альтитудам
         self.perforation_data = None  # Данные по верхней перфорации
@@ -484,9 +487,43 @@ class ExcelDataExtractor:
 
         return None
 
+    def to_simple_format(self, data):
+        """Приводит данные к простому формату из 4 столбцов (как в прежней версии)"""
+        simple = data.rename(columns={
+            'Скважина': 'скважина', 'Дата': 'дата',
+            'Уровень/Руст': 'замер на устье', 'Рпл привед': 'пластовое давление'})
+        cols = [c for c in ['скважина', 'дата', 'замер на устье', 'пластовое давление'] if c in simple.columns]
+        simple = simple[cols].copy()
+        if 'дата' in simple.columns:
+            simple['дата'] = pd.to_datetime(simple['дата'], errors='coerce')
+            simple = simple[simple['дата'].notna()]
+            simple['дата'] = simple['дата'].dt.date
+        return simple
+
+    def save_simple_results(self, data, output_path):
+        """Сохранение в простом формате: один лист «Данные» (или CSV) и краткая сводка"""
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_path.suffix.lower() == '.csv':
+            data.to_csv(output_path, index=False, encoding='utf-8-sig')
+        else:
+            if output_path.suffix.lower() not in ['.xlsx', '.xls']:
+                output_path = Path(f"{output_path}.xlsx")
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                data.to_excel(writer, sheet_name='Данные', index=False)
+        print(f"\nДанные сохранены в: {output_path}")
+        print(f"Всего записей: {len(data)}")
+        if 'скважина' in data.columns:
+            print(f"Скважин: {data['скважина'].nunique()}")
+        for col in ['скважина', 'дата', 'замер на устье', 'пластовое давление']:
+            if col in data.columns:
+                non_null = data[col].notna().sum()
+                if non_null > 0:
+                    print(f"  {col}: {non_null} записей ({non_null / len(data) * 100:.1f}%)")
+
     def process_and_enrich_data(self, data_df):
         """Обрабатывает и обогащает данные дополнительными столбцами"""
-        if data_df.empty:
+        if data_df.empty or self.simple_mode:
             return data_df
 
         # Создаем копию DataFrame для работы
@@ -868,6 +905,10 @@ class ExcelDataExtractor:
     def save_results(self, data, output_path):
         """Сохраняет результаты обработки"""
         try:
+            if self.simple_mode:
+                self.save_simple_results(self.to_simple_format(data), output_path)
+                return
+
             output_path = Path(output_path)
             output_dir = output_path.parent
 
@@ -1153,6 +1194,16 @@ class EnhancedGUI:
         # Экстрактор
         self.extractor = ExcelDataExtractor(debug_mode=True)
 
+        # Простой формат (4 столбца, без пересчётов — как в прежнем скрипте)
+        self.simple_mode_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            self.root,
+            text="Простой формат: скважина, дата, замер на устье, пластовое давление (без пересчётов)",
+            variable=self.simple_mode_var,
+            bg='#f0f0f0',
+            command=lambda: setattr(self.extractor, 'simple_mode', self.simple_mode_var.get())
+        ).pack(pady=5)
+
     def select_file(self, var, title):
         """Выбор файла через диалог"""
         file_path = filedialog.askopenfilename(
@@ -1324,7 +1375,8 @@ def main_enhanced():
     print("  - Рпл пересчет на верх перфораций, бар (расчетный)")
     print("=" * 80)
 
-    extractor = ExcelDataExtractor(debug_mode=True)
+    simple = input("Простой формат (4 столбца без пересчётов, как в прежней версии)? [y/N]: ").strip().lower() == 'y'
+    extractor = ExcelDataExtractor(debug_mode=True, simple_mode=simple)
 
     try:
         # Загрузка дополнительных данных
