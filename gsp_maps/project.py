@@ -350,6 +350,67 @@ class Project:
         return {"wells": m["wells"].tolist(), "days": m["days"].tolist(),
                 "flow": np.round(m["flow"], 1).tolist()}
 
+    def work_payload(self, gsp: str) -> dict:
+        """Работа скважин по сезонам и месяцам: матрицы «скважина × сезон» и «скважина × месяц», очерёдность ввода."""
+        st = self.store
+        assert st is not None
+        wells = st.wells(gsp)
+        widx = {w: i for i, w in enumerate(wells)}
+        segs = sorted(((gsp, kind, s) for (g, kind, s) in st.segments if g == gsp),
+                      key=lambda t: (int(t[2].split("-")[0]) if t[2].split("-")[0].isdigit() else 0, t[1]))
+        seasons = []
+        month_set = set()
+        per_month = {}
+        for _g, kind, s in segs:
+            lo, hi = st.segments[(gsp, kind, s)]
+            w, day = st.well[lo:hi], st.day[lo:hi]
+            fl = np.where(np.isfinite(st.flow[lo:hi]), st.flow[lo:hi], 0.0)
+            rt = st.runtime[lo:hi]
+            dt = day.astype("datetime64[D]")
+            ym = dt.astype("datetime64[M]").astype("int64") + 1970 * 12  # год*12 + месяц(0–11)
+            n = len(wells)
+            total, days, first, idle = [0.0] * n, [0] * n, [-2] * n, [0] * n  # first: -2 нет в сезоне, -1 не работала
+            starts = np.flatnonzero(np.r_[True, w[1:] != w[:-1]])
+            for a, b in zip(starts, list(starts[1:]) + [len(w)]):
+                i = widx[int(w[a])]
+                f = fl[a:b]
+                pos = f > 0
+                first[i] = -1
+                total[i], days[i] = float(f.sum()), int(pos.sum())
+                if pos.any():
+                    first[i] = int(day[a:b][pos][0])
+                if np.isfinite(rt[a:b]).any():
+                    idle[i] = int(((rt[a:b] > 0) & (f == 0)).sum())
+            seasons.append({"kind": KIND_NAMES[kind], "key": s, "total": total, "days": days, "first": first, "idle": idle,
+                            "start": int(day.min()), "end": int(day.max())})
+            # по месяцам
+            key = w.astype("int64") * 100000 + ym
+            edges = np.flatnonzero(np.r_[True, key[1:] != key[:-1]])
+            ends = list(edges[1:]) + [len(key)]
+            for a, b in zip(edges, ends):
+                m = int(ym[a])
+                month_set.add(m)
+                cell = per_month.setdefault((widx[int(w[a])], m), [0.0, 0, KIND_NAMES[kind]])
+                f = fl[a:b]
+                cell[0] += float(f.sum())
+                cell[1] += int((f > 0).sum())
+        months = sorted(month_set)
+        mi = {m: j for j, m in enumerate(months)}
+        n = len(wells)
+        flow_m = [[0.0] * len(months) for _ in range(n)]
+        days_m = [[0] * len(months) for _ in range(n)]
+        for (i, m), (f, d, _k) in per_month.items():
+            flow_m[i][mi[m]], days_m[i][mi[m]] = f, d
+        wdf = self.water()[0]
+        water_m = [[0.0] * len(months) for _ in range(n)]
+        if len(wdf):
+            for r in wdf.itertuples(index=False):
+                m = int(r.Год) * 12 + int(r.Месяц) - 1
+                if r.Скважина in widx and m in mi and r.Водный_фактор is not None and r.Водный_фактор == r.Водный_фактор:
+                    water_m[widx[r.Скважина]][mi[m]] = max(water_m[widx[r.Скважина]][mi[m]], float(r.Водный_фактор))
+        return {"wells": wells, "seasons": seasons, "months": months, "monthFlow": [[round(v, 1) for v in row] for row in flow_m],
+                "monthDays": days_m, "monthWater": water_m}
+
     # ---------- анализ и выгрузка ----------
     def trends(self, frames: List[pd.DataFrame]) -> pd.DataFrame:
         """Тренд среднего суточного расхода по сезонам отбора (наклон прямой), как analyze_trends; тренд воды — по среднему ВФ сезона."""
@@ -420,4 +481,45 @@ class Project:
                              "Верх перфорации, м (абс.)": depths.get(wl, (None, None))[0],
                              "Низ перфорации, м (абс.)": depths.get(wl, (None, None))[1], "Альтитуда, м": alt.get(wl)})
             put(pd.DataFrame(rows), "Скважины")
+            self._work_sheets(gsp, put)
         return path
+
+    def _work_sheets(self, gsp: str, put) -> None:
+        """Листы «работа скважин»: по сезонам, по месяцам, очерёдность ввода по каждому сезону."""
+        wk = self.work_payload(gsp)
+        wells = wk["wells"]
+        rows = []
+        for i, w in enumerate(wells):
+            r = {"Скважина": w}
+            for s in wk["seasons"]:
+                state = "нет данных" if s["first"][i] == -2 else s["days"][i]
+                r["%s %s, дней с расходом" % (s["kind"], s["key"])] = state
+            rows.append(r)
+        put(pd.DataFrame(rows), "Работа по сезонам")
+        cols = ["%02d.%d" % (m % 12 + 1, m // 12) for m in wk["months"]]
+        put(pd.DataFrame([[w] + wk["monthDays"][i] for i, w in enumerate(wells)], columns=["Скважина"] + cols), "Работа по месяцам")
+        put(pd.DataFrame([[w] + wk["monthFlow"][i] for i, w in enumerate(wells)], columns=["Скважина"] + cols), "Расход по месяцам")
+        order = []
+        for s in wk["seasons"]:
+            got = sorted((s["first"][i], w, i) for i, w in enumerate(wells) if s["first"][i] >= 0)
+            for rank, (day, w, i) in enumerate(got, 1):
+                order.append({"Вид": s["kind"], "Сезон": s["key"], "№": rank, "Скважина": w,
+                              "Первый расход": inputs.iso(day), "Позже первой, дн.": day - got[0][0],
+                              "Дней с расходом": s["days"][i], "Накоплено": s["total"][i], "Открыта, расхода нет, дн.": s["idle"][i]})
+        if order:
+            put(pd.DataFrame(order), "Очерёдность ввода")
+        # Гант по дням: все дни всех сезонов подряд, расход в ячейке
+        assert self.store is not None
+        widx = {w: i for i, w in enumerate(wells)}
+        days_all = sorted({int(d) for (g, k, s) in self.store.segments if g == gsp
+                           for d in self.store.matrix(gsp, k, s)["days"]})
+        col = {d: j for j, d in enumerate(days_all)}
+        grid = np.zeros((len(wells), len(days_all)))
+        for (g, k, s) in self.store.segments:
+            if g != gsp:
+                continue
+            m = self.store.matrix(gsp, k, s)
+            idx = [widx[int(w)] for w in m["wells"]]
+            grid[np.ix_(idx, [col[int(d)] for d in m["days"]])] = m["flow"]
+        put(pd.DataFrame(grid, columns=[inputs.iso(d) for d in days_all]).assign(Скважина=wells)[["Скважина"] + [inputs.iso(d) for d in days_all]],
+            "Гант_работы_скважин")

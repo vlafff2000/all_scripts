@@ -35,3 +35,7 @@ export const pickPath = (kind: 'file' | 'folder' | 'files', start: string) =>
 export const openFolder = () => call<{ ok: boolean }>('/api/open-folder', post({}))
 export const saveImage = (name: string, blob: Blob) =>
   call<{ name: string; path: string }>('/api/image?name=' + encodeURIComponent(name), { method: 'POST', body: blob })
+
+export interface WorkSeason { kind: 'Отбор' | 'Закачка'; key: string; total: number[]; days: number[]; first: number[]; idle: number[]; start: number; end: number }
+export interface WorkData { wells: number[]; seasons: WorkSeason[]; months: number[]; monthFlow: number[][]; monthDays: number[][]; monthWater: number[][] }
+export const getWork = (gsp: string) => call<WorkData>('/api/work?name=' + encodeURIComponent(gsp))

@@ -113,3 +113,24 @@ table.data { border-collapse: collapse; width: 100%; font-size: 14px; }
 .quiet.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
 .issues-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: min(440px, 80vw); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 8px 24px var(--shadow-strong); padding: 10px 14px; display: grid; gap: 6px; font-size: 14px; }
 .issues-pop p { color: var(--warn); }
+
+.work-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.work-head .muted { margin-left: auto; }
+.gantt-read { font-size: 14px; min-height: 22px; margin-bottom: 6px; color: var(--muted); }
+.gantt-read b { color: var(--ink); }
+table.matrix { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.matrix th, .matrix td { padding: 0; height: 22px; min-width: 28px; text-align: center; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; position: relative; }
+.matrix thead th { background: var(--head-bg); position: sticky; top: 0; z-index: 2; font-weight: 700; font-size: 12px; }
+.matrix thead tr:nth-child(2) th { top: 22px; font-weight: 400; color: var(--muted); }
+.matrix .stick { position: sticky; left: 0; z-index: 3; background: var(--head-bg); min-width: 44px; }
+.matrix tbody th.stick { z-index: 1; font-weight: 700; }
+.matrix th.yr { border-left: 2px solid var(--line-strong); }
+.matrix tbody tr { cursor: pointer; } .matrix tbody tr:hover td, .matrix tbody tr.sel td { box-shadow: inset 0 0 0 1px var(--ink); }
+.wdot { position: absolute; right: 2px; top: 2px; width: 6px; height: 6px; border-radius: 50%; border: 1px solid #fff; }
+.ydot { position: absolute; right: 2px; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: #f5c400; border: 1px solid #7a5d00; }
+.matrix.seasons th.mo { min-width: 62px; padding: 0 4px; white-space: nowrap; }
+.k-o { color: #e63946; } .k-z { color: #149ba5; }
+td.st.prod { background: #c8e6c9; color: #1b4d1f; } td.st.inj { background: #bbdefb; color: #0d3b66; } td.st.idle { background: #ffe0b2; color: #7a4a00; } td.st.none { background: var(--line-soft); }
+:root[data-theme='dark'] td.st.prod { background: #1f4a25; color: #c8e6c9; } :root[data-theme='dark'] td.st.inj { background: #174568; color: #cfe8ff; } :root[data-theme='dark'] td.st.idle { background: #5a3a10; color: #ffe0b2; }
+.data tbody tr.sel { background: var(--accent-soft); } .data tbody tr { cursor: pointer; }
+.matrix td.on { color: var(--ink); font-weight: 700; }
