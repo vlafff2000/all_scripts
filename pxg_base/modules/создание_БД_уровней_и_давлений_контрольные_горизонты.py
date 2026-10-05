@@ -573,10 +573,9 @@ class ExcelDataExtractor:
                     cell1 = df_raw.iloc[i, j]
                     cell2 = df_raw.iloc[i, j + 1]
 
-                    if pd.notna(cell1) and self.is_date(cell1):
-                        old_format_indicators += 1
-                    if pd.notna(cell2) and self.is_numeric(cell2):
-                        old_format_indicators += 1
+                    # признак старого формата — именно пара «дата, число»; одни числа есть и в новом формате
+                    if pd.notna(cell1) and self.is_date(cell1) and pd.notna(cell2) and self.is_numeric(cell2):
+                        old_format_indicators += 2
 
         self.log(f"Признаков старого формата: {old_format_indicators}")
 
