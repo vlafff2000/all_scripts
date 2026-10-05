@@ -101,6 +101,30 @@ def _vlookup_stdin(v: Dict[str, str]) -> str:
     return "".join(x.strip() + "\n" for x in lines)
 
 
+def _percent_lines(v: Dict[str, str]) -> List[str]:
+    """Проценты: единый (режим 1) или по одному на сезон отбора в порядке сезонов (режим 2)."""
+    if (v.get("pct_mode") or "1") == "2":
+        return ["2"] + lines_of(v.get("percents", ""))
+    return ["1", (v.get("percent") or "").strip()]
+
+
+def _redistribute_stdin(v: Dict[str, str]) -> str:
+    lines = [v.get("file", ""), v.get("seasons", ""), v.get("add_sheet", ""), v.get("sub_sheet", "")]
+    lines += _percent_lines(v) + ["y" if v.get("debug") in ("1", "true", "y") else "n"]
+    return "".join(x.strip() + "\n" for x in lines)
+
+
+def _redistribute400_stdin(v: Dict[str, str]) -> str:
+    if (v.get("work_mode") or "1") == "2":
+        lines = [v.get("file", ""), "2", v.get("data_sheet", ""), v.get("add_sheet", ""), v.get("sub_sheet", ""), (v.get("percent") or "").strip()]
+    else:
+        lines = [v.get("file", ""), "1", v.get("seasons_sheet", ""), v.get("add_sheet", ""), v.get("sub_sheet", "")] + _percent_lines(v)
+    return "".join(x.strip() + "\n" for x in lines)
+
+
+_SHEET_HINT = "Номер листа по порядку в книге (1, 2, …)"
+
+
 _FLOOR = ("Щигровский", "контрольные")
 _LEVEL_PARAMS = (
     Param("input_dir", "Папка с Excel-файлами", "folder", required=True,
@@ -254,6 +278,58 @@ SPECS: List[WebSpec] = [
         ),
         stdin=lambda v: v.get("file", "").strip() + "\n" + ("y" if v.get("convert") in ("1", "true", "y") else "n") + "\n\n",
         note="Результат — папка «output» с тремя файлами для tNavigator.",
+    ),
+    WebSpec(
+        module="Создание_include_schedule_факт_из_модели_как_исторические",
+        params=(
+            Param("file", "Excel-файл с данными из модели", "file", required=True,
+                  hint="Первый лист: даты в первом столбце, столбцы вида «…:номер:Дебит газа…» и «…:номер:Приёмистость газа…»"),
+            Param("folder", "Папка для результата", "folder", required=True),
+        ),
+        dialogs=("file", "folder"),
+        note="Результат — «<имя файла>_schedule.inc» в выбранной папке.",
+    ),
+    WebSpec(
+        module="Лена_перекидывать_в_процентах",
+        params=(
+            Param("file", "Excel-файл с данными", "file", required=True, hint="Листы: даты в первом столбце, столбцы «номер:Дебит газа (И), ст.м3/сут» и «номер:Приёмистость газа (И), ст.м3/сут»"),
+            Param("seasons", "Файл с сезонами", "file", required=True, hint="Строки «ДД.ММ.ГГГГ prod|inj|none»"),
+            Param("add_sheet", "Лист, КУДА добавляем отборы", required=True, hint=_SHEET_HINT),
+            Param("sub_sheet", "Лист, ОТКУДА отнимаем отборы", required=True, hint=_SHEET_HINT),
+            Param("pct_mode", "Проценты", "choice", default="1", options=(("1", "Один процент для всех сезонов отбора"), ("2", "Свой процент для каждого сезона отбора"))),
+            Param("percent", "Процент перераспределения, %", default="10", when="pct_mode=1"),
+            Param("percents", "Проценты по сезонам отбора", "lines", when="pct_mode=2", hint="По строке на сезон отбора в порядке сезонов в файле"),
+            Param("debug", "Создать отладочный файл", "bool", default="0"),
+        ),
+        stdin=_redistribute_stdin,
+        note="Результат «<имя файла>_перераспределено.xlsx» создаётся рядом с исходным файлом.",
+    ),
+    WebSpec(
+        module="Лена_перекидывать_400_тысяч_в_сутки",
+        params=(
+            Param("file", "Excel-файл с данными", "file", required=True),
+            Param("work_mode", "Режим", "choice", default="1", options=(
+                ("1", "Столбцы дебит/приёмистость и лист сезонов"),
+                ("2", "Готовые данные с режимом EI и списки скважин"))),
+            Param("seasons_sheet", "Лист с сезонами", hint=_SHEET_HINT, when="work_mode=1"),
+            Param("data_sheet", "Лист с данными (последний столбец — режим EI)", hint=_SHEET_HINT, when="work_mode=2"),
+            Param("add_sheet", "Лист, КУДА добавляем (в режиме 2 — южные скважины)", required=True, hint=_SHEET_HINT),
+            Param("sub_sheet", "Лист, ОТКУДА отнимаем (в режиме 2 — северные скважины)", required=True, hint=_SHEET_HINT),
+            Param("pct_mode", "Проценты", "choice", default="1", when="work_mode=1", options=(("1", "Один процент для всех сезонов отбора"), ("2", "Свой процент для каждого сезона отбора"))),
+            Param("percent", "Процент перераспределения, %", default="10"),
+            Param("percents", "Проценты по сезонам отбора", "lines", when="pct_mode=2", hint="По строке на сезон отбора в порядке сезонов"),
+        ),
+        stdin=_redistribute400_stdin,
+        note="Результат «<имя файла>_перераспределено….xlsx» создаётся рядом с исходным файлом.",
+    ),
+    WebSpec(
+        module="экстракция_ключевых_слов_в_юзер_файл",
+        params=(
+            Param("file", "Входной файл (schedule-секция)", "file", required=True),
+            Param("output", "Имя выходного файла", default="extracted_keywords.inc"),
+        ),
+        stdin=lambda v: v.get("file", "").strip() + "\n" + ((v.get("output") or "").strip() or "extracted_keywords.inc") + "\ny\n\n",
+        note="Выходной файл сохраняется в папку результатов.",
     ),
 ]
 

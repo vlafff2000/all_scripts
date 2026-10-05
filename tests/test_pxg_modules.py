@@ -126,3 +126,57 @@ def test_include_pressure_observation_with_md(tmp_path):
     out = tmp_path / "o"
     job = run_module("include_давления_наблюдалки_с_пересчетом2", {"file": str(src), "md": str(md), "convert": "1"}, out)
     assert list((out / "output_shirovsky_new_logic").glob("*")), "\n".join(job["log"][-15:])
+
+
+def _gas_sheet(wells):
+    dates = pd.date_range("2024-01-01", periods=5)
+    data = {"Дата": dates}
+    for w in wells:
+        data[f"{w}:Дебит газа (И), ст.м3/сут"] = [100.0 * w] * 5
+        data[f"{w}:Приёмистость газа (И), ст.м3/сут"] = [0.0] * 5
+    return pd.DataFrame(data)
+
+
+def test_redistribute_percent(tmp_path):
+    book = tmp_path / "gas.xlsx"
+    with pd.ExcelWriter(book) as w:
+        _gas_sheet([1, 2]).to_excel(w, sheet_name="Юг", index=False)
+        _gas_sheet([3, 4]).to_excel(w, sheet_name="Север", index=False)
+    seasons = tmp_path / "seasons.txt"
+    seasons.write_text("01.01.2023 inj\n01.01.2024 prod\n", encoding="utf-8")
+    job = run_module("Лена_перекидывать_в_процентах", {"file": str(book), "seasons": str(seasons), "add_sheet": "1", "sub_sheet": "2",
+                                                       "pct_mode": "1", "percent": "10", "debug": "0"}, tmp_path / "o")
+    res = pd.read_excel(tmp_path / "gas_перераспределено.xlsx", sheet_name=None)
+    south, north = res["Юг_обр"], res["Север_обр"]
+    assert abs(south.iloc[:, 1:].sum().sum() - 5 * 300 * 1.1) < 1e-6, "\n".join(job["log"][-15:])
+    assert abs(north.iloc[:, 1:].sum().sum() - (5 * 700 - 5 * 30)) < 1e-6
+
+
+def test_redistribute_by_season_sheet(tmp_path):
+    book = tmp_path / "gas2.xlsx"
+    with pd.ExcelWriter(book) as w:
+        pd.DataFrame({"date": ["01.01.2023", "01.01.2024"], "type": ["inj", "prod"]}).to_excel(w, sheet_name="Сезоны", index=False)
+        _gas_sheet([1, 2]).to_excel(w, sheet_name="Юг", index=False)
+        _gas_sheet([3, 4]).to_excel(w, sheet_name="Север", index=False)
+    job = run_module("Лена_перекидывать_400_тысяч_в_сутки", {"file": str(book), "work_mode": "1", "seasons_sheet": "1", "add_sheet": "2",
+                                                             "sub_sheet": "3", "pct_mode": "1", "percent": "10"}, tmp_path / "o")
+    assert list(tmp_path.glob("gas2_перераспределено*.xlsx")), "\n".join(job["log"][-15:])
+
+
+def test_fact_from_model_include(tmp_path):
+    src = tmp_path / "fact.xlsx"
+    pd.DataFrame({"Дата": ["01.01.2024", "02.01.2024"], "Модель:56:Дебит газа": [10.5, 0],
+                  "Модель:83:Приёмистость газа": [0, 20.0]}).to_excel(src, index=False)
+    out = tmp_path / "o"
+    (out).mkdir()
+    job = run_module("Создание_include_schedule_факт_из_модели_как_исторические", {"file": str(src), "folder": str(out)}, out)
+    text = (out / "fact_schedule.inc").read_text(encoding="utf-8")
+    assert "WCONHIST" in text and "'56'" in text and "WCONINJH" in text and "'83'" in text, "\n".join(job["log"][-15:])
+
+
+def test_extract_schedule_keywords(tmp_path):
+    src = tmp_path / "sched.inc"
+    src.write_text("DATES\n 01 JAN 2024 /\n/\n\nWELSPECS\n'56' 'G' 1 1 /\n/\n\nWRONG\n/\n", encoding="utf-8")
+    out = tmp_path / "o"
+    job = run_module("экстракция_ключевых_слов_в_юзер_файл", {"file": str(src), "output": "kw.inc"}, out)
+    assert "WELSPECS" in (out / "kw.inc").read_text(encoding="utf-8"), "\n".join(job["log"][-15:])
