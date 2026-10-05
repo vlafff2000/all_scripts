@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox, simpledialog
 import time
 import gc
 import warnings
+from pxg_core.расходы_файлы import normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date
 
 warnings.filterwarnings('ignore')
 
@@ -32,119 +33,6 @@ def select_file_dialog(title="Выберите файл", filetypes=[("Excel fil
     file_path = filedialog.askopenfilename(title=title, filetypes=filetypes)
     root.destroy()
     return file_path
-
-
-def load_periods_file(periods_file_path):
-    """
-    Загружает файл с периодами отбора, закачки и простоев
-    """
-    periods = []
-
-    try:
-        with open(periods_file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-
-                parts = line.split()
-                if len(parts) >= 2:
-                    date_str = parts[0]
-                    period_type = parts[1].lower()
-
-                    try:
-                        date = datetime.strptime(date_str, '%d.%m.%Y')
-                        periods.append({
-                            'date': date,
-                            'type': period_type
-                        })
-                    except ValueError:
-                        print(f"⚠️  Ошибка формата даты в строке: {line}")
-    except FileNotFoundError:
-        print(f"❌ Файл с периодами не найден: {periods_file_path}")
-    except Exception as e:
-        print(f"❌ Ошибка при чтении файла периодов: {e}")
-
-    # Сортируем по дате
-    periods.sort(key=lambda x: x['date'])
-    return periods
-
-
-def get_period_for_date(date, periods):
-    """
-    Определяет тип периода для заданной даты
-    """
-    if not periods:
-        return None
-
-    # Преобразуем дату в datetime, если это строка
-    if isinstance(date, str):
-        try:
-            date_obj = datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
-        except ValueError:
-            try:
-                date_obj = datetime.strptime(date, '%Y-%m-%d')
-            except ValueError:
-                return None
-    elif isinstance(date, datetime):
-        date_obj = date
-    else:
-        return None
-
-    # Находим последний период, который начался до или в эту дату
-    current_period = None
-    for period in periods:
-        if date_obj >= period['date']:
-            current_period = period['type']
-        else:
-            break
-
-    return current_period
-
-
-def normalize_sheet_name(sheet_name):
-    """
-    Нормализует название листа, извлекая название месяца из любого текста
-    """
-    # Приводим к нижнему регистру и удаляем лишние символы
-    cleaned = re.sub(r'[^\w\s]', '', str(sheet_name).lower().strip())
-
-    # Словарь месяцев для поиска
-    months_mapping = {
-        'январь': 'Январь',
-        'февраль': 'Февраль',
-        'март': 'Март',
-        'апрель': 'Апрель',
-        'май': 'Май',
-        'июнь': 'Июнь',
-        'июль': 'Июль',
-        'август': 'Август',
-        'сентябрь': 'Сентябрь',
-        'октябрь': 'Октябрь',
-        'ноябрь': 'Ноябрь',
-        'декабрь': 'Декабрь'
-    }
-
-    # Ищем месяц в очищенной строке
-    for month_key, month_value in months_mapping.items():
-        if month_key in cleaned:
-            return month_value
-
-    # Если месяц не найден, возвращаем оригинальное название
-    return sheet_name
-
-
-def get_sheet_names(data_type):
-    """
-    Возвращает список названий листов в зависимости от типа данных
-    с поддержкой нормализации
-    """
-    if data_type == "отбор":
-        return ['Октябрь', 'Ноябрь', 'Декабрь', 'Январь', 'Февраль', 'Март', 'Апрель']
-    elif data_type == "закачка":
-        return ['Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь']
-    else:
-        return ['Октябрь', 'Ноябрь', 'Декабрь', 'Январь', 'Февраль', 'Март', 'Апрель']
 
 
 def find_matching_sheets(file_path, expected_sheets):
@@ -180,36 +68,6 @@ def read_excel_safe(file_path, **kwargs):
     except Exception as e:
         print(f"❌ Ошибка при чтении файла {file_path}: {e}")
         return None
-
-
-def find_wells_count(df_full, found_row, found_col):
-    """
-    Более надежное определение количества скважин
-    """
-    wells_count = 0
-    wells_list = []
-
-    for i in range(found_row + 1, min(found_row + 100, len(df_full))):
-        well_value = df_full.iloc[i, found_col]
-
-        # Более гибкая проверка на пустые значения
-        well_str = str(well_value).strip()
-        if (pd.isna(well_value) or
-                well_str in ['', '0', '0.0', 'nan', 'None', 'NaN', 'N/A', '-'] or
-                well_str.startswith('Итого') or
-                well_str.startswith('Всего') or
-                well_str.startswith('Total')):
-            break
-
-        # Проверяем, что значение похоже на номер скважины (содержит цифры)
-        if any(char.isdigit() for char in well_str):
-            wells_count += 1
-            wells_list.append(well_value)
-        else:
-            # Если встретили текст без цифр, вероятно это конец списка скважин
-            break
-
-    return wells_count, wells_list
 
 
 def find_time_table_intelligent(file_path, sheet_name, gas_start_row, gas_start_col, gas_wells_count, gas_wells_list):

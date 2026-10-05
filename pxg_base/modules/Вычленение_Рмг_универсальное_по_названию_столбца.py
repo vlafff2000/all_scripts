@@ -2,16 +2,7 @@ import pandas as pd
 import os
 import glob
 from pathlib import Path
-
-def get_excel_files_from_folder(folder_path):
-    """Получает все Excel файлы из папки"""
-    excel_patterns = ['*.xlsx', '*.xls', '*.xlsm']
-    excel_files = []
-    
-    for pattern in excel_patterns:
-        excel_files.extend(glob.glob(os.path.join(folder_path, pattern)))
-    
-    return excel_files
+from pxg_core.расходы_файлы import get_excel_files_from_folder
 
 def extract_columns_from_file(file_path):
     """Извлекает нужные столбцы из всех листов файла"""

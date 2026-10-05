@@ -8,6 +8,8 @@ from pathlib import Path
 from .registry import MODULES
 
 MODULES_DIR = Path(__file__).parent / "modules"
+# общий пакет pxg_core лежит в корне репозитория
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def show_menu() -> None:
