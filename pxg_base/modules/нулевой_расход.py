@@ -4,7 +4,7 @@ import os
 import glob
 import re
 from datetime import datetime
-from pxg_core.расходы_файлы import normalize_sheet_name, get_sheet_names, find_wells_count, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder
+from pxg_core.расходы_файлы import normalize_sheet_name, get_sheet_names, find_wells_count, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent
 
 def find_matching_sheets(file_path, expected_sheets):
     """
@@ -27,121 +27,6 @@ def find_matching_sheets(file_path, expected_sheets):
     except Exception as e:
         print(f"❌ Ошибка при чтении листов файла {file_path}: {e}")
         return []
-
-def read_excel_safe(file_path, **kwargs):
-    """
-    Безопасное чтение Excel-файла с автоматическим определением движка
-    """
-    engines_to_try = ['openpyxl', 'xlrd']
-    
-    for engine in engines_to_try:
-        try:
-            # Пробуем прочитать файл с текущим движком
-            df = pd.read_excel(file_path, engine=engine, **kwargs)
-            return df
-        except Exception:
-            continue
-    
-    # Если ни один движок не сработал, пробуем без указания движка
-    try:
-        df = pd.read_excel(file_path, **kwargs)
-        return df
-    except Exception as e:
-        print(f"❌ Все движки не сработали для файла {file_path}: {e}")
-        return None
-
-def find_time_table_intelligent(file_path, sheet_name, gas_start_row, gas_start_col, gas_wells_count, gas_wells_list):
-    """
-    Интеллектуальный поиск таблицы времени работы по характеристикам данных
-    """
-    try:
-        # Читаем достаточно большую область после таблицы газа
-        search_start = gas_start_row + gas_wells_count + 2  # Минимальный отступ 2 строки
-        search_rows = 200  # Ищем в следующих 200 строках
-        
-        df_search = read_excel_safe(
-            file_path, 
-            sheet_name=sheet_name, 
-            skiprows=search_start,
-            nrows=search_rows,
-            header=None
-        )
-        
-        if df_search is None:
-            return None
-            
-        df_search = df_search.fillna(0)
-        
-        best_candidate = None
-        best_score = 0
-        
-        # Перебираем возможные начальные строки для таблицы времени
-        for start_idx in range(0, len(df_search) - gas_wells_count + 1):
-            current_row = search_start + start_idx
-            
-            # Проверяем, что в этой позиции есть данные скважин
-            has_wells = True
-            current_wells = []
-            
-            for i in range(gas_wells_count):
-                well_value = str(df_search.iloc[start_idx + i, gas_start_col]).strip()
-                if well_value in ['', '0', '0.0', 'nan', 'None']:
-                    has_wells = False
-                    break
-                current_wells.append(well_value)
-            
-            if not has_wells:
-                continue
-            
-            # Проверяем соответствие скважин (не обязательно полное совпадение)
-            wells_match_score = 0
-            for i, well in enumerate(current_wells):
-                if i < len(gas_wells_list) and well == str(gas_wells_list[i]).strip():
-                    wells_match_score += 1
-            
-            # Анализируем значения в ячейках (должны быть в диапазоне 0-24)
-            time_values = []
-            valid_cells = 0
-            total_cells = 0
-            
-            for i in range(gas_wells_count):
-                for j in range(1, min(32, len(df_search.columns) - gas_start_col)):
-                    try:
-                        value = float(df_search.iloc[start_idx + i, gas_start_col + j])
-                        total_cells += 1
-                        if 0 <= value <= 24:  # Время работы должно быть между 0 и 24 часами
-                            valid_cells += 1
-                            time_values.append(value)
-                    except:
-                        pass
-            
-            if total_cells == 0:
-                continue
-                
-            # Вычисляем оценку качества кандидата
-            time_quality_score = valid_cells / total_cells if total_cells > 0 else 0
-            wells_match_ratio = wells_match_score / gas_wells_count if gas_wells_count > 0 else 0
-            
-            # Общая оценка (время важнее совпадения скважин)
-            total_score = time_quality_score * 0.7 + wells_match_ratio * 0.3
-            
-            # Сохраняем лучшего кандидата
-            if total_score > best_score and time_quality_score > 0.5:  # Минимум 50% правильных значений времени
-                best_score = total_score
-                best_candidate = {
-                    'row': current_row,
-                    'time_quality': time_quality_score,
-                    'wells_match': wells_match_ratio,
-                    'total_score': total_score
-                }
-        
-        if best_candidate and best_candidate['total_score'] > 0.6:
-            return best_candidate['row']
-        else:
-            return None
-            
-    except Exception as e:
-        return None
 
 def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count, table_type, date_mapping=None):
     """
