@@ -200,7 +200,7 @@ def smoke_test(folder):
     python = folder / 'python' / RUNTIMES['windows' if os.name == 'nt' else 'linux']['exe']
     env = {k: v for k, v in os.environ.items() if not k.startswith('PYTHON')}
     env.update(PYTHONNOUSERSITE='1', MPLBACKEND='Agg')
-    code = ('import sys, tkinter, pandas, numpy, openpyxl, xlsxwriter, xlrd, odf, starlette, uvicorn, pxg_core.расходы_файлы;'
+    code = ('import sys, tkinter, pandas, numpy, openpyxl, xlsxwriter, xlrd, python_calamine, odf, starlette, uvicorn, pxg_core.расходы_файлы;'
             + ('import webview, win32api;' if os.name == 'nt' else '') +
             'import pxg_base.api as a;a.build_app();'
             'assert sys.prefix.startswith({!r}), sys.prefix;print("ok", sys.version.split()[0])').format(str(folder))

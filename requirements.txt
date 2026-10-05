@@ -4,6 +4,7 @@ numpy
 openpyxl
 xlsxwriter
 xlrd
+python-calamine
 odfpy
 starlette
 uvicorn
