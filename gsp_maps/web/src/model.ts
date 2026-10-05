@@ -106,9 +106,23 @@ export function place(g: GspData, calc: SeasonCalc) {
     }).filter(Number.isFinite).sort((p, q) => p - q)
     spacing = nn.length ? nn[Math.floor(nn.length / 2)] : 1
   }
-  const xs = placed.map(p => p.x), ys = placed.map(p => p.y)
-  const bounds = placed.length ? { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) } : { x0: 0, x1: 1, y0: 0, y1: 1 }
-  return { placed, unplaced, spacing, bounds }
+  const box = (ps: Placed[]) => {
+    const xs = ps.map(p => p.x), ys = ps.map(p => p.y)
+    return ps.length ? { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) } : { x0: 0, x1: 1, y0: 0, y1: 1 }
+  }
+  // одиночные далёкие скважины не должны сжимать кадр: рамка строится по основной группе, остальные доступны кнопкой «Показать все»
+  let core = placed
+  if (placed.length >= 8) {
+    const sorted = (v: number[]) => [...v].sort((p, q) => p - q)
+    const cx = sorted(placed.map(p => p.x))[Math.floor(placed.length / 2)], cy = sorted(placed.map(p => p.y))[Math.floor(placed.length / 2)]
+    const d = placed.map(p => Math.hypot(p.x - cx, p.y - cy)), sd = sorted(d)
+    const q1 = sd[Math.floor(sd.length * 0.25)], q3 = sd[Math.floor(sd.length * 0.75)]
+    const lim = Math.max(q3 + 2.5 * (q3 - q1), spacing * 8)
+    core = placed.filter((_, k) => d[k] <= lim)
+    if (core.length < placed.length * 0.6) core = placed
+  }
+  const far = placed.filter(p => !core.includes(p)).map(p => p.well)
+  return { placed, unplaced, spacing, bounds: box(core), boundsAll: box(placed), far }
 }
 
 export function sectorPath(cx: number, cy: number, r: number, a0: number, a1: number, r0 = 0) {
