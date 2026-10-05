@@ -45,6 +45,7 @@ export default function App() {
   const [seasonKey, setSeasonKey] = useState('')
   const [calc, setCalc] = useState<SeasonCalc | null>(null)
   const [calcKey, setCalcKey] = useState('')
+  const [prev, setPrev] = useState<SeasonCalc | null>(null)
   const [batch, setBatch] = useState<{ keys: string[]; i: number } | null>(null)
   const [win, setWin] = useState<[number, number]>([0, 0])
   const [selected, setSelected] = useState<number | null>(null)
@@ -90,6 +91,15 @@ export default function App() {
     }).catch(e => live && setGErr(String(e.message || e)))
     return () => { live = false }
   }, [g, kind, season])
+
+  const prevKey = (() => { const i = seasons.findIndex(s => s.key === season); return i > 0 ? seasons[i - 1].key : '' })()
+  useEffect(() => {
+    setPrev(null)
+    if (!g || !prevKey) return
+    let live = true
+    getSeason(g.gsp, kind, prevKey).then(d => { if (live) setPrev(new SeasonCalc(d)) }).catch(() => { /* сравнение необязательно */ })
+    return () => { live = false }
+  }, [g, kind, prevKey])
 
   const setWindow = useCallback((a: number, b: number) => setWin([a, b]), [])
   const [a, b] = calc ? calc.clampWindow(win[0], win[1]) : [0, 0]
@@ -163,7 +173,7 @@ export default function App() {
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
         </div>
-        {insp && <Inspector g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} onFocus={w => map.current?.focus(w)} />}
+        {insp && <Inspector g={g} calc={calc} prev={prev} prevKey={prevKey} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} onFocus={w => map.current?.focus(w)} />}
       </div>)
   }
   const showBar = ready && !!g && page !== 'data'
