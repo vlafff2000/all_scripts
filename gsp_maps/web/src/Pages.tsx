@@ -95,7 +95,6 @@ function WindowTable({ g, calc, kind, season, a, b, tabs }: { g: GspData; calc: 
   )
 }
 
-const BAND: Record<string, string> = { prod: 'отбор', inj: 'закачка', none: 'нейтральный период' }
 export function PressurePage({ g, kind, season, range }: { g: GspData; kind: string; season: string; range: [number, number] }) {
   const [hover, setHover] = useState<number | null>(null)
   const W = 1000, H = 340, L = 54, R = 16, T = 14, B = 34
@@ -120,9 +119,8 @@ export function PressurePage({ g, kind, season, range }: { g: GspData; kind: str
   return (
     <section className="card">
       <div className="p-legend">{sers.length === 0 && <span className="muted">Файлы давления не заданы — показан только расход ГСП.</span>}{sers.map(sr => <span key={sr.k}><i style={{ background: colors[sr.k] }} />{labels[sr.k]}</span>)}
-        {Object.entries(BAND).map(([k, v]) => <span key={k}><i className={'band ' + k} />{v}</span>)}<span><i className="win" />выбранный сезон</span></div>
+        <span><i className="win" />выбранный сезон</span></div>
       <svg style={sers.length ? undefined : { display: "none" }} viewBox={`0 0 ${W} ${H}`} className="pchart" onPointerMove={e => { const r = e.currentTarget.getBoundingClientRect(); const d = d0 + (((e.clientX - r.left) / r.width) * W - L) / (W - L - R) * (d1 - d0); setHover(Math.max(d0, Math.min(d1, d))) }} onPointerLeave={() => setHover(null)}>
-        {g.periods.map((p, i) => { const e = i + 1 < g.periods.length ? g.periods[i + 1].day : d1; const s0 = Math.max(p.day, d0), e0 = Math.min(e, d1); return e0 > s0 ? <rect key={i} x={x(s0)} width={x(e0) - x(s0)} y={T} height={H - T - B} className={'band ' + p.type} opacity={0.13} /> : null })}
         <rect x={x(Math.max(d0, range[0]))} width={Math.max(2, x(Math.min(d1, range[1])) - x(Math.max(d0, range[0])))} y={T} height={H - T - B} className="win-rect" />
         {ticks.map(v => { const i = v; return <g key={i}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" /><text x={L - 6} y={y(v)} textAnchor="end" dominantBaseline="central" className="ax">{fmt1(v)}</text></g> })}
         {years.filter(yr => yday(yr) >= d0 && yday(yr) <= d1).map(yr => <text key={yr} x={x(yday(yr))} y={H - 12} textAnchor="middle" className="ax">{yr}</text>)}

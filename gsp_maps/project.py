@@ -174,6 +174,20 @@ class Project:
         p = self.paths["press_" + which]
         return self._memo(("press", p), _mtime(p), lambda: inputs.load_pressure(p, which == "gsp"))
 
+    def gsp_pressure(self, which: str, gsp: str):
+        """Давление для ГСП. Замеры ГСП файла относятся к группе по номеру скважины; несколько замеров
+        за день усредняются. Если номера в файле не совпадают ни с одной скважиной базы, ряд общий."""
+        df, warn = self.pressure(which)
+        if which != "gsp" or not len(df) or self.store is None:
+            return df, warn
+        known = set(np.unique(self.store.well).tolist())
+        if not known.intersection(df["Скважина"]):
+            return df, warn
+        df = df[df["Скважина"].isin(self.store.wells(gsp))]
+        if len(df):
+            df = df.groupby("Дата", as_index=False)["Давление_бар"].mean().round({"Давление_бар": 2})
+        return df, warn
+
     def grid(self, gsp: str):
         p = self.paths["map"]
         return self._memo(("grid", p, gsp), _mtime(p), lambda: wellmap.read_grid(p, gsp))
@@ -243,9 +257,9 @@ class Project:
         return "перфорации: %d, альтитуды: %d" % (len(d), len(a))
 
     # ---------- расчёты для интерфейса ----------
-    def season_pressure(self, which: str) -> Dict[Tuple[int, str], float]:
+    def season_pressure(self, which: str, gsp: str = "") -> Dict[Tuple[int, str], float]:
         """Среднее давление за сезон: по месяцу замера (как add_directions_and_pressure)."""
-        df, _ = self.pressure(which)
+        df, _ = self.gsp_pressure(which, gsp) if gsp else self.pressure(which)
         if not len(df):
             return {}
         ts = pd.DatetimeIndex(df["Дата"])
@@ -263,7 +277,7 @@ class Project:
         if layout_dirs:
             df["Направление"] = df["Скважина"].map(layout_dirs)
         for which, col in (("gsp", "Сред_давл_ГСП_бар"), ("obj", "Сред_давл_Объект_бар")):
-            v = self.season_pressure(which).get((kind, season))
+            v = self.season_pressure(which, gsp).get((kind, season))
             if v is not None:
                 df[col] = v
         w = self.water()[0]
@@ -326,11 +340,11 @@ class Project:
                                   "note": r.Примечание})
         series = {}
         for which in ("gsp", "obj"):
-            df = self.pressure(which)[0]
+            df = self.gsp_pressure(which, gsp)[0]
             if len(df):
                 ds = df["Дата"].values.astype("datetime64[D]").astype("int64")
                 series[which] = {"days": ds.tolist(), "bar": df["Давление_бар"].tolist()}
-        sp = {w: {"%s|%s" % (KIND_NAMES[k], s): v for (k, s), v in self.season_pressure(w).items()} for w in ("gsp", "obj")}
+        sp = {w: {"%s|%s" % (KIND_NAMES[k], s): v for (k, s), v in self.season_pressure(w, gsp).items()} for w in ("gsp", "obj")}
         warnings = list(self.water()[1]) + list(self.periods()[1])
         warnings += ["Давление ГСП: " + m for m in self.pressure("gsp")[1]] + ["Давление объекта: " + m for m in self.pressure("obj")[1]]
         dirs = {w: v["dir"] for w, v in lay["wells"].items()}
@@ -586,7 +600,7 @@ class Project:
         """«Данные_для_графика_давления»: давление ГСП и объекта вместе с суточным расходом ГСП по датам."""
         days, flow = self.daily_flow(gsp)
         fl = {int(d): float(v) for d, v in zip(days, flow)}
-        pg, po = self.pressure("gsp")[0], self.pressure("obj")[0]
+        pg, po = self.gsp_pressure("gsp", gsp)[0], self.pressure("obj")[0]
         press = {}
         for key, df in (("gsp", pg), ("obj", po)):
             press[key] = {inputs.day_of(t): float(v) for t, v in zip(df["Дата"], df["Давление_бар"])} if len(df) else {}
@@ -649,7 +663,7 @@ class Project:
             if len(w):
                 put(w[w["Скважина"].isin(self.store.wells(gsp))], "Вода")
             for which, nm in (("gsp", "Давление ГСП"), ("obj", "Давление объекта")):
-                df = self.pressure(which)[0]
+                df = self.gsp_pressure(which, gsp)[0]
                 if len(df):
                     put(df.assign(Дата=df["Дата"].dt.strftime("%d.%m.%Y")), nm)
             rows = []
