@@ -5,34 +5,13 @@ import glob
 import re
 from datetime import datetime
 from pathlib import Path
-import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
 import time
 import gc
 import warnings
+from pxg_core import параметры
 from pxg_core.расходы_файлы import normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, read_excel_safe, find_time_table_intelligent
 
 warnings.filterwarnings('ignore')
-
-
-def select_folder_dialog(title="Выберите папку"):
-    """Открывает диалог выбора папки"""
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    folder_path = filedialog.askdirectory(title=title)
-    root.destroy()
-    return folder_path
-
-
-def select_file_dialog(title="Выберите файл", filetypes=[("Excel files", "*.xlsx *.xls")]):
-    """Открывает диалог выбора файла"""
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    file_path = filedialog.askopenfilename(title=title, filetypes=filetypes)
-    root.destroy()
-    return file_path
 
 
 def find_matching_sheets(file_path, expected_sheets):
@@ -550,10 +529,19 @@ def process_new_data(excel_files_folder, periods_file_path, data_type):
         return None
 
 
-def main():
+def main(argv=None):
     """
-    Основная функция - использует pandas для надежного обновления
+    Основная функция - использует pandas для надежного обновления.
+    Параметры берутся из командной строки (--db, --max-date, --periods, --kind, --folder), недостающие спрашиваются в консоли.
     """
+    args = параметры.parse(
+        "Дополнение базы расходов новыми данными", argv,
+        db="файл базы данных (Excel с листами «Отборы» и «Закачка»)",
+        max_date="максимальная дата ДД.ММ.ГГГГ: всё после неё удаляется",
+        periods="текстовый файл периодов",
+        kind="тип данных: отбор или закачка",
+        folder="папка с новыми файлами")
+
     print("🚀 СКРИПТ ДЛЯ ОБНОВЛЕНИЯ БАЗЫ ДАННЫХ (НАДЕЖНАЯ ВЕРСИЯ)")
     print("=" * 70)
     print("⚡ Алгоритм работы (используется pandas):")
@@ -564,16 +552,9 @@ def main():
     print("   5. Всё сохраняется обратно (без пустых строк)")
     print("=" * 70)
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-
     # Шаг 1: Выбор базы данных
-    print("\n📁 ШАГ 1: Выберите файл базы данных")
-    existing_db_file = select_file_dialog(
-        "Выберите существующий файл базы данных",
-        [("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
-    )
+    print("\n📁 ШАГ 1: Файл базы данных")
+    existing_db_file = параметры.ask_path("Путь к существующему файлу базы данных", args.db)
 
     if not existing_db_file:
         print("❌ Файл не выбран.")
@@ -582,14 +563,11 @@ def main():
     print(f"✅ База данных: {os.path.basename(existing_db_file)}")
 
     # Шаг 2: Ввод максимальной даты
-    print("\n📅 ШАГ 2: Введите максимальную дату для сохранения")
+    print("\n📅 ШАГ 2: Максимальная дата для сохранения")
     print("(ВСЕ ДАННЫЕ ПОСЛЕ ЭТОЙ ДАТЫ БУДУТ УДАЛЕНЫ)")
 
-    date_str = simpledialog.askstring(
-        "Максимальная дата",
-        "Введите максимальную дату в формате ДД.ММ.ГГГГ\n(например: 15.03.2026):",
-        initialvalue="15.03.2026"
-    )
+    date_str = args.max_date if args.max_date is not None else параметры.ask("Максимальная дата в формате ДД.ММ.ГГГГ (например 15.03.2026)", "15.03.2026")
+    date_str = (date_str or "").strip()
 
     if not date_str:
         print("❌ Дата не введена.")
@@ -602,36 +580,29 @@ def main():
         print("❌ Неверный формат даты")
         return
 
-    # Шаг 3: Выбор файла периодов
-    print("\n📅 ШАГ 3: Выберите файл периодов")
-    periods_file_path = select_file_dialog(
-        "Выберите файл с периодами",
-        [("Text files", "*.txt"), ("All files", "*.*")]
-    )
+    # Шаг 3: Файл периодов
+    print("\n📅 ШАГ 3: Файл периодов")
+    periods_file_path = параметры.ask_path("Путь к файлу с периодами (.txt)", args.periods)
 
     if not periods_file_path:
         print("❌ Файл не выбран.")
         return
 
-    # Шаг 4: Выбор типа данных
-    print("\n📊 ШАГ 4: Выберите тип данных")
-    data_type = simpledialog.askstring(
-        "Тип данных",
-        "Введите тип (отбор / закачка):",
-        initialvalue="отбор"
-    )
+    # Шаг 4: Тип данных
+    print("\n📊 ШАГ 4: Тип данных")
+    data_type = args.kind if args.kind is not None else параметры.ask("Тип (отбор / закачка)", "отбор")
 
-    if not data_type or data_type.lower() not in ["отбор", "закачка"]:
+    if not data_type or data_type.strip().lower() not in ["отбор", "закачка"]:
         print("❌ Неверный тип")
         return
 
-    data_type = data_type.lower()
+    data_type = data_type.strip().lower()
     sheet_name = "Отборы" if data_type == "отбор" else "Закачка"
     print(f"✅ Тип: {data_type}, лист: {sheet_name}")
 
-    # Шаг 5: Выбор папки с новыми файлами
-    print("\n📂 ШАГ 5: Выберите папку с новыми файлами")
-    excel_files_folder = select_folder_dialog("Выберите папку с новыми файлами")
+    # Шаг 5: Папка с новыми файлами
+    print("\n📂 ШАГ 5: Папка с новыми файлами")
+    excel_files_folder = параметры.ask_path("Путь к папке с новыми файлами", args.folder, kind="folder")
 
     if not excel_files_folder:
         print("❌ Папка не выбрана")
@@ -662,24 +633,16 @@ def main():
         if success:
             total_elapsed = time.time() - total_start
             print(f"\n⏱️  Общее время: {total_elapsed:.2f} сек ({total_elapsed / 60:.2f} мин)")
-
-            messagebox.showinfo(
-                "Готово",
-                f"База данных успешно обновлена!\n\n"
-                f"Данные после {max_date.strftime('%d.%m.%Y')} удалены\n"
-                f"Перезаписано {len(new_data)} строк\n"
-                f"Файл: {os.path.basename(existing_db_file)}"
-            )
+            print("\n✅ База данных успешно обновлена!")
+            print(f"   Данные после {max_date.strftime('%d.%m.%Y')} удалены")
+            print(f"   Перезаписано {len(new_data)} строк")
+            print(f"   Файл: {os.path.basename(existing_db_file)}")
         else:
             print("\n❌ Ошибка при обновлении данных")
     else:
         print("\n❌ Новых данных не найдено")
-        messagebox.showwarning(
-            "Внимание",
-            f"Новых данных для обработки не найдено."
-        )
+        print("⚠️  Новых данных для обработки не найдено.")
 
-    root.destroy()
     print("\n✨ ГОТОВО!")
 
 

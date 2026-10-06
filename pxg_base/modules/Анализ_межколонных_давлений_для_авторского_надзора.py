@@ -1,20 +1,15 @@
 import os
 import pandas as pd
 import numpy as np
-from tkinter import Tk, filedialog
+from pxg_core import параметры
 import warnings
 
 warnings.filterwarnings('ignore')
 
 
-def load_database():
-    """Загрузка базы данных из Excel файла"""
-    root = Tk()
-    root.withdraw()  # Скрываем основное окно
-    file_path = filedialog.askopenfilename(
-        title="Выберите файл с базой данных",
-        filetypes=[("Excel files", "*.xlsx *.xls")]
-    )
+def load_database(path=None):
+    """Загрузка базы данных из Excel файла (путь из аргумента или вопросом в консоли)"""
+    file_path = параметры.ask_path("Путь к файлу с базой данных (.xlsx)", path)
 
     if not file_path:
         print("Файл не выбран. Программа завершена.")
@@ -30,7 +25,7 @@ def load_database():
         return None
 
 
-def select_season(df):
+def select_season(df, wanted_text=None):
     """Выбор сезона для анализа"""
     if 'сезон' not in df.columns:
         print("Колонка 'сезон' не найдена в данных!")
@@ -44,8 +39,8 @@ def select_season(df):
         count = len(df[df['сезон'] == season])
         print(f"{i}. {season} (количество записей: {count})")
 
-    if os.environ.get("PXG_WEB"):  # веб-запуск: сезоны заданы в форме (пусто — все)
-        wanted = [x.strip().lower() for x in os.environ.get("PXG_SEASONS", "").split(",") if x.strip()]
+    if wanted_text is not None:  # сезоны заданы аргументом --seasons (пусто — все)
+        wanted = [x.strip().lower() for x in wanted_text.split(",") if x.strip()]
         picked = [s for s in seasons if not wanted or str(s).lower() in wanted]
         if not picked:
             print("Среди сезонов нет ни одного из указанных:", wanted)
@@ -170,10 +165,12 @@ def create_result_table(wells_with_issues):
     return output_table
 
 
-def save_results(result_table, wells_with_issues, selected_seasons):
-    """Сохранение результатов в Excel"""
+def save_results(result_table, wells_with_issues, selected_seasons, save_choice, grouped, subgroup_1, subgroup_2, subgroup_3):
+    """Сохранение результатов в Excel (save_choice: «да»/«нет» из аргумента, иначе вопрос в консоли)"""
 
-    save_choice = input("\nСохранить результаты в Excel файл? (да/нет): ").strip().lower()
+    if save_choice is None:
+        save_choice = параметры.ask("\nСохранить результаты в Excel файл? (да/нет)", "нет")
+    save_choice = save_choice.strip().lower()
 
     if save_choice in ['да', 'yes', 'y']:
         file_name = f"анализ_МКД_МКП_{'_'.join(selected_seasons).replace(' ', '_')}.xlsx"
@@ -198,7 +195,7 @@ def save_results(result_table, wells_with_issues, selected_seasons):
                     'Группа 3 (Р>28)'
                 ],
                 'Значение': [
-                    len(df_selected) if 'df_selected' in locals() else len(grouped),
+                    len(grouped),
                     len(wells_with_issues),
                     f"{wells_with_issues['Q_сут_max'].max():.2f} м³/сут",
                     f"{wells_with_issues['P_max'].max():.2f} кгс/см²",
@@ -214,17 +211,22 @@ def save_results(result_table, wells_with_issues, selected_seasons):
 
 
 # Основная программа
-if __name__ == "__main__":
+def main(argv=None):
+    args = параметры.parse(
+        "Анализ межколонных давлений и расходов газа", argv,
+        db="файл базы межколонок (Excel)",
+        seasons="сезоны через запятую (пусто — все); без параметра сезоны спрашиваются в консоли",
+        save="сохранить результаты в Excel: да или нет")
     print("=" * 60)
     print("АНАЛИЗ МЕЖКОЛОННЫХ ДАВЛЕНИЙ И РАСХОДОВ ГАЗА")
     print("=" * 60)
 
     # Загружаем базу данных
-    df = load_database()
+    df = load_database(args.db)
 
     if df is not None:
         # Выбираем сезоны
-        selected_seasons = select_season(df)
+        selected_seasons = select_season(df, args.seasons)
 
         if selected_seasons:
             # Проверяем наличие необходимых колонок
@@ -247,7 +249,12 @@ if __name__ == "__main__":
 
                 # Сохраняем результаты
                 if len(wells_with_issues) > 0:
-                    save_results(result_table, wells_with_issues, selected_seasons)
+                    save_results(result_table, wells_with_issues, selected_seasons, args.save, grouped, subgroup_1, subgroup_2, subgroup_3)
 
-    print("\nПрограмма завершена. Нажмите Enter для выхода...")
-    input()
+    print("\nПрограмма завершена.")
+    if args.db is None:
+        параметры.ask("Нажмите Enter для выхода")
+
+
+if __name__ == "__main__":
+    main()

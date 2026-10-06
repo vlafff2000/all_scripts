@@ -78,11 +78,12 @@ def tolerant_input() -> None:
 
 
 def main(argv=None) -> None:
-    module_path = (argv or sys.argv)[1]
+    argv = argv or sys.argv
+    module_path = argv[1]
     tolerant_input()
     install_headless_tk(json.loads(os.environ.get("PXG_DIALOGS") or "{}"))
     sys.path.insert(0, os.path.dirname(module_path))
-    sys.argv = [module_path]
+    sys.argv = [module_path] + list(argv[2:])
     runpy.run_path(module_path, run_name="__main__")
 
 
