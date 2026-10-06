@@ -68,3 +68,5 @@ applySide()
 export const spreadWells = pref<boolean>('gsp.spread', false)
 /** Близкие скважины склеиваются в один круг со счётчиком; при приближении карты распадаются. */
 export const clusterWells = pref<boolean>('gsp.cluster', true)
+/** Красить круги цветом группы, когда на карте несколько ГСП. */
+export const groupColoring = pref<boolean>('gsp.groupcolor', true)

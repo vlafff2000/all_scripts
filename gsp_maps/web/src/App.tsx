@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ALL_GSP, exportExcel, getGsp, getSeason, getState, saveImage, setAllGroups, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getSeason, getState, groupsOf, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
@@ -76,12 +76,22 @@ export default function App() {
 
   const ready = app?.state === 'ready'
   // «Весь объект» — все ГСП на одной карте; пункт есть, если групп больше одной
-  const gspList = ready ? (app!.gsps.length > 1 ? [...app!.gsps, ALL_GSP] : app!.gsps) : []
-  const meta = (x: string) => (x === ALL_GSP ? { grid: app!.gsps.some(n => app!.gspMeta[n]?.grid), xy: app!.gsps.some(n => app!.gspMeta[n]?.xy) } : app!.gspMeta[x])
-  const withMap = ready ? app!.gsps.find(x => app!.gspMeta[x]?.grid || app!.gspMeta[x]?.xy) : undefined
-  const gsp = ready ? (gspList.includes(gspPref) ? gspPref : withMap || app!.gsps[0] || '') : ''
   if (ready) setAllGroups(app!.gsps)
-  const wholeField = gsp === ALL_GSP
+  const withMap = ready ? app!.gsps.find(x => app!.gspMeta[x]?.grid || app!.gspMeta[x]?.xy) : undefined
+  const prefOk = ready && !!gspPref && groupsOf(gspPref).every(n => app!.gsps.includes(n))
+  const gsp = ready ? (prefOk ? gspPref : withMap || app!.gsps[0] || '') : ''
+  const selGroups = ready ? groupsOf(gsp) : []
+  const wholeField = ready && isMulti(gsp)
+  useEffect(() => {
+    const close = (e: PointerEvent) => { const d = groupRef.current; if (d?.open && !d.contains(e.target as Node)) d.removeAttribute('open') }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [])
+  const toggleGroup = (n: string) => {
+    const has = selGroups.includes(n)
+    if (has && selGroups.length === 1) return
+    lastGsp.set(nameOf(has ? selGroups.filter(x => x !== n) : [...selGroups, n]))
+  }
   useEffect(() => {
     if (!ready || !gsp) return
     let live = true
@@ -171,6 +181,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batch, season, calcKey, calc])
   const exportRef = useRef<HTMLDetailsElement>(null)
+  const groupRef = useRef<HTMLDetailsElement>(null)
   const excel = async () => {
     if (wholeField) { flash('Excel считается по одному ГСП: выберите ГСП вверху'); return }
     try { const r = await exportExcel(gsp, mode); flash('Excel сохранён: ' + r.path) } catch (e) { flash(String((e as Error).message || e)) } }
@@ -240,8 +251,16 @@ export default function App() {
       <main className={'workspace' + (page === 'map' || page === 'compare' ? ' wide' : '')}>
         {showBar && (
           <div className="topbar">
-            <label className="sel"><span>ГСП</span>
-              <select value={gsp} onChange={e => lastGsp.set(e.target.value)}>{gspList.map(x => <option key={x} value={x}>{x}{meta(x) && !meta(x).grid && !meta(x).xy ? ' · нет карты' : ''}</option>)}</select></label>
+            <details className="sel group-pick" ref={groupRef}>
+              <summary><span>ГСП</span><b>{wholeField ? (selGroups.length === app!.gsps.length ? 'Весь объект' : selGroups.join(', ')) : gsp}</b></summary>
+              <div className="group-menu" role="group" aria-label="Группы">
+                {app!.gsps.map(n => (
+                  <label key={n} className="check"><input type="checkbox" checked={selGroups.includes(n)} onChange={() => toggleGroup(n)} />
+                    {wholeField && <i className="gdot" style={{ background: groupColor(n) }} />}{n}{!app!.gspMeta[n]?.grid && !app!.gspMeta[n]?.xy ? ' · нет карты' : ''}</label>))}
+                {app!.gsps.length > 1 && <div className="group-menu-row"><button type="button" className="quiet" onClick={() => lastGsp.set(nameOf(app!.gsps))}>Все группы</button>
+                  <button type="button" className="quiet" onClick={() => lastGsp.set(selGroups[0])} disabled={selGroups.length < 2}>Только первая</button></div>}
+              </div>
+            </details>
             <div className="segmented" role="radiogroup" aria-label="Вид">
               {['Отбор', 'Закачка'].map(k => <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => lastKind.set(k)}>{k}</button>)}</div>
             {page !== 'compare' && <label className="sel"><span>Сезон</span>
