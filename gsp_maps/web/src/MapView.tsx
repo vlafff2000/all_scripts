@@ -1,4 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { GspData } from './api'
 import { PAINTS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, type Paint, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
 
@@ -8,6 +9,8 @@ interface Props {
   g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number
   options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; title: string
   /** Режим сравнения: общий масштаб кругов и общий вид (зум/сдвиг) у двух карт. */
+  /** Куда выводить подсказку: элемент вне карты (тогда она не закрывает скважины) или null — рядом с курсором. */
+  tipHost?: HTMLElement | null; tipTag?: string
   compact?: boolean; scaleMax?: number; view?: View; onView?: (v: View) => void
 }
 export interface View { k: number; tx: number; ty: number }
@@ -91,7 +94,7 @@ const Glyph = memo(function Glyph(p: {
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, compact, scaleMax, view: viewProp, onView }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, compact, scaleMax, view: viewProp, onView }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
@@ -401,8 +404,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || [], mx = Math.max(1, ...row), bw = 220 / Math.max(1, row.length)
         const ws = water.get(tipWell.well) || []
         const W = 252, left = tip.x + 18 + W > size.w ? tip.x - 18 - W : tip.x + 18
-        return (
-          <div className="tip" style={{ left: Math.max(8, left), top: Math.max(8, Math.min(tip.y - 20, size.h - 260)) }}>
+        const node = (
+          <div className={'tip' + (tipHost ? ' docked' : '')} style={tipHost ? undefined : { left: Math.max(8, left), top: Math.max(8, Math.min(tip.y - 20, size.h - 260)) }}>
+            {tipTag && <div className="tip-tag">{tipTag}</div>}
             <div className="tip-head"><b>№ {tipWell.well}</b>{tipWell.dir && <span className="tip-dir">{tipWell.dir}</span>}</div>
             {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? rampColor(paintData.stops, (paintData.vals.get(tipWell.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
             <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
@@ -417,6 +421,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               <div key={i}><i />{MONTH_NAME[w.month]} {w.year}<span>{w.note !== 'Ок' ? w.note : (w.flow ?? 0) + ' л/ч · ВФ ' + Math.round(w.factor ?? 0)}</span></div>))}</div>}
           </div>
         )
+        return tipHost ? createPortal(node, tipHost) : node
       })()}
       {!placed.length && <div className="empty-map">Для этого ГСП нет положений скважин. Задайте карту-сетку или файл XY в разделе «Данные».</div>}
       <span className="sr-only">{fmtDay(calc.days[a])} — {fmtDay(calc.days[b])}</span>

@@ -59,6 +59,7 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
   const ca = A.calc, cb = B.calc
   const nd = Math.max(ca?.nd || 0, cb?.nd || 0)
   const sync = usePref(syncMaps)
+  const [dock, setDock] = useState<HTMLElement | null>(null)
   const [winA, setWinA] = useState<[number, number] | null>(null)
   const [winB, setWinB] = useState<[number, number] | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
@@ -101,7 +102,7 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
 
   const mapFor = (side: string, c: SeasonCalc | null, key: string, w: [number, number] | null) => c && w ? (
     <MapView g={g} calc={c} kind={kind} season={key} a={w[0]} b={w[1]} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title(side, c, key, w)}
-      options={options} onOptions={onOptions} compact scaleMax={scaleMax} view={side === 'А' ? viewA : viewB} onView={side === 'А' ? onViewA : onViewB} />
+      options={options} onOptions={onOptions} compact tipHost={inspector ? dock : null} tipTag={`${side} · ${key}`} scaleMax={scaleMax} view={side === 'А' ? viewA : viewB} onView={side === 'А' ? onViewA : onViewB} />
   ) : <div className="map-wrap"><div className="empty-map">{c ? 'Сезон ' + key + ' закончился раньше выбранных дней.' : 'Считаю…'}</div></div>
 
   return (
@@ -128,7 +129,7 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
             <CompareTimeline items={[{ calc: ca!, key: keyA, side: 'А' }]} nd={ca!.nd} a={a} b={b} setWindow={setWindowA} th={34} />
             <CompareTimeline items={[{ calc: cb!, key: keyB, side: 'Б' }]} nd={cb!.nd} a={a2} b={b2} setWindow={setWindowB} th={34} /></div>)}
       </div>
-      {inspector && ready && <ComparePanel ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} a2={a2} b2={b2} selected={selected} group={group} onSelect={pick} />}
+      {inspector && <div className="side-col"><div className="tip-dock" ref={setDock} aria-live="polite" />{ready && <ComparePanel ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} a2={a2} b2={b2} selected={selected} group={group} onSelect={pick} />}</div>}
     </div>
   )
 }

@@ -233,3 +233,14 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .sync-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .sync-btn.on { color: var(--info-ink); border-color: var(--accent); background: var(--accent-soft); }
 .cmp-tls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; } .cmp-tls > * { min-width: 0; overflow: hidden; } .cmp-tls .tl-chips { display: none; }
+
+/* подсказка вне карты: стоит над панелью сведений и ничего не закрывает */
+.side-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
+.side-col > .inspector { flex: 1; min-height: 0; }
+.tip-dock { flex-shrink: 0; min-height: 64px; background: var(--surface); border: 1px dashed var(--line); border-radius: 10px; display: grid; align-items: center; }
+.tip-dock:empty::before { content: 'Наведите курсор на скважину: здесь появится её расход, доля и график сезона.'; padding: 10px 14px; color: var(--muted); font-size: 13px; }
+.tip-dock:not(:empty) { border: 1px solid var(--line); box-shadow: 0 1px 2px var(--shadow); }
+.tip.docked { position: static; width: auto; border: 0; box-shadow: none; border-radius: 10px; padding: 11px 14px; gap: 6px; }
+.tip.docked .tip-hero { font-size: 22px; }
+.tip.docked .tip-spark { height: 30px; }
+.tip-tag { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }

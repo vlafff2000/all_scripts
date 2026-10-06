@@ -55,6 +55,7 @@ export default function App() {
   const pick = useCallback((w: number | null) => { setSelected(w); setGroup([]) }, [])
   const [find, setFind] = useState('')
   const [note, setNote] = useState('')
+  const [tipDock, setTipDock] = useState<HTMLElement | null>(null)
   const map = useRef<MapHandle>(null)
 
   const refresh = useCallback(() => getState().then(setApp).catch(e => setError(String(e.message || e))), [])
@@ -174,12 +175,12 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title}
+          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp ? tipDock : null}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
         </div>
-        {insp && <Inspector g={g} calc={calc} prev={prev} prevKey={prevKey} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} onFocus={w => map.current?.focus(w)} />}
+        {insp && <div className="side-col"><div className="tip-dock" ref={setTipDock} aria-live="polite" /><Inspector g={g} calc={calc} prev={prev} prevKey={prevKey} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} onFocus={w => map.current?.focus(w)} /></div>}
       </div>)
   }
   const showBar = ready && !!g && page !== 'data'
