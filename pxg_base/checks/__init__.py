@@ -16,6 +16,11 @@ REGISTRY: Dict[str, str] = {
     "Нулевые_расходы_и_несоответствия_часов": "flows:check_zero",
     "Дополнение_базы_данных_расходов": "flows:check_append",
     "Таблица_среднесуточных_расходов_из_базы": "flows:check_average",
+    "Include_давлений_наблюдательных_скважин_горизонт_1002": "pressures:check_include_1002",
+    "Include_давлений_эксплуатационных_скважин": "pressures:check_include_exploit",
+    "Include_давлений_наблюдательных_скважин_с_пересчётом_по_MD": "pressures:check_include_md",
+    "Include_факта_из_модели_как_исторических_данных": "pressures:check_include_fact",
+    "Итоговая_таблица_давлений_2006_2025": "pressures:check_total_table",
 }
 
 

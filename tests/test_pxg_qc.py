@@ -100,3 +100,53 @@ def test_db_checks(tmp_path):
     assert ("ошибка", "DUP") in got and ("ошибка", "RANGE") in got and ("предупреждение", "GAP") in got, rep.to_text()
     rep = checks.run("Дополнение_базы_данных_расходов", {"db": str(path), "max_date": "01.01.2020", "periods": "", "kind": "закачка", "folder": str(tmp_path)})
     assert ("ошибка", "CROSS") in kinds(rep) and ("ошибка", "GAP") in kinds(rep)
+
+
+def _book(path, rows, cols):
+    import pandas as pd
+    pd.DataFrame(rows, columns=cols).to_excel(path, index=False)
+
+
+def test_include_1002(tmp_path):
+    rows = [["101", "01.01.2020", 100.0], ["101", "01.02.2020", 101.0], ["101", "01.03.2020", 101.0], ["102", "xx", 90.0],
+            ["102", "05.05.2020", "abc"], ["103", "05.05.2020", -5.0], ["103", "05.05.2020", 7.0]]
+    rows += [["104", "%02d.01.2020" % d, 100.0 + d % 3] for d in range(1, 11)] + [["104", "11.01.2020", 5000.0]]
+    p = tmp_path / "a.xlsx"
+    _book(p, rows, ["Скважина", "Дата", "Давление, бар"])
+    rep = checks.run("Include_давлений_наблюдательных_скважин_горизонт_1002", {"file": str(p)})
+    got = kinds(rep)
+    assert {("ошибка", "DATE"), ("ошибка", "RANGE"), ("предупреждение", "NUM"), ("предупреждение", "HEADER"),
+            ("предупреждение", "OUTLIER"), ("ошибка", "DUP")} <= got, rep.to_text()
+
+
+def test_include_exploit_and_md(tmp_path):
+    rows = [["101", "01.01.2020", 150.0, 120.0], ["101", "01.02.2020", 120.0, 150.0]]
+    p = tmp_path / "e.xlsx"
+    _book(p, rows, ["Скважина", "Дата", "Устьевое давление", "Пластовое давление"])
+    rep = checks.run("Include_давлений_эксплуатационных_скважин", {"file": str(p)})
+    assert ("предупреждение", "CROSS") in kinds(rep)
+    q = tmp_path / "m.xlsx"
+    _book(q, [[17, "01.01.2020", 0, 0, -3000.0, 0], [5, "01.01.2020", 0, 0, 10.0, 0], [200, "01.01.2020", 0, 0, 0, 90.0]],
+          ["Скважина", "Дата", "x", "y", "Уровень жидкости", "Пластовое давление"])
+    md = tmp_path / "md.xlsx"
+    _book(md, [[17, 2000.0], [17, 2001.0]], ["Скважина", "MD"])
+    rep = checks.run("Include_давлений_наблюдательных_скважин_с_пересчётом_по_MD", {"file": str(q), "md": str(md)})
+    got = kinds(rep)
+    assert ("ошибка", "DUP") in got and ("ошибка", "CROSS") in got, rep.to_text()   # MD повторяется; у скважины 5 нет MD
+
+
+def test_include_fact_and_total(tmp_path):
+    import pandas as pd
+    df = pd.DataFrame({"Дата": ["01.01.2020", "01.01.2020", "плохо"], "a:101:Дебит газа": [1.0, 2.0, 3.0],
+                       "a:101:Приёмистость газа": [0, 5.0, 6.0], "a:102:Что-то": [1, 2, 3], "без номера": [1, 2, 3]})
+    p = tmp_path / "f.xlsx"
+    df.to_excel(p, index=False)
+    rep = checks.run("Include_факта_из_модели_как_исторических_данных", {"file": str(p)})
+    got = kinds(rep)
+    assert ("ошибка", "DATE") in got and ("ошибка", "DUP") in got and ("предупреждение", "HEADER") in got, rep.to_text()
+    t = pd.DataFrame([["", "Скв.№56", None, "Скв.№83", None, ""], ["Дата", "уст", "пл", "уст", "пл", "ср"],
+                      ["01.01.2020", 100, 50, 80, 90, 70], ["02.01.2020", 100, 60, 80, 90, 70]])
+    q = tmp_path / "t.xlsx"
+    t.to_excel(q, index=False, header=False)
+    rep = checks.run("Итоговая_таблица_давлений_2006_2025", {"file": str(q)})
+    assert ("предупреждение", "CROSS") in kinds(rep), rep.to_text()
