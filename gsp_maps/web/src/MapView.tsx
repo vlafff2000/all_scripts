@@ -1,3 +1,4 @@
+import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { legendOpen, usePref } from './prefs'
 import { createPortal } from 'react-dom'
@@ -411,7 +412,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       </div>
       {tip && tipWell && (() => {
         const st = win.stats[tipIdx], share = st.total > 0 && win.sumAll > 0 ? st.total / win.sumAll : 0
-        const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || [], mx = Math.max(1, ...row), bw = 220 / Math.max(1, row.length)
+        const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || []
         const ws = water.get(tipWell.well) || []
         const W = 252, left = tip.x + 18 + W > size.w ? tip.x - 18 - W : tip.x + 18
         const node = (
@@ -421,11 +422,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? rampColor(paintData.stops, (paintData.vals.get(tipWell.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
             <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
             <div className="tip-share"><span><i style={{ width: Math.min(100, share * 100 * 4) + '%' }} /></span>{share > 0 ? fmtPct(share) + ' ГСП' : 'не работала'}</div>
-            <svg viewBox="0 0 220 38" className="tip-spark" aria-hidden="true">
-              <rect x={a * bw} width={Math.max(1, (b - a + 1) * bw)} height={38} className="daily-win" />
-              {row.map((v, j) => v > 0 && <rect key={j} x={j * bw} width={Math.max(0.6, bw - 0.3)} y={38 - (v / mx) * 34} height={(v / mx) * 34} rx={Math.min(1, bw / 3)} fill={pal.gas} opacity={j >= a && j <= b ? 0.95 : 0.3} />)}
-              <line x1={0} x2={220} y1={37.5} y2={37.5} stroke={pal.line} />
-            </svg>
+            <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive={!!tipHost} fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
+              series={[{ key: 'd', label: 'Расход', color: pal.gas, y: row.map(v => Math.max(0, v)) }]} />
             <div className="tip-kpis"><div><span>в среднем</span><b>{fmtTh(st.mean)}</b><small>тыс. м³/сут</small></div><div><span>дней с расходом</span><b>{st.days}</b><small>из {b - a + 1}</small></div></div>
             {ws.length > 0 && <div className="tip-water">{ws.map((w, i) => (
               <div key={i}><i />{MONTH_NAME[w.month]} {w.year}<span>{w.note !== 'Ок' ? w.note : (w.flow ?? 0) + ' л/ч · ВФ ' + Math.round(w.factor ?? 0)}</span></div>))}</div>}
