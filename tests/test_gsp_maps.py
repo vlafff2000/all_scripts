@@ -270,7 +270,7 @@ def test_api_flow(db, tmp_path, monkeypatch):
     data.mkdir()
     make_map(data / "Карта расположения скважин на ГСП.xlsx", {11: (3, 3), 12: (3, 8), 13: (9, 3), 14: (9, 8)}, sheet="ГСП 1")
     (data / "xy_tnav.txt").write_text("W11 100 900\nW12 300 900\nW13 100 700\nW14 300 700\n", encoding="utf-8")
-    (data / "давление_по_ГСП.txt").write_text("520\t10.11.2022\t95,4\n520\t10.01.2023\t90,1\n", encoding="utf-8")
+    (data / "давление_по_ГСП.txt").write_text("11\t10.11.2022\t95,4\n12\t10.11.2022\t95,6\n11\t10.01.2023\t90,1\n99\t10.01.2023\t10,0\n", encoding="utf-8")
     c = TestClient(api.app)
     found = c.post("/api/scan", json={"folder": str(data)})
     assert found.status_code == 200 and found.json()["paths"]["xy"].endswith("xy_tnav.txt")
@@ -284,8 +284,8 @@ def test_api_flow(db, tmp_path, monkeypatch):
     assert st["gspMeta"]["ГСП 1"] == {"grid": True, "xy": True} and st["gspMeta"]["ГСП 2"]["grid"] is False
     g = c.get("/api/gsp", params={"name": "ГСП 1", "mode": "auto"}).json()
     assert g["layout"]["mode"] == "xy" and g["layout"]["wells"]["11"] == {"x": 100.0, "y": 900.0, "src": "xy", "dir": "Северо-Запад"}
-    assert [s["key"] for s in g["seasons"]["Отбор"]] == ["2022-2023"] and g["seasonPressure"]["gsp"]["Отбор|2022-2023"] == pytest.approx(92.75)
-    assert g["pressure"]["gsp"]["bar"] == [95.4, 90.1]
+    assert [s["key"] for s in g["seasons"]["Отбор"]] == ["2022-2023"] and g["seasonPressure"]["gsp"]["Отбор|2022-2023"] == pytest.approx(92.8)
+    assert g["pressure"]["gsp"]["bar"] == [95.5, 90.1]  # замеры скважин 11 и 12 за день усреднены, скважина 99 чужая
     gg = c.get("/api/gsp", params={"name": "ГСП 1", "mode": "grid"}).json()
     assert gg["layout"]["mode"] == "grid"
     s = c.get("/api/season", params={"gsp": "ГСП 1", "kind": "Отбор", "season": "2022-2023"}).json()
@@ -360,7 +360,7 @@ def test_pressure_flow_table_matches_old(old, db, tmp_path, monkeypatch):
     path, o, z = db
     pr = _project(tmp_path, monkeypatch, path)
     days = pd.date_range("2022-09-25", "2023-02-10", freq="5D")
-    pg = pd.DataFrame({"Дата": days, "Давление_бар": np.linspace(80, 60, len(days))})
+    pg = pd.DataFrame({"Дата": days, "Давление_бар": np.linspace(80, 60, len(days)), "Скважина": 0})
     po = pd.DataFrame({"Дата": days[::2] + pd.Timedelta(days=1), "Давление_бар": np.linspace(70, 50, len(days[::2]))})
     pr.pressure = lambda which: ((pg if which == "gsp" else po), [])  # type: ignore[assignment]
     mine = pr.pressure_flow_table("ГСП 1")
