@@ -223,3 +223,7 @@ table.files { border-collapse: collapse; width: 100%; font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { .dot { animation: none; } .shell { transition: none; } }
 
 .pick-pair { display: grid; gap: 6px; }
+
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+table.qc td { vertical-align: top; }
+button.quiet.current { font-weight: 700; }
