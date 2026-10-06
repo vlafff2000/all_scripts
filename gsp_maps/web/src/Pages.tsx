@@ -127,8 +127,13 @@ export function TrendsPage({ g }: { g: GspData }) {
   const { sorted, th } = useSort(g.trends, 'Тренд_расхода', get)
   if (!g.trends.length) return <section className="card"><p className="muted">Тренды считаются по скважинам, у которых есть минимум два сезона отбора.</p></section>
   const mx = Math.max(1, ...g.trends.map(r => Math.abs(r.Тренд_расхода)))
+  const ordered = [...g.trends].sort((p, q) => q.Тренд_расхода - p.Тренд_расхода)
   return (
     <section className="card table-card">
+      <h3>Тренд расхода по скважинам, тыс. м³/сут за сезон</h3>
+      <Chart mode="bars" labels={ordered.map(r => String(r.Скважина))} fmt={v => fmtTh(v)} unit="тыс. м³/сут за сезон" height={220} label="Тренд расхода по скважинам"
+        barColor={j => (ordered[j].Тренд_расхода < 0 ? '#d55e00' : '#149ba5')}
+        series={[{ key: 't', label: 'Тренд расхода', color: '#149ba5', y: ordered.map(r => r.Тренд_расхода) }]} />
       <p className="muted">Наклон прямой по среднему суточному расходу в сезонах отбора: сколько тыс. м³/сут скважина добавляет (или теряет) за сезон. Водный фактор — по среднему за сезон.</p>
       <div className="scroll"><table className="data">
         <thead><tr>{th('Скважина', 'Скв.')}{th('Направление', 'Направление', false)}{th('Средний_расход', 'Средний расход, тыс. м³/сут')}{th('Тренд_расхода', 'Тренд расхода, тыс. м³/сут за сезон')}{th('Тренд_воды', 'Тренд воды (ВФ за сезон)')}</tr></thead>
