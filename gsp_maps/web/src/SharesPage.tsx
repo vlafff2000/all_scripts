@@ -10,32 +10,10 @@ const DIR_ORDER = ['Север', 'Северо-Восток', 'Восток', '�
 const DIR_COLOR: Record<string, string> = { 'Север': '#0072b2', 'Северо-Восток': '#56b4e9', 'Восток': '#009e73', 'Юго-Восток': '#e69f00', 'Юг': '#d55e00', 'Юго-Запад': '#cc79a7', 'Запад': '#6a3d9a', 'Северо-Запад': '#8c564b' }
 
 interface Part { name: string; color: string; v: number; label: string }
-function Stacked({ cols, hover, setHover }: { cols: { key: string; parts: Part[] }[]; hover: string | null; setHover: (s: string | null) => void }) {
-  const [tip, setTip] = useState<{ x: number; y: number; text: string[] } | null>(null)
-  const W = 1000, H = 300, L = 44, B = 30, T = 8
-  const bw = Math.min(46, ((W - L - 8) / Math.max(1, cols.length)) * 0.72), step = (W - L - 8) / Math.max(1, cols.length)
-  return (
-    <div style={{ position: 'relative' }}>
-    <svg viewBox={`0 0 ${W} ${H}`} className="pchart" role="img" aria-label="Доли по сезонам">
-      {[0, 25, 50, 75, 100].map(v => { const y = T + (1 - v / 100) * (H - T - B); return <g key={v}><line x1={L} x2={W - 8} y1={y} y2={y} className="grid" /><text x={L - 6} y={y} textAnchor="end" dominantBaseline="central" className="ax">{v}%</text></g> })}
-      {cols.map((c, i) => {
-        let acc = 0
-        const x = L + i * step + (step - bw) / 2
-        return (
-          <g key={c.key}>
-            {c.parts.map(p => {
-              const h = p.v * (H - T - B), y = T + (1 - acc - p.v) * (H - T - B)
-              acc += p.v
-              return <rect key={p.name} x={x} y={y} width={bw} height={Math.max(0, h)} fill={p.color} stroke="var(--surface)" strokeWidth={0.8} opacity={hover && hover !== p.name ? 0.35 : 1}
-                onPointerMove={e => { const r = e.currentTarget.ownerSVGElement!.getBoundingClientRect(); setHover(p.name); setTip({ x: e.clientX - r.left, y: e.clientY - r.top, text: [c.key, p.name + ': ' + p.label] }) }} onPointerLeave={() => { setHover(null); setTip(null) }} />
-            })}
-            <text x={x + bw / 2} y={H - 12} textAnchor="middle" className="ax">{c.key}</text>
-          </g>)
-      })}
-    </svg>
-    {tip && <div className="chart-tip" style={{ left: tip.x + 12, top: tip.y + 12 }}><b>{tip.text[0]}</b><div>{tip.text[1]}</div></div>}
-    </div>
-  )
+function Stacked({ cols, hover }: { cols: { key: string; parts: Part[] }[]; hover: string | null; setHover: (s: string | null) => void }) {
+  const names = [...new Set(cols.flatMap(c => c.parts.map(p => p.name)))]
+  const series = names.map(n => ({ key: n, label: n, color: cols.flatMap(c => c.parts).find(p => p.name === n)!.color, y: cols.map(c => c.parts.find(p => p.name === n)?.v ?? 0) }))
+  return <Chart mode="bars" stack highlight={hover} labels={cols.map(c => c.key)} fmt={v => fmt1(v * 100) + '%'} unit="" height={300} label="Доли по сезонам" series={series} />
 }
 
 function LineShare({ keys, vals, name }: { keys: string[]; vals: (number | null)[]; name: string }) {
