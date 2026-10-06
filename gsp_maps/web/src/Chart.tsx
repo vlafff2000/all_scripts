@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as echarts from 'echarts/core'
 import { BarChart, LineChart } from 'echarts/charts'
 import { DataZoomComponent, GridComponent, MarkAreaComponent, TooltipComponent } from 'echarts/components'
@@ -41,7 +41,7 @@ export default function Chart({ days = [], labels, series, mode, win, fmt, unit,
   const pick = useRef(onPick); pick.current = onPick
   const full = interactive && !compact
   const isTime = series.some(s => s.x)
-  const names = labels ?? days.map(d => fmtDay(d))
+  const names = useMemo(() => labels ?? days.map(d => fmtDay(d)), [labels, days])
   const nd = names.length
   const xr = xRange ?? (isTime ? [Math.min(...series.flatMap(s => s.x ?? [])), Math.max(...series.flatMap(s => s.x ?? []))] : [0, 0])
 
@@ -73,7 +73,8 @@ export default function Chart({ days = [], labels, series, mode, win, fmt, unit,
     setZoomed(dz.some(d => (d.start ?? 0) > 0.01 || (d.end ?? 100) < 99.99))
     const fx = (v: number | undefined) => (v === undefined ? '' : isTime ? fmtDay(Math.round(v)) : names[Math.max(0, Math.min(nd - 1, Math.round(v)))] ?? '')
     const fy = (v: number | undefined) => (v === undefined ? '' : String(Number(v.toPrecision(5))))
-    setBounds({ x0: fx(x?.startValue), x1: fx(x?.endValue), y0: fy(y?.startValue), y1: fy(y?.endValue) })
+    const nb = { x0: fx(x?.startValue), x1: fx(x?.endValue), y0: fy(y?.startValue), y1: fy(y?.endValue) }
+    setBounds(o => (o.x0 === nb.x0 && o.x1 === nb.x1 && o.y0 === nb.y0 && o.y1 === nb.y1 ? o : nb))
   }, [full, names, nd, isTime])
 
   useEffect(() => {
