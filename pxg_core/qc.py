@@ -387,6 +387,38 @@ def outliers(values: Sequence[float], k: Optional[float] = None) -> List[int]:
     return [int(i) for i in idx]
 
 
+def spikes(values: Sequence[float], k: Optional[float] = None, floor: float = 0.0) -> List[int]:
+    """Индексы одиночных всплесков ряда: значение резко выше (ниже) обоих соседей, а соседи — нет.
+
+    Считается по второй разности D = x − (сосед слева + сосед справа)/2: всплеск даёт большое D, а у соседей D противоположного
+    знака. Сезонный пик или впадина давления (у соседей D того же знака) и дрейф ряда за годы всплеском не считаются,
+    в отличие от outliers(), которая сравнивает со всей историей. Порог — k·σ второй разности, но не меньше k·floor."""
+    k = SETTINGS["mad_k"] if k is None else k
+    arr = np.asarray(values, dtype=float)
+    idx = np.where(np.isfinite(arr))[0]
+    if len(idx) < 8:
+        return []
+    x = arr[idx]
+    d = np.zeros(len(x))
+    d[1:-1] = x[1:-1] - (x[:-2] + x[2:]) / 2
+    scale = max(1.4826 * float(np.median(np.abs(d[1:-1] - np.median(d[1:-1])))), floor)
+    if scale <= 0:
+        return []
+    out = []
+    # крайние значения (самый новый замер — частое место опечатки): сравниваются с единственным соседом, порог — половина уровня ряда
+    jump = max(k * scale, 0.5 * float(np.median(np.abs(x))))
+    for i, j in ((0, 1), (len(x) - 1, len(x) - 2)):
+        if abs(x[i] - x[j]) > jump:
+            out.append(int(idx[i]))
+    for i in range(1, len(x) - 1):
+        if abs(d[i]) <= k * scale:
+            continue
+        around = [d[j] for j in (i - 1, i + 1) if 1 <= j < len(x) - 1]
+        if all(v * d[i] < 0 and abs(v) >= 0.25 * abs(d[i]) for v in around):
+            out.append(int(idx[i]))
+    return sorted(out)
+
+
 def unit_suspects(values: Sequence[float], ratio: Optional[float] = None) -> List[int]:
     """Индексы значений, отличающихся от медианы ряда в ratio раз и больше: похоже на другие единицы."""
     ratio = SETTINGS["ratio_unit"] if ratio is None else ratio

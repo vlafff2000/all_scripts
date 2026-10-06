@@ -270,4 +270,4 @@ def test_gdi(tmp_path):
     pd.DataFrame([[1, "10, 11"], [2, "11"]]).to_excel(g, index=False, header=False)
     rep = checks.run("Преобразование_исходных_таблиц_ГДИ_в_базу", {"files": str(f), "gsp": str(g), "periods": ""})
     got = kinds(rep)
-    assert {("ошибка", "DUP"), ("предупреждение", "DATE"), ("ошибка", "RANGE")} <= got, rep.to_text()
+    assert {("ошибка", "DUP"), ("предупреждение", "DATE"), ("предупреждение", "RANGE")} <= got, rep.to_text()

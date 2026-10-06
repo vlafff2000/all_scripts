@@ -89,11 +89,23 @@ def check_collect(v: Dict[str, str]) -> Report:
             if header is None:
                 rep.error("HEADER", "Не найдена строка заголовков («№№ скв»): модуль пропустит лист", **where)
                 continue
-            ncols = len(df.columns)
+            # справа от таблицы бывают пустые столбцы или лишний пробел: блоки считаются до последнего заполненного
+            filled = [j for j in range(len(df.columns)) if any(str(x).strip() not in ("", "nan") for x in df.iloc[header:, j])]
+            ncols = (max(filled) + 1) if filled else 0
             if ncols % 5:
                 rep.warn("HEADER", "Число столбцов %d не кратно 5: последний блок будет неполным и пропущен" % ncols, **where)
             found = {}
             skipped_wells = 0
+            stray = []          # итоги и вычисления под таблицей: число в столбце номеров там, где скважин уже нет
+            flow_wells = flow_no_p = mism = 0
+            days = calendar.monthrange(date.year, date.month)[1]
+            last_well_row = {}
+            for r in range(header + 1, len(df)):
+                row = df.iloc[r].tolist()
+                for b in range(0, ncols - 4, 5):
+                    n_, _ = qc.to_number(row[b]) if pd.notna(row[b]) else (None, "")
+                    if n_ is not None and 1 <= n_ <= 543 and abs(n_ - round(n_)) < 0.01:
+                        last_well_row[b] = r
             for r in range(header + 1, len(df)):
                 row = df.iloc[r].tolist()
                 joined = " ".join(str(x) for x in row if pd.notna(x)).lower()
@@ -110,9 +122,18 @@ def check_collect(v: Dict[str, str]) -> Report:
                     f = float(s.replace(",", "."))
                     wi = int(round(f))
                     if abs(f - wi) >= 0.01 or not 1 <= wi <= 543:
-                        rep.warn("WELL", "Номер скважины вне 1–543 или дробный: строка пропущена", well=s, row=r + 1, **where)
+                        if r > last_well_row.get(b, -1):
+                            stray.append(r + 1)
+                        else:
+                            rep.warn("WELL", "Номер скважины вне 1–543 или дробный: строка пропущена", well=s, row=r + 1, **where)
                         continue
                     q, p = row[b + 1], row[b + 4]
+                    qn_, qm_ = _num(q), _num(row[b + 2])
+                    if qn_ is not None and qm_ is not None and abs(qm_ - qn_ * days) > 0.01 * max(abs(qm_), 1):
+                        mism += 1
+                    if qn_ is not None and qn_ > 0:
+                        flow_wells += 1
+                        flow_no_p += 1 if not (_num(p) or 0) > 0 else 0
                     for label, val in (("Qм/к сут", q), ("Рм/к", p)):
                         n, prob = qc.to_number(val)
                         if prob in ("text", "excel"):
@@ -128,6 +149,16 @@ def check_collect(v: Dict[str, str]) -> Report:
                     rows_n += 1
             if skipped_wells:
                 rep.note("WELL", "%d ячеек в столбцах номеров не число (подписи, итоги): пропущены" % skipped_wells, **where)
+            if stray:
+                rep.note("WELL", "Под таблицей есть числа в столбцах номеров (итоги или вычисления, строки %s): модуль их пропускает" % (
+                    ", ".join(str(x) for x in stray[:8])), **where)
+            if flow_wells and flow_no_p == flow_wells:
+                rep.warn("GAP", "Рм/к не заполнено ни у одной из %d скважин с расходом: в базу пойдёт давление 0 (замер не внесён, а не нулевое давление)" % flow_wells,
+                         hint="Это месяц без давлений: максимум давления по сезону в анализе будет занижен", **where)
+            elif flow_wells and flow_no_p:
+                rep.note("GAP", "Рм/к не заполнено у %d из %d скважин с расходом: в базу пойдёт 0" % (flow_no_p, flow_wells), **where)
+            if mism:
+                rep.note("CROSS", "Qм/к (мес) не равен Qм/к (сут) × %d дней у %d скважин: модуль берёт суточный и считает месяц сам" % (days, mism), **where)
             if not found:
                 rep.error("WELL", "Под заголовком нет скважин: модуль получит 0 записей с листа", **where)
     for date, srcs in seen.items():
@@ -178,20 +209,41 @@ def check_analysis(v: Dict[str, str]) -> Report:
             rep.warn("NUM", "%s: значения не числа" % col, **where)
         if (n < 0).any():
             rep.error("RANGE", "%s: %d отрицательных значений" % (col, int((n < 0).sum())), **where)
+    wn = pd.to_numeric(df["номер_скважины"], errors="coerce")
+    badw = df[wn.isna() | (wn < 1) | (wn > 543) | ((wn - wn.round()).abs() > 0.01)]
+    if len(badw):
+        rep.warn("WELL", "Номер скважины не число или вне 1–543 в %d строках: модуль может потерять их или посчитать отдельной скважиной" % len(badw),
+                 value=badw["номер_скважины"].iloc[0], when=str(badw["дата"].iloc[0])[:10], **where)
     dup = df.duplicated(["номер_скважины", "дата"], keep=False)
     if dup.any():
-        rep.warn("DUP", "Повторяются пары «скважина + дата»: %d строк (максимум берётся по любой, но среднее исказится)" % int(dup.sum()),
-                 well=df[dup]["номер_скважины"].iloc[0], **where)
+        months = sorted({"%02d.%d" % (x.month, x.year) for x in d[dup].dropna()})
+        rep.warn("DUP", "Повторяются пары «скважина + дата»: %d строк в месяцах %s (расход и давление берутся из разных строк, среднее исказится)" % (
+            int(dup.sum()), ", ".join(months[:8]) + (" …" if len(months) > 8 else "")),
+            well=df[dup]["номер_скважины"].iloc[0], **where)
     q = pd.to_numeric(df["расход_газа_МК_сут"], errors="coerce")
     qm = pd.to_numeric(df["расход_газа_МК_мес"], errors="coerce")
     bad = ((qm - q * d.dt.days_in_month).abs() > 0.01 * qm.abs().clip(lower=1)) & q.notna() & qm.notna() & d.notna()
     if bad.any():
         rep.warn("CROSS", "Месячный расход не равен суточному × число дней в %d строках" % int(bad.sum()), **where)
-    for w, g in df.assign(_p=pd.to_numeric(df["давление_МК"], errors="coerce"), _d=d).groupby("номер_скважины"):
-        arr = g.sort_values("_d")["_p"].to_numpy(dtype=float)
-        k = qc.outliers(arr)
-        if k:
-            rep.warn("OUTLIER", "Давление м/к сильно выбивается из ряда скважины (в итог идёт максимум!)", well=w, value=arr[k[0]], **where)
+    if d.notna().any():
+        have = d.dropna().dt.to_period("M").unique()
+        gone = [str(x) for x in pd.period_range(have.min(), have.max(), freq="M").difference(have)]
+        if gone:
+            rep.warn("GAP", "В базе нет месяцев: %s: на графиках и в сезонных итогах будет провал" % ", ".join(
+                "%s.%s" % (g[5:], g[:4]) for g in gone[:12]) + (" …" if len(gone) > 12 else ""), **where)
+    # месяцы с расходом, но без единого давления: нули там означают «замера нет», а не «давления нет»
+    p = pd.to_numeric(df["давление_МК"], errors="coerce")
+    per = d.dt.to_period("M")
+    flow_m = (q > 0).groupby(per).sum()
+    press_m = (p > 0).groupby(per).sum()
+    nop = [str(m) for m in flow_m.index if flow_m[m] > 0 and press_m.get(m, 0) == 0]
+    if nop:
+        rep.warn("GAP", "В %d месяцах из %d есть расход, но нет ни одного давления (%s): нули давления — это отсутствие замера, максимум по сезону занижен" % (
+            len(nop), int((flow_m > 0).sum()), ", ".join("%s.%s" % (m[5:], m[:4]) for m in nop[:6]) + (" …" if len(nop) > 6 else "")),
+            hint="Проверьте исходные книги этих месяцев: возможно, столбец «Рм/к» не заполнен", **where)
+    pm = p[p > 0]
+    if len(pm) and (pm > qc.SETTINGS["max_pressure_bar"]).any():
+        rep.warn("RANGE", "Давление м/к больше %g: опечатка или другие единицы?" % qc.SETTINGS["max_pressure_bar"], value=float(pm.max()), **where)
     rep.saw("строк: %d, сезонов: %d" % (len(df), len(seasons)))
     return rep
 

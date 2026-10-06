@@ -495,6 +495,74 @@ def _season_of(name: str):
     return None
 
 
+GDI_BLANKS = {"-", "–", "—", "н.д.", "нд", "н/д", "нет"}   # так в таблицах помечают «нет значения»
+
+
+def _gdi_kind(title: str) -> str:
+    """Что за столбец ГДИ по названию: press (давление), dp, sq (Рпл²−Рз²), a, b, qmax, well, or ''."""
+    t = title.replace(" ", "")
+    if "рпл2" in t or "рз2" in t:
+        return "sq"
+    if t.startswith("dp") and "max" not in t:
+        return "dp"
+    if t.startswith("dpmax"):
+        return "dpmax"
+    if re.match(r"^(рзаб|рпл)", t):
+        return "pzab" if t.startswith("рзаб") else "ppl"
+    if re.match(r"^(руст|рст|рзатр|ргсп|р\W*гсп)", t) or ("давлен" in t and "перепад" not in t) or "кгс" in t:
+        return "press"
+    if t in ("a", "b"):
+        return t
+    return ""
+
+
+def _gdi_press_kind(kind: str) -> str:
+    return "press" if kind in ("pzab", "ppl", "press") else kind
+
+
+def _check_gdi_records(rep: Report, raw: pd.DataFrame, hdr: int, dcol: int, dates, where: dict) -> None:
+    """Запись ГДИ = строка с номером скважины; у неё должна быть дата (у режимов ниже модуль берёт её из первой строки)."""
+    wcol = next((j for j in range(raw.shape[1]) if pd.notna(raw.iat[hdr, j])
+                 and "скв" in str(raw.iat[hdr, j]).lower() and "гсп" not in str(raw.iat[hdr, j]).lower()), None)
+    if wcol is None:
+        return
+    head = [i for i in range(hdr + 1, len(raw)) if qc.to_number(raw.iat[i, wcol])[0] is not None]
+    if not head:
+        return
+    miss = [i for i in head if dates[i - hdr - 1] is None]
+    if miss:
+        rep.warn("DATE", "У %d записей из %d указана скважина, но нет даты: модуль пометит сезон «Не указан», графики по времени их не покажут" % (
+            len(miss), len(head)), row=miss[0] + 1, well=qc.to_number(raw.iat[miss[0], wcol])[0], **where)
+
+
+def _check_gdi_relations(rep: Report, raw: pd.DataFrame, hdr: int, cols: Dict[str, int], where: dict) -> None:
+    """Согласованность давлений и коэффициентов в одной строке: Рзаб ≤ Рпл, DP = Рпл − Рзаб, a ≥ 0."""
+    def col(kind):
+        j = cols.get(kind)
+        if j is None:
+            return None
+        return np.array([qc.to_number(x)[0] if qc.to_number(x)[0] is not None else np.nan for x in raw.iloc[hdr + 1:, j]], dtype=float)
+    pl, pz, dp = col("ppl"), col("pzab"), col("dp")
+    if pl is not None and pz is not None:
+        ok = np.isfinite(pl) & np.isfinite(pz)
+        bad = np.where(ok & (pz > pl))[0]
+        if len(bad):
+            rep.warn("CROSS", "Рзаб больше Рпл в %d строках (депрессия отрицательная): перепутаны столбцы или опечатка" % len(bad),
+                     row=hdr + 2 + int(bad[0]), value="%g > %g" % (pz[bad[0]], pl[bad[0]]), **where)
+        if dp is not None:
+            ok = ok & np.isfinite(dp)
+            bad = np.where(ok & (np.abs(pl - pz - dp) > 0.5))[0]
+            if len(bad):
+                rep.warn("CROSS", "DP не равен Рпл − Рзаб (разница больше 0,5) в %d строках из %d" % (len(bad), int(ok.sum())),
+                         row=hdr + 2 + int(bad[0]), value="DP=%g, Рпл−Рзаб=%g" % (dp[bad[0]], pl[bad[0]] - pz[bad[0]]), **where)
+    a = col("a")
+    if a is not None:
+        bad = np.where(np.isfinite(a) & ((a < 0) | (a > 5)))[0]
+        if len(bad):
+            rep.warn("RANGE", "Коэффициент a вне 0…5 в %d строках (обычно 0,1–1): единицы или опечатка" % len(bad),
+                     row=hdr + 2 + int(bad[0]), value=a[bad[0]], **where)
+
+
 def check_gdi(v: Dict[str, str]) -> Report:
     rep = Report("Преобразование исходных таблиц ГДИ в базу")
     files = _expand_paths(rep, v.get("files", ""))
@@ -554,21 +622,31 @@ def check_gdi(v: Dict[str, str]) -> Report:
                 if off:
                     rep.warn("DATE", "%d дат вне окна сезона %d–%d (01.09–30.04): модуль исправит их автоматически, проверьте журнал исправлений" % (
                         len(off), season[0], season[1]), value=off[0].strftime("%d.%m.%Y"), **where)
-            # числа: столбцы с давлением
+            _check_gdi_records(rep, raw, hdr, dcol, dates, where)
+            # числа: столбцы с давлением (перепады, Рпл²−Рз², температуры и расходы давлением не считаются)
+            cols = {}
             for j in range(raw.shape[1]):
                 title = " ".join(str(raw.iat[r, j]) for r in range(max(0, hdr - 1), hdr + 1) if pd.notna(raw.iat[r, j])).lower()
-                if not any(k in title for k in ("давлен", "р уст", "рзатр", "рпл", "ргсп", "р гсп", "кгс")):
+                title = " ".join(title.split())
+                kind = _gdi_kind(title)
+                if kind:
+                    cols.setdefault(kind, j)
+                if _gdi_press_kind(kind) != "press":
                     continue
                 nums = [qc.to_number(x) for x in raw.iloc[hdr + 1:, j]]
                 arr = np.array([n if n is not None else np.nan for n, _ in nums], dtype=float)
-                txt = sum(1 for (_, p), x in zip(nums, raw.iloc[hdr + 1:, j]) if p in ("text", "excel") and "e" not in str(x).lower())
+                txt = sum(1 for (_, p), x in zip(nums, raw.iloc[hdr + 1:, j]) if p in ("text", "excel") and "e" not in str(x).lower()
+                          and str(x).strip() not in GDI_BLANKS)
                 if txt:
                     rep.note("NUM", "Не число в %d ячейках столбца «%s» (модуль чистит апострофы и запятые, остальное останется текстом)" % (txt, title[:40]), **where)
-                if (arr[np.isfinite(arr)] < 0).any():
-                    rep.error("RANGE", "Отрицательное давление в столбце «%s»" % title[:40], **where)
+                neg = np.where(np.isfinite(arr) & (arr < 0))[0]
+                if len(neg):
+                    rep.warn("RANGE", "Отрицательное давление в столбце «%s» (%d значений)" % (title[:40], len(neg)),
+                             row=hdr + 2 + int(neg[0]), value=arr[neg[0]], **where)
                 if (arr[np.isfinite(arr)] > qc.SETTINGS["max_pressure_bar"]).any():
                     rep.warn("RANGE", "Давление больше %g в столбце «%s»" % (qc.SETTINGS["max_pressure_bar"], title[:40]), **where)
                 for k in qc.outliers(arr)[:1]:
                     rep.warn("OUTLIER", "Выброс в столбце «%s»" % title[:40], row=hdr + 2 + k, value=arr[k], **where)
+            _check_gdi_relations(rep, raw, hdr, cols, where)
     rep.saw("файлов: %d, листов: %d" % (len(files), n_sheets))
     return rep
