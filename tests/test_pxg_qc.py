@@ -150,3 +150,64 @@ def test_include_fact_and_total(tmp_path):
     t.to_excel(q, index=False, header=False)
     rep = checks.run("Итоговая_таблица_давлений_2006_2025", {"file": str(q)})
     assert ("предупреждение", "CROSS") in kinds(rep), rep.to_text()
+
+
+def test_mk_collect_and_analysis(tmp_path):
+    import pandas as pd
+    rows = [["Журнал за октябрь 2023г", None, None, None, None],
+            ["№№ скв", "Qсут", "Qмес", "Qм/к", "Рм/к"],
+            [12, 5.0, 150, 0, 7.0], [12, 5.0, 150, 0, 7.0], [900, 1, 1, 1, 1], [13, "abc", 0, 0, 800.0], ["Итого", None, None, None, None]]
+    f = tmp_path / "мк_октябрь.xlsx"
+    pd.DataFrame(rows).to_excel(f, index=False, header=False)
+    g = tmp_path / "мк ноябрь.xlsx"                                    # даты на листе нет: возьмётся текущий год
+    pd.DataFrame(rows[1:]).to_excel(g, index=False, header=False)
+    rep = checks.run("Сбор_данных_по_межколонным_давлениям", {"root": str(tmp_path)})
+    got = kinds(rep)
+    assert {("предупреждение", "DUP"), ("предупреждение", "WELL"), ("предупреждение", "NUM"), ("предупреждение", "DATE"),
+            ("предупреждение", "RANGE")} <= got, rep.to_text()
+    db = pd.DataFrame({"сезон": ["Сезон отбора 2023-2024"] * 3, "номер_скважины": [1, 1, 2], "расход_газа_МК_сут": [1, 1, -2],
+                       "расход_газа_МК_мес": [31, 31, 1], "давление_МК": [1, 1, 1], "дата": ["2023-10-01", "2023-10-01", "2023-10-01"]})
+    p = tmp_path / "db.xlsx"
+    db.to_excel(p, index=False)
+    rep = checks.run("Анализ_межколонных_давлений_для_авторского_надзора", {"db": str(p), "seasons": "Сезон отбора 1999-2000"})
+    got = kinds(rep)
+    assert ("ошибка", "GAP") in got and ("ошибка", "RANGE") in got and ("предупреждение", "DUP") in got, rep.to_text()
+
+
+def test_journal(tmp_path):
+    import pandas as pd
+    y = tmp_path / "2019"
+    y.mkdir()
+    ncol = 1 + 5 * 28                                                   # блоков меньше, чем дней в январе
+    rows = [[None] * ncol, ["Отбор"] + [None] * (ncol - 1), ["N скв"] + [None] * (ncol - 1)]
+    for w, q, h in ((5, 10.0, 0.0), (5, 3.0, 30.0), (999, 1.0, 1.0)):
+        r = [w] + [None] * (ncol - 1)
+        r[4], r[5] = q, h
+        rows.append(r)
+    rows.append([None] * ncol)
+    rows.append([7] + [None] * (ncol - 1))                               # ниже пустой строки
+    pd.DataFrame(rows).to_excel(y / "2019_01.xlsx", index=False, header=False)
+    rep = checks.run("Журнал_отбора_и_закачки_2019_2024", {"root": str(tmp_path)})
+    got = kinds(rep)
+    assert {("ошибка", "DATE"), ("ошибка", "RANGE"), ("предупреждение", "DUP"), ("предупреждение", "WELL"),
+            ("предупреждение", "GAP")} <= got, rep.to_text()
+
+
+def test_levels_bases(tmp_path):
+    import pandas as pd
+    d = tmp_path / "in"
+    d.mkdir()
+    rows = [["Дата замера", "Скв. 1", None, "Скв. 77", None],
+            [None, "Уровень/Руст", "Рпл привед", "Уровень/Руст", "Рпл привед"]]
+    rows += [["%02d.01.2020" % k, -100.0, 90.0 + k % 3, 5.0, 80.0] for k in range(1, 12)]
+    rows += [["32.01.2020", -100.0, 9000.0, "x", -3.0], ["01.01.2020", -100.0, 90.0, 5.0, 80.0]]
+    pd.DataFrame(rows).to_excel(d / "Щигровский горизонт.xlsx", index=False, header=False)
+    alt = tmp_path / "alt.xlsx"
+    pd.DataFrame({"Скважина": [1, 1], "Альтитуда": [100.0, 120.0]}).to_excel(alt, index=False)
+    rep = checks.run("Создание_базы_уровней_и_давлений_Щигровский_горизонт",
+                     {"input_dir": str(d), "altitude": str(alt), "perforation": ""})
+    got = kinds(rep)
+    assert {("предупреждение", "DATE"), ("предупреждение", "RANGE"), ("предупреждение", "DUP"), ("ошибка", "DUP"),
+            ("предупреждение", "CROSS")} <= got, rep.to_text()
+    rep = checks.run("Создание_базы_уровней_и_давлений_контрольные_горизонты", {"input_dir": str(tmp_path / "нет")})
+    assert rep.counts()[qc.ERROR] == 1
