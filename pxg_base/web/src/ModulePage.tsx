@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fileUrl, getJob, getJobs, openFolder, pickPath, startJob, type Job, type ModuleInfo, type Param } from './api'
+import { checkUrl, fileUrl, getJob, getJobs, openFolder, pickPath, runCheck, startJob, type Job, type ModuleInfo, type Param, type QcReport } from './api'
 import { loadForm, saveForm } from './prefs'
 
 const STATUS = { running: 'Выполняется', done: 'Готово', failed: 'Завершено с ошибкой' } as const
@@ -47,6 +47,45 @@ function PathField({ param, value, onChange, invalid }: { param: Param; value: s
   )
 }
 
+const LEVEL_CLASS: Record<string, string> = { 'ошибка': 'failed', 'предупреждение': 'warn', 'заметка': 'idle' }
+
+function QcPanel({ report }: { report: QcReport }) {
+  const [level, setLevel] = useState('')
+  const rows = report.issues.filter(i => !level || i.level === level)
+  const where = (i: QcReport['issues'][number]) =>
+    [i.file, i.sheet && 'лист ' + i.sheet, i.row && 'строка ' + i.row, i.well && 'скв. ' + i.well, i.date].filter(Boolean).join(' · ')
+  return (
+    <section className="card result" aria-live="polite">
+      <div className="result-head">
+        <strong>Проверка исходников</strong>
+        <span className="muted">{report.summary}</span>
+        <span className="spacer" />
+        {(['', 'ошибка', 'предупреждение', 'заметка'] as const).map(l => (
+          <button key={l} className={'quiet' + (level === l ? ' current' : '')} onClick={() => setLevel(l)}>
+            {l ? `${l} (${report.counts[l] ?? 0})` : 'все'}
+          </button>
+        ))}
+        <a className="quiet" href={checkUrl(report.id, 'xlsx')}>Excel</a>
+      </div>
+      {report.checked.length > 0 && <p className="muted out-dir">Просмотрено: {report.checked.join('; ')}</p>}
+      {rows.length === 0 ? <p className="note info">{report.issues.length ? 'В этом уровне замечаний нет.' : 'Замечаний нет.'}</p> : (
+        <table className="files qc">
+          <thead><tr><th>Уровень</th><th>Что не так</th><th>Где</th><th>Значение</th></tr></thead>
+          <tbody>{rows.map((i, k) => (
+            <tr key={k}>
+              <td><span className={'chip small ' + LEVEL_CLASS[i.level]}>{i.level}</span><div className="muted">{report.codes[i.code] ?? i.code}</div></td>
+              <td>{i.message}{i.hint && <div className="muted">→ {i.hint}</div>}</td>
+              <td className="muted">{where(i)}</td>
+              <td>{i.value}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+      {report.hidden.length > 0 && <p className="muted">Однотипные замечания сверх лимита не показаны: {report.hidden.map(h => `${h.level} ${report.codes[h.code] ?? h.code} — ${h.count}`).join('; ')}.</p>}
+    </section>
+  )
+}
+
 export default function ModulePage({ module }: { module: ModuleInfo }) {
   const [values, setValues] = useState<Record<string, string>>(() => {
     const saved = loadForm(module.id)
@@ -57,6 +96,8 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
   const [log, setLog] = useState<string[]>([])
   const [history, setHistory] = useState<Job[]>([])
   const [error, setError] = useState('')
+  const [qc, setQc] = useState<QcReport | null>(null)
+  const [checking, setChecking] = useState(false)
   const [now, setNow] = useState(Date.now() / 1000)
   const [copied, setCopied] = useState('')
   const logRef = useRef<HTMLPreElement>(null)
@@ -95,6 +136,15 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
     setLog([])
     try { setJob(await startJob(module.id, { ...values, out_dir: outDir })) }
     catch (e) { setError((e as Error).message) }
+  }
+  const check = async () => {
+    setTouched(true); setError('')
+    if (missing.length) return
+    saveForm(module.id, { ...values, out_dir: outDir })
+    setChecking(true); setQc(null)
+    try { setQc(await runCheck(module.id, values)) }
+    catch (e) { setError((e as Error).message) }
+    finally { setChecking(false) }
   }
   const show = async (j: Job) => { const full = await getJob(j.id, 0); setLog(full.log); setJob(full); setError('') }
   const copy = (key: string, text: string) => {
@@ -154,6 +204,7 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
           </details>
           <div className="actions">
             <button className="primary" type="submit" disabled={running}>{running ? 'Выполняется…' : 'Запустить'}</button>
+            {module.check && <button type="button" className="quiet" onClick={check} disabled={checking || running}>{checking ? 'Проверка…' : 'Проверить исходники'}</button>}
             <span className="muted keys">Ctrl+Enter — запустить</span>
             {touched && missing.length > 0 && <span className="field-error">Заполните обязательные поля.</span>}
           </div>
@@ -161,6 +212,8 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
       )}
 
       {error && <p className="note warning">{error}</p>}
+
+      {qc && <QcPanel report={qc} />}
 
       {job && (
         <section className="card result" aria-live="polite">

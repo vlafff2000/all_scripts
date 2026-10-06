@@ -5,7 +5,7 @@ export interface Param {
 }
 export interface ModuleInfo {
   id: string; group: string; title: string; description: string
-  web: boolean; note: string; command: string; params: Param[]
+  web: boolean; check: boolean; note: string; command: string; params: Param[]
 }
 export interface Job {
   id: string; module: string; status: 'running' | 'done' | 'failed'
@@ -33,3 +33,17 @@ export const getJobs = () => call<{ jobs: Job[] }>('/api/jobs').then(r => r.jobs
 export const pickPath = (kind: 'folder' | 'file', start: string) =>
   call<{ path: string }>(`/api/pick?kind=${kind}&start=${encodeURIComponent(start)}`).then(r => r.path)
 export const openFolder = (id: string) => call<{ ok: boolean }>(`/api/jobs/${id}/open`, { method: 'POST' })
+
+export interface QcIssue {
+  level: 'ошибка' | 'предупреждение' | 'заметка'; code: string; message: string; file: string; sheet: string
+  row: string; well: string; date: string; value: string; hint: string
+}
+export interface QcReport {
+  id: string; title: string; summary: string; counts: Record<string, number>; checked: string[]
+  issues: QcIssue[]; hidden: { level: string; code: string; count: number }[]; codes: Record<string, string>
+}
+export const runCheck = (module: string, params: Record<string, string>) =>
+  call<QcReport>('/api/check', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module, params }),
+  })
+export const checkUrl = (id: string, fmt: 'xlsx' | 'txt') => `/api/check/${id}.${fmt}`
