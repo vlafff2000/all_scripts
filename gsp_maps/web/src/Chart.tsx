@@ -1,5 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import * as echarts from 'echarts/core'
+import { BarChart, LineChart } from 'echarts/charts'
+import { DataZoomComponent, GridComponent, MarkAreaComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { fmtDay } from './model'
+
+echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, CanvasRenderer])
 
 export interface Series { key: string | number; label: string; color: string; y: number[]; dash?: boolean; bold?: boolean }
 interface Props {
@@ -8,88 +14,141 @@ interface Props {
   onPick?: (j: number) => void; barColor?: (j: number) => string | undefined
 }
 
-const niceTicks = (mx: number, n = 4) => {
-  const raw = mx / n, p = Math.pow(10, Math.floor(Math.log10(raw || 1))), f = raw / p
-  const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p
-  const out: number[] = []
-  for (let v = 0; v <= mx + step * 0.01; v += step) out.push(v)
-  return { ticks: out, top: out[out.length - 1] || 1 }
+const cssVar = (name: string, fb: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fb
+const resolve = (c: string) => { const m = /^var\((--[\w-]+)\)$/.exec(c); return m ? cssVar(m[1], '#888') : c }
+const alpha = (hex: string, a: number) => {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return hex
+  const n = parseInt(m[1], 16)
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`
 }
+const num = (s: string) => { const v = Number(s.trim().replace(/\s/g, '').replace(',', '.')); return s.trim() !== '' && Number.isFinite(v) ? v : null }
 
-/** Интерактивный график по дням сезона: значения при наведении, зум рамкой (двойной щелчок — сброс). */
+/** График в стиле Газового атласа (ECharts): колесо — масштаб, перетаскивание — сдвиг, ползунки и рамка на обеих осях,
+ *  ввод границ осей, логарифмическая шкала Y. Для мини-графиков (compact) — только подсказка при наведении. */
 export default function Chart({ days = [], labels, series, mode, win, fmt, unit, height = 150, compact, interactive = true, label, onPick, barColor }: Props) {
   const box = useRef<HTMLDivElement>(null)
-  const [w, setW] = useState(300)
-  const [zoom, setZoom] = useState<[number, number] | null>(null)
-  const [hover, setHover] = useState<number | null>(null)
-  const [drag, setDrag] = useState<[number, number] | null>(null)
+  const inst = useRef<echarts.ECharts | null>(null)
+  const [log, setLog] = useState(false)
+  const [boxZoom, setBoxZoom] = useState(false)
+  const [zoomed, setZoomed] = useState(false)
+  const [axes, setAxes] = useState(false)
+  const [theme, setTheme] = useState(0)
+  const [bounds, setBounds] = useState({ x0: '', x1: '', y0: '', y1: '' })
+  const pick = useRef(onPick); pick.current = onPick
+  const full = interactive && !compact
+  const names = labels ?? days.map(d => fmtDay(d))
+  const nd = names.length
+
+  useEffect(() => {
+    const el = document.documentElement
+    const mo = new MutationObserver(() => setTheme(t => t + 1))
+    mo.observe(el, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => mo.disconnect()
+  }, [])
+
   useEffect(() => {
     const el = box.current
     if (!el) return
-    const ro = new ResizeObserver(() => setW(Math.max(120, el.clientWidth)))
-    ro.observe(el); setW(Math.max(120, el.clientWidth))
-    return () => ro.disconnect()
+    const ch = echarts.init(el, undefined, { renderer: 'canvas' })
+    inst.current = ch
+    const ro = new ResizeObserver(() => ch.resize())
+    ro.observe(el)
+    ch.on('click', (p: unknown) => { const i = (p as { dataIndex?: number }).dataIndex; if (typeof i === 'number') pick.current?.(i) })
+    return () => { ro.disconnect(); ch.dispose(); inst.current = null }
   }, [])
-  useEffect(() => { setZoom(null) }, [days, labels])
 
-  const lab = (j: number, short = false) => (labels ? labels[j] : short ? fmtDay(days[j]).slice(0, 5) : fmtDay(days[j]))
-  const nd = labels ? labels.length : days.length, fs = compact ? 11 : 12
-  const L = compact ? 38 : 54, R = 8, T = 8, B = 20, H = height, pw = Math.max(10, w - L - R), ph = H - T - B
-  const [z0, z1] = zoom ?? [0, nd - 1]
-  const span = Math.max(1, z1 - z0 + 1)
-  const mx = Math.max(1e-9, ...series.map(s => Math.max(0, ...s.y.slice(z0, z1 + 1))))
-  const { ticks, top } = niceTicks(mx, compact ? 3 : 4)
-  const xs = (j: number) => L + (mode === 'bars' ? ((j - z0) / span) * pw : span > 1 ? ((j - z0) / (span - 1)) * pw : 0)
-  const bw = pw / span
-  const ys = (v: number) => T + ph - (Math.max(0, v) / top) * ph
-  const jAt = (px: number) => {
-    const t = (px - L) / pw
-    return Math.max(z0, Math.min(z1, mode === 'bars' ? z0 + Math.floor(t * span) : z0 + Math.round(t * (span - 1))))
+  const dataKey = nd + '|' + names[0] + '|' + names[nd - 1]
+  const readBounds = useCallback(() => {
+    const ch = inst.current
+    if (!ch || !full) return
+    const dz = (ch.getOption() as { dataZoom?: { start?: number; end?: number; startValue?: number; endValue?: number }[] }).dataZoom || []
+    const x = dz[0], y = dz[2]
+    setZoomed(dz.some(d => (d.start ?? 0) > 0.01 || (d.end ?? 100) < 99.99))
+    const fx = (v: number | undefined) => (v === undefined ? '' : names[Math.max(0, Math.min(nd - 1, Math.round(v)))] ?? '')
+    const fy = (v: number | undefined) => (v === undefined ? '' : String(Number(v.toPrecision(5))))
+    setBounds({ x0: fx(x?.startValue), x1: fx(x?.endValue), y0: fy(y?.startValue), y1: fy(y?.endValue) })
+  }, [full, names, nd])
+
+  useEffect(() => {
+    const ch = inst.current
+    if (!ch) return
+    const ink = cssVar('--ink', '#1b2a31'), muted = cssVar('--muted', '#5f7178'), grid = cssVar('--line-soft', '#edf1f2'), axis = cssVar('--line-strong', '#b9c7cb')
+    const surface = cssVar('--surface', '#fff'), accent = cssVar('--accent', '#149ba5')
+    const fs = compact ? 11 : 12
+    const val = (v: number) => (log && v <= 0 ? null : v)
+    const sr = series.map((s, k) => {
+      const color = resolve(s.color)
+      const base = {
+        name: s.label, data: s.y.map(val), silent: !full,
+        markArea: k === 0 && win ? { silent: true, itemStyle: { color: alpha(accent, 0.12) }, data: [[{ xAxis: Math.max(0, win[0]) }, { xAxis: Math.min(nd - 1, win[1]) }]] } : undefined,
+      }
+      return mode === 'bars'
+        ? { ...base, type: 'bar' as const, barCategoryGap: '12%', itemStyle: { color: barColor ? (p: { dataIndex: number }) => resolve(barColor(p.dataIndex) ?? s.color) : color } }
+        : { ...base, type: 'line' as const, showSymbol: false, symbolSize: 6, lineStyle: { width: s.bold ? 2.8 : 2, type: s.dash ? ('dashed' as const) : ('solid' as const), color }, itemStyle: { color }, emphasis: { focus: 'series' as const } }
+    })
+    const zoomBase = { filterMode: 'none' as const, zoomOnMouseWheel: true, moveOnMouseMove: true, moveOnMouseWheel: false }
+    const slider = { type: 'slider' as const, filterMode: 'none' as const, showDetail: false, brushSelect: false, borderColor: axis, backgroundColor: 'transparent', fillerColor: alpha(accent, 0.18), handleSize: '90%', textStyle: { color: muted }, dataBackground: { lineStyle: { color: axis }, areaStyle: { color: alpha(axis, 0.3) } } }
+    const dataZoom = full ? [
+      { type: 'inside' as const, xAxisIndex: 0, ...zoomBase },
+      { ...slider, xAxisIndex: 0, height: 16, bottom: 6 },
+      { type: 'inside' as const, yAxisIndex: 0, filterMode: 'none' as const, zoomOnMouseWheel: 'shift' as const, moveOnMouseMove: 'shift' as const, moveOnMouseWheel: false },
+      { ...slider, yAxisIndex: 0, width: 14, right: 4, top: 12, bottom: 34 },
+    ] : []
+    ch.setOption({
+      animation: false, backgroundColor: 'transparent', textStyle: { fontFamily: "'PT Sans','Segoe UI',sans-serif", fontSize: fs, color: muted },
+      grid: { left: 6, right: full ? 28 : 8, top: 12, bottom: full ? 40 : 4, containLabel: true },
+      xAxis: { type: 'category', data: names, boundaryGap: mode === 'bars', axisLine: { lineStyle: { color: axis } }, axisTick: { show: false }, axisLabel: { color: muted, fontSize: fs, hideOverlap: true, formatter: (v: string) => (labels ? v : v.slice(0, 5)) }, axisPointer: { show: interactive } },
+      yAxis: { type: log ? 'log' : 'value', logBase: 10, axisLabel: { color: muted, fontSize: fs, formatter: (v: number) => fmt(v) }, splitLine: { lineStyle: { color: grid, type: 'dashed' } }, axisLine: { show: false }, axisPointer: { show: false } },
+      dataZoom,
+      series: sr,
+      tooltip: interactive ? {
+        trigger: 'axis', confine: true, backgroundColor: surface, borderColor: cssVar('--line', '#dbe3e5'), textStyle: { color: ink, fontSize: 12.5 }, extraCssText: 'box-shadow:0 6px 18px rgba(27,42,49,.25);border-radius:8px',
+        axisPointer: { type: mode === 'bars' ? 'shadow' : 'line', shadowStyle: { color: alpha(ink, 0.06) }, lineStyle: { color: alpha(ink, 0.45) } },
+        formatter: (ps: unknown) => {
+          const a = (Array.isArray(ps) ? ps : [ps]) as { axisValueLabel: string; seriesName: string; value: number | null; color: string }[]
+          const rows = a.filter(p => p.value !== null && p.value !== undefined)
+          if (!rows.length) return ''
+          return `<b>${a[0].axisValueLabel}</b>` + rows.map(p => `<div><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.color};margin-right:5px"></span>${rows.length > 1 ? p.seriesName + ': ' : ''}<b>${fmt(p.value as number)}</b> ${unit}</div>`).join('')
+        },
+      } : { show: false },
+    }, { replaceMerge: ['series'] })
+    ch.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: full && boxZoom })
+    ch.off('datazoom'); if (full) ch.on('datazoom', readBounds)
+    readBounds()
+  }, [series, names, mode, win, fmt, unit, compact, interactive, full, log, boxZoom, theme, labels, nd, barColor, readBounds])
+
+  useEffect(() => { inst.current?.dispatchAction({ type: 'dataZoom', batch: [0, 1, 2, 3].map(i => ({ dataZoomIndex: i, start: 0, end: 100 })) }) }, [dataKey])
+  const reset = () => { inst.current?.dispatchAction({ type: 'dataZoom', batch: [0, 1, 2, 3].map(i => ({ dataZoomIndex: i, start: 0, end: 100 })) }); readBounds() }
+  const applyX = (a: string, b: string) => {
+    const find = (t: string) => { const i = names.indexOf(t.trim()); if (i >= 0) return i; const n = num(t); return n !== null ? Math.max(0, Math.min(nd - 1, Math.round(n) - 1)) : null }
+    const i0 = find(a), i1 = find(b)
+    if (i0 !== null && i1 !== null && i1 > i0) inst.current?.dispatchAction({ type: 'dataZoom', dataZoomIndex: 0, startValue: i0, endValue: i1 })
   }
-  const px = (e: React.PointerEvent) => e.clientX - (box.current?.getBoundingClientRect().left ?? 0)
-  const xTicks = span <= 14 && labels ? Array.from({ length: span }, (_, k) => z0 + k) : [0, 1, 2, 3].map(k => z0 + Math.round(((span - 1) * k) / 3)).filter((v, k, a) => a.indexOf(v) === k)
-  const hv = hover !== null && hover >= z0 && hover <= z1 ? hover : null
-  const tipLeft = hv !== null && xs(hv) > w * 0.55
+  const applyY = (a: string, b: string) => {
+    const lo = num(a), hi = num(b)
+    if (lo !== null && hi !== null && hi > lo && (!log || lo > 0)) inst.current?.dispatchAction({ type: 'dataZoom', dataZoomIndex: 2, startValue: lo, endValue: hi })
+  }
+  const field = (k: 'x0' | 'x1' | 'y0' | 'y1', ph: string) => (
+    <input key={k} value={bounds[k]} placeholder={ph} aria-label={ph} onChange={e => setBounds(b => ({ ...b, [k]: e.target.value }))}
+      onKeyDown={e => { if (e.key === 'Enter') { const b = { ...bounds, [k]: (e.target as HTMLInputElement).value }; k[0] === 'x' ? applyX(b.x0, b.x1) : applyY(b.y0, b.y1) } }}
+      onBlur={() => (k[0] === 'x' ? applyX(bounds.x0, bounds.x1) : applyY(bounds.y0, bounds.y1))} />)
 
   return (
-    <div className={'chart' + (compact ? ' compact' : '')} ref={box} style={{ height: H }}>
-      <svg width={w} height={H} role="img" aria-label={label}
-        onPointerMove={interactive ? e => { const j = jAt(px(e)); setHover(j); if (drag) setDrag([drag[0], j]) } : undefined}
-        onPointerLeave={interactive ? () => { setHover(null); setDrag(null) } : undefined}
-        onPointerDown={interactive ? e => { (e.target as Element).setPointerCapture?.(e.pointerId); const j = jAt(px(e)); setDrag([j, j]) } : undefined}
-        onPointerUp={interactive ? () => {
-          if (drag && onPick && drag[0] === drag[1]) onPick(drag[0])
-          if (drag && Math.abs(drag[1] - drag[0]) >= 2) setZoom([Math.min(...drag), Math.max(...drag)])
-          setDrag(null)
-        } : undefined}
-        onDoubleClick={interactive ? () => setZoom(null) : undefined}>
-        {ticks.map(v => <g key={v}>
-          <line x1={L} x2={L + pw} y1={ys(v)} y2={ys(v)} className="chart-grid" />
-          <text x={L - 5} y={ys(v) + 4} textAnchor="end" className="chart-t" fontSize={fs}>{fmt(v)}</text>
-        </g>)}
-        {win && <rect x={Math.max(L, xs(Math.max(win[0], z0)))} width={Math.max(1, Math.min(L + pw, xs(Math.min(win[1], z1)) + (mode === 'bars' ? bw : 0)) - Math.max(L, xs(Math.max(win[0], z0))))} y={T} height={ph} className="daily-win" />}
-        {mode === 'bars' && series.map(s => s.y.slice(z0, z1 + 1).map((v, k) => v > 0 && (
-          <rect key={s.key + '_' + k} x={xs(z0 + k)} width={Math.max(0.8, bw - (bw > 4 ? 1 : 0.3))} y={ys(v)} height={T + ph - ys(v)} fill={barColor?.(z0 + k) ?? s.color}
-            opacity={win && (z0 + k < win[0] || z0 + k > win[1]) ? 0.35 : 1} />)))}
-        {mode === 'lines' && series.map(s => (
-          <polyline key={s.key} fill="none" stroke={s.color} strokeWidth={s.bold ? 2.6 : 2} strokeLinejoin="round" strokeDasharray={s.dash ? '5 4' : undefined}
-            points={s.y.slice(z0, z1 + 1).map((v, k) => xs(z0 + k).toFixed(1) + ',' + ys(v).toFixed(1)).join(' ')} />))}
-        <line x1={L} x2={L + pw} y1={T + ph} y2={T + ph} className="daily-axis" />
-        {xTicks.map((j, k) => <text key={j} x={xs(j) + (mode === 'bars' ? bw / 2 : 0)} y={H - 5} className="chart-t" fontSize={fs}
-          textAnchor={k === 0 ? 'start' : k === xTicks.length - 1 ? 'end' : 'middle'}>{lab(j, true)}</text>)}
-        {drag && <rect x={xs(Math.min(...drag))} width={Math.max(1, Math.abs(xs(drag[1]) - xs(drag[0])) + (mode === 'bars' ? bw : 0))} y={T} height={ph} className="chart-brush" />}
-        {hv !== null && <>
-          <line x1={xs(hv) + (mode === 'bars' ? bw / 2 : 0)} x2={xs(hv) + (mode === 'bars' ? bw / 2 : 0)} y1={T} y2={T + ph} className="chart-cross" />
-          {mode === 'lines' && series.filter(s => s.y[hv] !== undefined).map(s => <circle key={s.key} cx={xs(hv)} cy={ys(s.y[hv])} r={3.5} fill={s.color} stroke="var(--surface)" strokeWidth={1.5} />)}
-        </>}
-      </svg>
-      {hv !== null && (
-        <div className="chart-tip" style={{ left: tipLeft ? undefined : xs(hv) + 12, right: tipLeft ? w - xs(hv) + 12 : undefined, top: T }}>
-          <b>{lab(hv)}</b>
-          {series.filter(s => s.y[hv] !== undefined).map(s => <div key={s.key}><i style={{ background: s.color }} />{series.length > 1 ? s.label + ': ' : ''}<b>{fmt(s.y[hv] ?? 0)}</b> {unit}</div>)}
+    <div className={'chart' + (compact ? ' compact' : '')}>
+      {full && (
+        <div className="chart-bar">
+          <button type="button" className={boxZoom ? 'on' : ''} aria-pressed={boxZoom} title="Выделить область мышью, чтобы приблизить" onClick={() => setBoxZoom(v => !v)}>Рамка</button>
+          <button type="button" className={log ? 'on' : ''} aria-pressed={log} title="Логарифмическая шкала по Y" onClick={() => { setLog(v => !v); reset() }}>Лог. Y</button>
+          <button type="button" className={axes ? 'on' : ''} aria-pressed={axes} title="Задать границы осей числами" onClick={() => setAxes(v => !v)}>Оси</button>
+          <button type="button" disabled={!zoomed} title="Показать всё" onClick={reset}>Сбросить</button>
+          <span className="chart-hint">колесо — масштаб, перетаскивание — сдвиг, Shift+колесо — по Y</span>
         </div>
       )}
-      {zoom && <button type="button" className="chart-reset" onClick={() => setZoom(null)}>Сбросить зум</button>}
+      {full && axes && (
+        <div className="chart-axes"><span>X</span>{field('x0', 'от')}{field('x1', 'до')}<span>Y</span>{field('y0', 'от')}{field('y1', 'до')}</div>
+      )}
+      <div ref={box} role="img" aria-label={label} style={{ height: height + (full ? 34 : 0), width: '100%' }} />
     </div>
   )
 }
