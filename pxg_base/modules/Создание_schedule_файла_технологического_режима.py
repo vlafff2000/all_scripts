@@ -24,6 +24,26 @@ import xlsxwriter
 # Подавляем предупреждения
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
+# Веб-запуск (PXG_WEB): параметры приходят из формы через переменные окружения, окна не открываются,
+# результаты складываются в текущую папку; ошибки, о которых скрипт сообщает окном, дают код выхода 1.
+WEB = bool(os.environ.get("PXG_WEB"))
+_web_errors = []
+
+if WEB:
+    _show_error = messagebox.showerror
+
+    def _record_error(*args, **kwargs):
+        _web_errors.append(args[1] if len(args) > 1 else "")
+        return _show_error(*args, **kwargs)
+
+    messagebox.showerror = _record_error
+
+
+def web_stop(text):
+    """Веб-запуск: нечего спросить в окне — сообщаем, что не так, и завершаемся с ошибкой."""
+    print("❌ " + text)
+    _web_errors.append(text)
+
 
 # ============================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ EXCEL
@@ -238,7 +258,7 @@ def is_empty_sheet(file_path, sheet_name, data_type):
             return True
         header_found = False
         for i in range(min(5, len(df_sample))):
-            row_values = df_sample.iloc[i].astype(str).str.lower().tolist()
+            row_values = df_sample.iloc[i].fillna("").astype(str).str.lower().tolist()
             for cell in row_values:
                 if any(keyword in cell for keyword in ['скважин', 'n скв', '№ скв', 'скв.']):
                     header_found = True
@@ -256,7 +276,7 @@ def read_approved_volumes(file_path, periods=None):
 
     header_row_idx = None
     for i in range(min(10, len(df))):
-        row = df.iloc[i].astype(str).str.lower()
+        row = df.iloc[i].fillna("").astype(str).str.lower()
         if 'номер гсп' in row.values or 'гсп' in row.values:
             header_row_idx = i
             break
@@ -315,7 +335,7 @@ def read_approved_volumes(file_path, periods=None):
     return approved, days_in_month, all_gsp
 
 
-def get_work_days_for_month(month, month_num, year, days_worked):
+def get_work_days_for_month(month, month_num, year, days_worked, mode=None):
     """Определяет рабочие дни месяца"""
     total_days = calendar.monthrange(year, month_num)[1]
 
@@ -2078,7 +2098,7 @@ def calculate_correction_coefficients(df, pzrg_df, log_writer=None):
         print("❌ Не найдена колонка с суточным расходом")
         return df
 
-    corrected_df['Суточный_расход_газа_скорректированный'] = corrected_df[daily_col]
+    corrected_df['Суточный_расход_газа_скорректированный'] = corrected_df[daily_col].astype(float)
 
     if not df.empty and pzrg_df is not None:
         date_col = 'Дата' if 'Дата' in df.columns else 'DATE'
@@ -3839,6 +3859,19 @@ def ask_forecast_params():
     return forecast_years, percent_variants
 
 
+def ask_forecast_params_web():
+    """Параметры прогноза из формы: PXG_FORECAST_YEARS и PXG_PERCENTS (через запятую)."""
+    try:
+        years = int(os.environ.get("PXG_FORECAST_YEARS") or "5")
+        percents = [int(p.strip()) for p in (os.environ.get("PXG_PERCENTS") or "40, 60, 80, 100, 110").split(",") if p.strip()]
+        if years < 1 or not percents:
+            raise ValueError
+    except ValueError:
+        web_stop("Не удалось разобрать параметры прогноза: нужны число лет и проценты через запятую (например 40, 60, 80, 100, 110).")
+        return None, None
+    return years, percents
+
+
 def select_folder_gui(title="Выберите папку"):
     """Выбор папки с GUI"""
     import tkinter as tk
@@ -3926,7 +3959,14 @@ def main():
     print("\n📋 ШАГ 0: ВЫБОР РЕЖИМА РАБОТЫ")
     print("-" * 40)
 
-    mode = select_mode_gui()
+    if WEB:
+        mode = os.environ.get("PXG_MODE") or ""
+        if mode == "прогноз_варьирование":
+            web_stop("Режим «Прогноз с варьированием» требует редактора стратегий и в веб-форме пока недоступен: "
+                     "запустите скрипт из консоли (python apps/schedule_tr или pxg_base/modules/...).")
+            return
+    else:
+        mode = select_mode_gui()
 
     if not mode:
         messagebox.showerror("Ошибка", "Режим работы не выбран")
@@ -3940,7 +3980,7 @@ def main():
     percent_variants = None
 
     if mode in ["прогноз", "прогноз_варьирование"]:
-        forecast_years, percent_variants = ask_forecast_params()
+        forecast_years, percent_variants = ask_forecast_params_web() if WEB else ask_forecast_params()
         if forecast_years is None or percent_variants is None:
             return
         print(f"   Прогноз на {forecast_years} лет")
@@ -3971,10 +4011,19 @@ def main():
     total_gas_file_prod = files.get('total_gas_file_prod')
     prod_gsp_files = files.get('prod_gsp_files', [])
 
+    # Режим «отбор» работает с переменными approved_file/total_gas_file/gsp_files; автопоиск кладёт файлы папки «Отбор»
+    # в *_prod, поэтому без этого переноса брались бы файлы закачки (если рядом есть папка «Закачка»).
+    if mode == "отбор" and approved_file_prod and total_gas_file_prod and prod_gsp_files:
+        approved_file, total_gas_file, gsp_files = approved_file_prod, total_gas_file_prod, prod_gsp_files
+
     # Проверяем, что все нужные файлы найдены
     if mode == "закачка":
         if not approved_file or not total_gas_file or not gsp_files:
             print("\n⚠️ Не все файлы найдены автоматически!")
+            if WEB:
+                web_stop("В корневой папке не найдены файлы ГСП, утверждённых объёмов или посуточных расходов. "
+                         "Ожидаются папки «Закачка» и «Отбор» (или файлы в корне) — см. подсказку у формы.")
+                return
             print("   Будет предложено выбрать файлы вручную.")
 
             injection_folder = select_folder_gui("Выберите папку с файлами ЗАКАЧКИ")
@@ -4007,6 +4056,10 @@ def main():
     elif mode == "отбор":
         if not approved_file or not total_gas_file or not gsp_files:
             print("\n⚠️ Не все файлы найдены автоматически!")
+            if WEB:
+                web_stop("В корневой папке не найдены файлы ГСП, утверждённых объёмов или посуточных расходов. "
+                         "Ожидаются папки «Закачка» и «Отбор» (или файлы в корне) — см. подсказку у формы.")
+                return
             print("   Будет предложено выбрать файлы вручную.")
 
             production_folder = select_folder_gui("Выберите папку с файлами ОТБОРА")
@@ -4039,6 +4092,9 @@ def main():
     elif mode in ["прогноз", "прогноз_варьирование"]:
         if not approved_file or not total_gas_file or not gsp_files:
             print("\n⚠️ Не все файлы для закачки найдены автоматически!")
+            if WEB:
+                web_stop("Не найдены файлы закачки (ГСП, утверждённые объёмы, посуточные расходы) в папке «Закачка».")
+                return
             print("   Будет предложено выбрать файлы вручную.")
 
             injection_folder = select_folder_gui("Выберите папку с файлами ЗАКАЧКИ")
@@ -4065,6 +4121,9 @@ def main():
 
         if not approved_file_prod or not total_gas_file_prod or not prod_gsp_files:
             print("\n⚠️ Не все файлы для отбора найдены автоматически!")
+            if WEB:
+                web_stop("Не найдены файлы отбора (ГСП, утверждённые объёмы, посуточные расходы) в папке «Отбор».")
+                return
             print("   Будет предложено выбрать файлы вручную.")
 
             production_folder = select_folder_gui("Выберите папку с файлами ОТБОРА")
@@ -4105,7 +4164,7 @@ def main():
     print("\n📋 ВЫБОР ПАПКИ ДЛЯ СОХРАНЕНИЯ РЕЗУЛЬТАТОВ")
     print("-" * 40)
 
-    output_folder = select_folder_gui("Выберите папку для сохранения результатов")
+    output_folder = os.getcwd() if WEB else select_folder_gui("Выберите папку для сохранения результатов")
     if not output_folder:
         messagebox.showerror("Ошибка", "Папка не выбрана")
         return
@@ -4113,10 +4172,16 @@ def main():
     print(f"\n📁 Папка для сохранения: {output_folder}")
 
     # ------------------- Выбор года -------------------
-    year = simpledialog.askinteger(
-        "Год", f"Введите ГОД начала сезона {mode}:",
-        minvalue=2000, maxvalue=2100
-    )
+    if WEB:
+        try:
+            year = int(os.environ.get("PXG_YEAR") or 0)
+        except ValueError:
+            year = 0
+    else:
+        year = simpledialog.askinteger(
+            "Год", f"Введите ГОД начала сезона {mode}:",
+            minvalue=2000, maxvalue=2100
+        )
     if not year:
         messagebox.showerror("Ошибка", "Год не указан")
         return
@@ -4127,7 +4192,20 @@ def main():
     start_date_str = None
     end_date_str = None
 
-    if mode == "закачка":
+    if WEB and mode in ["закачка", "отбор"]:
+        default_start, default_end = (f"01.04.{year}", f"16.10.{year}") if mode == "закачка" else (f"01.10.{year}", f"01.05.{year + 1}")
+        start_date_str = (os.environ.get("PXG_START") or default_start).strip()
+        end_date_str = (os.environ.get("PXG_END") or default_end).strip()
+        try:
+            if datetime.strptime(start_date_str, '%d.%m.%Y') >= datetime.strptime(end_date_str, '%d.%m.%Y'):
+                web_stop("Начальная дата сезона должна быть раньше конечной.")
+                return
+        except ValueError:
+            web_stop("Даты сезона нужны в формате ДД.ММ.ГГГГ (получено: %s — %s)." % (start_date_str, end_date_str))
+            return
+        print(f"\n📅 Сезон {mode}: {start_date_str} — {end_date_str} (конечная дата не включается)")
+
+    elif mode == "закачка":
         default_start = f"01.04.{year}"
         default_end = f"16.10.{year}"
         date_prompt_start = f"Введите НАЧАЛЬНУЮ дату сезона {mode} (ДД.ММ.ГГГГ):\nНапример: {default_start}"
@@ -4176,6 +4254,11 @@ def main():
             return
 
     # ------------------- Файл периодов -------------------
+    if WEB and os.environ.get("PXG_PERIODS"):
+        periods_file = os.environ["PXG_PERIODS"]
+    if WEB and (not periods_file or not os.path.exists(periods_file)):
+        web_stop("Файл периодов не найден: положите period_of_work.txt в корневую папку или укажите его в форме.")
+        return
     if not periods_file or not os.path.exists(periods_file):
         periods_file = filedialog.askopenfilename(
             title="Выберите файл с периодами (period_of_work.txt)",
@@ -4190,6 +4273,10 @@ def main():
     # Загружаем периоды
     periods_data = load_periods_file(periods_file)
     print(f"   Загружено периодов: {len(periods_data)}")
+    if WEB and mode == "прогноз" and len(periods_data) < 4:
+        web_stop("Для прогноза в файле периодов нужен полный цикл из четырёх строк: отбор, пауза, закачка, пауза "
+                 "(например: 01.11.2027 prod, 01.05.2028 none, 01.04.2028 inj, 16.10.2028 none, по датам).")
+        return
 
     # ============================================================
     # ===== НОВЫЙ РЕЖИМ: ПРОГНОЗ С ВАРЬИРОВАНИЕМ =====
@@ -4692,3 +4779,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    if _web_errors:
+        sys.exit(1)
