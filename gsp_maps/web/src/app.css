@@ -281,3 +281,16 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 
 .tip-head.grab { cursor: grab; touch-action: none; user-select: none; }
 .tip-head.grab:active { cursor: grabbing; }
+
+/* выбор нескольких групп */
+.group-pick { position: relative; }
+.group-pick > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.group-pick > summary::-webkit-details-marker { display: none; }
+.group-pick > summary span { color: var(--muted); font-size: 12px; }
+.group-pick > summary b { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-pick > summary::after { content: '▾'; color: var(--muted); font-size: 11px; }
+.group-menu { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; min-width: 210px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.16); padding: 8px 10px; display: grid; gap: 4px; }
+.group-menu .check { margin: 0; display: flex; align-items: center; gap: 8px; }
+.group-menu-row { display: flex; gap: 6px; margin-top: 4px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.gdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.map-chip .gdot { margin-right: 5px; }

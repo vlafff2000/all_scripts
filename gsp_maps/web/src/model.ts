@@ -1,4 +1,4 @@
-import { ALL_GSP, type GspData, type SeasonData, type SeasonInfo, type WaterRec } from './api'
+import { isMulti, type GspData, type SeasonData, type SeasonInfo, type WaterRec } from './api'
 import type { SeasonScope } from './prefs'
 
 export const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
@@ -256,7 +256,7 @@ export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: strin
   const keys = multi ? scope!.keys : [season]
   if (paint === 'entry') {
     // внутри ГСП важна очерёдность включения (цвет — место в ряду), для всего объекта — дни от начала сезона
-    const byDays = g.gsp === ALL_GSP
+    const byDays = isMulti(g.gsp)
     const info = new Map((g.seasons[kind as 'Отбор' | 'Закачка'] || []).map(s => [s.key, s]))
     const per = new Map<number, { frac: number[]; off: number[]; rank: number[]; of: number[]; keys: string[]; day: number[] }>()
     let used = 0
