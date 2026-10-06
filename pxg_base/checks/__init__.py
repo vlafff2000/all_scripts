@@ -33,6 +33,7 @@ REGISTRY: Dict[str, str] = {
     "Перераспределение_отборов_по_сезонам_или_режиму_EI": "misc:check_redistribution_ei",
     "Преобразование_исходных_таблиц_ГДИ_в_базу": "misc:check_gdi",
     "Итоговая_таблица_давлений_2006_2025": "pressures:check_total_table",
+    "Создание_schedule_файла_технологического_режима": "schedule_tr:check_schedule_tr",
 }
 
 
