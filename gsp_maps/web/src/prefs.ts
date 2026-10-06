@@ -54,3 +54,10 @@ export const labelMode = pref<'num' | 'val' | 'none'>('gsp.labels', 'num', raw =
 export const syncMaps = pref<boolean>('gsp.cmp.sync', true)
 export const hideIdle = pref<boolean>('gsp.hideidle', false)
 export const minValue = pref<number>('gsp.minvalue', 0, raw => { const v = Number(raw); return v >= 0 && v < 1e6 ? v : 0 })
+
+export const tipMode = pref<'float' | 'dock'>('gsp.tipmode', 'dock', raw => (raw === 'float' ? 'float' : 'dock'))
+export const SIDE_MIN = 260, SIDE_MAX = 760
+export const sideWidth = pref<number>('gsp.sidew', 340, raw => { const v = Number(raw); return v >= SIDE_MIN && v <= SIDE_MAX ? v : 340 })
+const applySide = () => { document.documentElement.style.setProperty('--side-w', sideWidth.get() + 'px') }
+sideWidth.subscribe(applySide)
+applySide()
