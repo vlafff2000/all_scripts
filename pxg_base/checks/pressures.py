@@ -140,10 +140,10 @@ def check_pressure_rows(rep: Report, wells, dates, pressure, where: dict, label:
         for k, g in ok.groupby("k"):
             g = g.sort_values("d")
             arr = g["n"].to_numpy(dtype=float)
-            for i in qc.outliers(arr)[:1]:
+            for i in qc.spikes(arr, floor=1.0)[:1]:
                 if shown < 30:
-                    rep.warn("OUTLIER", "%s сильно отличается от остальных замеров скважины (медиана %.1f)" % (label, np.median(arr)),
-                             well=k, when=g["d"].iloc[i], value=arr[i], **where)
+                    rep.warn("OUTLIER", "%s резко отличается от соседних замеров скважины (медиана рядом %.1f)" % (
+                        label, np.median(arr[max(0, i - 3):i + 4])), well=k, when=g["d"].iloc[i], value=arr[i], **where)
                 shown += 1
             for a, b in qc.stuck_runs(list(arr), 6)[:1]:
                 rep.note("OUTLIER", "Одно и то же значение %d замеров подряд" % (b - a), well=k, when=g["d"].iloc[a], value=arr[a], **where)
@@ -179,10 +179,14 @@ def check_include_1002(v: Dict[str, str]) -> Report:
             else:
                 rep.error("HEADER", "Не найден столбец давления (ожидается «Рпл пересчет на верх перфораций, бар»)", **where)
                 return rep
-    if "перфорац" not in pcol.lower() or "бар" not in pcol.lower():
-        rep.warn("HEADER", "Давление будет взято из столбца «%s», а не «Рпл пересчет на верх перфораций, бар»" % pcol,
-                 hint="Модуль берёт первый столбец, в названии которого есть «бар»", **where)
     bars = [c for c in df.columns if "бар" in c.lower()]
+    if "перфорац" not in pcol.lower() or "бар" not in pcol.lower():
+        if bars:
+            rep.warn("HEADER", "Давление будет взято из столбца «%s», а не «Рпл пересчет на верх перфораций, бар»" % pcol,
+                     hint="Модуль берёт первый столбец, в названии которого есть «бар»", **where)
+        else:
+            rep.note("HEADER", "Столбца со словом «бар» нет: давление будет взято из «%s» как есть, без пересчёта единиц" % pcol,
+                     hint="Это обычный вид базы давлений наблюдательных скважин; значения идут в include как бары", **where)
     if len(bars) > 1:
         rep.warn("HEADER", "Несколько столбцов со словом «бар»: %s; будет первый" % ", ".join(bars), **where)
     wells = df[wcol].astype(str).str.strip()

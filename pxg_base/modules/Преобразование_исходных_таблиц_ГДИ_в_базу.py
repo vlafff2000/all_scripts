@@ -454,6 +454,28 @@ def process_wells_data(input_files, output_file, periods_file=None, gsp_mapping_
         return False
 
 
+def parse_date_texts(series):
+    """Даты из текста по одной: ГГГГ-ММ-ДД читается как есть, остальное (ДД.ММ.ГГГГ) — днём вперёд.
+
+    Общий pd.to_datetime(dayfirst=True) путает месяц с днём в ISO-датах (2025-08-04 → 04.08 → апрель) и на pandas 2+
+    подгоняет весь столбец под формат первой строки: даты в другом формате становятся пустыми."""
+    parsed = {}
+    for value in series.dropna().unique():
+        text = str(value).split()[0] if str(value).strip() else ''
+        if re.match(r'^\d{4}-\d{1,2}-\d{1,2}$', text):
+            parts = text.split('-')
+            try:
+                parsed[value] = datetime(int(parts[0]), int(parts[1]), int(parts[2]))
+            except ValueError:
+                parsed[value] = pd.NaT
+        else:
+            try:
+                parsed[value] = pd.to_datetime(text, errors='coerce', dayfirst=True)
+            except (ValueError, TypeError):
+                parsed[value] = pd.NaT
+    return pd.to_datetime(series.map(parsed), errors='coerce')
+
+
 def clean_apostrophes(df):
     """
     Очистка всех столбцов от апострофов и преобразование в правильные типы данных.
@@ -549,8 +571,7 @@ def clean_apostrophes(df):
 
         elif col in date_columns:
             # Даты
-            df[col] = df[col].str.split().str[0]
-            df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+            df[col] = parse_date_texts(df[col])
 
         # text_columns оставляем как есть (уже очищенные от кавычек)
 
