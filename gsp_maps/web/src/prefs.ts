@@ -59,3 +59,9 @@ export const minValue = pref<number>('gsp.minvalue', 0, raw => { const v = Numbe
 export type SeasonScope = 'one' | 'pick' | 'all'
 export const seasonScope = pref<SeasonScope>('gsp.scope', 'one', raw => (raw === 'pick' || raw === 'all' ? raw : 'one'))
 export const pickedSeasons = pref<string[]>('gsp.picked', [], raw => (Array.isArray(raw) ? raw.map(String) : []))
+export const tipMode = pref<'float' | 'dock'>('gsp.tipmode', 'dock', raw => (raw === 'float' ? 'float' : 'dock'))
+export const SIDE_MIN = 260, SIDE_MAX = 760
+export const sideWidth = pref<number>('gsp.sidew', 340, raw => { const v = Number(raw); return v >= SIDE_MIN && v <= SIDE_MAX ? v : 340 })
+const applySide = () => { document.documentElement.style.setProperty('--side-w', sideWidth.get() + 'px') }
+sideWidth.subscribe(applySide)
+applySide()

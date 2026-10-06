@@ -1,3 +1,4 @@
+import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { legendOpen, pickedSeasons, seasonScope, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
@@ -11,7 +12,7 @@ interface Props {
   options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; title: string
   /** Режим сравнения: общий масштаб кругов и общий вид (зум/сдвиг) у двух карт. */
   /** Куда выводить подсказку: элемент вне карты (тогда она не закрывает скважины) или null — рядом с курсором. */
-  tipHost?: HTMLElement | null; tipTag?: string
+  tipHost?: HTMLElement | null; tipTag?: string; stickyTip?: boolean
   /** Сезоны для раскраски «Ввод» и «Обводнённость»: выбор периода показывается в панели «Вид карты», только если передан. */
   multi?: { seasons: SeasonInfo[]; calcs: Map<string, SeasonCalc> }
   compact?: boolean; scaleMax?: number; view?: View; onView?: (v: View) => void
@@ -31,7 +32,7 @@ const readPal = (): Pal => ({
 const Glyph = memo(function Glyph(p: {
   well: number; x: number; y: number; r: number; rmax: number; total: number; share: number; months: number[]; order: number[]; monthColors: string[]
   sectors: boolean; paint?: { color: string; label: string } | null; water: { factor: number | null; flow: number | null; color: string }[]; maxFlow: number; showShare: boolean
-  selected: boolean; label: string; dim: boolean; pal: Pal
+  selected: boolean; label: string; dim: boolean; hot?: boolean; pal: Pal
 }) {
   const { x, y, rmax, pal } = p
   const idle = p.paint === undefined ? !(p.total > 0) : !p.paint
@@ -83,6 +84,7 @@ const Glyph = memo(function Glyph(p: {
   const lx = inside ? x : x + r + rmax * 0.1, ly = y
   return (
     <g className="glyph" data-well={p.well} opacity={p.dim ? 0.22 : 1}>
+      {p.hot && !p.selected && <circle cx={x} cy={y} r={r + rmax * 0.18} fill="none" stroke={pal.accent} strokeWidth={rmax * 0.07} />}
       {p.selected && <circle cx={x} cy={y} r={r + rmax * 0.26} fill={pal.accent} fillOpacity={0.16} stroke={pal.accent} strokeWidth={rmax * 0.06} />}
       {els}
       {p.label && (inside
@@ -98,7 +100,7 @@ const Glyph = memo(function Glyph(p: {
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, compact, scaleMax, view: viewProp, onView }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
@@ -274,7 +276,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const small = !!compact || !legendExpanded
   const LW = paintData ? 270 : small ? 124 : 248
   const legH = 46 + sizeH + (!paintData && !small && usedMonths.length > 1 ? 44 : 0) + (!paintData && !small && options.water ? (wm.list.length > 1 ? 52 : 26) : 0)
-  const tipWell = tip ? placed.find(q => q.well === tip.well) : null
+  // без наведения подсказка остаётся на выбранной скважине (только в панели); при наведении следует за курсором
+  const tipId = tip ? tip.well : tipHost && stickyTip && selected !== null ? selected : null
+  const tipWell = tipId !== null ? placed.find(q => q.well === tipId) : null
   const tipIdx = tipWell ? placed.indexOf(tipWell) : -1
   const [t1, t2] = [title.split(' · ').slice(0, 2).join(' · '), paintData?.scopeNote || title.split(' · ')[2] || '']
 
@@ -343,7 +347,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 months={win.months[n] || []} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
                 paint={paintData ? (paintData.vals.has(q.well) ? { color: rampColor(paintData.stops, (paintData.vals.get(q.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)), label: paintData.vals.get(q.well)!.label } : null) : undefined}
                 water={options.water ? rings.get(q.well) || [] : []} maxFlow={maxFlow} showShare={options.share}
-                selected={selected === q.well || group.includes(q.well)} dim={!!tip && tip.well !== q.well && !group.includes(q.well)} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
+                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
             ))}
           </g>
         </g>
@@ -447,23 +451,20 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <button type="button" title="Отдалить" onClick={() => zoomBy(1 / 1.5)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10" /></svg></button>
         <button type="button" title="Показать всю карту" onClick={resetView}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg></button>
       </div>
-      {tip && tipWell && (() => {
+      {tipWell && (() => {
         const st = win.stats[tipIdx], share = st.total > 0 && win.sumAll > 0 ? st.total / win.sumAll : 0
-        const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || [], mx = Math.max(1, ...row), bw = 220 / Math.max(1, row.length)
+        const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || []
         const ws = water.get(tipWell.well) || []
-        const W = 252, left = tip.x + 18 + W > size.w ? tip.x - 18 - W : tip.x + 18
+        const W = 252, tx = tip?.x ?? 0, ty = tip?.y ?? 0, left = tx + 18 + W > size.w ? tx - 18 - W : tx + 18
         const node = (
-          <div className={'tip' + (tipHost ? ' docked' : '')} style={tipHost ? undefined : { left: Math.max(8, left), top: Math.max(8, Math.min(tip.y - 20, size.h - 260)) }}>
+          <div className={'tip' + (tipHost ? ' docked' : '')} style={tipHost ? undefined : { left: Math.max(8, left), top: Math.max(8, Math.min(ty - 20, size.h - 260)) }}>
             {tipTag && <div className="tip-tag">{tipTag}</div>}
             <div className="tip-head"><b>№ {tipWell.well}</b>{tipWell.dir && <span className="tip-dir">{tipWell.dir}</span>}</div>
             {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? rampColor(paintData.stops, (paintData.vals.get(tipWell.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
             <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
             <div className="tip-share"><span><i style={{ width: Math.min(100, share * 100 * 4) + '%' }} /></span>{share > 0 ? fmtPct(share) + ' ГСП' : 'не работала'}</div>
-            <svg viewBox="0 0 220 38" className="tip-spark" aria-hidden="true">
-              <rect x={a * bw} width={Math.max(1, (b - a + 1) * bw)} height={38} className="daily-win" />
-              {row.map((v, j) => v > 0 && <rect key={j} x={j * bw} width={Math.max(0.6, bw - 0.3)} y={38 - (v / mx) * 34} height={(v / mx) * 34} rx={Math.min(1, bw / 3)} fill={pal.gas} opacity={j >= a && j <= b ? 0.95 : 0.3} />)}
-              <line x1={0} x2={220} y1={37.5} y2={37.5} stroke={pal.line} />
-            </svg>
+            <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive={!!tipHost} fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
+              series={[{ key: 'd', label: 'Расход', color: pal.gas, y: row.map(v => Math.max(0, v)) }]} />
             <div className="tip-kpis"><div><span>в среднем</span><b>{fmtTh(st.mean)}</b><small>тыс. м³/сут</small></div><div><span>дней с расходом</span><b>{st.days}</b><small>из {b - a + 1}</small></div></div>
             {ws.length > 0 && <div className="tip-water">{ws.map((w, i) => (
               <div key={i}><i style={{ background: wm.color.get(w.year * 12 + w.month) }} />{MONTH_NAME[w.month]} {w.year}<span>{w.note !== 'Ок' ? w.note : fmt1(w.flow ?? 0) + ' л/ч · ВФ ' + Math.round(w.factor ?? 0)}</span></div>))}</div>}

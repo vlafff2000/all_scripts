@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import Chart from './Chart'
 import { ALL_GSP, getSeason, type GspData } from './api'
 import { SeasonCalc, fmt1, fmtInt, fmtMln, fmtPct, fmtTh } from './model'
 
@@ -33,54 +34,21 @@ function dailyOf(c: SeasonCalc, wells: number[]) {
 }
 const cumulative = (d: number[]) => { let s = 0; return d.map(v => (s += v)) }
 
-const W = 560, H = 150, ML = 40, MR = 12, MT = 8, MB = 22
-function Axis({ max, unit, fmt }: { max: number; unit: string; fmt: (v: number) => string }) {
-  return (
-    <>
-      {[0, 0.5, 1].map(t => <g key={t}><line x1={ML} x2={W - MR} y1={MT + (1 - t) * (H - MT - MB)} y2={MT + (1 - t) * (H - MT - MB)} className="w-grid" />
-        <text x={ML - 5} y={MT + (1 - t) * (H - MT - MB) + 3.5} textAnchor="end" className="w-t">{fmt(max * t)}</text></g>)}
-      <text x={ML} y={MT - 1} className="w-t" dy={-1}>{unit}</text>
-    </>
-  )
-}
-
 function Bars({ items, unit, fmt, onPick, mark }: { items: { label: string; v: number; id?: number }[]; unit: string; fmt: (v: number) => string; onPick?: (id: number) => void; mark?: number | null }) {
-  const max = Math.max(1e-9, ...items.map(i => i.v))
-  const bw = (W - ML - MR) / Math.max(1, items.length)
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-chart" role="img">
-      <Axis max={max} unit={unit} fmt={fmt} />
-      {items.map((it, k) => {
-        const h = (it.v / max) * (H - MT - MB), x = ML + k * bw
-        return (
-          <g key={k} onClick={() => it.id !== undefined && onPick?.(it.id)} style={{ cursor: onPick ? 'pointer' : undefined }}>
-            <title>{it.label + ': ' + fmt(it.v) + ' ' + unit}</title>
-            <rect x={x + bw * 0.12} y={H - MB - h} width={bw * 0.76} height={Math.max(0, h)} rx={Math.min(3, bw * 0.2)} fill={mark !== undefined && mark === it.id ? 'var(--accent-strong)' : 'var(--map-gas)'} />
-            {(items.length <= 14 || k % Math.ceil(items.length / 14) === 0) && <text x={x + bw / 2} y={H - 6} textAnchor="middle" className="w-t">{it.label}</text>}
-          </g>
-        )
-      })}
-      <line x1={ML} x2={W - MR} y1={H - MB} y2={H - MB} className="w-axis" />
-    </svg>
-  )
+  return <Chart mode="bars" labels={items.map(i => i.label)} fmt={fmt} unit={unit} height={190} label="Столбчатая диаграмма"
+    series={[{ key: 'v', label: unit, color: 'var(--map-gas)', y: items.map(i => i.v) }]}
+    barColor={onPick || mark !== undefined ? j => (mark !== undefined && mark === items[j].id ? 'var(--accent-strong)' : undefined) : undefined}
+    onPick={onPick ? j => { const id = items[j]?.id; if (id !== undefined) onPick(id) } : undefined} />
 }
 
 interface Line { name: string; ys: number[]; color: string; dash?: boolean; bold?: boolean }
 function Lines({ lines, n, unit, fmt, win }: { lines: Line[]; n: number; unit: string; fmt: (v: number) => string; win?: [number, number] }) {
-  const max = Math.max(1e-9, ...lines.flatMap(l => l.ys))
-  const x = (j: number) => ML + ((j + 0.5) / Math.max(1, n)) * (W - ML - MR), y = (v: number) => MT + (1 - v / max) * (H - MT - MB)
   return (
-    <svg viewBox={`0 0 ${W + 70} ${H}`} className="w-chart" role="img">
-      <Axis max={max} unit={unit} fmt={fmt} />
-      {win && <rect x={x(win[0]) - 1} width={Math.max(2, x(win[1]) - x(win[0]) + 2)} y={MT} height={H - MT - MB} className="daily-win" />}
-      {lines.map((l, k) => l.ys.length > 0 && (
-        <g key={k}>
-          <path d={'M' + l.ys.map((v, j) => `${x(j).toFixed(1)},${y(v).toFixed(1)}`).join('L')} fill="none" stroke={l.color} strokeWidth={l.bold ? 2.4 : 1.5} strokeDasharray={l.dash ? '5 3' : undefined} strokeLinejoin="round" />
-          <text x={x(l.ys.length - 1) + 4} y={y(l.ys[l.ys.length - 1]) + 3.5} className="w-t" style={{ fill: 'var(--ink)' }}>{l.name}</text>
-        </g>))}
-      <line x1={ML} x2={W - MR} y1={H - MB} y2={H - MB} className="w-axis" />
-      <text x={ML} y={H - 6} className="w-t">день 1</text><text x={W - MR} y={H - 6} textAnchor="end" className="w-t">день {n}</text>
-    </svg>
+    <>
+      <Chart mode="lines" labels={Array.from({ length: n }, (_, j) => 'день ' + (j + 1))} win={win} fmt={fmt} unit={unit} height={220} label="Накопленные кривые"
+        series={lines.filter(l => l.ys.length > 0).map(l => ({ key: l.name, label: l.name, color: l.color, y: l.ys, dash: l.dash, bold: l.bold }))} />
+      <div className="cum-legend">{lines.map(l => <span key={l.name}><i style={{ background: l.color }} />{l.name}</span>)}</div>
+    </>
   )
 }
 

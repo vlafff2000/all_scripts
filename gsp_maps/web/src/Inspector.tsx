@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { GspData } from './api'
+import Chart, { Series } from './Chart'
 import { GAS, MONTH_NAME, SeasonCalc, WATER, fmt1, fmtDay, fmtInt, fmtMln, fmtPct, fmtTh, place, waterByWell } from './model'
 
 interface Props {
@@ -7,49 +8,26 @@ interface Props {
   selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; onFocus: (w: number) => void
 }
 
-function DailyBars({ row, days, a, b }: { row: number[]; days: number[]; a: number; b: number }) {
-  const W = 300, H = 90, mx = Math.max(1, ...row), bw = W / row.length
-  return (
-    <svg viewBox={`0 0 ${W} ${H + 14}`} className="daily" role="img" aria-label="Суточный расход скважины по дням сезона">
-      <rect x={a * bw} width={Math.max(1, (b - a + 1) * bw)} y={0} height={H} className="daily-win" />
-      {row.map((v, j) => v > 0 && <rect key={j} x={j * bw} width={Math.max(0.6, bw - 0.4)} y={H - (v / mx) * H} height={(v / mx) * H} fill={GAS} opacity={j >= a && j <= b ? 1 : 0.35} />)}
-      <line x1={0} x2={W} y1={H} y2={H} className="daily-axis" />
-      <text x={0} y={H + 11} className="daily-t">{fmtDay(days[0])}</text>
-      <text x={W} y={H + 11} textAnchor="end" className="daily-t">{fmtDay(days[days.length - 1])}</text>
-      <text x={W} y={9} textAnchor="end" className="daily-t">макс. {fmtTh(mx)} тыс. м³/сут</text>
-    </svg>
-  )
-}
-
 const LINES = ['#d1495b', '#2e86ab', '#3b8b5a', '#e0a100', '#7b5ea7', '#1b998b', '#c7522a', '#5f7178']
+
+function DailyBars({ row, days, a, b }: { row: number[]; days: number[]; a: number; b: number }) {
+  return <Chart days={days} mode="bars" win={[a, b]} fmt={fmtTh} unit="тыс. м³/сут" height={170} label="Суточный расход по дням сезона"
+    series={[{ key: 'd', label: 'Расход', color: GAS, y: row.map(v => Math.max(0, v)) }]} />
+}
 
 /** Накопленный расход по дням сезона: по одной линии на скважину (до 8) и, если нужно, суммарная. */
 function CumChart({ calc, wells, a, b, total, prev }: { calc: SeasonCalc; wells: number[]; a: number; b: number; total?: boolean; prev?: SeasonCalc | null }) {
-  const W = 300, H = 120, nd = calc.nd
-  const series = wells.filter(w => calc.index.has(w)).slice(0, 8).map((w, k) => {
-    let c = 0
-    return { w, color: LINES[k], y: calc.flow[calc.index.get(w)!].map(v => (c += Math.max(0, v))) }
-  })
-  if (total) {
-    let c = 0
-    series.unshift({ w: -1, color: '#1b2a31', y: Array.from({ length: nd }, (_, j) => (c += wells.reduce((s, w) => s + Math.max(0, calc.index.has(w) ? calc.flow[calc.index.get(w)!][j] : 0), 0))) })
-  }
-  // прошлый сезон (пунктир): та же скважина, по номеру дня от начала сезона
-  const old = prev && wells.length === 1 && prev.index.has(wells[0]) ? (() => { let c = 0; return prev.flow[prev.index.get(wells[0])!].map(v => (c += Math.max(0, v))) })() : null
-  const mx = Math.max(1, ...series.map(s => s.y[nd - 1] || 0), ...(old ? [old[old.length - 1] || 0] : [])), x = (j: number) => (nd > 1 ? (j / (nd - 1)) * W : 0)
+  const nd = calc.nd
+  const cum = (row: number[]) => { let c = 0; return row.map(v => (c += Math.max(0, v))) }
+  const series: Series[] = wells.filter(w => calc.index.has(w)).slice(0, 8).map((w, k) => ({ key: w, label: String(w), color: LINES[k], y: cum(calc.flow[calc.index.get(w)!]) }))
+  if (total) series.unshift({ key: -1, label: 'сумма', color: '#1b2a31', bold: true, y: cum(Array.from({ length: nd }, (_, j) => wells.reduce((s, w) => s + (calc.index.has(w) ? calc.flow[calc.index.get(w)!][j] : 0), 0))) })
+  const old = prev && wells.length === 1 && prev.index.has(wells[0]) ? cum(prev.flow[prev.index.get(wells[0])!]).slice(0, nd) : null
+  if (old) series.push({ key: 'old', label: 'прошлый сезон', color: '#8a979c', dash: true, y: old })
   return (
     <>
-      <svg viewBox={`0 0 ${W} ${H + 14}`} className="cum" role="img" aria-label="Накопленный расход по дням сезона">
-        <rect x={x(a)} width={Math.max(1, x(b) - x(a))} y={0} height={H} className="daily-win" />
-        {old && <polyline fill="none" stroke="#8a979c" strokeWidth={1.4} strokeDasharray="4 3" points={old.slice(0, nd).map((v, j) => x(j).toFixed(1) + ',' + (H - (v / mx) * H).toFixed(1)).join(' ')} />}
-        {series.map(s => <polyline key={s.w} fill="none" stroke={s.color} strokeWidth={s.w === -1 ? 2.2 : 1.6} strokeLinejoin="round" points={s.y.map((v, j) => x(j).toFixed(1) + ',' + (H - (v / mx) * H).toFixed(1)).join(' ')} />)}
-        <line x1={0} x2={W} y1={H} y2={H} className="daily-axis" />
-        <text x={0} y={H + 11} className="daily-t">{fmtDay(calc.days[0])}</text>
-        <text x={W} y={H + 11} textAnchor="end" className="daily-t">{fmtDay(calc.days[nd - 1])}</text>
-        <text x={W} y={9} textAnchor="end" className="daily-t">макс. {fmtMln(mx)} млн м³</text>
-      </svg>
+      <Chart days={calc.days} mode="lines" win={[a, b]} fmt={fmtMln} unit="млн м³" height={190} label="Накопленный расход по дням сезона" series={series} />
       {old && <div className="cum-legend"><span><i style={{ background: series[0]?.color }} />этот сезон</span><span><i style={{ background: '#8a979c' }} />прошлый сезон</span></div>}
-      {series.length > 1 && <div className="cum-legend">{series.map(s => <span key={s.w}><i style={{ background: s.color }} />{s.w === -1 ? 'сумма' : s.w}</span>)}</div>}
+      {series.filter(s => s.key !== 'old').length > 1 && <div className="cum-legend">{series.filter(s => s.key !== 'old').map(s => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}</div>}
     </>
   )
 }

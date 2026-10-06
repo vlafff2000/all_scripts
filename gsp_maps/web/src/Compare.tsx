@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSeason, type GspData } from './api'
+import Chart from './Chart'
 import MapView, { type MapOptions, type View } from './MapView'
-import { syncMaps, usePref } from './prefs'
+import SideGrip from './SideGrip'
+import { syncMaps, tipMode, usePref } from './prefs'
 import { SeasonCalc, fmt1, fmtDay, fmtMln, fmtPct, fmtTh } from './model'
 
 interface Props {
@@ -49,6 +51,7 @@ function useSeason(g: GspData, kind: string, key: string) {
 }
 
 export default function Compare({ g, kind, options, onOptions, inspector }: Props) {
+  const tmode = usePref(tipMode)
   const seasons = g.seasons[kind as 'Отбор' | 'Закачка'] || []
   const keys = seasons.map(s => s.key)
   const [pa, setPa] = useState(''), [pb, setPb] = useState('')
@@ -102,7 +105,7 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
 
   const mapFor = (side: string, c: SeasonCalc | null, key: string, w: [number, number] | null) => c && w ? (
     <MapView g={g} calc={c} kind={kind} season={key} a={w[0]} b={w[1]} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title(side, c, key, w)}
-      options={options} onOptions={onOptions} compact tipHost={inspector ? dock : null} tipTag={`${side} · ${key}`} scaleMax={scaleMax} view={side === 'А' ? viewA : viewB} onView={side === 'А' ? onViewA : onViewB} />
+      options={options} onOptions={onOptions} compact tipHost={inspector && tmode === 'dock' ? dock : null} stickyTip={false} tipTag={`${side} · ${key}`} scaleMax={scaleMax} view={side === 'А' ? viewA : viewB} onView={side === 'А' ? onViewA : onViewB} />
   ) : <div className="map-wrap"><div className="empty-map">{c ? 'Сезон ' + key + ' закончился раньше выбранных дней.' : 'Считаю…'}</div></div>
 
   return (
@@ -129,7 +132,7 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
             <CompareTimeline items={[{ calc: ca!, key: keyA, side: 'А' }]} nd={ca!.nd} a={a} b={b} setWindow={setWindowA} th={34} />
             <CompareTimeline items={[{ calc: cb!, key: keyB, side: 'Б' }]} nd={cb!.nd} a={a2} b={b2} setWindow={setWindowB} th={34} /></div>)}
       </div>
-      {inspector && <div className="side-col"><div className="tip-dock" ref={setDock} aria-live="polite" />{ready && <ComparePanel ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} a2={a2} b2={b2} selected={selected} group={group} onSelect={pick} />}</div>}
+      {inspector && <div className="side-col"><SideGrip />{tmode === 'dock' && <div className="tip-dock" ref={setDock} aria-live="polite" />}{ready && <ComparePanel ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} a2={a2} b2={b2} selected={selected} group={group} onSelect={pick} />}</div>}
     </div>
   )
 }
@@ -235,23 +238,12 @@ function Row({ label, a, b, f, unit, pct = true }: { label: string; a: number | 
 }
 
 function CumCompare({ rows, wins, nd, keyA, keyB }: { rows: [number[] | null, number[] | null]; wins: [number, number][]; nd: number; keyA: string; keyB: string }) {
-  const W = 300, H = 110
   const cum = (r: number[] | null) => { const o: number[] = []; let s = 0; for (const v of r || []) { s += Math.max(0, v); o.push(s) } return o }
   const [xa, xb] = [cum(rows[0]), cum(rows[1])]
-  const mx = Math.max(1, ...xa, ...xb)
-  const x = (j: number) => ((j + 0.5) / nd) * W, y = (v: number) => H - (v / mx) * (H - 6)
-  const line = (c: number[]) => 'M' + c.map((v, j) => `${x(j).toFixed(1)},${y(v).toFixed(1)}`).join('L')
   return (
     <>
-      <svg viewBox={`0 0 ${W} ${H + 14}`} className="cum" role="img" aria-label="Накопленный расход по дням от старта сезона, два сезона">
-        {wins.map(([x0, x1], k) => <rect key={k} x={(x0 / nd) * W} width={Math.max(1, ((x1 - x0 + 1) / nd) * W)} y={0} height={H} className="daily-win" opacity={wins[0][0] === wins[1][0] && wins[0][1] === wins[1][1] && k ? 0 : 1} />)}
-        <path d={line(xa)} fill="none" className="cmp-line-a" strokeWidth={1.8} />
-        <path d={line(xb)} fill="none" stroke="var(--accent)" strokeWidth={2} />
-        <line x1={0} x2={W} y1={H} y2={H} className="daily-axis" />
-        <text x={0} y={H + 11} className="daily-t">день 1</text>
-        <text x={W} y={H + 11} textAnchor="end" className="daily-t">день {nd}</text>
-        <text x={W} y={9} textAnchor="end" className="daily-t">макс. {fmtMln(mx)} млн м³</text>
-      </svg>
+      <Chart mode="lines" labels={Array.from({ length: nd }, (_, j) => 'день ' + (j + 1))} win={wins[0]} fmt={fmtMln} unit="млн м³" height={190} label="Накопленный расход по дням от старта сезона, два сезона"
+        series={[{ key: 'a', label: 'А · ' + keyA, color: '#8a979c', dash: true, y: xa }, { key: 'b', label: 'Б · ' + keyB, color: 'var(--accent)', y: xb }]} />
       <div className="cum-legend"><span><i className="cmp-key-a" />А · {keyA}: {fmtMln(xa[xa.length - 1] || 0)}</span><span><i style={{ background: 'var(--accent)' }} />Б · {keyB}: {fmtMln(xb[xb.length - 1] || 0)}</span></div>
     </>
   )

@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ALL_GSP, exportExcel, getGsp, getSeason, getState, saveImage, setAllGroups, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
+import SideGrip from './SideGrip'
 import MapView, { type MapHandle } from './MapView'
 import { SeasonCalc, fmtDay, scopeKeys } from './model'
 import SharesPage from './SharesPage'
 import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
-import { bubbleScale, hideIdle, minValue, labelMode, paintMode, fixedScale, inspectorOpen, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { bubbleScale, hideIdle, minValue, labelMode, paintMode, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
 
 const PAGES = [
@@ -43,7 +44,7 @@ export default function App() {
   const [page, setPage] = useState<PageId>(routeOf())
   const collapsed = usePref(sidebarCollapsed), currentTheme = usePref(theme)
   const mode = usePref(posMode), kind = usePref(lastKind), gspPref = usePref(lastGsp)
-  const sec = usePref(sectors), water = usePref(showWater), share = usePref(showShare), fixed = usePref(fixedScale), paint = usePref(paintMode), bscale = usePref(bubbleScale), labels = usePref(labelMode), idleOff = usePref(hideIdle), minV = usePref(minValue), insp = usePref(inspectorOpen)
+  const sec = usePref(sectors), water = usePref(showWater), share = usePref(showShare), fixed = usePref(fixedScale), paint = usePref(paintMode), bscale = usePref(bubbleScale), labels = usePref(labelMode), idleOff = usePref(hideIdle), minV = usePref(minValue), insp = usePref(inspectorOpen), tmode = usePref(tipMode)
   const [g, setG] = useState<GspData | null>(null)
   const [gErr, setGErr] = useState('')
   const [seasonKey, setSeasonKey] = useState('')
@@ -207,12 +208,12 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp ? tipDock : null} multi={multi}
+          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
         </div>
-        {insp && <div className="side-col"><div className="tip-dock" ref={setTipDock} aria-live="polite" /><Inspector g={g} calc={calc} prev={prev} prevKey={prevKey} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} onFocus={w => map.current?.focus(w)} /></div>}
+        {insp && <div className="side-col"><SideGrip />{tmode === 'dock' && <div className="tip-dock" ref={setTipDock} aria-live="polite" />}<Inspector g={g} calc={calc} prev={prev} prevKey={prevKey} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} onFocus={w => map.current?.focus(w)} /></div>}
       </div>)
   }
   const showBar = ready && !!g && page !== 'data'
@@ -245,7 +246,7 @@ export default function App() {
               {['Отбор', 'Закачка'].map(k => <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => lastKind.set(k)}>{k}</button>)}</div>
             {page !== 'compare' && <label className="sel"><span>Сезон</span>
               <select value={season} onChange={e => setSeasonKey(e.target.value)}>{seasons.map(s => <option key={s.key}>{s.key}</option>)}</select></label>}
-            {page === 'compare' && <><span className="spacer" /><button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сравнения">Сведения</button></>}
+            {page === 'compare' && <><span className="spacer" /><button type="button" className="quiet" onClick={() => tipMode.set(tmode === 'dock' ? 'float' : 'dock')} title="Подсказка при наведении: в панели сведений или плавающая у курсора">{tmode === 'dock' ? 'Подсказка: в панели' : 'Подсказка: плавающая'}</button><button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сравнения">Сведения</button></>}
             {page === 'map' && <>
               <input className="find" inputMode="numeric" placeholder="Скважина №" aria-label="Найти скважину" value={find} onChange={e => goFind(e.target.value)} />
               <span className="spacer" />
@@ -258,6 +259,7 @@ export default function App() {
                   <button type="button" onClick={pngAll} disabled={!!batch}>Картинки всех сезонов<small>PNG по каждому сезону вида</small></button>
                 </div>
               </details>
+              <button type="button" className="quiet" onClick={() => tipMode.set(tmode === 'dock' ? 'float' : 'dock')} title="Подсказка при наведении: в панели сведений или плавающая у курсора">{tmode === 'dock' ? 'Подсказка: в панели' : 'Подсказка: плавающая'}</button>
               <button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сведений">Сведения</button>
             </>}
           </div>)}
