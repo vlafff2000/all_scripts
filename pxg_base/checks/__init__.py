@@ -20,6 +20,11 @@ REGISTRY: Dict[str, str] = {
     "Include_давлений_эксплуатационных_скважин": "pressures:check_include_exploit",
     "Include_давлений_наблюдательных_скважин_с_пересчётом_по_MD": "pressures:check_include_md",
     "Include_факта_из_модели_как_исторических_данных": "pressures:check_include_fact",
+    "Сбор_данных_по_межколонным_давлениям": "interkolonka:check_collect",
+    "Анализ_межколонных_давлений_для_авторского_надзора": "interkolonka:check_analysis",
+    "Журнал_отбора_и_закачки_2019_2024": "interkolonka:check_journal",
+    "Создание_базы_уровней_и_давлений_Щигровский_горизонт": "levels:check_shigrovsky",
+    "Создание_базы_уровней_и_давлений_контрольные_горизонты": "levels:check_control",
     "Итоговая_таблица_давлений_2006_2025": "pressures:check_total_table",
 }
 
