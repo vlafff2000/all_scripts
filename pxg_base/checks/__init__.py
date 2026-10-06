@@ -25,6 +25,13 @@ REGISTRY: Dict[str, str] = {
     "Журнал_отбора_и_закачки_2019_2024": "interkolonka:check_journal",
     "Создание_базы_уровней_и_давлений_Щигровский_горизонт": "levels:check_shigrovsky",
     "Создание_базы_уровней_и_давлений_контрольные_горизонты": "levels:check_control",
+    "Выделение_Рмг_по_названиям_столбцов": "misc:check_rmg_names",
+    "Выделение_Рмг_по_номерам_столбцов": "misc:check_rmg_numbers",
+    "Сопоставление_таблиц_ВПР": "misc:check_vlookup",
+    "Извлечение_ключевых_слов_из_schedule": "misc:check_schedule",
+    "Перераспределение_отборов_в_процентах": "misc:check_redistribution_pct",
+    "Перераспределение_отборов_по_сезонам_или_режиму_EI": "misc:check_redistribution_ei",
+    "Преобразование_исходных_таблиц_ГДИ_в_базу": "misc:check_gdi",
     "Итоговая_таблица_давлений_2006_2025": "pressures:check_total_table",
 }
 

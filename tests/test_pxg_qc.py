@@ -79,11 +79,11 @@ def test_api_check(tmp_path):
     tree = make_flow_tree(tmp_path / "data")
     c = TestClient(app)
     mods = {m["id"]: m for m in c.get("/api/modules").json()["modules"]}
-    assert mods["Создание_базы_данных_расходов"]["check"] and not mods["Сопоставление_таблиц_ВПР"]["check"]
+    assert mods["Создание_базы_данных_расходов"]["check"] and mods["Сопоставление_таблиц_ВПР"]["check"]
     r = c.post("/api/check", json={"module": "Создание_базы_данных_расходов", "params": {"root": str(tree.root)}}).json()
     assert r["counts"]["ошибка"] == 0 and r["id"]
     assert c.get("/api/check/%s.xlsx" % r["id"]).status_code == 200
-    assert c.post("/api/check", json={"module": "Сопоставление_таблиц_ВПР", "params": {}}).status_code == 404
+    assert c.post("/api/check", json={"module": "Нет_такого_модуля", "params": {}}).status_code == 404
 
 
 def test_db_checks(tmp_path):
@@ -211,3 +211,63 @@ def test_levels_bases(tmp_path):
             ("предупреждение", "CROSS")} <= got, rep.to_text()
     rep = checks.run("Создание_базы_уровней_и_давлений_контрольные_горизонты", {"input_dir": str(tmp_path / "нет")})
     assert rep.counts()[qc.ERROR] == 1
+
+
+def test_all_modules_have_checks():
+    from pxg_base.registry import MODULES
+    assert [m[1] for m in MODULES if not checks.available(m[1])] == []
+
+
+def test_vlookup_and_schedule(tmp_path):
+    import pandas as pd
+    a, b = tmp_path / "a.xlsx", tmp_path / "b.xlsx"
+    pd.DataFrame({"Скв": ["1", "2", "3", "3"], "x": [1, 2, 3, 4]}).to_excel(a, index=False)
+    pd.DataFrame({"Скв": [1, 2, 2], "val": [5, 6, 7], "x": [0, 0, 0]}).to_excel(b, index=False)
+    rep = checks.run("Сопоставление_таблиц_ВПР", {"main_file": str(a), "lookup_file": str(b), "mode": "1",
+                                                  "main_key": "Скв", "lookup_key": "Скв", "columns": "val, x, нет"})
+    assert ("ошибка", "HEADER") in kinds(rep)
+    rep = checks.run("Сопоставление_таблиц_ВПР", {"main_file": str(a), "lookup_file": str(b), "mode": "1",
+                                                  "main_key": "Скв", "lookup_key": "Скв", "columns": "val, x"})
+    got = kinds(rep)
+    assert ("ошибка", "DUP") in got and ("предупреждение", "CROSS") in got, rep.to_text()
+    s = tmp_path / "s.inc"
+    s.write_text("WELSPECS\n 'A' /\n/\nDATES\n 1 'JAN' 2020 /\n/\nCOMPDATM\n 1 /\n/\nDATES\n 1 'JAN' 2020 /\n/\nWPIMULT\n 1 /\n", encoding="utf-8")
+    rep = checks.run("Извлечение_ключевых_слов_из_schedule", {"file": str(s)})
+    got = kinds(rep)
+    assert ("ошибка", "SYNTAX") in got and ("предупреждение", "DUP") in got, rep.to_text()
+    assert any("опечатк" in i.message for i in rep.issues)
+
+
+def test_rmg_and_redistribution(tmp_path):
+    import pandas as pd
+    f1, f2 = tmp_path / "1.xlsx", tmp_path / "2.xlsx"
+    pd.DataFrame([["Дата", "A", "ГИС Касимов"], ["01.01.2020", 1, 10.0], ["02.01.2020", 2, "abc"]]).to_excel(f1, index=False, header=False)
+    pd.DataFrame([["Дата", "ГИС Касимов", "A"], ["01.01.2020", 1, 10.0]]).to_excel(f2, index=False, header=False)
+    rep = checks.run("Выделение_Рмг_по_названиям_столбцов", {"paths": "%s\n%s\n%s" % (f1, f1, tmp_path / "нет")})
+    got = kinds(rep)
+    assert ("предупреждение", "NUM") in got and ("ошибка", "FILE") in got and ("заметка", "DUP") in got, rep.to_text()
+    rep = checks.run("Выделение_Рмг_по_номерам_столбцов", {"paths": "%s\n%s" % (f1, f2), "columns": "0 2 9"})
+    got = kinds(rep)
+    assert ("предупреждение", "HEADER") in got, rep.to_text()
+    book = tmp_path / "r.xlsx"
+    cols = ["Дата", "1:Дебит газа (И), ст.м3/сут", "1:Приёмистость газа (И), ст.м3/сут", "2:Дебит"]
+    with pd.ExcelWriter(book) as xw:
+        for name in ("Данные", "Другой"):
+            pd.DataFrame([["01.01.2020", 5, 0, 7], ["02.01.2020", 5, 0, "x"]], columns=cols).to_excel(xw, sheet_name=name, index=False)
+    seasons = tmp_path / "seasons.txt"
+    seasons.write_text("01.01.2020 prod\n01.04.2020 inj\n", encoding="utf-8")
+    rep = checks.run("Перераспределение_отборов_в_процентах", {"file": str(book), "seasons": str(seasons), "add_sheet": "1",
+                                                              "sub_sheet": "1", "pct_mode": "1", "percent": "150"})
+    got = kinds(rep)
+    assert {("ошибка", "CROSS"), ("ошибка", "RANGE"), ("предупреждение", "HEADER")} <= got, rep.to_text()
+
+
+def test_gdi(tmp_path):
+    import pandas as pd
+    f = tmp_path / "ГДИ 2022-2023.xlsx"
+    pd.DataFrame([["Скв", "Дата", "Рзатр, кгс/см2"], [1, "05.06.2019", 100.0], [1, "ошибка", -5.0]]).to_excel(f, index=False, header=False)
+    g = tmp_path / "gsp.xlsx"
+    pd.DataFrame([[1, "10, 11"], [2, "11"]]).to_excel(g, index=False, header=False)
+    rep = checks.run("Преобразование_исходных_таблиц_ГДИ_в_базу", {"files": str(f), "gsp": str(g), "periods": ""})
+    got = kinds(rep)
+    assert {("ошибка", "DUP"), ("предупреждение", "DATE"), ("ошибка", "RANGE")} <= got, rep.to_text()
