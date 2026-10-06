@@ -1,6 +1,6 @@
 import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { legendOpen, pickedSeasons, seasonScope, spreadWells, usePref, type SeasonScope } from './prefs'
+import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import type { GspData, SeasonInfo } from './api'
 import { PAINTS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
@@ -94,6 +94,18 @@ const Glyph = memo(function Glyph(p: {
             stroke={pal.bg} strokeWidth={fs * 0.28} paintOrder="stroke" strokeLinejoin="round">{p.label}{share && <tspan fontWeight={400} fill={pal.muted}> · {share}</tspan>}</text>)}
       {inside && (two || (share && r > fs * 2)) && <text x={x} y={y + fs * 0.62} fontSize={fs * 0.62} textAnchor="middle" dominantBaseline="central" fill="#fff" fillOpacity={0.92}
         stroke="rgba(30,8,12,.4)" strokeWidth={fs * 0.08} paintOrder="stroke">{two || share}</text>}
+    </g>
+  )
+})
+
+const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: number; r: number; rd: number; count: number; fill: string; title: string; pal: Pal }) {
+  const { x, y, r, rd, pal } = p
+  return (
+    <g className="cluster" data-cluster={p.id} style={{ cursor: 'zoom-in' }}>
+      <title>{p.title}</title>
+      <circle cx={x} cy={y} r={r + rd * 0.2} fill={pal.surface} fillOpacity={0.55} stroke={p.fill} strokeWidth={rd * 0.07} strokeDasharray={`${rd * 0.2} ${rd * 0.14}`} />
+      <circle cx={x} cy={y} r={r} fill={p.fill} fillOpacity={0.88} stroke={pal.surface} strokeWidth={rd * 0.06} />
+      <text x={x} y={y} fontSize={Math.min(r * 0.95, rd * 0.78)} textAnchor="middle" dominantBaseline="central" fontWeight={700} fill="#fff" stroke="rgba(30,8,12,.4)" strokeWidth={rd * 0.07} paintOrder="stroke" strokeLinejoin="round">{p.count}</text>
     </g>
   )
 })
@@ -248,6 +260,53 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const K = fit.s * view.k
   const sx = (mx: number) => view.k * (fit.s * mx + fit.ox) + view.tx, sy = (my: number) => view.k * (fit.s * my + fit.oy) + view.ty
   const bar = niceStep(140 / K)
+  // в режиме группировки круги имеют постоянный размер на экране (как значки на веб-картах), поэтому при приближении близкие скважины расходятся
+  const useCluster = usePref(clusterWells)
+  const rpx0 = Math.max(12, Math.min(22, rmax * fit.s))
+  const rd = useCluster ? rpx0 / K : rmax
+  const items = useMemo(() => {
+    const vis: number[] = []
+    placed.forEach((q, n) => {
+      const t = win.stats[n].total
+      const hidden = !paintData && ((options.hideIdle && !(t > 0)) || (options.minValue > 0 && t < options.minValue * 1e6))
+      if (!hidden || selected === q.well || group.includes(q.well)) vis.push(n)
+    })
+    vis.sort((u, v) => win.stats[v].total - win.stats[u].total)
+    type Cl = { id: number; x: number; y: number; idx: number[]; total: number }
+    const out: { single?: number; cl?: Cl }[] = []
+    if (!useCluster || view.k >= 10) { vis.forEach(n => out.push({ single: n })); return out }
+    const thr = 2.2 * rd * options.scale, cell = thr
+    const grid = new Map<string, number[]>()
+    const key = (x: number, y: number) => Math.floor(x / cell) + ',' + Math.floor(y / cell)
+    const taken = new Set<number>()
+    const pinned = (n: number) => selected === placed[n].well || group.includes(placed[n].well)
+    vis.forEach(n => { const k = key(placed[n].x, placed[n].y); const a = grid.get(k); if (a) a.push(n); else grid.set(k, [n]) })
+    let id = 0
+    for (const n of vis) {
+      if (taken.has(n)) continue
+      taken.add(n)
+      if (pinned(n)) { out.push({ single: n }); continue }
+      const q = placed[n], gx = Math.floor(q.x / cell), gy = Math.floor(q.y / cell), mem = [n]
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const o of grid.get((gx + dx) + ',' + (gy + dy)) || []) {
+        if (taken.has(o) || pinned(o)) continue
+        if (Math.hypot(placed[o].x - q.x, placed[o].y - q.y) < thr) { taken.add(o); mem.push(o) }
+      }
+      if (mem.length === 1) { out.push({ single: n }); continue }
+      let sw = 0, cx = 0, cy = 0, total = 0
+      for (const o of mem) { const w = Math.max(win.stats[o].total, 1); sw += w; cx += placed[o].x * w; cy += placed[o].y * w; total += Math.max(win.stats[o].total, 0) }
+      out.push({ cl: { id: id++, x: cx / sw, y: cy / sw, idx: mem, total } })
+    }
+    return out
+  }, [placed, win, paintData, options.hideIdle, options.minValue, options.scale, selected, group, useCluster, view.k, rd])
+  const zoomTo = (idx: number[]) => {
+    const xs = idx.map(n => placed[n].x), ys = idx.map(n => placed[n].y)
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
+    const w = Math.max((x1 - x0) * fit.s, 1), h = Math.max((y1 - y0) * fit.s, 1)
+    const k = Math.max(view.k * 1.7, Math.min(24, (size.w * 0.55) / w, (size.h * 0.55) / h))
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2
+    setView({ k: Math.min(24, k), tx: size.w / 2 - Math.min(24, k) * (fit.s * cx + fit.ox), ty: size.h / 2 - Math.min(24, k) * (fit.s * cy + fit.oy) })
+  }
+  const clustersRef = useRef<number[][]>([])
   // координатная сетка (только для настоящих координат XY)
   const grid = useMemo(() => {
     if (!unit || !placed.length) return null
@@ -260,10 +319,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return { xs, ys }
   }, [unit, placed.length, view, fit.s, fit.ox, fit.oy, size])
   // «пятно» месторождения: объединение мягких кругов вокруг скважин
-  const halo = Math.max(rmax * 1.5, spacing * 0.9)
+  const halo = useCluster ? rd * 1.7 : Math.max(rmax * 1.5, spacing * 0.9)
 
   // легенда размеров: вложенные круги того же масштаба, что на карте (не крупнее 30 px)
-  const Rpx = rmax * options.scale * K
+  const Rpx = rd * options.scale * K
   const vTop = (() => {
     const raw = win.scaleMax * Math.min(1, (30 / Math.max(Rpx, 1e-6)) ** 2), q = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / q
     return (f >= 5 ? 5 : f >= 2 ? 2 : 1) * q
@@ -318,7 +377,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             onGroup(Array.from(new Set([...base, ...inside])))
             if (inside.length === 1 && !base.length) onSelect(inside[0])
           } else if (!moved) {
-            const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-well]')
+            const hit = document.elementFromPoint(e.clientX, e.clientY)
+            const cl = hit?.closest('[data-cluster]')
+            if (cl) { const idx = clustersRef.current[Number(cl.getAttribute('data-cluster'))]; if (idx) zoomTo(idx); setBox(null); return }
+            const t = hit?.closest('[data-well]')
             const w = t ? Number(t.getAttribute('data-well')) : null
             if (w !== null && (e.ctrlKey || e.metaKey || e.shiftKey)) {
               const cur = group.length ? group : selected !== null ? [selected] : []
@@ -341,15 +403,33 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
             <g opacity={0.07} fill={pal.accent}>{placed.map(q => <circle key={q.well} cx={q.x} cy={q.y} r={halo} />)}</g>
-            {placed.map((q, n) => ({ q, n })).sort((u, v) => win.stats[v.n].total - win.stats[u.n].total).map(({ q, n }) => (!paintData && ((options.hideIdle && !(win.stats[n].total > 0)) || (options.minValue > 0 && win.stats[n].total < options.minValue * 1e6)) && selected !== q.well && !group.includes(q.well) ? null :
-              <Glyph key={q.well} well={q.well} x={q.x} y={q.y} rmax={rmax} total={win.stats[n].total} pal={pal}
-                r={win.stats[n].total > 0 ? rmax * options.scale * Math.sqrt(win.stats[n].total / win.scaleMax) : rmax * 0.25}
+            {(() => { clustersRef.current = items.filter(it => it.cl).map(it => it.cl!.idx); return null })()}
+            {items.map(it => {
+              if (it.cl) {
+                const c = it.cl
+                let ci = 0
+                const rr = rd * options.scale * Math.min(1.9, 1 + 0.22 * Math.log2(c.idx.length))
+                let fill = pal.gas
+                if (paintData) {
+                  const vs = c.idx.map(n => paintData.vals.get(placed[n].well)?.v).filter((v): v is number => v !== undefined)
+                  fill = vs.length ? rampColor(paintData.stops, (vs.reduce((p2, q2) => p2 + q2, 0) / vs.length - paintData.lo) / (paintData.hi - paintData.lo)) : pal.muted
+                }
+                const wet = c.idx.filter(n => (water.get(placed[n].well) || []).some(w => (w.flow ?? 0) > 0)).length
+                const title = `${c.idx.length} скв. рядом: ${fmtMln(c.total)} млн м³` + (win.sumAll > 0 ? ` (${fmtPct(c.total / win.sumAll)})` : '') + (wet ? `, с водой: ${wet}` : '') + ' · нажмите или приблизьте карту'
+                ci = clustersRef.current.findIndex(x => x === c.idx)
+                return <ClusterGlyph key={'c' + c.idx.map(n => placed[n].well).join('-')} id={ci} x={c.x} y={c.y} r={rr} rd={rd} count={c.idx.length} fill={fill} title={title} pal={pal} />
+              }
+              const n = it.single!, q = placed[n]
+              return (
+              <Glyph key={q.well} well={q.well} x={q.x} y={q.y} rmax={rd} total={win.stats[n].total} pal={pal}
+                r={win.stats[n].total > 0 ? Math.max(rd * 0.45 * options.scale, rd * options.scale * Math.sqrt(win.stats[n].total / win.scaleMax)) : rd * 0.25}
                 share={win.stats[n].total > 0 ? win.stats[n].total / win.sumAll : 0}
                 months={win.months[n] || []} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
                 paint={paintData ? (paintData.vals.has(q.well) ? { color: rampColor(paintData.stops, (paintData.vals.get(q.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)), label: paintData.vals.get(q.well)!.label } : null) : undefined}
                 water={options.water ? rings.get(q.well) || [] : []} maxFlow={maxFlow} showShare={options.share}
                 selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
-            ))}
+              )
+            })}
           </g>
         </g>
         {/* заголовок и легенда рисуются в координатах экрана, поэтому попадают и в PNG */}
@@ -422,6 +502,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           <section><h4>Круги</h4>
             <label className="row"><span>Размер</span><input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
             <label className="row"><span>Подпись</span><select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
+            <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
             <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
             {!paintData && <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Шкала по всему сезону</label>}
           </section>
