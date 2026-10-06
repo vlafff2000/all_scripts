@@ -20,6 +20,7 @@ interface Props {
 export interface View { k: number; tx: number; ty: number }
 interface Tip { x: number; y: number; well: number }
 
+const EMPTY: never[] = []
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 
 /** Цвета карты берутся из темы и передаются числами: так они попадают и в PNG, где CSS-переменных нет. */
@@ -127,6 +128,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const [tip, setTip] = useState<Tip | null>(null)
   const [fpos, setFpos] = useState<{ x: number; y: number } | null>(null)
   const drag = useRef<{ x: number; y: number; moved: boolean; box?: boolean; x0?: number; y0?: number } | null>(null)
+  const panAcc = useRef({ x: 0, y: 0 })
+  const panRaf = useRef(0)
   const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
 
   useLayoutEffect(() => {
@@ -262,6 +265,12 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const bar = niceStep(140 / K)
   // в режиме группировки круги имеют постоянный размер на экране (как значки на веб-картах), поэтому при приближении близкие скважины расходятся
   const useCluster = usePref(clusterWells)
+  const paints = useMemo(() => {
+    if (!paintData) return null
+    const m = new Map<number, { color: string; label: string }>()
+    paintData.vals.forEach((v, well) => m.set(well, { color: rampColor(paintData.stops, (v.v - paintData.lo) / (paintData.hi - paintData.lo)), label: v.label }))
+    return m
+  }, [paintData])
   const groupsOn = usePref(groupColoring)
   const multiG = !!g.groups && g.groups.length > 1
   const byGroup = multiG && groupsOn
@@ -348,6 +357,74 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const tipIdx = tipWell ? placed.indexOf(tipWell) : -1
   const [t1, t2] = [title.split(' · ').slice(0, 2).join(' · '), paintData?.scopeNote || title.split(' · ')[2] || '']
 
+  const layer = useMemo(() => {
+    clustersRef.current = items.filter(it => it.cl).map(it => it.cl!.idx)
+    return (
+      <>
+        {items.map(it => {
+              if (it.cl) {
+                const c = it.cl
+                let ci = 0
+                const rr = rd * options.scale * Math.min(1.9, 1 + 0.22 * Math.log2(c.idx.length))
+                let fill = pal.gas, ringC: string | undefined
+                const cnt = new Map<string, number>()
+                if (byGroup) { for (const n of c.idx) { const gn = g.groupOf![String(placed[n].well)]; cnt.set(gn, (cnt.get(gn) || 0) + 1) } const top = [...cnt.entries()].sort((u, v) => v[1] - u[1])[0]; ringC = groupColor(top[0]); fill = ringC }
+                if (paintData) {
+                  const vs = c.idx.map(n => paintData.vals.get(placed[n].well)?.v).filter((v): v is number => v !== undefined)
+                  fill = vs.length ? rampColor(paintData.stops, (vs.reduce((p2, q2) => p2 + q2, 0) / vs.length - paintData.lo) / (paintData.hi - paintData.lo)) : pal.muted
+                }
+                const wet = c.idx.filter(n => (water.get(placed[n].well) || []).some(w => (w.flow ?? 0) > 0)).length
+                const title = `${c.idx.length} скв. рядом: ${fmtMln(c.total)} млн м³` + (win.sumAll > 0 ? ` (${fmtPct(c.total / win.sumAll)})` : '') + (wet ? `, с водой: ${wet}` : '') + (byGroup ? ' · ' + [...cnt.entries()].sort((u, v) => v[1] - u[1]).map(e => e[0] + ': ' + e[1]).join(', ') : '') + ' · нажмите или приблизьте карту'
+                ci = clustersRef.current.findIndex(x => x === c.idx)
+                return <ClusterGlyph key={'c' + c.idx.map(n => placed[n].well).join('-')} id={ci} x={c.x} y={c.y} r={rr} rd={rd} count={c.idx.length} fill={fill} ring={paintData ? ringC : undefined} title={title} pal={pal} />
+              }
+              const n = it.single!, q = placed[n]
+              return (
+              <Glyph key={q.well} well={q.well} x={q.x} y={q.y} rmax={rd} total={win.stats[n].total} pal={pal}
+                r={win.stats[n].total > 0 ? Math.max(rd * 0.45 * options.scale, rd * options.scale * Math.sqrt(win.stats[n].total / win.scaleMax)) : rd * 0.25}
+                share={win.stats[n].total > 0 ? win.stats[n].total / win.sumAll : 0}
+                months={win.months[n] || EMPTY} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
+                paint={paints ? paints.get(q.well) ?? null : undefined}
+                water={options.water ? rings.get(q.well) || EMPTY : EMPTY} maxFlow={maxFlow} showShare={options.share}
+                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
+              )
+            })}
+      </>
+    )
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, rd, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
+  const tipNode = useMemo(() => {
+    if (!tipWell) return null
+        const st = win.stats[tipIdx], share = st.total > 0 && win.sumAll > 0 ? st.total / win.sumAll : 0
+        const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || []
+        const ws = water.get(tipWell.well) || []
+        const W = 252, fp = fpos || { x: Math.max(8, size.w - W - 14), y: 64 }
+        const node = (
+          <div className={'tip' + (tipHost ? ' docked' : '')} style={tipHost ? undefined : { left: Math.max(0, Math.min(fp.x, size.w - W)), top: Math.max(0, Math.min(fp.y, size.h - 120)) }}>
+            {tipTag && <div className="tip-tag">{tipTag}</div>}
+            <div className={'tip-head' + (tipHost ? '' : ' grab')} title={tipHost ? undefined : 'Потяните, чтобы перенести подсказку'}
+              onPointerDown={tipHost ? undefined : e => {
+                e.preventDefault()
+                const el = e.currentTarget, x0 = e.clientX, y0 = e.clientY, p0 = fp
+                el.setPointerCapture(e.pointerId)
+                const move = (ev: PointerEvent) => setFpos({ x: p0.x + ev.clientX - x0, y: p0.y + ev.clientY - y0 })
+                const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up) }
+                el.addEventListener('pointermove', move); el.addEventListener('pointerup', up)
+              }}><b>№ {tipWell.well}</b>{tipWell.dir && <span className="tip-dir">{tipWell.dir}</span>}{multiG && g.groupOf?.[String(tipWell.well)] && <span className="tip-dir">{g.groupOf[String(tipWell.well)]}</span>}</div>
+            {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? rampColor(paintData.stops, (paintData.vals.get(tipWell.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
+            <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
+            <div className="tip-share"><span><i style={{ width: Math.min(100, share * 100 * 4) + '%' }} /></span>{share > 0 ? fmtPct(share) + ' ГСП' : 'не работала'}</div>
+            <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
+              series={[{ key: 'd', label: 'Расход', color: pal.gas, y: row.map(v => Math.max(0, v)) }]} />
+            <div className="tip-kpis"><div><span>в среднем</span><b>{fmtTh(st.mean)}</b><small>тыс. м³/сут</small></div><div><span>дней с расходом</span><b>{st.days}</b><small>из {b - a + 1}</small></div></div>
+            {ws.length > 0 && <div className="tip-water">{ws.map((w, i) => (
+              <div key={i}><i style={{ background: wm.color.get(w.year * 12 + w.month) }} />{MONTH_NAME[w.month]} {w.year}<span>{w.note !== 'Ок' ? w.note : fmt1(w.flow ?? 0) + ' л/ч · ВФ ' + Math.round(w.factor ?? 0)}</span></div>))}</div>}
+          </div>
+        )
+        return node
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tipWell, tipIdx, win, calc, water, paintData, pal, a, b, fpos, size.w, size.h, tipHost, tipTag, multiG, g, wm])
+
   return (
     <div className="map-wrap" ref={wrap}>
       <svg ref={svg} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} fontFamily="'PT Sans','Segoe UI',sans-serif"
@@ -362,12 +439,21 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             const dx = e.clientX - d.x, dy = e.clientY - d.y
             if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
             if (d.moved && d.box) { const r = wrap.current!.getBoundingClientRect(); setBox({ x0: d.x0!, y0: d.y0!, x1: e.clientX - r.left, y1: e.clientY - r.top }); setTip(null) }
-            else if (d.moved) { d.x = e.clientX; d.y = e.clientY; setView(v => ({ ...v, tx: v.tx + dx, ty: v.ty + dy })); setTip(null) }
+            else if (d.moved) {
+              d.x = e.clientX; d.y = e.clientY
+              panAcc.current.x += dx; panAcc.current.y += dy
+              if (!panRaf.current) panRaf.current = requestAnimationFrame(() => {
+                panRaf.current = 0
+                const { x, y } = panAcc.current; panAcc.current = { x: 0, y: 0 }
+                setView(v => ({ ...v, tx: v.tx + x, ty: v.ty + y }))
+              })
+              setTip(t => (t ? null : t))
+            }
           } else {
             const t = (e.target as Element).closest('[data-well]')
             if (t) {
               const r = wrap.current!.getBoundingClientRect(), well = Number(t.getAttribute('data-well')), x = e.clientX - r.left, y = e.clientY - r.top
-              setTip(p => (p && p.well === well && p.x === x && p.y === y ? p : { x, y, well }))
+              setTip(p => (p && p.well === well ? p : { x, y, well }))
             } else setTip(p => (p ? null : p))
           }
         }}
@@ -407,35 +493,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
             <g opacity={0.07} fill={pal.accent}>{placed.map(q => <circle key={q.well} cx={q.x} cy={q.y} r={halo} />)}</g>
-            {(() => { clustersRef.current = items.filter(it => it.cl).map(it => it.cl!.idx); return null })()}
-            {items.map(it => {
-              if (it.cl) {
-                const c = it.cl
-                let ci = 0
-                const rr = rd * options.scale * Math.min(1.9, 1 + 0.22 * Math.log2(c.idx.length))
-                let fill = pal.gas, ringC: string | undefined
-                const cnt = new Map<string, number>()
-                if (byGroup) { for (const n of c.idx) { const gn = g.groupOf![String(placed[n].well)]; cnt.set(gn, (cnt.get(gn) || 0) + 1) } const top = [...cnt.entries()].sort((u, v) => v[1] - u[1])[0]; ringC = groupColor(top[0]); fill = ringC }
-                if (paintData) {
-                  const vs = c.idx.map(n => paintData.vals.get(placed[n].well)?.v).filter((v): v is number => v !== undefined)
-                  fill = vs.length ? rampColor(paintData.stops, (vs.reduce((p2, q2) => p2 + q2, 0) / vs.length - paintData.lo) / (paintData.hi - paintData.lo)) : pal.muted
-                }
-                const wet = c.idx.filter(n => (water.get(placed[n].well) || []).some(w => (w.flow ?? 0) > 0)).length
-                const title = `${c.idx.length} скв. рядом: ${fmtMln(c.total)} млн м³` + (win.sumAll > 0 ? ` (${fmtPct(c.total / win.sumAll)})` : '') + (wet ? `, с водой: ${wet}` : '') + (byGroup ? ' · ' + [...cnt.entries()].sort((u, v) => v[1] - u[1]).map(e => e[0] + ': ' + e[1]).join(', ') : '') + ' · нажмите или приблизьте карту'
-                ci = clustersRef.current.findIndex(x => x === c.idx)
-                return <ClusterGlyph key={'c' + c.idx.map(n => placed[n].well).join('-')} id={ci} x={c.x} y={c.y} r={rr} rd={rd} count={c.idx.length} fill={fill} ring={paintData ? ringC : undefined} title={title} pal={pal} />
-              }
-              const n = it.single!, q = placed[n]
-              return (
-              <Glyph key={q.well} well={q.well} x={q.x} y={q.y} rmax={rd} total={win.stats[n].total} pal={pal}
-                r={win.stats[n].total > 0 ? Math.max(rd * 0.45 * options.scale, rd * options.scale * Math.sqrt(win.stats[n].total / win.scaleMax)) : rd * 0.25}
-                share={win.stats[n].total > 0 ? win.stats[n].total / win.sumAll : 0}
-                months={win.months[n] || []} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
-                paint={paintData ? (paintData.vals.has(q.well) ? { color: rampColor(paintData.stops, (paintData.vals.get(q.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)), label: paintData.vals.get(q.well)!.label } : null) : undefined}
-                water={options.water ? rings.get(q.well) || [] : []} maxFlow={maxFlow} showShare={options.share}
-                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
-              )
-            })}
+            {layer}
           </g>
         </g>
         {/* заголовок и легенда рисуются в координатах экрана, поэтому попадают и в PNG */}
@@ -543,35 +601,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <button type="button" title="Отдалить" onClick={() => zoomBy(1 / 1.5)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10" /></svg></button>
         <button type="button" title="Показать всю карту" onClick={resetView}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg></button>
       </div>
-      {tipWell && (() => {
-        const st = win.stats[tipIdx], share = st.total > 0 && win.sumAll > 0 ? st.total / win.sumAll : 0
-        const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || []
-        const ws = water.get(tipWell.well) || []
-        const W = 252, fp = fpos || { x: Math.max(8, size.w - W - 14), y: 64 }
-        const node = (
-          <div className={'tip' + (tipHost ? ' docked' : '')} style={tipHost ? undefined : { left: Math.max(0, Math.min(fp.x, size.w - W)), top: Math.max(0, Math.min(fp.y, size.h - 120)) }}>
-            {tipTag && <div className="tip-tag">{tipTag}</div>}
-            <div className={'tip-head' + (tipHost ? '' : ' grab')} title={tipHost ? undefined : 'Потяните, чтобы перенести подсказку'}
-              onPointerDown={tipHost ? undefined : e => {
-                e.preventDefault()
-                const el = e.currentTarget, x0 = e.clientX, y0 = e.clientY, p0 = fp
-                el.setPointerCapture(e.pointerId)
-                const move = (ev: PointerEvent) => setFpos({ x: p0.x + ev.clientX - x0, y: p0.y + ev.clientY - y0 })
-                const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up) }
-                el.addEventListener('pointermove', move); el.addEventListener('pointerup', up)
-              }}><b>№ {tipWell.well}</b>{tipWell.dir && <span className="tip-dir">{tipWell.dir}</span>}{multiG && g.groupOf?.[String(tipWell.well)] && <span className="tip-dir">{g.groupOf[String(tipWell.well)]}</span>}</div>
-            {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? rampColor(paintData.stops, (paintData.vals.get(tipWell.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
-            <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
-            <div className="tip-share"><span><i style={{ width: Math.min(100, share * 100 * 4) + '%' }} /></span>{share > 0 ? fmtPct(share) + ' ГСП' : 'не работала'}</div>
-            <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
-              series={[{ key: 'd', label: 'Расход', color: pal.gas, y: row.map(v => Math.max(0, v)) }]} />
-            <div className="tip-kpis"><div><span>в среднем</span><b>{fmtTh(st.mean)}</b><small>тыс. м³/сут</small></div><div><span>дней с расходом</span><b>{st.days}</b><small>из {b - a + 1}</small></div></div>
-            {ws.length > 0 && <div className="tip-water">{ws.map((w, i) => (
-              <div key={i}><i style={{ background: wm.color.get(w.year * 12 + w.month) }} />{MONTH_NAME[w.month]} {w.year}<span>{w.note !== 'Ок' ? w.note : fmt1(w.flow ?? 0) + ' л/ч · ВФ ' + Math.round(w.factor ?? 0)}</span></div>))}</div>}
-          </div>
-        )
-        return tipHost ? createPortal(node, tipHost) : node
-      })()}
+      {tipNode && (tipHost ? createPortal(tipNode, tipHost) : tipNode)}
       {!placed.length && <div className="empty-map">Для этого ГСП нет положений скважин. Задайте карту-сетку или файл XY в разделе «Данные».</div>}
       <span className="sr-only">{fmtDay(calc.days[a])} — {fmtDay(calc.days[b])}</span>
     </div>
