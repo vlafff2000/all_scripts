@@ -244,3 +244,17 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .tip.docked .tip-hero { font-size: 22px; }
 .tip.docked .tip-spark { height: 30px; }
 .tip-tag { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+
+/* поскважинный анализ */
+.wells-page { display: grid; gap: 12px; align-content: start; }
+.wells-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 14px; }
+.wells-kpi { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wells-kpi > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.wells-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.wells-grid .card.wide { grid-column: 1 / -1; }
+.wells-grid h3, .wells-table h3 { font-size: 15px; margin: 0 0 2px; }
+.w-chart { width: 100%; height: auto; display: block; margin-top: 6px; }
+.w-grid { stroke: var(--line-soft); } .w-axis { stroke: var(--line-strong); } .w-t { font-size: 10.5px; fill: var(--muted); }
+.table-scroll { max-height: 420px; overflow: auto; margin-top: 6px; }
+.wells-table tbody tr { cursor: pointer; } .wells-table tbody tr:hover { background: var(--row-hover); }
+@media (max-width: 1100px) { .wells-grid, .wells-kpi { grid-template-columns: 1fr 1fr; } }

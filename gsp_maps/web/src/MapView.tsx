@@ -1,4 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { legendOpen, usePref } from './prefs'
 import { createPortal } from 'react-dom'
 import type { GspData } from './api'
 import { PAINTS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, type Paint, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
@@ -244,8 +245,11 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const labY: number[] = []
   refs.forEach((c, i) => { const want = 34 + 2 * R0 - 2 * c.r; labY.push(i ? Math.max(want, labY[i - 1] + 14) : want) })
   const sizeH = Math.max(2 * R0, labY[labY.length - 1] - 34 + 6)
-  const LW = 248
-  const legH = 46 + sizeH + (!paintData && !compact && usedMonths.length > 1 ? 44 : 0) + (!paintData && !compact && options.water ? 26 : 0)
+  // по умолчанию легенда маленькая: только размеры кругов; месяцы и вода раскрываются по кнопке
+  const legendExpanded = usePref(legendOpen)
+  const small = !!compact || !legendExpanded
+  const LW = paintData ? 220 : small ? 124 : 248
+  const legH = 46 + sizeH + (!paintData && !small && usedMonths.length > 1 ? 44 : 0) + (!paintData && !small && options.water ? 26 : 0)
   const tipWell = tip ? placed.find(q => q.well === tip.well) : null
   const tipIdx = tipWell ? placed.indexOf(tipWell) : -1
   const [t1, t2] = [title.split(' · ').slice(0, 2).join(' · '), title.split(' · ')[2] || '']
@@ -332,8 +336,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             <text x={LW - 14} y={57} fontSize={11} fill={pal.muted} textAnchor="end">{paintData.fmt(paintData.hi)}</text>
             <circle cx={19} cy={75} r={4.5} fill={pal.surface} stroke={pal.muted} strokeDasharray="2 1.6" /><text x={30} y={79} fontSize={11} fill={pal.muted}>нет данных · {paintData.note}</text>
           </> : <>
-            <text x={14} y={22} fontSize={12.5} fontWeight={700} fill={pal.ink}>Расход газа за окно</text>
-            <text x={LW - 14} y={22} fontSize={11} fill={pal.muted} textAnchor="end">млн м³ · {options.fixed ? 'шкала сезона' : 'шкала окна'}</text>
+            {small ? <text x={14} y={22} fontSize={11.5} fill={pal.muted}><tspan fontWeight={700} fill={pal.ink}>млн м³</tspan></text>
+              : <><text x={14} y={22} fontSize={12.5} fontWeight={700} fill={pal.ink}>Расход газа</text>
+                <text x={LW - 34} y={22} fontSize={11} fill={pal.muted} textAnchor="end">млн м³ · {options.fixed ? 'шкала сезона' : 'шкала окна'}</text></>}
+            {!compact && <g className="no-export" style={{ cursor: 'pointer' }} onPointerDown={e => e.stopPropagation()} onClick={() => legendOpen.set(!legendExpanded)}>
+              <title>{legendExpanded ? 'Свернуть легенду' : 'Показать месяцы и воду'}</title>
+              <rect x={LW - 26} y={6} width={20} height={20} rx={6} fill={pal.bg} stroke={pal.line} />
+              <path d={legendExpanded ? 'M{x1} 17 l4 -3 l4 3'.replace('{x1}', String(LW - 20)) : 'M{x1} 14 l4 3 l4 -3'.replace('{x1}', String(LW - 20))} fill="none" stroke={pal.muted} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+            </g>}
             {refs.map((c, i) => (
               <g key={i}>
                 <circle cx={14 + R0} cy={34 + 2 * R0 - c.r} r={c.r} fill={pal.gas} fillOpacity={0.1 + i * 0.12} stroke={pal.gas} strokeWidth={1} />
@@ -341,14 +351,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 <text x={14 + 2 * R0 + 18} y={labY[i]} fontSize={11} fill={pal.ink} dominantBaseline="central">{fmtMln(c.v)}</text>
               </g>
             ))}
-            {!compact && usedMonths.length > 1 && <g transform={`translate(14 ${46 + sizeH})`}>
+            {!small && usedMonths.length > 1 && <g transform={`translate(14 ${46 + sizeH})`}>
               <text y={0} fontSize={11} fill={pal.muted}>Секторы — месяцы окна, раньше светлее</text>
               {usedMonths.map((m, i) => {
                 const w = (LW - 28) / usedMonths.length
                 return <g key={m} transform={`translate(${i * w} 8)`}><rect width={w - 2} height={10} rx={3} fill={monthColors[m]} /><text x={(w - 2) / 2} y={25} fontSize={10.5} fill={pal.ink} textAnchor="middle">{MONTH_SHORT[m]}</text></g>
               })}
             </g>}
-            {!compact && options.water && <g transform={`translate(14 ${legH - 14})`}>
+            {!small && options.water && <g transform={`translate(14 ${legH - 14})`}>
               <path d={sectorPath(8, -4, 8, -1.2, 1.2, 5.5)} fill={pal.water} /><circle cx={16} cy={-9} r={4.5} fill={pal.water} />
               <text x={26} y={0} fontSize={11} fill={pal.muted}>вода: кольцо — л/ч, кружок — ВФ</text>
             </g>}
