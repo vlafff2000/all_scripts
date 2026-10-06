@@ -1,6 +1,6 @@
 import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { legendOpen, pickedSeasons, seasonScope, usePref, type SeasonScope } from './prefs'
+import { legendOpen, pickedSeasons, seasonScope, spreadWells, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import type { GspData, SeasonInfo } from './api'
 import { PAINTS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
@@ -125,16 +125,18 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return () => ro.disconnect()
   }, [])
 
-  const geo = useMemo(() => place(g, calc), [g, calc])
+  const spread = usePref(spreadWells)
+  const geo = useMemo(() => place(g, calc, spread), [g, calc, spread])
   const [frameAll, setFrameAll] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
   const { placed, spacing, far } = geo
   const bounds = frameAll ? geo.boundsAll : geo.bounds
   const rmax = useMemo(() => {
+    if (geo.unit) return geo.unit
     const span = Math.max(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0, 1)
     // в плотных кустах медианный шаг крошечный: круг не меньше 2,2 % размаха карты (перекрытие лечат зум и порядок отрисовки)
     return Math.min(Math.max(spacing * 0.58, span * 0.022), span * 0.09)
-  }, [spacing, bounds])
+  }, [spacing, bounds, geo.unit])
 
   // подгонка карты под окно
   const M = 64, top = 64
@@ -241,7 +243,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return c
   }, [usedMonths, pal.gas, themeKey])
 
-  const unit = g.layout.mode === 'xy' ? 'м' : ''
+  const unit = g.layout.mode === 'xy' && !spread ? 'м' : ''
   const K = fit.s * view.k
   const sx = (mx: number) => view.k * (fit.s * mx + fit.ox) + view.tx, sy = (my: number) => view.k * (fit.s * my + fit.oy) + view.ty
   const bar = niceStep(140 / K)
@@ -421,6 +423,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           <section><h4>Круги</h4>
             <label className="row"><span>Размер</span><input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
             <label className="row"><span>Подпись</span><select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
+            <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
             {!paintData && <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Шкала по всему сезону</label>}
           </section>
           {multi && (options.paint === 'entry' || options.paint === 'wf') && <section><h4>Сезоны</h4>
@@ -444,6 +447,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       <div className="map-chips no-export">
         {group.length > 1 && <span className="map-chip accent">Выбрано скважин: {group.length}<button type="button" onClick={() => onGroup([])} aria-label="Сбросить выбор">×</button></span>}
         {far.length > 0 && <span className="map-chip" title={'Далёкие скважины: ' + far.join(', ')}>{frameAll ? 'Показаны все скважины' : `За кадром: ${far.length} скв.`}<button type="button" onClick={() => setFrameAll(v => !v)}>{frameAll ? 'Основная группа' : 'Показать'}</button></span>}
+        {spread && placed.length > 1 && <span className="map-chip" title="Скважины разнесены для читаемости: взаимное расположение сохранено, расстояния условные">Схема, расстояния условные</span>}
         {geo.unplaced.length > 0 && <span className="map-chip warn" title={geo.unplaced.join(', ')}>Без координат: {geo.unplaced.length} скв.</span>}
       </div>
       <div className="map-tools no-export">
