@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSeason, type GspData } from './api'
 import MapView, { type MapOptions, type View } from './MapView'
-import { syncMaps, usePref } from './prefs'
+import SideGrip from './SideGrip'
+import { syncMaps, tipMode, usePref } from './prefs'
 import { SeasonCalc, fmt1, fmtDay, fmtMln, fmtPct, fmtTh } from './model'
 
 interface Props {
@@ -49,6 +50,7 @@ function useSeason(g: GspData, kind: string, key: string) {
 }
 
 export default function Compare({ g, kind, options, onOptions, inspector }: Props) {
+  const tmode = usePref(tipMode)
   const seasons = g.seasons[kind as 'Отбор' | 'Закачка'] || []
   const keys = seasons.map(s => s.key)
   const [pa, setPa] = useState(''), [pb, setPb] = useState('')
@@ -102,7 +104,7 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
 
   const mapFor = (side: string, c: SeasonCalc | null, key: string, w: [number, number] | null) => c && w ? (
     <MapView g={g} calc={c} kind={kind} season={key} a={w[0]} b={w[1]} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title(side, c, key, w)}
-      options={options} onOptions={onOptions} compact tipHost={inspector ? dock : null} tipTag={`${side} · ${key}`} scaleMax={scaleMax} view={side === 'А' ? viewA : viewB} onView={side === 'А' ? onViewA : onViewB} />
+      options={options} onOptions={onOptions} compact tipHost={inspector && tmode === 'dock' ? dock : null} stickyTip={false} tipTag={`${side} · ${key}`} scaleMax={scaleMax} view={side === 'А' ? viewA : viewB} onView={side === 'А' ? onViewA : onViewB} />
   ) : <div className="map-wrap"><div className="empty-map">{c ? 'Сезон ' + key + ' закончился раньше выбранных дней.' : 'Считаю…'}</div></div>
 
   return (
@@ -129,7 +131,7 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
             <CompareTimeline items={[{ calc: ca!, key: keyA, side: 'А' }]} nd={ca!.nd} a={a} b={b} setWindow={setWindowA} th={34} />
             <CompareTimeline items={[{ calc: cb!, key: keyB, side: 'Б' }]} nd={cb!.nd} a={a2} b={b2} setWindow={setWindowB} th={34} /></div>)}
       </div>
-      {inspector && <div className="side-col"><div className="tip-dock" ref={setDock} aria-live="polite" />{ready && <ComparePanel ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} a2={a2} b2={b2} selected={selected} group={group} onSelect={pick} />}</div>}
+      {inspector && <div className="side-col"><SideGrip />{tmode === 'dock' && <div className="tip-dock" ref={setDock} aria-live="polite" />}{ready && <ComparePanel ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} a2={a2} b2={b2} selected={selected} group={group} onSelect={pick} />}</div>}
     </div>
   )
 }
