@@ -10,6 +10,8 @@ export interface GspData {
   gsp: string; wells: number[]; layout: Layout; seasons: Record<'Отбор' | 'Закачка', SeasonInfo[]>
   periods: { day: number; type: string }[]; water: WaterRec[]
   gspFlow: Series; pressure: { gsp?: Series; obj?: Series }; seasonPressure: { gsp: Record<string, number>; obj: Record<string, number> }
+  /** Для набора из нескольких ГСП: какие группы вошли и какой группе принадлежит скважина. */
+  groups?: string[]; groupOf?: Record<string, string>
   warnings: string[]; trends: TrendRow[]; depths: Record<string, [number, number]>; altitude: Record<string, number>
 }
 export interface SeasonData { wells: number[]; days: number[]; flow: number[][] }
@@ -30,8 +32,19 @@ export const scanFolder = (folder: string) => call<AppState>('/api/scan', post({
 export const ALL_GSP = 'Весь объект'
 let allGroups: string[] = []
 export const setAllGroups = (gs: string[]) => { allGroups = gs }
+/** Набор из нескольких ГСП называется по именам через « + »; все группы сразу — «Весь объект». */
+export const GROUP_SEP = ' + '
+export const groupsOf = (name: string): string[] => (name === ALL_GSP ? allGroups : name.includes(GROUP_SEP) ? name.split(GROUP_SEP) : [name])
+export const isMulti = (name: string) => groupsOf(name).length > 1
+export const nameOf = (sel: string[]) => {
+  const ordered = allGroups.filter(n => sel.includes(n))
+  return ordered.length === allGroups.length && ordered.length > 1 ? ALL_GSP : ordered.join(GROUP_SEP)
+}
+/** Цвета групп: ряд Окабе–Ито, цвет группы не зависит от того, какие группы выбраны. */
+const GROUP_COLORS = ['#0072b2', '#d55e00', '#009e73', '#cc79a7', '#e69f00', '#56b4e9', '#7a5195', '#8c564b', '#6b8e23', '#b8860b', '#17becf', '#e377c2']
+export const groupColor = (name: string) => GROUP_COLORS[Math.max(0, allGroups.indexOf(name)) % GROUP_COLORS.length]
 
-function mergeGsp(list: GspData[]): GspData {
+function mergeGsp(list: GspData[], name: string): GspData {
   const kinds = ['Отбор', 'Закачка'] as const
   const seasons = { Отбор: [], Закачка: [] } as GspData['seasons']
   for (const k of kinds) {
@@ -58,7 +71,8 @@ function mergeGsp(list: GspData[]): GspData {
   for (const g of list) g.gspFlow.days.forEach((d, i) => { bar[at.get(d)!] += g.gspFlow.bar[i] })
   const pr = list.find(g => g.pressure.obj)?.pressure.obj
   return {
-    gsp: ALL_GSP, wells: list.flatMap(g => g.wells),
+    gsp: name, wells: list.flatMap(g => g.wells),
+    groups: list.map(g => g.gsp), groupOf: Object.fromEntries(list.flatMap(g => g.wells.map(w => [String(w), g.gsp] as [string, string]))),
     layout: { mode: allXy ? 'xy' : 'grid', wells, missing: list.flatMap(g => g.layout.missing), has_grid: list.some(g => g.layout.has_grid), has_xy: list.some(g => g.layout.has_xy),
       notes: Array.from(new Set(list.flatMap(g => g.layout.notes))).concat(allXy ? [] : ['Положения из сетки: ГСП стоят рядом, масштаб между ними условный.']) },
     seasons, periods: list[0].periods, water: list.flatMap(g => g.water),
@@ -81,11 +95,11 @@ function mergeSeason(list: SeasonData[]): SeasonData {
 }
 
 export const getGsp = async (name: string, mode: string): Promise<GspData> => {
-  if (name !== ALL_GSP) return call<GspData>('/api/gsp?name=' + encodeURIComponent(name) + '&mode=' + mode)
-  return mergeGsp(await Promise.all(allGroups.map(n => getGsp(n, mode))))
+  if (!isMulti(name)) return call<GspData>('/api/gsp?name=' + encodeURIComponent(name) + '&mode=' + mode)
+  return mergeGsp(await Promise.all(groupsOf(name).map(n => getGsp(n, mode))), name)
 }
 export const getSeason = async (gsp: string, kind: string, season: string): Promise<SeasonData> => {
-  if (gsp === ALL_GSP) return mergeSeason((await Promise.all(allGroups.map(n => getSeason(n, kind, season)))).filter(d => d.wells.length))
+  if (isMulti(gsp)) return mergeSeason((await Promise.all(groupsOf(gsp).map(n => getSeason(n, kind, season)))).filter(d => d.wells.length))
   return call<SeasonData>('/api/season?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season))
 }
 export const exportExcel = (gsp: string, mode: string) => call<{ name: string; path: string }>('/api/export', post({ gsp, mode }))
