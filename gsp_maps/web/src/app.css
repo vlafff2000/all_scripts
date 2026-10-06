@@ -166,7 +166,7 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .map-tools svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* подсказка: карточка с крупным числом, долей и мини-графиком сезона */
-.tip { position: absolute; z-index: 7; pointer-events: none; width: 252px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: 0 14px 36px var(--shadow-strong); font-size: 13px; display: grid; gap: 8px; }
+.tip { position: absolute; z-index: 7; pointer-events: auto; width: 252px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: 0 14px 36px var(--shadow-strong); font-size: 13px; display: grid; gap: 8px; }
 .tip-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .tip-head b { font-size: 16px; }
 .tip-dir { font-size: 12px; color: var(--muted); background: var(--bg); border-radius: 999px; padding: 1px 9px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -278,3 +278,6 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 
 .season-pick { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; max-height: 120px; overflow: auto; }
 .season-pick .check { margin: 0; }
+
+.tip-head.grab { cursor: grab; touch-action: none; user-select: none; }
+.tip-head.grab:active { cursor: grabbing; }

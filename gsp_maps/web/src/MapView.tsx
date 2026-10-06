@@ -113,6 +113,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onView])
   const [tip, setTip] = useState<Tip | null>(null)
+  const [fpos, setFpos] = useState<{ x: number; y: number } | null>(null)
   const drag = useRef<{ x: number; y: number; moved: boolean; box?: boolean; x0?: number; y0?: number } | null>(null)
   const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
 
@@ -277,7 +278,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const LW = paintData ? 270 : small ? 124 : 248
   const legH = 46 + sizeH + (!paintData && !small && usedMonths.length > 1 ? 44 : 0) + (!paintData && !small && options.water ? (wm.list.length > 1 ? 52 : 26) : 0)
   // без наведения подсказка остаётся на выбранной скважине (только в панели); при наведении следует за курсором
-  const tipId = tip ? tip.well : tipHost && stickyTip && selected !== null ? selected : null
+  const tipId = tip ? tip.well : stickyTip && selected !== null ? selected : null
   const tipWell = tipId !== null ? placed.find(q => q.well === tipId) : null
   const tipIdx = tipWell ? placed.indexOf(tipWell) : -1
   const [t1, t2] = [title.split(' · ').slice(0, 2).join(' · '), paintData?.scopeNote || title.split(' · ')[2] || '']
@@ -297,8 +298,12 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
             if (d.moved && d.box) { const r = wrap.current!.getBoundingClientRect(); setBox({ x0: d.x0!, y0: d.y0!, x1: e.clientX - r.left, y1: e.clientY - r.top }); setTip(null) }
             else if (d.moved) { d.x = e.clientX; d.y = e.clientY; setView(v => ({ ...v, tx: v.tx + dx, ty: v.ty + dy })); setTip(null) }
-          } else if (tip) {
-            const r = wrap.current!.getBoundingClientRect(); setTip({ ...tip, x: e.clientX - r.left, y: e.clientY - r.top })
+          } else {
+            const t = (e.target as Element).closest('[data-well]')
+            if (t) {
+              const r = wrap.current!.getBoundingClientRect(), well = Number(t.getAttribute('data-well')), x = e.clientX - r.left, y = e.clientY - r.top
+              setTip(p => (p && p.well === well && p.x === x && p.y === y ? p : { x, y, well }))
+            } else setTip(p => (p ? null : p))
           }
         }}
         onPointerUp={e => {
@@ -320,13 +325,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           }
           setBox(null)
         }}
-        onPointerLeave={() => setTip(null)}
-        onPointerOver={e => {
-          if (drag.current?.moved) return
-          const t = (e.target as Element).closest('[data-well]')
-          if (t) { const r = wrap.current!.getBoundingClientRect(); setTip({ x: e.clientX - r.left, y: e.clientY - r.top, well: Number(t.getAttribute('data-well')) }) }
-          else setTip(null)
-        }}>
+        onPointerLeave={() => setTip(null)}>
         <defs>
           <filter id="mapShadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" floodColor="#0b1418" floodOpacity="0.14" /></filter>
         </defs>
@@ -455,15 +454,23 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         const st = win.stats[tipIdx], share = st.total > 0 && win.sumAll > 0 ? st.total / win.sumAll : 0
         const row = calc.flow[calc.index.get(tipWell.well) ?? 0] || []
         const ws = water.get(tipWell.well) || []
-        const W = 252, tx = tip?.x ?? 0, ty = tip?.y ?? 0, left = tx + 18 + W > size.w ? tx - 18 - W : tx + 18
+        const W = 252, fp = fpos || { x: Math.max(8, size.w - W - 14), y: 64 }
         const node = (
-          <div className={'tip' + (tipHost ? ' docked' : '')} style={tipHost ? undefined : { left: Math.max(8, left), top: Math.max(8, Math.min(ty - 20, size.h - 260)) }}>
+          <div className={'tip' + (tipHost ? ' docked' : '')} style={tipHost ? undefined : { left: Math.max(0, Math.min(fp.x, size.w - W)), top: Math.max(0, Math.min(fp.y, size.h - 120)) }}>
             {tipTag && <div className="tip-tag">{tipTag}</div>}
-            <div className="tip-head"><b>№ {tipWell.well}</b>{tipWell.dir && <span className="tip-dir">{tipWell.dir}</span>}</div>
+            <div className={'tip-head' + (tipHost ? '' : ' grab')} title={tipHost ? undefined : 'Потяните, чтобы перенести подсказку'}
+              onPointerDown={tipHost ? undefined : e => {
+                e.preventDefault()
+                const el = e.currentTarget, x0 = e.clientX, y0 = e.clientY, p0 = fp
+                el.setPointerCapture(e.pointerId)
+                const move = (ev: PointerEvent) => setFpos({ x: p0.x + ev.clientX - x0, y: p0.y + ev.clientY - y0 })
+                const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up) }
+                el.addEventListener('pointermove', move); el.addEventListener('pointerup', up)
+              }}><b>№ {tipWell.well}</b>{tipWell.dir && <span className="tip-dir">{tipWell.dir}</span>}</div>
             {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? rampColor(paintData.stops, (paintData.vals.get(tipWell.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
             <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
             <div className="tip-share"><span><i style={{ width: Math.min(100, share * 100 * 4) + '%' }} /></span>{share > 0 ? fmtPct(share) + ' ГСП' : 'не работала'}</div>
-            <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive={!!tipHost} fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
+            <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
               series={[{ key: 'd', label: 'Расход', color: pal.gas, y: row.map(v => Math.max(0, v)) }]} />
             <div className="tip-kpis"><div><span>в среднем</span><b>{fmtTh(st.mean)}</b><small>тыс. м³/сут</small></div><div><span>дней с расходом</span><b>{st.days}</b><small>из {b - a + 1}</small></div></div>
             {ws.length > 0 && <div className="tip-water">{ws.map((w, i) => (
