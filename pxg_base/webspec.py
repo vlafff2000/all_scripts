@@ -34,6 +34,8 @@ class WebSpec:
                 флажок (bool) — «y»/«n».
     dialogs   — id параметров для окон выбора файла/папки tkinter (по порядку вызовов); сами окна не открываются.
     strings   — id параметров для окон ввода строки (simpledialog.askstring) по порядку.
+    args      — пары (id параметра, имя аргумента командной строки): модуль получает `--имя=значение`, пустые тоже.
+    fixed_args — готовые аргументы, одинаковые при каждом веб-запуске.
     env       — пары (id параметра, имя переменной окружения) для скриптов, которым значения удобнее передать так.
     stdin     — своя сборка стандартного ввода, если порядок вопросов зависит от значений.
     """
@@ -42,6 +44,8 @@ class WebSpec:
     answers: Tuple[str, ...] = ()
     dialogs: Tuple[str, ...] = ()
     strings: Tuple[str, ...] = ()
+    args: Tuple[Tuple[str, str], ...] = ()
+    fixed_args: Tuple[str, ...] = ()
     env: Tuple[Tuple[str, str], ...] = ()
     stdin: Optional[Callable[[Dict[str, str]], str]] = None
     note: str = ""
@@ -70,6 +74,15 @@ class WebSpec:
     def dialog_config(self, values: Dict[str, str]) -> dict:
         return {"paths": [(values.get(a) or "").strip() for a in self.dialogs],
                 "strings": [(values.get(a) or "").strip() for a in self.strings]}
+
+    def argv(self, values: Dict[str, str]) -> List[str]:
+        out = list(self.fixed_args)
+        for pid, name in self.args:
+            v = values.get(pid) or ""
+            if self.kind_of(pid) == "bool":
+                v = "да" if v in ("1", "true", "y") else "нет"
+            out.append("--%s=%s" % (name, v.strip()))
+        return out
 
     def env_values(self, values: Dict[str, str]) -> Dict[str, str]:
         out = {}
@@ -166,8 +179,7 @@ SPECS: List[WebSpec] = [
             Param("kind", "Тип данных", "choice", default="отбор", options=(("отбор", "Отбор (лист «Отборы»)"), ("закачка", "Закачка"))),
             Param("folder", "Папка с новыми файлами", "folder", required=True),
         ),
-        dialogs=("db", "periods", "folder"), strings=("max_date", "kind"),
-        env=(),
+        args=(("db", "db"), ("max_date", "max-date"), ("periods", "periods"), ("kind", "kind"), ("folder", "folder")),
         note="База не меняется на месте: обновлённая копия лежит в папке результатов.",
     ),
     WebSpec(
@@ -235,7 +247,7 @@ SPECS: List[WebSpec] = [
     WebSpec(
         module="Сбор_данных_по_межколонным_давлениям",
         params=(Param("root", "Корневая папка с данными", "folder", required=True),),
-        dialogs=("root",),
+        args=(("root", "root"),),
         note="Результат — «БД_межколонки.xlsx».",
     ),
     WebSpec(
@@ -244,8 +256,7 @@ SPECS: List[WebSpec] = [
             Param("db", "Файл базы межколонок", "file", required=True, hint="Результат модуля «Межколонки» (колонки «сезон», «номер_скважины», …)"),
             Param("seasons", "Сезоны", hint="Названия через запятую; пусто — все сезоны"),
         ),
-        dialogs=("db",), env=(("seasons", "PXG_SEASONS"),),
-        stdin=lambda v: "да\n",
+        args=(("db", "db"), ("seasons", "seasons")), fixed_args=("--save=да",),
     ),
     WebSpec(
         module="Include_давлений_наблюдательных_скважин_горизонт_1002",

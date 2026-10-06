@@ -1,18 +1,9 @@
 import os
 import pandas as pd
 from datetime import datetime
-import tkinter as tk
-from tkinter import filedialog
+from pxg_core import параметры
 import re
 import calendar
-
-def select_root_directory():
-    """Выбор корневой папки через диалоговое окно"""
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    directory = filedialog.askdirectory(title="Выберите корневую папку с данными")
-    return directory
 
 def parse_date_from_cell(value):
     """Парсинг даты из текстовой ячейки"""
@@ -266,10 +257,10 @@ def process_excel_file(file_path):
         print(f"Ошибка при обработке файла {file_path}: {str(e)}")
         return []
 
-def main():
-    """Основная функция"""
-    print("Выберите корневую папку с данными...")
-    root_directory = select_root_directory()
+def main(argv=None):
+    """Основная функция. Корневая папка: аргумент --root или вопрос в консоли."""
+    args = параметры.parse("Сбор данных по межколонным давлениям", argv, root="корневая папка с файлами «мк»")
+    root_directory = параметры.ask_path("Путь к корневой папке с данными", args.root, kind="folder")
     
     if not root_directory:
         print("Папка не выбрана. Программа завершена.")

@@ -67,7 +67,7 @@ def _run(job: Job, spec: WebSpec) -> None:
     code = -1
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-u", str(Path(__file__).with_name("runner.py")), str(path)], cwd=str(job.out_dir), env=env,
+            [sys.executable, "-u", str(Path(__file__).with_name("runner.py")), str(path)] + spec.argv(job.values), cwd=str(job.out_dir), env=env,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             universal_newlines=True, encoding="utf-8", errors="replace")
         try:

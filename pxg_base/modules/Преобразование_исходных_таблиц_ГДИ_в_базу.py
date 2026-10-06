@@ -1440,7 +1440,7 @@ def read_excel_file(file_path):
 
         gsp_in_first_rows = False
         for i in range(min(3, len(df))):
-            row_str = ' '.join(df.iloc[i].astype(str).tolist())
+            row_str = ' '.join(str(v) for v in df.iloc[i].tolist())  # без astype(str): в pandas 3 пропуски остаются числами
             if 'ГСП' in row_str:
                 gsp_in_first_rows = True
                 break
@@ -1702,7 +1702,7 @@ def process_wells_structure(df):
 
         for col in columns_to_fill:
             if col in df_result.columns:
-                df_result.loc[group_indices, col] = df_result.loc[group_indices, col].fillna(method='ffill')
+                df_result.loc[group_indices, col] = df_result.loc[group_indices, col].ffill()
 
     df_result = df_result.drop('_group_id', axis=1)
 
@@ -2135,7 +2135,7 @@ def get_input_files_interactive():
             else:
                 print(f"Путь не найден: {user_input}")
 
-    input_files = list(set(input_files))
+    input_files = list(dict.fromkeys(input_files))  # без повторов, в порядке ввода (set давал случайный порядок строк в результате)
 
     if not input_files:
         print("Не указано ни одного файла для обработки")

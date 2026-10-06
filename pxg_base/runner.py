@@ -49,11 +49,16 @@ def install_headless_tk(config: dict) -> None:
         setattr(messagebox, name, message)
     messagebox.askyesno = messagebox.askokcancel = messagebox.askyesnocancel = lambda *a, **k: True
     tkinter = types.ModuleType("tkinter")
-    tkinter.__getattr__ = lambda name: Silent  # type: ignore[assignment]
+    def any_name(name):
+        if name.startswith("__"):  # inspect, pickle и др. спрашивают __file__, __spec__: им ответ «нет такого»
+            raise AttributeError(name)
+        return Silent
+
+    tkinter.__getattr__ = any_name  # type: ignore[assignment]
     tkinter.Tk = Silent
     tkinter.filedialog, tkinter.simpledialog, tkinter.messagebox = filedialog, simpledialog, messagebox
     ttk = types.ModuleType("tkinter.ttk")
-    ttk.__getattr__ = lambda name: Silent  # type: ignore[assignment]
+    ttk.__getattr__ = any_name  # type: ignore[assignment]
     tkinter.ttk = ttk
     sys.modules.update({"tkinter": tkinter, "tkinter.filedialog": filedialog, "tkinter.simpledialog": simpledialog,
                         "tkinter.messagebox": messagebox, "tkinter.ttk": ttk})
@@ -78,11 +83,12 @@ def tolerant_input() -> None:
 
 
 def main(argv=None) -> None:
-    module_path = (argv or sys.argv)[1]
+    argv = argv or sys.argv
+    module_path = argv[1]
     tolerant_input()
     install_headless_tk(json.loads(os.environ.get("PXG_DIALOGS") or "{}"))
     sys.path.insert(0, os.path.dirname(module_path))
-    sys.argv = [module_path]
+    sys.argv = [module_path] + list(argv[2:])
     runpy.run_path(module_path, run_name="__main__")
 
 
