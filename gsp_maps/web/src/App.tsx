@@ -5,6 +5,7 @@ import Inspector from './Inspector'
 import MapView, { type MapHandle } from './MapView'
 import { SeasonCalc, fmtDay } from './model'
 import SharesPage from './SharesPage'
+import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
 import { bubbleScale, hideIdle, minValue, labelMode, paintMode, fixedScale, inspectorOpen, lastGsp, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
@@ -13,6 +14,7 @@ import Timeline from './Timeline'
 const PAGES = [
   { id: 'map', title: 'Карта', icon: 'M8 1.5a4.5 4.5 0 0 1 4.5 4.5c0 3-4.5 8.5-4.5 8.5S3.5 9 3.5 6A4.5 4.5 0 0 1 8 1.5Zm0 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z' },
   { id: 'compare', title: 'Сравнение', icon: 'M2 3h5v10H2zM9 3h5v10H9zM4.5 6v4M11.5 6v4' },
+  { id: 'wells', title: 'Скважины', icon: 'M3 13V9M7 13V4M11 13V7M15 13V2M2 13.5h13' },
   { id: 'work', title: 'Работа скважин', icon: 'M2 3h12M2 8h12M2 13h12M4 3v0M7 8v0M10 13v0M3 5.5h5M6 10.5h7' },
   { id: 'shares', title: 'Доли', icon: 'M8 2a6 6 0 1 0 6 6H8zM9.5 1.5A5 5 0 0 1 14.5 6.5H9.5z' },
   { id: 'table', title: 'Таблица', icon: 'M2 3h12v10H2zM2 6.5h12M2 10h12M6 3v10' },
@@ -55,6 +57,7 @@ export default function App() {
   const pick = useCallback((w: number | null) => { setSelected(w); setGroup([]) }, [])
   const [find, setFind] = useState('')
   const [note, setNote] = useState('')
+  const [tipDock, setTipDock] = useState<HTMLElement | null>(null)
   const map = useRef<MapHandle>(null)
 
   const refresh = useCallback(() => getState().then(setApp).catch(e => setError(String(e.message || e))), [])
@@ -168,18 +171,19 @@ export default function App() {
     if (!g || !calc) return gErr ? <div className="note warning">{gErr}</div> : <p className="muted">Считаю…</p>
     if (page === 'table') return <TablePage g={g} calc={calc} kind={kind} season={season} a={a} b={b} mode={mode} />
     if (page === 'pressure') return <PressurePage g={g} kind={kind} season={season} range={[calc.days[a], calc.days[b]]} />
+    if (page === 'wells') return <WellsPage g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={setSelected} group={group} />
     if (page === 'work') return <WorkPage g={g} calc={calc} kind={kind} season={season} selected={selected} onSelect={setSelected} />
     if (page === 'shares') return <SharesPage g={g} kind={kind} selected={selected} onSelect={setSelected} />
     if (page === 'trends') return <TrendsPage g={g} />
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title}
+          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp ? tipDock : null}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
         </div>
-        {insp && <Inspector g={g} calc={calc} prev={prev} prevKey={prevKey} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} onFocus={w => map.current?.focus(w)} />}
+        {insp && <div className="side-col"><div className="tip-dock" ref={setTipDock} aria-live="polite" /><Inspector g={g} calc={calc} prev={prev} prevKey={prevKey} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} onFocus={w => map.current?.focus(w)} /></div>}
       </div>)
   }
   const showBar = ready && !!g && page !== 'data'

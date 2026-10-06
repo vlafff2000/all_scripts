@@ -229,3 +229,32 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .dvbar i.pos { background: var(--accent); border-radius: 0 4px 4px 0; } .dvbar i.neg { background: #8a979c; border-radius: 4px 0 0 4px; }
 @media (max-width: 1100px) { .cmp-page { grid-template-columns: 1fr; } .cmp-maps { grid-template-columns: 1fr; } .cmp-cell .map-wrap { min-height: 420px; } }
 .cmp-cell .view-label { display: none; } .cmp-cell .view-btn { padding: 0 9px; }
+.sync-btn { display: inline-flex; align-items: center; gap: 6px; }
+.sync-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.sync-btn.on { color: var(--info-ink); border-color: var(--accent); background: var(--accent-soft); }
+.cmp-tls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; } .cmp-tls > * { min-width: 0; overflow: hidden; } .cmp-tls .tl-chips { display: none; }
+
+/* подсказка вне карты: стоит над панелью сведений и ничего не закрывает */
+.side-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
+.side-col > .inspector { flex: 1; min-height: 0; }
+.tip-dock { flex-shrink: 0; min-height: 64px; background: var(--surface); border: 1px dashed var(--line); border-radius: 10px; display: grid; align-items: center; }
+.tip-dock:empty::before { content: 'Наведите курсор на скважину: здесь появится её расход, доля и график сезона.'; padding: 10px 14px; color: var(--muted); font-size: 13px; }
+.tip-dock:not(:empty) { border: 1px solid var(--line); box-shadow: 0 1px 2px var(--shadow); }
+.tip.docked { position: static; width: auto; border: 0; box-shadow: none; border-radius: 10px; padding: 11px 14px; gap: 6px; }
+.tip.docked .tip-hero { font-size: 22px; }
+.tip.docked .tip-spark { height: 30px; }
+.tip-tag { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+
+/* поскважинный анализ */
+.wells-page { display: grid; gap: 12px; align-content: start; }
+.wells-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 14px; }
+.wells-kpi { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wells-kpi > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.wells-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.wells-grid .card.wide { grid-column: 1 / -1; }
+.wells-grid h3, .wells-table h3 { font-size: 15px; margin: 0 0 2px; }
+.w-chart { width: 100%; height: auto; display: block; margin-top: 6px; }
+.w-grid { stroke: var(--line-soft); } .w-axis { stroke: var(--line-strong); } .w-t { font-size: 10.5px; fill: var(--muted); }
+.table-scroll { max-height: 420px; overflow: auto; margin-top: 6px; }
+.wells-table tbody tr { cursor: pointer; } .wells-table tbody tr:hover { background: var(--row-hover); }
+@media (max-width: 1100px) { .wells-grid, .wells-kpi { grid-template-columns: 1fr 1fr; } }
