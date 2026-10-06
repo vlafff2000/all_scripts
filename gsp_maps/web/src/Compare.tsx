@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSeason, type GspData } from './api'
 import MapView, { type MapOptions, type View } from './MapView'
+import { syncMaps, usePref } from './prefs'
 import { SeasonCalc, fmt1, fmtDay, fmtMln, fmtPct, fmtTh } from './model'
 
 interface Props {
   g: GspData; kind: string; options: MapOptions; onOptions: (o: Partial<MapOptions>) => void
   inspector: boolean
 }
-const PAD = 10, TH = 70
+const PAD = 10
 
 /** Окно в днях от старта сезона; у более короткого сезона оно обрезается, а если сезон кончился раньше окна, окна нет. */
 const clampTo = (c: SeasonCalc, a: number, b: number): [number, number] | null => (a >= c.nd ? null : [a, Math.min(b, c.nd - 1)])
@@ -57,18 +58,30 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
   const A = useSeason(g, kind, keyA), B = useSeason(g, kind, keyB)
   const ca = A.calc, cb = B.calc
   const nd = Math.max(ca?.nd || 0, cb?.nd || 0)
-  const [win, setWin] = useState<[number, number] | null>(null)
+  const sync = usePref(syncMaps)
+  const [winA, setWinA] = useState<[number, number] | null>(null)
+  const [winB, setWinB] = useState<[number, number] | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [group, setGroup] = useState<number[]>([])
-  const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 })
-  const onView = useCallback((v: View) => setView(v), [])
-  useEffect(() => { setWin([0, Math.max(0, nd - 1)]) }, [nd, keyA, keyB])
+  const [viewA, setViewA] = useState<View>({ k: 1, tx: 0, ty: 0 })
+  const [viewB, setViewB] = useState<View>({ k: 1, tx: 0, ty: 0 })
+  const syncRef = useRef(sync); syncRef.current = sync
+  const onViewA = useCallback((v: View) => { setViewA(v); if (syncRef.current) setViewB(v) }, [])
+  const onViewB = useCallback((v: View) => { setViewB(v); if (syncRef.current) setViewA(v) }, [])
+  useEffect(() => { const w: [number, number] = [0, Math.max(0, nd - 1)]; setWinA(w); setWinB(w) }, [nd, keyA, keyB])
+  // при включении синхронизации правая карта берёт вид и окно левой
+  useEffect(() => { if (sync) { setViewB(viewA); setWinB(winA) } }, [sync]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setSelected(null); setGroup([]) }, [g.gsp])
   const pick = useCallback((w: number | null) => { setSelected(w); setGroup([]) }, [])
-  const [a, b] = win ? [Math.min(win[0], Math.max(0, nd - 1)), Math.min(win[1], Math.max(0, nd - 1))] : [0, 0]
-  const setWindow = useCallback((x: number, y: number) => setWin([x, y]), [])
+  // при синхронизации обе карты живут на общей оси дней (по длиннейшему сезону), иначе у каждой своя ось
+  const lim = (n: number) => Math.max(0, (sync ? nd : n) - 1)
+  const fit = (w: [number, number] | null, n: number): [number, number] => (w ? [Math.min(w[0], lim(n)), Math.min(w[1], lim(n))] : [0, 0])
+  const [a, b] = fit(winA, ca?.nd || 0)
+  const [a2, b2] = sync ? [a, b] : fit(winB, cb?.nd || 0)
+  const setWindowA = useCallback((x: number, y: number) => { setWinA([x, y]); if (syncRef.current) setWinB([x, y]) }, [])
+  const setWindowB = useCallback((x: number, y: number) => { setWinB([x, y]); if (syncRef.current) setWinA([x, y]) }, [])
 
-  const wa = ca ? clampTo(ca, a, b) : null, wb = cb ? clampTo(cb, a, b) : null
+  const wa = ca ? clampTo(ca, a, b) : null, wb = cb ? clampTo(cb, a2, b2) : null
   // общий масштаб кругов: самая крупная скважина из двух сезонов, иначе круги нельзя сравнивать
   const scaleMax = useMemo(() => {
     if (!ca || !cb) return undefined
@@ -88,7 +101,7 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
 
   const mapFor = (side: string, c: SeasonCalc | null, key: string, w: [number, number] | null) => c && w ? (
     <MapView g={g} calc={c} kind={kind} season={key} a={w[0]} b={w[1]} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title(side, c, key, w)}
-      options={options} onOptions={onOptions} compact scaleMax={scaleMax} view={view} onView={onView} />
+      options={options} onOptions={onOptions} compact scaleMax={scaleMax} view={side === 'А' ? viewA : viewB} onView={side === 'А' ? onViewA : onViewB} />
   ) : <div className="map-wrap"><div className="empty-map">{c ? 'Сезон ' + key + ' закончился раньше выбранных дней.' : 'Считаю…'}</div></div>
 
   return (
@@ -97,22 +110,32 @@ export default function Compare({ g, kind, options, onOptions, inspector }: Prop
         <div className="cmp-bar">
           <label className="sel"><span>А</span><select value={keyA} onChange={e => setPa(e.target.value)}>{keys.map(k => <option key={k}>{k}</option>)}</select></label>
           <button type="button" className="quiet" onClick={swap} title="Поменять карты местами">⇄</button>
+          <button type="button" className={'quiet sync-btn' + (sync ? ' on' : '')} aria-pressed={sync} onClick={() => syncMaps.set(!sync)}
+            title={sync ? 'Карты связаны: зум, сдвиг и время общие. Нажмите, чтобы отвязать' : 'Карты независимы. Нажмите, чтобы связать зум, сдвиг и время'}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">{sync ? <path d="M6.5 9.5 9.5 6.5M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1" /> : <path d="M6.5 9.5 9.5 6.5M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9M3 3l10 10" />}</svg>
+            {sync ? 'Синхронно' : 'Независимо'}</button>
           <label className="sel"><span>Б</span><select value={keyB} onChange={e => setPb(e.target.value)}>{keys.map(k => <option key={k}>{k}</option>)}</select></label>
-          <span className="muted cmp-hint">Карты двигаются и приближаются вместе, круги одного масштаба, время идёт по дням от старта сезона.</span>
+          <span className="muted cmp-hint">{sync ? 'Карты двигаются, приближаются и листаются по времени вместе: дни считаются от старта сезона.' : 'Каждая карта со своим видом и своим окном времени.'} Круги везде одного масштаба.</span>
         </div>
         {err && <div className="note warning">{err}</div>}
         <div className="cmp-maps">
           <div className="cmp-cell">{mapFor('А', ca, keyA, wa)}</div>
           <div className="cmp-cell">{mapFor('Б', cb, keyB, wb)}</div>
         </div>
-        {ready && <CompareTimeline ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} setWindow={setWindow} />}
+        {ready && (sync
+          ? <CompareTimeline items={[{ calc: ca!, key: keyA, side: 'А' }, { calc: cb!, key: keyB, side: 'Б' }]} nd={nd} a={a} b={b} setWindow={setWindowA} />
+          : <div className="cmp-tls">
+            <CompareTimeline items={[{ calc: ca!, key: keyA, side: 'А' }]} nd={ca!.nd} a={a} b={b} setWindow={setWindowA} th={34} />
+            <CompareTimeline items={[{ calc: cb!, key: keyB, side: 'Б' }]} nd={cb!.nd} a={a2} b={b2} setWindow={setWindowB} th={34} /></div>)}
       </div>
-      {inspector && ready && <ComparePanel ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} selected={selected} group={group} onSelect={pick} />}
+      {inspector && ready && <ComparePanel ca={ca!} cb={cb!} keyA={keyA} keyB={keyB} nd={nd} a={a} b={b} a2={a2} b2={b2} selected={selected} group={group} onSelect={pick} />}
     </div>
   )
 }
 
-function CompareTimeline({ ca, cb, keyA, keyB, nd, a, b, setWindow }: { ca: SeasonCalc; cb: SeasonCalc; keyA: string; keyB: string; nd: number; a: number; b: number; setWindow: (a: number, b: number) => void }) {
+interface TlItem { calc: SeasonCalc; key: string; side: string }
+function CompareTimeline({ items, nd, a, b, setWindow, th = 70 }: { items: TlItem[]; th?: number; nd: number; a: number; b: number; setWindow: (a: number, b: number) => void }) {
+  const two = items.length > 1
   const box = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(900)
   const [playing, setPlaying] = useState(false)
@@ -144,10 +167,9 @@ function CompareTimeline({ ca, cb, keyA, keyB, nd, a, b, setWindow }: { ca: Seas
     return () => cancelAnimationFrame(id)
   }, [playing, speed, nd, setWindow])
 
-  const mx = Math.max(1, ...ca.daily, ...cb.daily)
-  const path = (c: SeasonCalc) => 'M' + Array.from(c.daily, (v, j) => `${(PAD + ((j + 0.5) / nd) * inner).toFixed(1)},${(TH - (Math.max(0, v) / mx) * (TH - 6)).toFixed(1)}`).join('L')
-  const pa = useMemo(() => path(ca), [ca, nd, inner]) // eslint-disable-line react-hooks/exhaustive-deps
-  const pb = useMemo(() => path(cb), [cb, nd, inner]) // eslint-disable-line react-hooks/exhaustive-deps
+  const mx = Math.max(1, ...items.flatMap(i => Array.from(i.calc.daily)))
+  const path = (c: SeasonCalc) => 'M' + Array.from(c.daily, (v, j) => `${(PAD + ((j + 0.5) / nd) * inner).toFixed(1)},${(th - (Math.max(0, v) / mx) * (th - 6)).toFixed(1)}`).join('L')
+  const paths = useMemo(() => items.map(i => path(i.calc)), [items, nd, inner]) // eslint-disable-line react-hooks/exhaustive-deps
   const step = nd > 400 ? 90 : 30
   const ticks = Array.from({ length: Math.floor((nd - 1) / step) + 1 }, (_, k) => k * step)
 
@@ -181,21 +203,21 @@ function CompareTimeline({ ca, cb, keyA, keyB, nd, a, b, setWindow }: { ca: Seas
         <div className="segmented tl-speed" role="radiogroup" aria-label="Скорость">
           {[1, 2, 4, 8].map(s => <button key={s} type="button" role="radio" aria-checked={speed === s} onClick={() => setSpeed(s)}>{s}×</button>)}
         </div>
-        <div className="tl-read"><b>день {a + 1} — {b + 1}</b><span className="muted"> · {b - a + 1} дн. · А: {dates(ca)} · Б: {dates(cb)}</span></div>
+        <div className="tl-read"><b>день {a + 1} — {b + 1}</b><span className="muted"> · {b - a + 1} дн. · {items.map(i => i.side + ': ' + dates(i.calc)).join(' · ')}</span></div>
         <div className="tl-chips">
           <button type="button" className={'chip-btn' + (whole ? ' on' : '')} onClick={() => { setPlaying(false); setWindow(0, nd - 1) }}>Весь сезон</button>
           {ticks.filter(t => t + step <= nd + 1).map(t => <button key={t} type="button" className="chip-btn" onClick={() => { setPlaying(false); setWindow(t, Math.min(nd - 1, t + step - 1)) }} title={`Дни ${t + 1}–${Math.min(nd, t + step)} от старта сезона`}>{t + 1}–{Math.min(nd, t + step)}</button>)}
         </div>
       </div>
       <div ref={box} className="tl-track" onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null }}>
-        <svg width={w} height={TH + 22} role="img" aria-label="Общий бегунок по дням от старта сезона">
-          {ticks.map(t => <g key={t}><line x1={px(t)} x2={px(t)} y1={4} y2={TH} className="tl-tick" /><text x={px(t) + 3} y={TH + 14} className="tl-label">день {t + 1}</text></g>)}
-          <path d={pa} className="spark-line cmp-line-a" /><path d={pb} className="spark-line" />
-          <rect x={px(a)} width={Math.max(2, px(b + 1) - px(a))} y={2} height={TH - 4} className="tl-sel" />
-          <rect x={px(a) - 3} y={TH / 2 - 14} width={6} height={28} rx={3} className="tl-handle" />
-          <rect x={px(b + 1) - 3} y={TH / 2 - 14} width={6} height={28} rx={3} className="tl-handle" />
+        <svg width={w} height={th + 22} role="img" aria-label="Общий бегунок по дням от старта сезона">
+          {ticks.map(t => <g key={t}><line x1={px(t)} x2={px(t)} y1={4} y2={th} className="tl-tick" /><text x={px(t) + 3} y={th + 14} className="tl-label">день {t + 1}</text></g>)}
+          {paths.map((d, i) => <path key={i} d={d} className={'spark-line' + (two && i === 0 ? ' cmp-line-a' : '')} />)}
+          <rect x={px(a)} width={Math.max(2, px(b + 1) - px(a))} y={2} height={th - 4} className="tl-sel" />
+          <rect x={px(a) - 3} y={th / 2 - 14} width={6} height={28} rx={3} className="tl-handle" />
+          <rect x={px(b + 1) - 3} y={th / 2 - 14} width={6} height={28} rx={3} className="tl-handle" />
         </svg>
-        <div className="cum-legend"><span><i className="cmp-key-a" />А · {keyA}</span><span><i style={{ background: 'var(--accent)' }} />Б · {keyB}</span><span className="muted">суточный расход ГСП, общая шкала</span></div>
+        <div className="cum-legend">{items.map((i, k) => <span key={k}><i className={two && k === 0 ? 'cmp-key-a' : ''} style={two && k === 0 ? undefined : { background: 'var(--accent)' }} />{i.side} · {i.key}</span>)}<span className="muted">суточный расход ГСП{two ? ', общая шкала' : ''}</span></div>
       </div>
     </div>
   )
@@ -211,7 +233,7 @@ function Row({ label, a, b, f, unit, pct = true }: { label: string; a: number | 
   )
 }
 
-function CumCompare({ rows, a, b, nd, keyA, keyB }: { rows: [number[] | null, number[] | null]; a: number; b: number; nd: number; keyA: string; keyB: string }) {
+function CumCompare({ rows, wins, nd, keyA, keyB }: { rows: [number[] | null, number[] | null]; wins: [number, number][]; nd: number; keyA: string; keyB: string }) {
   const W = 300, H = 110
   const cum = (r: number[] | null) => { const o: number[] = []; let s = 0; for (const v of r || []) { s += Math.max(0, v); o.push(s) } return o }
   const [xa, xb] = [cum(rows[0]), cum(rows[1])]
@@ -221,7 +243,7 @@ function CumCompare({ rows, a, b, nd, keyA, keyB }: { rows: [number[] | null, nu
   return (
     <>
       <svg viewBox={`0 0 ${W} ${H + 14}`} className="cum" role="img" aria-label="Накопленный расход по дням от старта сезона, два сезона">
-        <rect x={(a / nd) * W} width={Math.max(1, ((b - a + 1) / nd) * W)} y={0} height={H} className="daily-win" />
+        {wins.map(([x0, x1], k) => <rect key={k} x={(x0 / nd) * W} width={Math.max(1, ((x1 - x0 + 1) / nd) * W)} y={0} height={H} className="daily-win" opacity={wins[0][0] === wins[1][0] && wins[0][1] === wins[1][1] && k ? 0 : 1} />)}
         <path d={line(xa)} fill="none" className="cmp-line-a" strokeWidth={1.8} />
         <path d={line(xb)} fill="none" stroke="var(--accent)" strokeWidth={2} />
         <line x1={0} x2={W} y1={H} y2={H} className="daily-axis" />
@@ -234,15 +256,15 @@ function CumCompare({ rows, a, b, nd, keyA, keyB }: { rows: [number[] | null, nu
   )
 }
 
-function ComparePanel({ ca, cb, keyA, keyB, nd, a, b, selected, group, onSelect }: { ca: SeasonCalc; cb: SeasonCalc; keyA: string; keyB: string; nd: number; a: number; b: number; selected: number | null; group: number[]; onSelect: (w: number | null) => void }) {
-  const ta = useMemo(() => totalsOf(ca, a, b), [ca, a, b]), tb = useMemo(() => totalsOf(cb, a, b), [cb, b, a])
+function ComparePanel({ ca, cb, keyA, keyB, nd, a, b, a2, b2, selected, group, onSelect }: { ca: SeasonCalc; cb: SeasonCalc; keyA: string; keyB: string; nd: number; a: number; b: number; a2: number; b2: number; selected: number | null; group: number[]; onSelect: (w: number | null) => void }) {
+  const ta = useMemo(() => totalsOf(ca, a, b), [ca, a, b]), tb = useMemo(() => totalsOf(cb, a2, b2), [cb, a2, b2])
   const wells = useMemo(() => {
     const m = new Map<number, [number, number]>()
-    const wa = clampTo(ca, a, b), wb = clampTo(cb, a, b)
+    const wa = clampTo(ca, a, b), wb = clampTo(cb, a2, b2)
     for (let i = 0; i < ca.nw; i++) m.set(ca.wells[i], [wa ? ca.stat(i, wa[0], wa[1]).total : 0, 0])
     for (let i = 0; i < cb.nw; i++) { const v = wb ? cb.stat(i, wb[0], wb[1]).total : 0; const e = m.get(cb.wells[i]); if (e) e[1] = v; else m.set(cb.wells[i], [0, v]) }
     return [...m.entries()].map(([w, [x, y]]) => ({ w, x, y, d: y - x })).filter(r => r.x > 0 || r.y > 0)
-  }, [ca, cb, a, b])
+  }, [ca, cb, a, b, a2, b2])
   const top = useMemo(() => [...wells].sort((p, q) => Math.abs(q.d) - Math.abs(p.d)).slice(0, 8), [wells])
   const dmax = Math.max(1, ...top.map(r => Math.abs(r.d)))
   const picked = group.length > 1 ? group : selected !== null ? [selected] : []
@@ -257,6 +279,7 @@ function ComparePanel({ ca, cb, keyA, keyB, nd, a, b, selected, group, onSelect 
   return (
     <aside className="inspector">
       <div className="insp-head"><div><h2>Сравнение</h2><span className="muted">А {keyA} · Б {keyB}</span></div></div>
+      {(a !== a2 || b !== b2) && <p className="muted hint">Окна у карт разные: А — дни {a + 1}–{b + 1}, Б — дни {a2 + 1}–{b2 + 1}.</p>}
       <h3>Итоги за выбранные дни</h3>
       <table className="mini cmp-table">
         <thead><tr><th /><th className="number">А</th><th className="number">Б</th><th className="number">Б − А</th></tr></thead>
@@ -273,7 +296,7 @@ function ComparePanel({ ca, cb, keyA, keyB, nd, a, b, selected, group, onSelect 
       </table>
       <p className="muted hint">Скважин, работавших только в А: {onlyA}, только в Б: {onlyB}. «День 50 %» считается по всему сезону.</p>
       <h3>Накопленный расход · {scope}</h3>
-      <CumCompare rows={[rowsFor(ca), rowsFor(cb)]} a={a} b={b} nd={nd} keyA={keyA} keyB={keyB} />
+      <CumCompare rows={[rowsFor(ca), rowsFor(cb)]} wins={[[a, b], [a2, b2]]} nd={nd} keyA={keyA} keyB={keyB} />
       <h3>Что изменилось сильнее всего</h3>
       <ul className="toplist cmp-top">{top.map(r => (
         <li key={r.w}><button type="button" className={selected === r.w ? 'on' : ''} onClick={() => onSelect(r.w)} title={`А ${fmtMln(r.x)} → Б ${fmtMln(r.y)} млн м³`}>
