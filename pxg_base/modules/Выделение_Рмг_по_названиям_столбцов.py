@@ -108,7 +108,7 @@ def process_files_simple():
         print("Не указано ни одного файла!")
         return
     
-    files = list(set(files))
+    files = list(dict.fromkeys(files))  # без повторов, в порядке ввода
     print(f"\nВсего файлов для обработки: {len(files)}")
     
     all_data = []

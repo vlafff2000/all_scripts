@@ -60,7 +60,7 @@ def select_columns_interactively():
         return None, None
     
     # Убираем дубликаты
-    files = list(set(files))
+    files = list(dict.fromkeys(files))  # без повторов, в порядке ввода
     print(f"\nВсего файлов для обработки: {len(files)}")
     
     # Показываем столбцы первого файла для выбора
