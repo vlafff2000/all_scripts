@@ -1,4 +1,5 @@
-import type { GspData, SeasonData, WaterRec } from './api'
+import { ALL_GSP, type GspData, type SeasonData, type SeasonInfo, type WaterRec } from './api'
+import type { SeasonScope } from './prefs'
 
 export const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
 export const MONTH_NAME = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
@@ -145,13 +146,36 @@ export function niceStep(span: number, target = 5) {
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p
 }
 
+/** Цвета колец воды по месяцам: от голубого к фиолетовому, раньше — светлее. */
+export const WATER_STOPS = ['#6dd3ee', '#2f9be0', '#2f6fd0', '#4a4fc4', '#7a3fb0']
+/** Месяцы с водой в окне (год·12+месяц) по порядку и их цвета. */
+export function waterMonths(water: Map<number, WaterPoint[]>): { list: number[]; color: Map<number, string> } {
+  const set = new Set<number>()
+  for (const pts of water.values()) for (const p of pts) if ((p.flow ?? 0) > 0) set.add(p.year * 12 + p.month)
+  const list = [...set].sort((p, q) => p - q), color = new Map<number, string>()
+  list.forEach((ym, i) => color.set(ym, rampColor(WATER_STOPS, list.length > 1 ? i / (list.length - 1) : 0.4)))
+  return { list, color }
+}
+
+/** Какие сезоны брать для раскраски: один выбранный, отмеченные или все. */
+export function scopeKeys(mode: SeasonScope, picked: string[], seasons: SeasonInfo[], season: string): string[] {
+  if (mode === 'all') return seasons.map(s => s.key)
+  if (mode === 'pick') { const k = seasons.map(s => s.key).filter(x => picked.includes(x)); if (k.length) return k }
+  return [season]
+}
+export interface Scope { mode: SeasonScope; keys: string[]; calcs: Map<string, SeasonCalc> }
+
 /** Раскраска карты: по умолчанию круги по расходу газа, остальные режимы красят скважины одной шкалой. */
-export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'wfall'
+export type Paint = 'flow' | 'entry' | 'depth' | 'wf'
 export const PAINTS: [Paint, string][] = [
-  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость (окно)'], ['wfall', 'Обводнённость (все сезоны)'],
+  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'],
 ]
 export interface PaintVal { v: number; label: string; tip: string }
-export interface PaintData { vals: Map<number, PaintVal>; lo: number; hi: number; stops: string[]; title: string; fmt: (v: number) => string; note: string }
+export interface PaintData {
+  vals: Map<number, PaintVal>; lo: number; hi: number; stops: string[]; title: string; fmt: (v: number) => string; note: string
+  /** Подписи под шкалой в легенде: только края (для очерёдности) или ещё середина. */
+  mid?: boolean; scopeNote?: string
+}
 
 export function rampColor(stops: string[], t: number): string {
   const x = Math.max(0, Math.min(1, t)) * (stops.length - 1), i = Math.min(stops.length - 2, Math.floor(x)), f = x - i
@@ -159,8 +183,8 @@ export function rampColor(stops: string[], t: number): string {
   const p = c(stops[i]), q = c(stops[i + 1])
   return '#' + p.map((v, k) => Math.round(v + (q[k] - v) * f).toString(16).padStart(2, '0')).join('')
 }
-// последовательные шкалы — один тон от светлого к тёмному (без радуги)
-const ENTRY_STOPS = ['#d9d3f5', '#9085e9', '#5b4bc4', '#2e2470']
+// ввод: разноцветная шкала от жёлтого (первые) к тёмно-фиолетовому (последние), чтобы соседние по времени скважины различались
+const ENTRY_STOPS = ['#f6d746', '#a0da39', '#36b779', '#25858e', '#3e4a89', '#46186a']
 const DEPTH_STOPS = ['#c4e8e5', '#5fbab4', '#1b8780', '#0b4f4b']
 const WF_STOPS = ['#cde2fb', '#6da7ec', '#256abf', '#0d366b']
 /** Месяцы сезона на круге: порядковая шкала одного тёплого тона, раньше — светлее, позже — темнее. */
@@ -168,17 +192,62 @@ export const SEASON_STOPS = ['#f19a85', '#e2614f', '#c33a3f', '#8e2236', '#5c152
 // на тёмном фоне тот же тон, но без самых тёмных ступеней: они сливались бы с фоном
 export const SEASON_STOPS_DARK = ['#f7c2b4', '#f19a85', '#e2614f', '#c94347', '#a32d3f']
 
+const seasonsWord = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'сезону' : 'сезонам')
+const scopeTitle = (sc: Scope | undefined, season: string, kind: string) =>
+  !sc || sc.mode === 'one' ? `${kind.toLowerCase()} ${season}` : sc.mode === 'all' ? `среднее по всем сезонам (${sc.keys.length})` : `среднее по ${sc.keys.length} ${seasonsWord(sc.keys.length)}`
+
 /** Значения выбранной раскраски по скважинам сезона. Скважины без значения в карту не попадают (рисуются серыми). */
-export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: string, season: string, a: number, b: number): PaintData | null {
+export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: string, season: string, a: number, b: number, scope?: Scope): PaintData | null {
   if (paint === 'flow') return null
   const vals = new Map<number, PaintVal>()
+  const multi = !!scope && scope.mode !== 'one' && scope.keys.length > 0
+  const keys = multi ? scope!.keys : [season]
   if (paint === 'entry') {
-    const first: [number, number][] = []
-    calc.wells.forEach((w, i) => { const j = calc.flow[i].findIndex(v => v > 0); if (j >= 0) first.push([calc.days[j], w]) })
-    first.sort((p, q) => p[0] - q[0])
-    first.forEach(([d, w], r) => vals.set(w, { v: d, label: fmtDay(d).slice(0, 5), tip: `Ввод ${r + 1}-й: ${fmtDay(d)}` + (r ? `, позже первой на ${d - first[0][0]} дн.` : '') }))
-    const lo = first.length ? first[0][0] : 0, hi = first.length ? first[first.length - 1][0] : 1
-    return { vals, lo, hi: hi === lo ? lo + 1 : hi, stops: ENTRY_STOPS, title: `Первый день с расходом, ${kind.toLowerCase()} ${season}`, fmt: fmtDay, note: 'число на круге — дата ввода (дд.мм)' }
+    // внутри ГСП важна очерёдность включения (цвет — место в ряду), для всего объекта — дни от начала сезона
+    const byDays = g.gsp === ALL_GSP
+    const info = new Map((g.seasons[kind as 'Отбор' | 'Закачка'] || []).map(s => [s.key, s]))
+    const per = new Map<number, { frac: number[]; off: number[]; rank: number[]; of: number[]; keys: string[]; day: number[] }>()
+    let used = 0
+    for (const key of keys) {
+      const c = key === season ? calc : scope?.calcs.get(key)
+      if (!c) continue
+      used++
+      const start = info.get(key)?.start ?? c.days[0]
+      const first: [number, number][] = []
+      c.wells.forEach((w, i) => { const j = c.flow[i].findIndex(v => v > 0); if (j >= 0) first.push([c.days[j], w]) })
+      first.sort((p, q) => p[0] - q[0] || p[1] - q[1])
+      const dates = [...new Set(first.map(f => f[0]))]  // очередь считается по датам: скважины с одним днём ввода делят место
+      first.forEach(([d, w]) => {
+        const rank = dates.indexOf(d)
+        const e = per.get(w) || { frac: [], off: [], rank: [], of: [], keys: [], day: [] }
+        e.frac.push(dates.length > 1 ? rank / (dates.length - 1) : 0); e.off.push(d - start); e.rank.push(rank + 1); e.of.push(dates.length); e.keys.push(key); e.day.push(d)
+        per.set(w, e)
+      })
+    }
+    const mean = (v: number[]) => v.reduce((p, q) => p + q, 0) / v.length
+    let hi = 1
+    const raw = new Map<number, number>()
+    per.forEach((e, w) => { const v = byDays ? mean(e.off) : mean(e.frac); raw.set(w, v); hi = Math.max(hi, v) })
+    if (!byDays) hi = 1
+    per.forEach((e, w) => {
+      const v = raw.get(w)!
+      if (!multi) {
+        const d = e.day[0], off = e.off[0]
+        vals.set(w, { v, label: byDays ? String(off) : String(e.rank[0]), tip: `Очередь ввода ${e.rank[0]} из ${e.of[0]}: ${fmtDay(d)}, на ${off}-й день от старта сезона` })
+      } else {
+        const m = mean(e.off), r = mean(e.rank)
+        const list = e.keys.map((k, i) => `${k}: день ${e.off[i]}, очередь ${e.rank[i]}`).slice(0, 6).join('; ') + (e.keys.length > 6 ? '…' : '')
+        vals.set(w, { v, label: byDays ? String(Math.round(m)) : String(Math.round(r)),
+          tip: `Ввод в среднем на ${Math.round(m)}-й день от старта, очередь в среднем ${r.toFixed(1).replace('.', ',')} (сезонов ${e.keys.length} из ${used}). ${list}` })
+      }
+    })
+    return {
+      vals, lo: 0, hi, stops: ENTRY_STOPS, mid: byDays,
+      title: byDays ? `Дни до ввода, ${scopeTitle(scope, season, kind)}` : `Очерёдность ввода, ${scopeTitle(scope, season, kind)}`,
+      fmt: byDays ? v => Math.round(v) + ' дн.' : v => (v <= 0 ? 'первые' : v >= 1 ? 'последние' : Math.round(v * 100) + ' %'),
+      note: byDays ? 'число — день ввода от старта' : 'число — очередь ввода (1 — первая)',
+      scopeNote: multi ? scopeTitle(scope, season, kind) : undefined,
+    }
   }
   if (paint === 'depth') {
     let lo = Infinity, hi = -Infinity
@@ -192,17 +261,32 @@ export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: strin
     if (!ok.length) { lo = 0; hi = 1 }
     return { vals, lo, hi: hi === lo ? lo + 10 : hi, stops: DEPTH_STOPS, title: 'Глубина верха перфорации, м', fmt: v => String(Math.round(v)), note: 'число на круге — верх перфорации, м' }
   }
-  const src = paint === 'wf' ? [...waterByWell(g.water, kind, season, calc.days[a], calc.days[b]).entries()]
-    : (() => { const m = new Map<number, WaterPoint[]>(); for (const r of g.water) { const arr = m.get(r.well) || []; arr.push({ month: r.month - 1, year: r.year, factor: r.factor, flow: r.flow, note: r.note }); m.set(r.well, arr) } return [...m.entries()] })()
+  // обводнённость: за окно одного сезона — максимум водного фактора; за несколько сезонов — среднее из максимумов по сезонам
   const have = new Set(calc.wells)
-  let hi = 0
-  for (const [w, pts] of src) {
-    if (!have.has(w)) continue
-    const f = pts.map(p => p.factor).filter((v): v is number => v !== null)
-    if (!f.length) continue
-    const mx = Math.max(...f), n = f.filter(v => v > 0).length
-    hi = Math.max(hi, mx)
-    vals.set(w, { v: mx, label: String(Math.round(mx)), tip: `Водный фактор: максимум ${Math.round(mx)} л/1000 м³, замеров с водой ${n} из ${f.length}` })
+  const perSeason = new Map<number, [string, number][]>()
+  for (const key of keys) {
+    const src = multi ? waterByWell(g.water, kind, key, -1e7, 1e7) : waterByWell(g.water, kind, key, calc.days[a], calc.days[b])
+    for (const [w, pts] of src) {
+      if (!have.has(w)) continue
+      const f = pts.map(p => p.factor).filter((v): v is number => v !== null)
+      if (!f.length) continue
+      const arr = perSeason.get(w) || []
+      arr.push([key, Math.max(...f)])
+      perSeason.set(w, arr)
+    }
   }
-  return { vals, lo: 0, hi: hi || 1, stops: WF_STOPS, title: paint === 'wf' ? 'Макс. водный фактор в окне, л/1000 м³' : 'Макс. водный фактор за все сезоны, л/1000 м³', fmt: v => String(Math.round(v)), note: 'число на круге — водный фактор' }
+  let hi = 0
+  perSeason.forEach((arr, w) => {
+    const v = arr.reduce((p, q) => p + q[1], 0) / arr.length
+    hi = Math.max(hi, v)
+    if (!multi) { vals.set(w, { v, label: String(Math.round(v)), tip: `Водный фактор: максимум ${Math.round(v)} л/1000 м³ за окно` }); return }
+    const peak = arr.reduce((p, q) => (q[1] > p[1] ? q : p))
+    const withWater = arr.filter(q => q[1] > 0).length
+    vals.set(w, { v, label: String(Math.round(v)), tip: `Водный фактор в среднем ${Math.round(v)} л/1000 м³ по ${arr.length} сез. из ${keys.length}, с водой ${withWater}; пик ${Math.round(peak[1])} (${peak[0]})` })
+  })
+  return {
+    vals, lo: 0, hi: hi || 1, stops: WF_STOPS, mid: true,
+    title: multi ? 'ВФ, среднее по сезонам, л/1000 м³' : 'Макс. ВФ в окне, л/1000 м³',
+    fmt: v => String(Math.round(v)), note: 'число — водный фактор', scopeNote: multi ? scopeTitle(scope, season, kind) : undefined,
+  }
 }

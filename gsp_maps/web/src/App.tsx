@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { exportExcel, getGsp, getSeason, getState, saveImage, type AppState, type GspData } from './api'
+import { ALL_GSP, exportExcel, getGsp, getSeason, getState, saveImage, setAllGroups, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
 import MapView, { type MapHandle } from './MapView'
-import { SeasonCalc, fmtDay } from './model'
+import { SeasonCalc, fmtDay, scopeKeys } from './model'
 import SharesPage from './SharesPage'
 import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
-import { bubbleScale, hideIdle, minValue, labelMode, paintMode, fixedScale, inspectorOpen, tipMode, lastGsp, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { bubbleScale, hideIdle, minValue, labelMode, paintMode, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
 
 const PAGES = [
@@ -75,8 +75,13 @@ export default function App() {
   }, [])
 
   const ready = app?.state === 'ready'
+  // «Весь объект» — все ГСП на одной карте; пункт есть, если групп больше одной
+  const gspList = ready ? (app!.gsps.length > 1 ? [...app!.gsps, ALL_GSP] : app!.gsps) : []
+  const meta = (x: string) => (x === ALL_GSP ? { grid: app!.gsps.some(n => app!.gspMeta[n]?.grid), xy: app!.gsps.some(n => app!.gspMeta[n]?.xy) } : app!.gspMeta[x])
   const withMap = ready ? app!.gsps.find(x => app!.gspMeta[x]?.grid || app!.gspMeta[x]?.xy) : undefined
-  const gsp = ready ? (app!.gsps.includes(gspPref) ? gspPref : withMap || app!.gsps[0] || '') : ''
+  const gsp = ready ? (gspList.includes(gspPref) ? gspPref : withMap || app!.gsps[0] || '') : ''
+  if (ready) setAllGroups(app!.gsps)
+  const wholeField = gsp === ALL_GSP
   useEffect(() => {
     if (!ready || !gsp) return
     let live = true
@@ -106,6 +111,27 @@ export default function App() {
     getSeason(g.gsp, kind, prevKey).then(d => { if (live) setPrev(new SeasonCalc(d)) }).catch(() => { /* сравнение необязательно */ })
     return () => { live = false }
   }, [g, kind, prevKey])
+
+  // сезоны для раскраски «Ввод» по нескольким сезонам: догружаются по мере надобности
+  const scope = usePref(seasonScope), picked = usePref(pickedSeasons)
+  const [extra, setExtra] = useState<Map<string, SeasonCalc>>(new Map())
+  const extraOwner = useRef('')
+  const wantKeys = g && paint === 'entry' && scope !== 'one' ? scopeKeys(scope, picked, seasons, season).filter(k => k !== season) : []
+  const wantSig = wantKeys.join('|')
+  useEffect(() => {
+    if (!g) return
+    const owner = g.gsp + '|' + kind
+    if (extraOwner.current !== owner) { extraOwner.current = owner; setExtra(new Map()) }
+    const need = wantKeys.filter(k => !(extraOwner.current === owner && extra.has(k)))
+    if (!need.length) return
+    let live = true
+    Promise.all(need.map(k => getSeason(g.gsp, kind, k).then(d => [k, new SeasonCalc(d)] as const))).then(r => {
+      if (live) setExtra(m => { const n = new Map(extraOwner.current === owner ? m : []); r.forEach(([k, c]) => n.set(k, c)); return n })
+    }).catch(() => { /* остальные сезоны необязательны */ })
+    return () => { live = false }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [g, kind, wantSig])
+  const multi = useMemo(() => ({ seasons, calcs: extra }), [seasons, extra])
 
   const setWindow = useCallback((a: number, b: number) => setWin([a, b]), [])
   const [a, b] = calc ? calc.clampWindow(win[0], win[1]) : [0, 0]
@@ -145,7 +171,9 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batch, season, calcKey, calc])
   const exportRef = useRef<HTMLDetailsElement>(null)
-  const excel = async () => { try { const r = await exportExcel(gsp, mode); flash('Excel сохранён: ' + r.path) } catch (e) { flash(String((e as Error).message || e)) } }
+  const excel = async () => {
+    if (wholeField) { flash('Excel считается по одному ГСП: выберите ГСП вверху'); return }
+    try { const r = await exportExcel(gsp, mode); flash('Excel сохранён: ' + r.path) } catch (e) { flash(String((e as Error).message || e)) } }
   const goFind = (v: string) => {
     setFind(v)
     const n = Number(v)
@@ -170,6 +198,7 @@ export default function App() {
       <Compare g={g} kind={kind} inspector={insp} options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
         onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />)
     if (!g || !calc) return gErr ? <div className="note warning">{gErr}</div> : <p className="muted">Считаю…</p>
+    if (wholeField && ['table', 'work', 'shares'].includes(page)) return <section className="card"><h2>Нужна одна группа</h2><p className="muted">Эта страница считается по одному ГСП. Выберите ГСП вверху: «Весь объект» работает на картах, в сравнении и в разделе «Скважины».</p></section>
     if (page === 'table') return <TablePage g={g} calc={calc} kind={kind} season={season} a={a} b={b} mode={mode} />
     if (page === 'pressure') return <PressurePage g={g} kind={kind} season={season} range={[calc.days[a], calc.days[b]]} />
     if (page === 'wells') return <WellsPage g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={setSelected} group={group} />
@@ -179,7 +208,7 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null}
+          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
@@ -212,7 +241,7 @@ export default function App() {
         {showBar && (
           <div className="topbar">
             <label className="sel"><span>ГСП</span>
-              <select value={gsp} onChange={e => lastGsp.set(e.target.value)}>{app!.gsps.map(x => <option key={x} value={x}>{x}{app!.gspMeta[x] && !app!.gspMeta[x].grid && !app!.gspMeta[x].xy ? ' · нет карты' : ''}</option>)}</select></label>
+              <select value={gsp} onChange={e => lastGsp.set(e.target.value)}>{gspList.map(x => <option key={x} value={x}>{x}{meta(x) && !meta(x).grid && !meta(x).xy ? ' · нет карты' : ''}</option>)}</select></label>
             <div className="segmented" role="radiogroup" aria-label="Вид">
               {['Отбор', 'Закачка'].map(k => <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => lastKind.set(k)}>{k}</button>)}</div>
             {page !== 'compare' && <label className="sel"><span>Сезон</span>

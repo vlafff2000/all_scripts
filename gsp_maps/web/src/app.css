@@ -275,3 +275,6 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .side-grip::after { content: ''; position: absolute; left: 3px; top: 50%; width: 2px; height: 36px; margin-top: -18px; border-radius: 1px; background: var(--line); }
 .side-grip:hover::after, .side-grip:focus-visible::after { background: var(--accent, #c0392b); }
 @media (max-width: 1100px) { .side-grip { display: none; } }
+
+.season-pick { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; max-height: 120px; overflow: auto; }
+.season-pick .check { margin: 0; }

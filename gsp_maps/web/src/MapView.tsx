@@ -1,9 +1,9 @@
 import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { legendOpen, usePref } from './prefs'
+import { legendOpen, pickedSeasons, seasonScope, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
-import type { GspData } from './api'
-import { PAINTS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, type Paint, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
+import type { GspData, SeasonInfo } from './api'
+import { PAINTS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
@@ -13,6 +13,8 @@ interface Props {
   /** Режим сравнения: общий масштаб кругов и общий вид (зум/сдвиг) у двух карт. */
   /** Куда выводить подсказку: элемент вне карты (тогда она не закрывает скважины) или null — рядом с курсором. */
   tipHost?: HTMLElement | null; tipTag?: string; stickyTip?: boolean
+  /** Сезоны для раскраски «Ввод» и «Обводнённость»: выбор периода показывается в панели «Вид карты», только если передан. */
+  multi?: { seasons: SeasonInfo[]; calcs: Map<string, SeasonCalc> }
   compact?: boolean; scaleMax?: number; view?: View; onView?: (v: View) => void
 }
 export interface View { k: number; tx: number; ty: number }
@@ -29,7 +31,7 @@ const readPal = (): Pal => ({
 
 const Glyph = memo(function Glyph(p: {
   well: number; x: number; y: number; r: number; rmax: number; total: number; share: number; months: number[]; order: number[]; monthColors: string[]
-  sectors: boolean; paint?: { color: string; label: string } | null; water: { factor: number | null; flow: number | null }[]; maxFlow: number; showShare: boolean
+  sectors: boolean; paint?: { color: string; label: string } | null; water: { factor: number | null; flow: number | null; color: string }[]; maxFlow: number; showShare: boolean
   selected: boolean; label: string; dim: boolean; hot?: boolean; pal: Pal
 }) {
   const { x, y, rmax, pal } = p
@@ -57,19 +59,20 @@ const Glyph = memo(function Glyph(p: {
       els.push(<circle key="o" cx={x} cy={y} r={r} fill="none" stroke={pal.surface} strokeWidth={ring} />)
     }
   }
-  // вода: тонкое голубое кольцо снаружи (толщина ∝ л/ч), водный фактор — кружок на кольце
+  // вода: по кольцу на каждый месяц с водой, снаружи друг от друга (раньше — ближе к кругу), цвет — месяц, толщина ∝ л/ч; водный фактор — кружок на внешнем кольце
   const ws = p.water.filter(w => (w.flow ?? 0) > 0)
   if (ws.length && !idle) {
-    const gap = ws.length > 1 ? 0.16 : 0, span = (Math.PI * 2) / ws.length, r0 = r + rmax * 0.07
+    let r0 = r + rmax * 0.07
     ws.forEach((w, i) => {
-      const t = rmax * 0.14 * (0.35 + 0.65 * Math.sqrt((w.flow ?? 0) / (p.maxFlow || 1)))
-      els.push(<path key={'w' + i} d={sectorPath(x, y, r0 + t, i * span + gap / 2, (i + 1) * span - gap / 2, r0)} fill={pal.water} />)
+      const t = rmax * 0.12 * (0.4 + 0.6 * Math.sqrt((w.flow ?? 0) / (p.maxFlow || 1)))
+      els.push(<circle key={'w' + i} cx={x} cy={y} r={r0 + t / 2} fill="none" stroke={w.color} strokeWidth={t} />)
+      r0 += t + rmax * 0.02
     })
     const wf = Math.max(...ws.map(w => w.factor ?? 0))
     if (wf > 0) {
-      const t = String(Math.round(wf)), br = rmax * (t.length > 2 ? 0.27 : 0.22), ang = Math.PI / 4, rr = r0 + rmax * 0.08
+      const t = String(Math.round(wf)), br = rmax * (t.length > 2 ? 0.27 : 0.22), ang = Math.PI / 4, rr = r0 + rmax * 0.02
       const bx = x + rr * Math.sin(ang), by = y - rr * Math.cos(ang)
-      els.push(<g key="wf"><circle cx={bx} cy={by} r={br} fill={pal.water} stroke={pal.surface} strokeWidth={rmax * 0.035} />
+      els.push(<g key="wf"><circle cx={bx} cy={by} r={br} fill={ws[ws.length - 1].color} stroke={pal.surface} strokeWidth={rmax * 0.035} />
         <text x={bx} y={by} fontSize={br * (t.length > 2 ? 0.95 : 1.15)} textAnchor="middle" dominantBaseline="central" fill="#fff" fontWeight={700}>{t}</text></g>)
     }
   }
@@ -97,7 +100,7 @@ const Glyph = memo(function Glyph(p: {
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, stickyTip = true, compact, scaleMax, view: viewProp, onView }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
@@ -155,7 +158,28 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   }, [placed, calc, a, b, options.sectors, options.fixed, scaleMax])
 
   const water = useMemo(() => waterByWell(g.water, kind, season, calc.days[a], calc.days[b]), [g.water, kind, season, calc, a, b])
-  const paintData: PaintData | null = useMemo(() => paintFor(options.paint, g, calc, kind, season, a, b), [options.paint, g, calc, kind, season, a, b])
+  const scopeMode = usePref(seasonScope), picked = usePref(pickedSeasons)
+  const scope: Scope | undefined = useMemo(() => {
+    if (!multi) return undefined
+    const keys = scopeKeys(scopeMode, picked, multi.seasons, season)
+    return { mode: keys.length === 1 && keys[0] === season ? 'one' : scopeMode, keys, calcs: multi.calcs }
+  }, [multi, scopeMode, picked, season])
+  const paintData: PaintData | null = useMemo(() => paintFor(options.paint, g, calc, kind, season, a, b, options.paint === 'entry' || options.paint === 'wf' ? scope : undefined), [options.paint, g, calc, kind, season, a, b, scope])
+  const wm = useMemo(() => waterMonths(water), [water])
+  // кольца воды скважины: один месяц — одно кольцо (замеры месяца сводятся к максимуму)
+  const rings = useMemo(() => {
+    const out = new Map<number, { factor: number | null; flow: number | null; color: string }[]>()
+    for (const [w, pts] of water) {
+      const by = new Map<number, { factor: number | null; flow: number | null; color: string }>()
+      for (const q of pts) {
+        const ym = q.year * 12 + q.month, c = by.get(ym)
+        if (!(q.flow && q.flow > 0)) continue
+        by.set(ym, { factor: Math.max(q.factor ?? 0, c?.factor ?? 0) || null, flow: Math.max(q.flow, c?.flow ?? 0), color: wm.color.get(ym) || WATER })
+      }
+      out.set(w, [...by.entries()].sort((p, q) => p[0] - q[0]).map(e => e[1]))
+    }
+    return out
+  }, [water, wm])
   const maxFlow = useMemo(() => Math.max(1, ...[...water.values()].flat().map(w => w.flow ?? 0)), [water])
   const usedMonths = useMemo(() => {
     const s = new Set<number>()
@@ -250,13 +274,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   // по умолчанию легенда маленькая: только размеры кругов; месяцы и вода раскрываются по кнопке
   const legendExpanded = usePref(legendOpen)
   const small = !!compact || !legendExpanded
-  const LW = paintData ? 220 : small ? 124 : 248
-  const legH = 46 + sizeH + (!paintData && !small && usedMonths.length > 1 ? 44 : 0) + (!paintData && !small && options.water ? 26 : 0)
+  const LW = paintData ? 270 : small ? 124 : 248
+  const legH = 46 + sizeH + (!paintData && !small && usedMonths.length > 1 ? 44 : 0) + (!paintData && !small && options.water ? (wm.list.length > 1 ? 52 : 26) : 0)
   // без наведения подсказка остаётся на выбранной скважине (только в панели); при наведении следует за курсором
   const tipId = tip ? tip.well : tipHost && stickyTip && selected !== null ? selected : null
   const tipWell = tipId !== null ? placed.find(q => q.well === tipId) : null
   const tipIdx = tipWell ? placed.indexOf(tipWell) : -1
-  const [t1, t2] = [title.split(' · ').slice(0, 2).join(' · '), title.split(' · ')[2] || '']
+  const [t1, t2] = [title.split(' · ').slice(0, 2).join(' · '), paintData?.scopeNote || title.split(' · ')[2] || '']
 
   return (
     <div className="map-wrap" ref={wrap}>
@@ -322,7 +346,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 share={win.stats[n].total > 0 ? win.stats[n].total / win.sumAll : 0}
                 months={win.months[n] || []} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
                 paint={paintData ? (paintData.vals.has(q.well) ? { color: rampColor(paintData.stops, (paintData.vals.get(q.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)), label: paintData.vals.get(q.well)!.label } : null) : undefined}
-                water={options.water ? water.get(q.well) || [] : []} maxFlow={maxFlow} showShare={options.share}
+                water={options.water ? rings.get(q.well) || [] : []} maxFlow={maxFlow} showShare={options.share}
                 selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
             ))}
           </g>
@@ -337,6 +361,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             <defs><linearGradient id="paintramp" x1="0" x2="1">{[0, 0.25, 0.5, 0.75, 1].map(t => <stop key={t} offset={t} stopColor={rampColor(paintData.stops, t)} />)}</linearGradient></defs>
             <rect x={14} y={32} width={LW - 28} height={10} rx={5} fill="url(#paintramp)" />
             <text x={14} y={57} fontSize={11} fill={pal.muted}>{paintData.fmt(paintData.lo)}</text>
+            {paintData.mid && <text x={LW / 2} y={57} fontSize={11} fill={pal.muted} textAnchor="middle">{paintData.fmt((paintData.lo + paintData.hi) / 2)}</text>}
             <text x={LW - 14} y={57} fontSize={11} fill={pal.muted} textAnchor="end">{paintData.fmt(paintData.hi)}</text>
             <circle cx={19} cy={75} r={4.5} fill={pal.surface} stroke={pal.muted} strokeDasharray="2 1.6" /><text x={30} y={79} fontSize={11} fill={pal.muted}>нет данных · {paintData.note}</text>
           </> : <>
@@ -362,9 +387,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 return <g key={m} transform={`translate(${i * w} 8)`}><rect width={w - 2} height={10} rx={3} fill={monthColors[m]} /><text x={(w - 2) / 2} y={25} fontSize={10.5} fill={pal.ink} textAnchor="middle">{MONTH_SHORT[m]}</text></g>
               })}
             </g>}
-            {!small && options.water && <g transform={`translate(14 ${legH - 14})`}>
-              <path d={sectorPath(8, -4, 8, -1.2, 1.2, 5.5)} fill={pal.water} /><circle cx={16} cy={-9} r={4.5} fill={pal.water} />
-              <text x={26} y={0} fontSize={11} fill={pal.muted}>вода: кольцо — л/ч, кружок — ВФ</text>
+            {!small && options.water && <g transform={`translate(14 ${legH - (wm.list.length > 1 ? 40 : 14)})`}>
+              <circle cx={8} cy={-4} r={7} fill="none" stroke={wm.color.get(wm.list[0]) || pal.water} strokeWidth={2.5} /><circle cx={16} cy={-9} r={4.5} fill={pal.water} />
+              <text x={26} y={0} fontSize={11} fill={pal.muted}>вода: кольцо на месяц, толщина — л/ч, кружок — ВФ</text>
+              {wm.list.length > 1 && wm.list.map((ym, i) => {
+                const w = (LW - 28) / wm.list.length
+                return <g key={ym} transform={`translate(${i * w} 8)`}><rect width={w - 2} height={10} rx={3} fill={wm.color.get(ym)} /><text x={(w - 2) / 2} y={25} fontSize={10.5} fill={pal.ink} textAnchor="middle">{MONTH_SHORT[ym % 12]}</text></g>
+              })}
             </g>}
           </>}
         </g>
@@ -394,6 +423,15 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             <label className="row"><span>Подпись</span><select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
             {!paintData && <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Шкала по всему сезону</label>}
           </section>
+          {multi && (options.paint === 'entry' || options.paint === 'wf') && <section><h4>Сезоны</h4>
+            <div className="segmented" role="radiogroup" aria-label="За какие сезоны">
+              {([['one', 'Один'], ['pick', 'Выбрать'], ['all', 'Все, среднее']] as [SeasonScope, string][]).map(([k, t]) => (
+                <button key={k} type="button" role="radio" aria-checked={scopeMode === k} onClick={() => seasonScope.set(k)}>{t}</button>))}</div>
+            {scopeMode === 'pick' && <div className="season-pick">{multi.seasons.map(sn => (
+              <label key={sn.key} className="check"><input type="checkbox" checked={picked.includes(sn.key)}
+                onChange={e => pickedSeasons.set(e.target.checked ? [...picked, sn.key] : picked.filter(x => x !== sn.key))} />{sn.key}</label>))}</div>}
+            {scopeMode !== 'one' && multi.seasons.length > 1 && scope?.keys.some(k => k !== season && !multi.calcs.has(k)) && options.paint === 'entry' && <p className="muted small">Загружаю сезоны…</p>}
+          </section>}
           {!paintData && <section><h4>Показывать</h4>
             <label className="check"><input type="checkbox" checked={options.hideIdle} onChange={e => onOptions({ hideIdle: e.target.checked })} />Только работающие</label>
             <label className="row" title="Скрыть скважины с расходом ниже порога"><span>Порог, млн м³</span><input type="number" min={0} step={0.5} className="thr" value={options.minValue} onChange={e => onOptions({ minValue: Math.max(0, Number(e.target.value) || 0) })} /></label>
@@ -429,7 +467,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               series={[{ key: 'd', label: 'Расход', color: pal.gas, y: row.map(v => Math.max(0, v)) }]} />
             <div className="tip-kpis"><div><span>в среднем</span><b>{fmtTh(st.mean)}</b><small>тыс. м³/сут</small></div><div><span>дней с расходом</span><b>{st.days}</b><small>из {b - a + 1}</small></div></div>
             {ws.length > 0 && <div className="tip-water">{ws.map((w, i) => (
-              <div key={i}><i />{MONTH_NAME[w.month]} {w.year}<span>{w.note !== 'Ок' ? w.note : (w.flow ?? 0) + ' л/ч · ВФ ' + Math.round(w.factor ?? 0)}</span></div>))}</div>}
+              <div key={i}><i style={{ background: wm.color.get(w.year * 12 + w.month) }} />{MONTH_NAME[w.month]} {w.year}<span>{w.note !== 'Ок' ? w.note : fmt1(w.flow ?? 0) + ' л/ч · ВФ ' + Math.round(w.factor ?? 0)}</span></div>))}</div>}
           </div>
         )
         return tipHost ? createPortal(node, tipHost) : node
