@@ -49,11 +49,16 @@ def install_headless_tk(config: dict) -> None:
         setattr(messagebox, name, message)
     messagebox.askyesno = messagebox.askokcancel = messagebox.askyesnocancel = lambda *a, **k: True
     tkinter = types.ModuleType("tkinter")
-    tkinter.__getattr__ = lambda name: Silent  # type: ignore[assignment]
+    def any_name(name):
+        if name.startswith("__"):  # inspect, pickle и др. спрашивают __file__, __spec__: им ответ «нет такого»
+            raise AttributeError(name)
+        return Silent
+
+    tkinter.__getattr__ = any_name  # type: ignore[assignment]
     tkinter.Tk = Silent
     tkinter.filedialog, tkinter.simpledialog, tkinter.messagebox = filedialog, simpledialog, messagebox
     ttk = types.ModuleType("tkinter.ttk")
-    ttk.__getattr__ = lambda name: Silent  # type: ignore[assignment]
+    ttk.__getattr__ = any_name  # type: ignore[assignment]
     tkinter.ttk = ttk
     sys.modules.update({"tkinter": tkinter, "tkinter.filedialog": filedialog, "tkinter.simpledialog": simpledialog,
                         "tkinter.messagebox": messagebox, "tkinter.ttk": ttk})
