@@ -26,9 +26,68 @@ export const getState = () => call<AppState>('/api/state')
 export const saveConfig = (paths: Record<string, string>, resultsDir?: string, load = true) =>
   call<AppState>('/api/config', post({ paths, resultsDir, load }))
 export const scanFolder = (folder: string) => call<AppState>('/api/scan', post({ folder }))
-export const getGsp = (name: string, mode: string) => call<GspData>('/api/gsp?name=' + encodeURIComponent(name) + '&mode=' + mode)
-export const getSeason = (gsp: string, kind: string, season: string) =>
-  call<SeasonData>('/api/season?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season))
+/** Режим «весь объект»: все ГСП на одной карте. Данные собираются из обычных запросов по каждому ГСП. */
+export const ALL_GSP = 'Весь объект'
+let allGroups: string[] = []
+export const setAllGroups = (gs: string[]) => { allGroups = gs }
+
+function mergeGsp(list: GspData[]): GspData {
+  const kinds = ['Отбор', 'Закачка'] as const
+  const seasons = { Отбор: [], Закачка: [] } as GspData['seasons']
+  for (const k of kinds) {
+    const m = new Map<string, SeasonInfo>()
+    for (const g of list) for (const s of g.seasons[k]) {
+      const c = m.get(s.key)
+      m.set(s.key, c ? { key: s.key, start: Math.min(c.start, s.start), end: Math.max(c.end, s.end) } : { ...s })
+    }
+    seasons[k] = [...m.values()].sort((p, q) => p.start - q.start)
+  }
+  // сетки разных ГСП нарисованы каждая со своего нуля: ставим их рядом по горизонтали; координаты XY общие и не сдвигаются
+  const wells: Record<string, Pos> = {}
+  let shift = 0
+  const allXy = list.every(g => g.layout.mode === 'xy' || !Object.keys(g.layout.wells).length)
+  for (const g of list) {
+    const ps = Object.values(g.layout.wells)
+    const dx = allXy || !ps.length ? 0 : shift - Math.min(...ps.map(p => p.x))
+    for (const [w, p] of Object.entries(g.layout.wells)) wells[w] = { ...p, x: p.x + dx }
+    if (ps.length && !allXy) shift = Math.max(...ps.map(p => p.x + dx)) + 3
+  }
+  const days = [...new Set(list.flatMap(g => g.gspFlow.days))].sort((p, q) => p - q)
+  const at = new Map(days.map((d, i) => [d, i]))
+  const bar = days.map(() => 0)
+  for (const g of list) g.gspFlow.days.forEach((d, i) => { bar[at.get(d)!] += g.gspFlow.bar[i] })
+  const pr = list.find(g => g.pressure.obj)?.pressure.obj
+  return {
+    gsp: ALL_GSP, wells: list.flatMap(g => g.wells),
+    layout: { mode: allXy ? 'xy' : 'grid', wells, missing: list.flatMap(g => g.layout.missing), has_grid: list.some(g => g.layout.has_grid), has_xy: list.some(g => g.layout.has_xy),
+      notes: Array.from(new Set(list.flatMap(g => g.layout.notes))).concat(allXy ? [] : ['Положения из сетки: ГСП стоят рядом, масштаб между ними условный.']) },
+    seasons, periods: list[0].periods, water: list.flatMap(g => g.water),
+    gspFlow: { days, bar }, pressure: pr ? { obj: pr } : {}, seasonPressure: { gsp: {}, obj: list[0].seasonPressure.obj },
+    warnings: Array.from(new Set(list.flatMap(g => g.warnings))), trends: list.flatMap(g => g.trends),
+    depths: Object.assign({}, ...list.map(g => g.depths)), altitude: Object.assign({}, ...list.map(g => g.altitude)),
+  }
+}
+
+function mergeSeason(list: SeasonData[]): SeasonData {
+  const days = [...new Set(list.flatMap(d => d.days))].sort((p, q) => p - q)
+  const at = new Map(days.map((d, i) => [d, i]))
+  const wells: number[] = [], flow: number[][] = []
+  for (const d of list) d.wells.forEach((w, i) => {
+    const row = new Array(days.length).fill(0)
+    d.days.forEach((x, j) => { row[at.get(x)!] = d.flow[i][j] })
+    wells.push(w); flow.push(row)
+  })
+  return { wells, days, flow }
+}
+
+export const getGsp = async (name: string, mode: string): Promise<GspData> => {
+  if (name !== ALL_GSP) return call<GspData>('/api/gsp?name=' + encodeURIComponent(name) + '&mode=' + mode)
+  return mergeGsp(await Promise.all(allGroups.map(n => getGsp(n, mode))))
+}
+export const getSeason = async (gsp: string, kind: string, season: string): Promise<SeasonData> => {
+  if (gsp === ALL_GSP) return mergeSeason((await Promise.all(allGroups.map(n => getSeason(n, kind, season)))).filter(d => d.wells.length))
+  return call<SeasonData>('/api/season?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season))
+}
 export const exportExcel = (gsp: string, mode: string) => call<{ name: string; path: string }>('/api/export', post({ gsp, mode }))
 export const pickPath = (kind: 'file' | 'folder' | 'files', start: string) =>
   call<{ path: string }>('/api/pick?kind=' + kind + '&start=' + encodeURIComponent(start))

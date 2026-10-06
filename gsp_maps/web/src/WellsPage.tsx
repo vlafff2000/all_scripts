@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getSeason, type GspData } from './api'
+import { ALL_GSP, getSeason, type GspData } from './api'
 import { SeasonCalc, fmt1, fmtInt, fmtMln, fmtPct, fmtTh } from './model'
 
 interface Props {
@@ -131,7 +131,7 @@ export default function WellsPage({ g, calc, kind, season, a, b, selected, onSel
     return { mine, avg, last: mine[mine.length - 1] || 0, avgLast: avg[avg.length - 1] || 0 }
   }, [one, wells, calc])
 
-  const scopeName = scope === 'group' ? `группа, ${wells.length} скв.` : `весь ${g.gsp}, ${wells.length} скв.`
+  const scopeName = scope === 'group' ? `группа, ${wells.length} скв.` : `${g.gsp === ALL_GSP ? g.gsp : "весь " + g.gsp}, ${wells.length} скв.`
   return (
     <div className="wells-page">
       <div className="card wells-head">

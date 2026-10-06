@@ -25,7 +25,7 @@ export const usePref = <T,>(p: Pref<T>): T => useSyncExternalStore(p.subscribe, 
 
 export type Theme = 'light' | 'dark' | 'system'
 export const theme = pref<Theme>('gsp.theme', 'system', raw => (raw === 'dark' || raw === 'light' ? raw : 'system'))
-export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'wfall'>('gsp.paint', 'flow', raw => (['entry', 'depth', 'wf', 'wfall'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
+export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
 export const sidebarCollapsed = pref<boolean>('gsp.sidebar.collapsed', false)
 
 const media = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
@@ -54,3 +54,8 @@ export const labelMode = pref<'num' | 'val' | 'none'>('gsp.labels', 'num', raw =
 export const syncMaps = pref<boolean>('gsp.cmp.sync', true)
 export const hideIdle = pref<boolean>('gsp.hideidle', false)
 export const minValue = pref<number>('gsp.minvalue', 0, raw => { const v = Number(raw); return v >= 0 && v < 1e6 ? v : 0 })
+
+/** За какие сезоны красить ввод и обводнённость: один (выбранный сверху), несколько отмеченных или все (среднее). */
+export type SeasonScope = 'one' | 'pick' | 'all'
+export const seasonScope = pref<SeasonScope>('gsp.scope', 'one', raw => (raw === 'pick' || raw === 'all' ? raw : 'one'))
+export const pickedSeasons = pref<string[]>('gsp.picked', [], raw => (Array.isArray(raw) ? raw.map(String) : []))
