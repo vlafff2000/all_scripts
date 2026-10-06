@@ -26,7 +26,7 @@
 .topbar .check { font-size: 14px; color: var(--ink); }
 .topbar .quiet[aria-pressed='true'] { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
 
-.map-page { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; }
+.map-page { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-w, 340px); gap: 12px; }
 .map-page.no-insp { grid-template-columns: minmax(0, 1fr); }
 .map-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
 .map-wrap { position: relative; flex: 1; min-height: 280px; background: var(--map-bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; touch-action: none; }
@@ -208,7 +208,7 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .timeline { border-radius: 10px; box-shadow: 0 1px 2px var(--shadow); }
 
 /* сравнение двух сезонов */
-.cmp-page { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; }
+.cmp-page { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-w, 340px); gap: 12px; }
 .cmp-page.no-insp { grid-template-columns: minmax(0, 1fr); }
 .cmp-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
 .cmp-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -235,7 +235,7 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .cmp-tls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; } .cmp-tls > * { min-width: 0; overflow: hidden; } .cmp-tls .tl-chips { display: none; }
 
 /* подсказка вне карты: стоит над панелью сведений и ничего не закрывает */
-.side-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
+.side-col { position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
 .side-col > .inspector { flex: 1; min-height: 0; }
 .tip-dock { flex-shrink: 0; min-height: 64px; background: var(--surface); border: 1px dashed var(--line); border-radius: 10px; display: grid; align-items: center; }
 .tip-dock:empty::before { content: 'Наведите курсор на скважину: здесь появится её расход, доля и график сезона.'; padding: 10px 14px; color: var(--muted); font-size: 13px; }
@@ -270,3 +270,8 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .chart-tip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
 .chart-reset { position: absolute; right: 6px; top: 2px; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
 .tip.docked .chart svg { cursor: crosshair; } .tip.docked { pointer-events: auto; }
+
+.side-grip { position: absolute; left: -9px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; border-radius: 4px; touch-action: none; }
+.side-grip::after { content: ''; position: absolute; left: 3px; top: 50%; width: 2px; height: 36px; margin-top: -18px; border-radius: 1px; background: var(--line); }
+.side-grip:hover::after, .side-grip:focus-visible::after { background: var(--accent, #c0392b); }
+@media (max-width: 1100px) { .side-grip { display: none; } }
