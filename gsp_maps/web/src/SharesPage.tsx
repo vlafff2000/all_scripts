@@ -1,3 +1,4 @@
+import Chart from './Chart'
 import { useEffect, useMemo, useState } from 'react'
 import { getWork, type GspData, type WorkData } from './api'
 import { fmt1, fmtPct } from './model'
@@ -10,9 +11,11 @@ const DIR_COLOR: Record<string, string> = { 'Север': '#0072b2', 'Север
 
 interface Part { name: string; color: string; v: number; label: string }
 function Stacked({ cols, hover, setHover }: { cols: { key: string; parts: Part[] }[]; hover: string | null; setHover: (s: string | null) => void }) {
+  const [tip, setTip] = useState<{ x: number; y: number; text: string[] } | null>(null)
   const W = 1000, H = 300, L = 44, B = 30, T = 8
   const bw = Math.min(46, ((W - L - 8) / Math.max(1, cols.length)) * 0.72), step = (W - L - 8) / Math.max(1, cols.length)
   return (
+    <div style={{ position: 'relative' }}>
     <svg viewBox={`0 0 ${W} ${H}`} className="pchart" role="img" aria-label="Доли по сезонам">
       {[0, 25, 50, 75, 100].map(v => { const y = T + (1 - v / 100) * (H - T - B); return <g key={v}><line x1={L} x2={W - 8} y1={y} y2={y} className="grid" /><text x={L - 6} y={y} textAnchor="end" dominantBaseline="central" className="ax">{v}%</text></g> })}
       {cols.map((c, i) => {
@@ -24,30 +27,20 @@ function Stacked({ cols, hover, setHover }: { cols: { key: string; parts: Part[]
               const h = p.v * (H - T - B), y = T + (1 - acc - p.v) * (H - T - B)
               acc += p.v
               return <rect key={p.name} x={x} y={y} width={bw} height={Math.max(0, h)} fill={p.color} stroke="var(--surface)" strokeWidth={0.8} opacity={hover && hover !== p.name ? 0.35 : 1}
-                onPointerEnter={() => setHover(p.name)} onPointerLeave={() => setHover(null)}><title>{`${c.key} · ${p.name}: ${p.label}`}</title></rect>
+                onPointerMove={e => { const r = e.currentTarget.ownerSVGElement!.getBoundingClientRect(); setHover(p.name); setTip({ x: e.clientX - r.left, y: e.clientY - r.top, text: [c.key, p.name + ': ' + p.label] }) }} onPointerLeave={() => { setHover(null); setTip(null) }} />
             })}
             <text x={x + bw / 2} y={H - 12} textAnchor="middle" className="ax">{c.key}</text>
           </g>)
       })}
     </svg>
+    {tip && <div className="chart-tip" style={{ left: tip.x + 12, top: tip.y + 12 }}><b>{tip.text[0]}</b><div>{tip.text[1]}</div></div>}
+    </div>
   )
 }
 
 function LineShare({ keys, vals, name }: { keys: string[]; vals: (number | null)[]; name: string }) {
-  const W = 1000, H = 220, L = 44, B = 30, T = 10
-  const mx = Math.max(1e-9, ...vals.map(v => v ?? 0)) * 1.15
-  const x = (i: number) => L + ((i + 0.5) / Math.max(1, keys.length)) * (W - L - 8)
-  const y = (v: number) => T + (1 - v / mx) * (H - T - B)
-  const pts = vals.map((v, i) => (v === null ? null : [x(i), y(v)] as [number, number]))
-  const d = pts.filter(Boolean).map((p, i) => (i ? 'L' : 'M') + p![0].toFixed(1) + ',' + p![1].toFixed(1)).join('')
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="pchart" role="img" aria-label={`Доля скважины ${name} по сезонам`}>
-      {[0, 0.5, 1].map(f => { const v = (mx / 1.15) * f; return <g key={f}><line x1={L} x2={W - 8} y1={y(v)} y2={y(v)} className="grid" /><text x={L - 6} y={y(v)} textAnchor="end" dominantBaseline="central" className="ax">{fmt1(v * 100)}%</text></g> })}
-      <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2} />
-      {pts.map((p, i) => p && <g key={i}><circle cx={p[0]} cy={p[1]} r={4} fill="var(--accent)" stroke="var(--surface)" /><title>{`${keys[i]}: ${fmtPct(vals[i]!)}`}</title></g>)}
-      {keys.map((k, i) => <text key={k} x={x(i)} y={H - 10} textAnchor="middle" className="ax">{k}</text>)}
-    </svg>
-  )
+  return <Chart mode="lines" labels={keys} fmt={v => fmt1(v * 100) + '%'} unit="" height={220} label={`Доля скважины ${name} по сезонам`}
+    series={[{ key: 'v', label: 'Доля', color: 'var(--accent)', y: vals.map(v => v ?? 0) }]} />
 }
 
 export default function SharesPage({ g, kind, selected, onSelect }: { g: GspData; kind: string; selected: number | null; onSelect: (w: number | null) => void }) {
