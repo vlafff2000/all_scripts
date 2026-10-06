@@ -37,7 +37,7 @@ def test_every_module_has_a_form():
     assert {s.module for s in SPECS} == {m[1] for m in MODULES}
     for spec in SPECS:
         ids = {p.id for p in spec.params}
-        used = set(spec.answers) | set(spec.dialogs) | set(spec.strings) | {p for p, _ in spec.env}
+        used = set(spec.answers) | {p for p, _ in spec.args} | set(spec.dialogs) | set(spec.strings) | {p for p, _ in spec.env}
         assert used <= ids, (spec.module, used - ids)
 
 
@@ -96,7 +96,7 @@ def test_update_flow_db_with_new_files(tmp_path):
     folder = next(p for p in (tree.root / "Отбор").rglob("*") if p.is_dir() and any(p.glob("*.xlsx")))
     job = run_module("Дополнение_базы_данных_расходов", {"db": str(db), "max_date": "01.12.2023", "periods": str(tree.periods_file),
                                              "kind": "отбор", "folder": str(folder)}, tmp_path / "upd")
-    assert any("[выбор]" in line for line in job["log"]) and any("ГОТОВО" in line for line in job["log"])
+    assert any("ШАГ 5" in line for line in job["log"]) and any("ГОТОВО" in line for line in job["log"])
 
 
 def test_include_pressure_observation_1002(tmp_path):
@@ -180,3 +180,27 @@ def test_extract_schedule_keywords(tmp_path):
     out = tmp_path / "o"
     job = run_module("Извлечение_ключевых_слов_из_schedule", {"file": str(src), "output": "kw.inc"}, out)
     assert "WELSPECS" in (out / "kw.inc").read_text(encoding="utf-8"), "\n".join(job["log"][-15:])
+
+
+@pytest.mark.parametrize("module", ["Дополнение_базы_данных_расходов", "Сбор_данных_по_межколонным_давлениям",
+                                    "Анализ_межколонных_давлений_для_авторского_надзора"])
+def test_no_tkinter_windows(module):
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "pxg_base" / "modules" / (module + ".py")).read_text(encoding="utf-8")
+    assert "tkinter" not in src
+
+
+def test_interannular_analysis_console_args(tmp_path):
+    """Консольный запуск без формы: параметры аргументами, без окон."""
+    import subprocess
+    db = pd.DataFrame([{"дата": "2024-01-31", "год": 2024, "месяц": 1, "сезон": "2024-2025", "номер_скважины": w,
+                        "расход_газа_МК_сут": q, "расход_газа_МК_мес": q * 30, "давление_МК": p} for w, q, p in ((2, 15, 10), (3, 40, 31))])
+    src = tmp_path / "mk.xlsx"
+    db.to_excel(src, index=False)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    mod = os.path.join(root, "pxg_base", "modules", "Анализ_межколонных_давлений_для_авторского_надзора.py")
+    r = subprocess.run([sys.executable, mod, "--db=" + str(src), "--seasons=2024-2025", "--save=да"], cwd=str(tmp_path),
+                       env=dict(os.environ, PYTHONPATH=root, PYTHONIOENCODING="utf-8"), stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, encoding="utf-8")
+    assert r.returncode == 0, r.stdout
+    assert (tmp_path / "анализ_МКД_МКП_2024-2025.xlsx").exists()
