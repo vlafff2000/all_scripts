@@ -159,9 +159,14 @@ export function rampColor(stops: string[], t: number): string {
   const p = c(stops[i]), q = c(stops[i + 1])
   return '#' + p.map((v, k) => Math.round(v + (q[k] - v) * f).toString(16).padStart(2, '0')).join('')
 }
-const ENTRY_STOPS = ['#1b7f5f', '#e6ab02', '#d95f02', '#7a1c1c']
-const DEPTH_STOPS = ['#ffe600', '#ff9500', '#d12f6e', '#2a2ad4']
-const WF_STOPS = ['#d6e8fa', '#6fa8e0', '#1f5fb0', '#08306b']
+// последовательные шкалы — один тон от светлого к тёмному (без радуги)
+const ENTRY_STOPS = ['#d9d3f5', '#9085e9', '#5b4bc4', '#2e2470']
+const DEPTH_STOPS = ['#c4e8e5', '#5fbab4', '#1b8780', '#0b4f4b']
+const WF_STOPS = ['#cde2fb', '#6da7ec', '#256abf', '#0d366b']
+/** Месяцы сезона на круге: порядковая шкала одного тёплого тона, раньше — светлее, позже — темнее. */
+export const SEASON_STOPS = ['#f19a85', '#e2614f', '#c33a3f', '#8e2236', '#5c1529']
+// на тёмном фоне тот же тон, но без самых тёмных ступеней: они сливались бы с фоном
+export const SEASON_STOPS_DARK = ['#f7c2b4', '#f19a85', '#e2614f', '#c94347', '#a32d3f']
 
 /** Значения выбранной раскраски по скважинам сезона. Скважины без значения в карту не попадают (рисуются серыми). */
 export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: string, season: string, a: number, b: number): PaintData | null {
