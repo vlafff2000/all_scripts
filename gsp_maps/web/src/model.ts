@@ -89,13 +89,65 @@ export function seasonOf(month0: number, year: number): [string, string] {
   return [String(year), 'Закачка']
 }
 
+const medianNN = (pts: { x: number; y: number }[]) => {
+  if (pts.length < 2) return 1
+  const nn = pts.map(a => {
+    let m = Infinity
+    for (const b of pts) if (a !== b) { const d = Math.hypot(a.x - b.x, a.y - b.y); if (d > 0 && d < m) m = d }
+    return m
+  }).filter(Number.isFinite).sort((p, q) => p - q)
+  return nn.length ? nn[Math.floor(nn.length / 2)] : 1
+}
+
+/** Схематичная раскладка: скважины разнесены так, чтобы круги не налезали друг на друга, а взаимное расположение сохранялось.
+ *  Шаг d выбирается по площади карты (скважины заполняют её равномерно), но не меньше, чем нужно для круга с кольцами воды. Считается один раз на ГСП. */
+const spreadCache = new WeakMap<GspData, { pos: Map<number, [number, number]>; unit: number }>()
+export function spreadLayout(g: GspData) {
+  const hit = spreadCache.get(g)
+  if (hit) return hit
+  const pts = Object.entries(g.layout.wells).map(([w, p]) => ({ w: Number(w), x: p.x, y: -p.y, x0: p.x, y0: -p.y }))
+  const n = pts.length
+  const pos = new Map<number, [number, number]>()
+  if (n < 2) { pts.forEach(p => pos.set(p.w, [p.x, p.y])); const r = { pos, unit: 1 }; spreadCache.set(g, r); return r }
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+  const W = Math.max(...xs) - Math.min(...xs), H = Math.max(...ys) - Math.min(...ys)
+  const sp = medianNN(pts)
+  const dmin = 3 * 0.58 * sp
+  const d = Math.max(dmin, 1.05 * Math.sqrt(Math.max(W, sp) * Math.max(H, sp) / n))
+  // совпадающие точки слегка разводим по детерминированным углам, иначе им не из чего расталкиваться
+  pts.forEach((p, i) => { p.x += Math.cos(i * 2.399963) * d * 0.02; p.y += Math.sin(i * 2.399963) * d * 0.02 })
+  for (let it = 0; it < 220; it++) {
+    let worst = 0
+    const fx = new Float64Array(n), fy = new Float64Array(n)
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const dx = pts[j].x - pts[i].x, dy = pts[j].y - pts[i].y
+      if (Math.abs(dx) >= d || Math.abs(dy) >= d) continue
+      const r = Math.hypot(dx, dy)
+      if (r >= d) continue
+      const push = (d - r) * 0.5, ux = r > 1e-9 ? dx / r : 1, uy = r > 1e-9 ? dy / r : 0
+      fx[i] -= ux * push; fy[i] -= uy * push; fx[j] += ux * push; fy[j] += uy * push
+      worst = Math.max(worst, d - r)
+    }
+    // слабая пружина к исходному месту сохраняет форму месторождения
+    const k = it < 120 ? 0.02 : 0
+    for (let i = 0; i < n; i++) { pts[i].x += fx[i] * 0.8 + (pts[i].x0 - pts[i].x) * k; pts[i].y += fy[i] * 0.8 + (pts[i].y0 - pts[i].y) * k }
+    if (worst < d * 0.01) break
+  }
+  pts.forEach(p => pos.set(p.w, [p.x, p.y]))
+  const r = { pos, unit: d / 3 }
+  spreadCache.set(g, r)
+  return r
+}
+
 export interface Placed { well: number; i: number; x: number; y: number; src: string; dir: string }
 /** Скважины сезона с координатами и расстояние между ближайшими соседями (по нему выбираются размеры кругов). */
-export function place(g: GspData, calc: SeasonCalc) {
+export function place(g: GspData, calc: SeasonCalc, spread = false) {
+  const sl = spread ? spreadLayout(g) : null
   const placed: Placed[] = [], unplaced: number[] = []
   calc.wells.forEach((w, i) => {
     const p = g.layout.wells[String(w)]
-    if (p) placed.push({ well: w, i, x: p.x, y: -p.y, src: p.src, dir: p.dir })
+    const q = sl?.pos.get(w)
+    if (p) placed.push({ well: w, i, x: q ? q[0] : p.x, y: q ? q[1] : -p.y, src: p.src, dir: p.dir })
     else unplaced.push(w)
   })
   let spacing = 1
@@ -123,7 +175,7 @@ export function place(g: GspData, calc: SeasonCalc) {
     if (core.length < placed.length * 0.6) core = placed
   }
   const far = placed.filter(p => !core.includes(p)).map(p => p.well)
-  return { placed, unplaced, spacing, bounds: box(core), boundsAll: box(placed), far }
+  return { placed, unplaced, spacing: sl ? sl.unit * 3 * 0.6 : spacing, bounds: box(core), boundsAll: box(placed), far, unit: sl ? sl.unit : null }
 }
 
 export function sectorPath(cx: number, cy: number, r: number, a0: number, a1: number, r0 = 0) {

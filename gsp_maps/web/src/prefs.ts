@@ -65,3 +65,4 @@ export const sideWidth = pref<number>('gsp.sidew', 340, raw => { const v = Numbe
 const applySide = () => { document.documentElement.style.setProperty('--side-w', sideWidth.get() + 'px') }
 sideWidth.subscribe(applySide)
 applySide()
+export const spreadWells = pref<boolean>('gsp.spread', true)
