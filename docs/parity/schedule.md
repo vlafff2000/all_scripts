@@ -19,14 +19,15 @@
 ## Тех.карта и доли
 | Функция | Файл | Что делает | Шаг | Состояние |
 |---|---|---|---|---|
-| `read_approved_volumes`, `read_total_gas_volumes` | ТР | утверждённые объёмы по группам и месяцам, итоги | 4 | ☐ |
-| `get_work_days_for_month` | ТР | рабочие дни месяца (крайние месяцы сезона) | 4 | ☐ |
+| `read_approved_volumes` | ТР | утверждённые объёмы по группам и месяцам | 4 | ☐ (пока вызывается старый код через `totals.legacy()`) |
+| `read_total_gas_volumes` | ТР | общие объёмы газа по дням | А5-доп | ✅ `totals.read_total_volumes`, тест паритета на посуточных закачке и отборах |
+| `get_work_days_for_month` | ТР | рабочие дни месяца (крайние месяцы сезона) | А5-доп | ✅ `totals.work_days`, паритет по всем месяцам и числам дней |
 | `process_injection_file_for_percents` | ТР | проценты скважин по истории | 10 | ☐ (заменяется осреднением) |
 
 ## Прогноз
 | Функция | Файл | Что делает | Шаг | Состояние |
 |---|---|---|---|---|
-| `generate_output_files`, `create_summary_file` | ТР | schedule и сводный Excel | 5 | ☐ |
+| `generate_output_files`, `create_summary_file` | ТР | файлы ГСП и сводный проверочный Excel | А5-доп | ✅ `totals.write_gsp_files`, `summary_frame`; паритет листов и сводки на образцах; кнопка «Проверочный Excel» в приложении (`/api/check`). ≈ без консольных печатей, проблемы — в отчёт QC |
 | `create_forecast_include_file` | ТР | базовый прогноз | 5 | ☐ |
 | `create_forecast_combined` | ТР | прогноз закачка+отбор | 5 | ☐ |
 | `adjust_february_last_shelf` | ТР | «полка» февраля | 14 | ☐ |

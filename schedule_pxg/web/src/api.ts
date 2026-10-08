@@ -31,3 +31,6 @@ export const runTrial = (path: string, template: Template) => call<Trial>('/api/
 export const saveTemplate = (template: Template) => call<AppState>('/api/template', post({ template }))
 export const deleteTemplate = (name: string) => call<AppState>('/api/template/delete', post({ name }))
 export const pickFile = (start: string) => call<{ path: string }>('/api/pick?start=' + encodeURIComponent(start))
+export interface CheckInput { totals: string; approved: string; gsp: string[]; mode: string; year: number; folder: string }
+export interface CheckResult { folder: string; files: string[]; summary: string | null; days: number; maxDevPct: number; ok: boolean; issues: { level: string; message: string }[] }
+export const runCheck = (b: CheckInput) => call<CheckResult>('/api/check', post(b))

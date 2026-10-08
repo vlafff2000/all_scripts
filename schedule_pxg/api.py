@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import history, wizard
+from . import history, totals, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -93,6 +93,32 @@ async def delete_template(request: Request):
     return JSONResponse(await run_in_threadpool(_state))
 
 
+async def check_export(request: Request):
+    """Кнопка «Проверочный Excel»: файлы ГСП и сводка по общим объёмам газа."""
+    b = await request.json()
+    tot, app = _clean(b.get("totals")), _clean(b.get("approved"))
+    gsp = [_clean(x) for x in (b.get("gsp") or []) if _clean(x)]
+    for label, path in [("общих объёмов", tot), ("утверждённых объёмов", app)] + [("ГСП", g) for g in gsp]:
+        if not os.path.isfile(path):
+            return _err("Файл %s не найден: %s" % (label, path), 404)
+    if not gsp:
+        return _err("Укажите хотя бы один файл ГСП")
+    mode = b.get("mode") if b.get("mode") in (totals.INJ, totals.PROD) else totals.INJ
+    try:
+        year = int(b.get("year"))
+    except (TypeError, ValueError):
+        return _err("Год должен быть числом")
+    folder = _clean(b.get("folder")) or os.path.join(FOLDER, "Проверка")
+    try:
+        r = await run_in_threadpool(totals.build_check, tot, app, gsp, mode, year, folder)
+    except Exception as e:
+        return _err("Проверочный Excel не создан: %s" % e, 500)
+    rep = r["issues"]
+    return JSONResponse({"folder": folder, "files": [os.path.basename(f) for f in r["files"]], "summary": r["summary"],
+                         "days": r["days"], "maxDevPct": r["max_dev_pct"], "ok": bool(r["files"]),
+                         "issues": [{"level": i.level, "message": i.message} for i in rep.issues[:20]]})
+
+
 _PICK = (
     "import sys, tkinter\nfrom tkinter import filedialog\n"
     "start = sys.argv[1]\n"
@@ -128,6 +154,7 @@ def build_app() -> Starlette:
         Route("/api/template", save_template, methods=["POST"]),
         Route("/api/template/delete", delete_template, methods=["POST"]),
         Route("/api/pick", pick),
+        Route("/api/check", check_export, methods=["POST"]),
     ]
     if DIST.is_dir():
         routes.append(Mount("/", StaticFiles(directory=str(DIST), html=True)))
