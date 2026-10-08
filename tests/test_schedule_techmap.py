@@ -20,12 +20,18 @@ OLD = "pxg_base.modules.Создание_schedule_файла_технологи�
 
 
 def old_module():
-    for name in ("tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "tkinter.simpledialog"):
+    names = ("tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "tkinter.simpledialog")
+    saved = {n: sys.modules.get(n) for n in names}
+    for name in names:
         sys.modules.setdefault(name, types.ModuleType(name))
     try:
         return importlib.import_module(OLD)
     except Exception as e:  # старый скрипт тянет GUI и лишние библиотеки
         pytest.skip("старый скрипт не импортируется: %s" % e)
+    finally:  # заглушки не должны оставаться в sys.modules: на них падают другие тесты паритета
+        for n, v in saved.items():
+            if v is None:
+                sys.modules.pop(n, None)
 
 
 @have
