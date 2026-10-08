@@ -55,10 +55,13 @@ WINDOWS_LAUNCHERS = {
                     '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base --app %*',
     'Karty_GSP.bat': 'rem Карты ГСП: окно приложения (или браузер, если окно недоступно).\r\n'
                      '"%~dp0python\\python.exe" -s -X utf8 -m gsp_maps %*',
-    'Perechislit_UNRST.bat': 'rem Перетащите файл .UNRST на этот файл: рядом ляжет отчёт *_keywords.txt.\r\n'
-                             'if "%~1"=="" (echo Перетащите файл .UNRST на этот файл. & pause & exit /b 1)\r\n'
-                             '"%~dp0python\\python.exe" -s -X utf8 -m tnav_results.list_restart --report-next-to "%~1"\r\n'
-                             'pause\r\nexit /b 0',
+    'Perechislit_UNRST.bat': 'rem Двойной щелчок: берёт все *.UNRST из этой папки; можно и перетащить файл на этот значок.\r\n'
+                             'set FOUND=0\r\n'
+                             'if not "%~1"=="" (set FOUND=1 & "%~dp0python\\python.exe" -s -X utf8 -m tnav_results.list_restart --report-next-to "%~1" & goto :done)\r\n'
+                             'for %%F in ("%~dp0*.UNRST") do (set FOUND=1 & echo === %%~nxF & "%~dp0python\\python.exe" -s -X utf8 -m tnav_results.list_restart --report-next-to "%%~fF")\r\n'
+                             'if "%FOUND%"=="0" echo Файлы *.UNRST не найдены: положите расчёт в папку %~dp0 и запустите снова.\r\n'
+                             ':done\r\n'
+                             'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
     'PXG_Base_console.bat': 'rem База ПХГ: консольное меню модулей.\r\n'
                             '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base %*',
 }
@@ -69,10 +72,16 @@ WINDOWS_SUFFIX = '\r\nif errorlevel 1 pause\r\n'
 LINUX_LAUNCHERS = {
     'pxg_base.sh': '# База ПХГ в браузере.\nexec "$PY" -s -X utf8 -m pxg_base --browser "$@"',
     'karty_gsp.sh': '# Карты ГСП в браузере.\nexec "$PY" -s -X utf8 -m gsp_maps --browser "$@"',
-    'perechislit_unrst.sh': '# Перечислитель ключевых слов и дат UNRST: ./perechislit_unrst.sh РАСЧЁТ.UNRST (отчёт рядом).\n'
-                            'if [ $# -lt 1 ]; then echo "Использование: $0 файл.UNRST (или перетащите файл на значок)"; read -n 1 -s -r -p "Нажмите любую клавишу..."; exit 1; fi\n'
-                            '"$PY" -s -X utf8 -m tnav_results.list_restart --report-next-to "$1" || true\n'
-                            'echo; read -n 1 -s -r -p "Нажмите любую клавишу..."; echo',
+    'perechislit_unrst.sh': '# Перечислитель UNRST: bash perechislit_unrst.sh (без аргументов берёт все *.UNRST из этой папки и из папки запуска);\n'
+                            '# можно указать пути: bash perechislit_unrst.sh /путь/РАСЧЁТ.UNRST. Отчёт <имя>_keywords.txt ложится рядом с файлом.\n'
+                            'START="${OLDPWD:-.}"; FOUND=0\n'
+                            'if [ $# -gt 0 ]; then FILES=("$@"); else\n'
+                            '  FILES=(); DIRS=("$PWD"); [ "$START" != "$PWD" ] && DIRS+=("$START")\n'
+                            '  for d in "${DIRS[@]}"; do for f in "$d"/*.UNRST "$d"/*.unrst; do [ -f "$f" ] && FILES+=("$f"); done; done\n'
+                            'fi\n'
+                            'for f in "${FILES[@]}"; do FOUND=1; echo "=== $f"; "$PY" -s -X utf8 -m tnav_results.list_restart --report-next-to "$f" || true; done\n'
+                            '[ "$FOUND" = 0 ] && echo "Файлы *.UNRST не найдены: положите расчёт рядом со скриптом ($PWD) и запустите снова."\n'
+                            'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
     'pxg_base_console.sh': '# База ПХГ: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
@@ -91,8 +100,8 @@ README = '''База ПХГ — переносная версия ({target})
 3. {maps} — «Карты ГСП»: секторные диаграммы расходов газа и воды по скважинам на карте с бегунком времени.
    Положение скважин берётся из карты-сетки Excel и/или из координат X, Y (tNavigator).
 
-4. {unrst} — «Перечислитель UNRST»: перетащите на него файл расчёта .UNRST (или запустите с путём к файлу в терминале);
-   рядом с файлом появится отчёт *_keywords.txt: даты, ключевые слова, есть ли SGAS и PRESSURE. Окно закроется после нажатия клавиши.
+4. {unrst} — «Перечислитель UNRST»: положите файлы расчёта .UNRST в эту папку и запустите (двойной щелчок или `bash {unrst}`);
+   все найденные *.UNRST обрабатываются по очереди (можно и указать путь к файлу). Рядом с файлом появится отчёт *_keywords.txt: даты, ключевые слова, есть ли SGAS и PRESSURE. Окно закроется после нажатия клавиши.
 
 Результаты запусков «Базы ПХГ» складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
 Другая папка результатов по умолчанию: переменная окружения PXG_RUNS_DIR.
