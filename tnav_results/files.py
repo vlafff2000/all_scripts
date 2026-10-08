@@ -17,6 +17,9 @@ class Grid(NamedTuple):
     coord: object           # array('f'), 6 чисел на столбец-узел
     zcorn: object           # array('f'), 8*ni*nj*nk
     mapaxes: Optional[list]
+    corsnum: object = None  # номер укрупнённого блока для каждой ячейки (0 — не укрупнена); COARSEN
+    actnumc: object = None  # активность мелких ячеек без учёта укрупнения
+    lgr: tuple = ()         # имена локальных сеток (LGR); читается только глобальная сетка
 
     def cell_index(self, i: int, j: int, k: int) -> int:
         return i + self.ni * (j + self.nj * k)
@@ -33,13 +36,26 @@ class Grid(NamedTuple):
 
 
 def read_egrid(path: str) -> Grid:
-    d = {b.keyword: v for b, v in read_all(path, ["GRIDHEAD", "COORD", "ZCORN", "ACTNUM", "MAPAXES"])}
+    """Глобальная сетка EGRID (до ENDGRID); локальные сетки LGR не читаются, их имена — в ``lgr``."""
+    want = ("GRIDHEAD", "COORD", "ZCORN", "ACTNUM", "ACTNUMC", "CORSNUM", "MAPAXES")
+    d: Dict[str, object] = {}
+    lgr: List[str] = []
+    done = False
+    with open(path, "rb") as f:
+        for b, v in iter_blocks(f, lambda b: (not done and b.keyword in want) or b.keyword == "LGR"):
+            if b.keyword == "ENDGRID":
+                done = True
+            elif b.keyword == "LGR" and v:
+                lgr.append(str(v[0]).strip())
+            elif not done and v is not None and b.keyword not in d:
+                d[b.keyword] = v
     if "GRIDHEAD" not in d:
         raise ValueError("в EGRID нет GRIDHEAD: %s" % path)
     h = d["GRIDHEAD"]
     ni, nj, nk = h[1], h[2], h[3]
     act = list(d["ACTNUM"]) if "ACTNUM" in d else [1] * (ni * nj * nk)
-    return Grid(ni, nj, nk, act, d.get("COORD"), d.get("ZCORN"), list(d["MAPAXES"]) if "MAPAXES" in d else None)
+    return Grid(ni, nj, nk, act, d.get("COORD"), d.get("ZCORN"), list(d["MAPAXES"]) if "MAPAXES" in d else None,
+                d.get("CORSNUM"), d.get("ACTNUMC"), tuple(lgr))
 
 
 def read_init(path: str, keywords: Optional[Sequence[str]] = None) -> Dict[str, object]:

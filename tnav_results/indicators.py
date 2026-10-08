@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import sys
+from array import array
 from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 from .files import Grid, RestartStep, Summary, iter_restart_steps, read_egrid, read_init, read_restart_keyword
 
-DEFAULT_SG_THRESHOLD = 0.05   # доля; уточняется у заказчика (в плане: «подтвердить порог Sg»)
+DEFAULT_SG_THRESHOLD = 0.01   # доля; значение заказчика (Егор, 2026-10-08)
 
 Cell = Tuple[int, int, int]    # (i, j, k) с нуля
 
@@ -23,39 +25,99 @@ Cell = Tuple[int, int, int]    # (i, j, k) с нуля
 # ---------------------------------------------------------------- модель: активные ячейки
 
 class CellModel:
-    """Сетка + соответствие «номер активной ячейки -> (i, j, k)» и колонны ячеек."""
+    """Сетка + соответствие «элемент массива INIT/UNRST -> ячейки сетки».
+
+    Элемент массива — «единица»: обычная активная ячейка или укрупнённый блок (COARSEN). Нумерация единиц
+    идёт по ACTNUM (у блока активна одна опорная ячейка), так же лежат массивы PORO, SGAS, PRESSURE и др.
+    Колонны для ГВК строятся по мелким ячейкам: Sg блока относится ко всем его мелким ячейкам.
+    Двойная пористость: массив длиной 2*единиц — матрица, затем трещины (объём суммируется, ГВК по матрице).
+    LGR: считается глобальная сетка, локальные не читаются (см. ``notes``).
+    """
 
     def __init__(self, grid: Grid):
         self.grid = grid
         ni, nj = grid.ni, grid.nj
         layer = ni * nj
-        self.ijk: List[Cell] = []
-        self.columns: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}   # (i,j) -> [(k, номер активной)]
-        n = 0
+        total = len(grid.actnum)
+        cors = grid.corsnum if (grid.corsnum is not None and any(grid.corsnum)) else None
+        fine_act = grid.actnumc if (cors is not None and grid.actnumc is not None) else grid.actnum
+        self.total = total
+        self.coarse = cors is not None
+        self.ijk: List[Cell] = []            # опорная ячейка единицы
+        self.rep: List[int] = []             # её глобальный номер
+        self.unit_of_fine = array("i", [-1]) * total
+        block_unit: Dict[int, int] = {}
         for g, a in enumerate(grid.actnum):
             if not a:
                 continue
-            i, j, k = g % ni, (g // ni) % nj, g // layer
-            self.ijk.append((i, j, k))
-            self.columns.setdefault((i, j), []).append((k, n))
-            n += 1
-        self.n_active = n
-        self.active_of: Dict[Cell, int] = {c: x for x, c in enumerate(self.ijk)}
+            n = len(self.ijk)
+            self.ijk.append((g % ni, (g // ni) % nj, g // layer))
+            self.rep.append(g)
+            self.unit_of_fine[g] = n
+            if cors is not None and cors[g]:
+                block_unit[cors[g]] = n
+        self.n_active = len(self.ijk)
+        if cors is not None:
+            for g in range(total):
+                if fine_act[g] and cors[g] and not grid.actnum[g] and cors[g] in block_unit:
+                    self.unit_of_fine[g] = block_unit[cors[g]]
+        # колонны мелких ячеек: (i, j) -> (список k, список единиц)
+        self.columns: Dict[Tuple[int, int], Tuple[List[int], List[int]]] = {}
+        uf = self.unit_of_fine
+        for g in range(total):
+            u = uf[g]
+            if u >= 0:
+                col = self.columns.setdefault((g % ni, (g // ni) % nj), ([], []))
+                col[0].append(g // layer)
+                col[1].append(u)
+        self.notes: List[str] = []
+        if self.coarse:
+            self.notes.append("укрупнение ячеек (COARSEN): %d блоков; пласты, регионы и фильтр ячеек берутся по "
+                              "опорной ячейке блока, Sg и давление блока относятся ко всем его мелким ячейкам"
+                              % len(block_unit))
+        if grid.lgr:
+            self.notes.append("в модели есть локальные сетки LGR (%s): показатели считаются по глобальной сетке, "
+                              "вложенные ячейки не учтены" % ", ".join(grid.lgr))
+
+    def unit_at(self, c: Cell) -> int:
+        """Номер единицы для мелкой ячейки (i, j, k с нуля); -1 — неактивна или вне сетки."""
+        g = self.grid
+        if not (0 <= c[0] < g.ni and 0 <= c[1] < g.nj and 0 <= c[2] < g.nk):
+            return -1
+        return self.unit_of_fine[c[0] + g.ni * (c[1] + g.nj * c[2])]
 
     def check(self, arr, name: str) -> None:
         if len(arr) != self.n_active:
-            raise ValueError("%s: %d значений, активных ячеек %d (LGR или двойная пористость? сетки не совпадают)"
-                             % (name, len(arr), self.n_active))
+            raise ValueError("%s: %d значений, единиц сетки %d (LGR или иная сетка?)" % (name, len(arr), self.n_active))
 
-    def to_active(self, arr, name: str):
-        """Массив по активным ячейкам. PORV в INIT tNav записан на всю сетку (ni*nj*nk) —
-        такой массив сжимается по ACTNUM; остальные размеры дают понятную ошибку."""
-        if len(arr) == self.n_active:
-            return arr
-        if len(arr) == len(self.grid.actnum):
-            return [v for v, a in zip(arr, self.grid.actnum) if a]
-        self.check(arr, name)
-        return arr
+    def to_units(self, arr, name: str, mode: str = "rep") -> List[list]:
+        """Части массива по единицам: одна (обычная модель) или две (двойная пористость).
+
+        Допустимые длины: единиц сетки, всех ячеек сетки (PORV в INIT пишется на всю сетку) и то же вдвое.
+        mode "sum" — для полного массива объёмов (PORV) суммировать по мелким ячейкам блока,
+        "rep" — брать значение опорной ячейки.
+        """
+        n, total = self.n_active, self.total
+        for parts in (1, 2):
+            if len(arr) == parts * n:
+                return [arr[q * n:(q + 1) * n] for q in range(parts)]
+        for parts in (1, 2):
+            if len(arr) == parts * total:
+                out = []
+                for q in range(parts):
+                    full = arr[q * total:(q + 1) * total]
+                    if mode == "sum":
+                        acc = [0.0] * n
+                        uf = self.unit_of_fine
+                        for g in range(total):
+                            if uf[g] >= 0:
+                                acc[uf[g]] += full[g]
+                        out.append(acc)
+                    else:
+                        out.append([full[g] for g in self.rep])
+                return out
+        raise ValueError("%s: %d значений; единиц сетки %d, ячеек %d (LGR или иная сетка?)"
+                         % (name, len(arr), n, total))
 
     # геометрия
     def _zc(self, i: int, j: int, k: int, cj: int, ci: int, ck: int) -> float:
@@ -116,28 +178,30 @@ def gas_pore_volume(model: CellModel, porv, sg, threshold: float = DEFAULT_SG_TH
     cell_filter — необязательная функция (i, j, k) -> bool (например, только ячейки в области).
     Единицы — как у PORV (пластовые рм3, не стандартные).
     """
-    porv = model.to_active(porv, "PORV")
-    sg = model.to_active(sg, "Sg")
-    if regions is not None:
-        regions = model.to_active(regions, "регионы")
+    pp = model.to_units(porv, "PORV", "sum")
+    sp = model.to_units(sg, "Sg")
+    if len(pp) != len(sp):
+        raise ValueError("PORV и Sg: разное число частей (двойная пористость есть не в обоих массивах)")
+    reg = model.to_units(regions, "регионы")[0] if regions is not None else None
     total, cells = 0.0, 0
     by_layer = {name: 0.0 for name in (layers or {})}
     by_region: Dict[int, float] = {}
-    for n, (i, j, k) in enumerate(model.ijk):
-        s = sg[n]
-        if not s > threshold:
-            continue
-        if cell_filter is not None and not cell_filter(i, j, k):
-            continue
-        v = porv[n] * s
-        total += v
-        cells += 1
-        for name, (k1, k2) in (layers or {}).items():
-            if k1 <= k + 1 <= k2:
-                by_layer[name] += v
-        if regions is not None:
-            r = int(regions[n])
-            by_region[r] = by_region.get(r, 0.0) + v
+    for porv_u, sg_u in zip(pp, sp):
+        for n, (i, j, k) in enumerate(model.ijk):
+            s = sg_u[n]
+            if not s > threshold:
+                continue
+            if cell_filter is not None and not cell_filter(i, j, k):
+                continue
+            v = porv_u[n] * s
+            total += v
+            cells += 1
+            for name, (k1, k2) in (layers or {}).items():
+                if k1 <= k + 1 <= k2:
+                    by_layer[name] += v
+            if reg is not None:
+                r = int(reg[n])
+                by_region[r] = by_region.get(r, 0.0) + v
     return GasPoreVolume(total, by_layer, by_region, cells)
 
 
@@ -153,22 +217,22 @@ def gwc_map(model: CellModel, sg, threshold: float = DEFAULT_SG_THRESHOLD,
     (газ «упирается» в границу сетки: ГВК не ниже этой глубины).
     which: "lowest" — самый глубокий переход в колонне (по умолчанию), "highest" — самый верхний.
     """
-    model.check(sg, "Sg")
+    sg = model.to_units(sg, "Sg")[0]          # при двойной пористости ГВК по матрице
     if which not in ("lowest", "highest"):
         raise ValueError("which: 'lowest' или 'highest'")
     out: Dict[Tuple[int, int], float] = {}
-    for col, cells in model.columns.items():
+    for col, (ks, ns) in model.columns.items():
         found: Optional[float] = None
-        for idx, (k, n) in enumerate(cells):
+        for idx, (k, n) in enumerate(zip(ks, ns)):
             if not sg[n] > threshold:
                 continue
-            nxt = cells[idx + 1] if idx + 1 < len(cells) else None
-            if nxt is not None and nxt[0] == k + 1 and sg[nxt[1]] > threshold:
+            has_next = idx + 1 < len(ks) and ks[idx + 1] == k + 1
+            if has_next and sg[ns[idx + 1]] > threshold:
                 continue          # газ продолжается вниз
             c = (col[0], col[1], k)
-            if nxt is not None and nxt[0] == k + 1:
-                s_a, s_b = sg[n], sg[nxt[1]]
-                z_a, z_b = model.centre(c), model.centre((col[0], col[1], nxt[0]))
+            if has_next:
+                s_a, s_b = sg[n], sg[ns[idx + 1]]
+                z_a, z_b = model.centre(c), model.centre((col[0], col[1], k + 1))
                 z = z_a + (s_a - threshold) / (s_a - s_b) * (z_b - z_a)
             else:
                 z = model.bottom(c)
@@ -210,9 +274,8 @@ def columns_near_wells(model: CellModel, wells: Dict[str, Tuple[int, int]], radi
     """
     out: Dict[str, List[Tuple[int, int]]] = {}
     for name, (wi, wj) in wells.items():
-        cells = model.columns.get((wi, wj))
-        z = z_ref if z_ref is not None else (
-            model.centre((wi, wj, cells[len(cells) // 2][0])) if cells else 0.0)
+        ks = model.columns.get((wi, wj), ([], []))[0]
+        z = z_ref if z_ref is not None else (model.centre((wi, wj, ks[len(ks) // 2])) if ks else 0.0)
         wx, wy = model.column_xy(wi, wj, z)
         out[name] = [c for c in model.columns
                      if math.hypot(model.column_xy(c[0], c[1], z)[0] - wx,
@@ -243,7 +306,7 @@ def indicators_over_time(model: CellModel, init_path: str, unrst_path: str,
     """По каждой дате рестарта: (дата, GasPoreVolume, GwcStats). Куб читается по одному шагу."""
     need = ["PORV"] + ([region_key] if region_key else [])
     init = read_init(init_path, need)
-    porv = init["PORV"]
+    porv = [v for part in model.to_units(init["PORV"], "PORV", "sum") for v in part]   # один раз, по единицам
     regions = init.get(region_key) if region_key else None
     out = []
     for st in (steps if steps is not None else iter_restart_steps(unrst_path)):
@@ -276,13 +339,13 @@ def cell_pressure_series(model: CellModel, unrst_path: str, well_cells: Dict[str
 
     well_cells: {скважина: [(i, j, k) с нуля]}; неактивные ячейки пропускаются.
     """
-    idx = {w: [model.active_of[c] for c in cells if c in model.active_of] for w, cells in well_cells.items()}
+    idx = {w: [u for u in (model.unit_at(c) for c in cells) if u >= 0] for w, cells in well_cells.items()}
     out: Dict[str, List[Tuple[dt.datetime, float]]] = {w: [] for w in well_cells}
     for st in (steps if steps is not None else iter_restart_steps(unrst_path)):
         p = read_restart_keyword(unrst_path, st, keyword)
         if p is None:
             continue
-        model.check(p, keyword)
+        p = model.to_units(p, keyword)[0]
         for w, ix in idx.items():
             if ix:
                 out[w].append((st.date, sum(p[n] for n in ix) / len(ix)))
@@ -327,7 +390,10 @@ def main(argv=None) -> int:
     p.add_argument("--region", help="массив INIT для разбивки по регионам, например FIPNUM")
     p.add_argument("-o", "--out", help="CSV с результатом")
     a = p.parse_args(argv)
-    rows = indicators_over_time(load_model(a.egrid), a.init, a.unrst, a.sg, region_key=a.region)
+    model = load_model(a.egrid)
+    for note in model.notes:
+        print("Внимание: " + note, file=sys.stderr)
+    rows = indicators_over_time(model, a.init, a.unrst, a.sg, region_key=a.region)
     lines = ["дата;газонасыщенный_объем;ячеек;колонн_с_газом;гвк_min;гвк_среднее;гвк_среднее_по_площади;гвк_max"]
     f = lambda v: "" if v is None else "%.3f" % v
     for d, v, g in rows:
