@@ -47,6 +47,16 @@ class CellModel:
             raise ValueError("%s: %d значений, активных ячеек %d (LGR или двойная пористость? сетки не совпадают)"
                              % (name, len(arr), self.n_active))
 
+    def to_active(self, arr, name: str):
+        """Массив по активным ячейкам. PORV в INIT tNav записан на всю сетку (ni*nj*nk) —
+        такой массив сжимается по ACTNUM; остальные размеры дают понятную ошибку."""
+        if len(arr) == self.n_active:
+            return arr
+        if len(arr) == len(self.grid.actnum):
+            return [v for v, a in zip(arr, self.grid.actnum) if a]
+        self.check(arr, name)
+        return arr
+
     # геометрия
     def _zc(self, i: int, j: int, k: int, cj: int, ci: int, ck: int) -> float:
         g = self.grid
@@ -106,10 +116,10 @@ def gas_pore_volume(model: CellModel, porv, sg, threshold: float = DEFAULT_SG_TH
     cell_filter — необязательная функция (i, j, k) -> bool (например, только ячейки в области).
     Единицы — как у PORV (пластовые рм3, не стандартные).
     """
-    model.check(porv, "PORV")
-    model.check(sg, "Sg")
+    porv = model.to_active(porv, "PORV")
+    sg = model.to_active(sg, "Sg")
     if regions is not None:
-        model.check(regions, "регионы")
+        regions = model.to_active(regions, "регионы")
     total, cells = 0.0, 0
     by_layer = {name: 0.0 for name in (layers or {})}
     by_region: Dict[int, float] = {}
