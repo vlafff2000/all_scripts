@@ -37,6 +37,7 @@ class Project:
         self.groups: Dict[str, Optional[str]] = {}  # группа -> родитель (None — прямо под объектом)
         self.well_group: Dict[str, str] = {}  # скважина -> группа
         self.sets: Dict[str, List[str]] = {}  # свободный набор -> скважины
+        self.templates: Dict[str, dict] = {}  # шаблоны импорта (history.Template.to_dict), сохраняет мастер
 
     # скважины
     def add_well(self, name: str, synonyms=(), well_type: str = "эксплуатационная", group: Optional[str] = None) -> None:
@@ -115,6 +116,7 @@ class Project:
         _write_json(os.path.join(folder, "wells.json"), self.wells)
         _write_json(os.path.join(folder, "groups.json"), {"groups": self.groups, "well_group": self.well_group})
         _write_json(os.path.join(folder, "sets.json"), self.sets)
+        _write_json(os.path.join(folder, "templates.json"), self.templates)
 
     @classmethod
     def load(cls, folder: str) -> "Project":
@@ -125,4 +127,5 @@ class Project:
         p.groups = g.get("groups", {})
         p.well_group = g.get("well_group", {})
         p.sets = _read_json(os.path.join(folder, "sets.json"), {})
+        p.templates = _read_json(os.path.join(folder, "templates.json"), {})
         return p

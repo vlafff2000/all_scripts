@@ -1,0 +1,33 @@
+.shell { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+.side { background: var(--side); color: var(--side-ink); padding: 16px; }
+.side h1 { margin: 0; font-size: 20px; }
+.side h2 { font-size: 13px; text-transform: uppercase; color: var(--side-muted); margin: 20px 0 8px; }
+.side .muted { color: var(--side-muted); }
+.work { padding: 16px 24px; display: flex; flex-direction: column; gap: 14px; background: var(--bg); color: var(--ink); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.card h2 { margin: 0 0 10px; font-size: 16px; }
+.row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin: 8px 0; }
+.grow { flex: 1; min-width: 240px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+input, select { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); font: inherit; background: var(--surface); color: var(--ink); }
+button { padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); font: inherit; cursor: pointer; color: var(--ink); }
+button.primary { background: var(--accent); border-color: var(--accent-strong); color: #fff; }
+button:disabled { opacity: .5; cursor: default; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.note { background: var(--accent-soft); color: var(--info-ink); padding: 8px 10px; border-radius: var(--radius); }
+.note.warn { background: var(--warn-soft); color: var(--warn); }
+.scroll { overflow: auto; max-height: 360px; border: 1px solid var(--line); border-radius: var(--radius); }
+table.raw { border-collapse: collapse; font-size: 12px; width: 100%; }
+table.raw td, table.raw th { border-bottom: 1px solid var(--line-soft); padding: 3px 8px; white-space: nowrap; text-align: left; }
+table.raw tbody tr { cursor: pointer; }
+table.raw tr.hdr { background: var(--accent-soft); font-weight: 700; }
+table.raw thead th { background: var(--head-bg); position: sticky; top: 0; }
+.tpl-item { display: flex; justify-content: space-between; align-items: center; }
+.link { background: none; border: 0; color: var(--side-ink); text-decoration: underline; padding: 3px 0; }
+.x { background: none; border: 0; color: var(--side-muted); }
+.issues { padding-left: 18px; font-size: 13px; }
+.issues .ошибка { color: var(--bad); }
+.issues .предупреждение { color: var(--warn); }
+@media (max-width: 800px) { .shell { grid-template-columns: 1fr; } }
