@@ -224,3 +224,6 @@ def test_api_history_table_volumes_and_log_csv(tmp_path, monkeypatch):
     csv_text = c.post("/api/history/log", json={"files": [xl], "mode": "daily", "pzrg_file": pzf}).text
     assert csv_text.startswith("\ufeffНачало_периода;") and "2028-02-29;2028-02-29" in csv_text
     assert c.post("/api/history/log", json={"files": [xl], "mode": "daily"}).status_code == 400
+    rep = c.post("/api/history/report", json={"files": [xl], "mode": "daily", "pzrg_file": pzf})
+    assert rep.status_code == 200 and rep.content[:2] == b"PK" and "correction_report.xlsx" in rep.headers["content-disposition"]
+    assert c.post("/api/history/report", json={"files": [xl], "mode": "daily"}).status_code == 400

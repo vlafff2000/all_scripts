@@ -13,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -392,6 +392,32 @@ async def history_log(request: Request):
                              headers={"Content-Disposition": "attachment; filename*=UTF-8''correction_log_periods.csv"})
 
 
+async def history_report(request: Request):
+    """Excel-отчёт по поправкам по ПЗРГ (сводка, детали по скважинам, статистика по периодам)."""
+    try:
+        body = await request.json()
+        _, res, _, _ = await run_in_threadpool(_history_run, body)
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    except Exception as e:
+        return _err("История не обработана: %s" % e, 500)
+    if not res.log:
+        return _err("Отчёта нет: ПЗРГ не задан")
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    try:
+        await run_in_threadpool(historymode.write_correction_xlsx, tmp, res)
+        with open(tmp, "rb") as f:
+            data = f.read()
+    finally:
+        os.remove(tmp)
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename*=UTF-8''correction_report.xlsx"})
+
+
 async def history_schedule(request: Request):
     try:
         body = await request.json()
@@ -548,6 +574,7 @@ def build_app() -> Starlette:
         Route("/api/history", history_build, methods=["POST"]),
         Route("/api/history/schedule", history_schedule, methods=["POST"]),
         Route("/api/history/log", history_log, methods=["POST"]),
+        Route("/api/history/report", history_report, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),
         Route("/api/averaging/sources", averaging_sources, methods=["POST"]),
