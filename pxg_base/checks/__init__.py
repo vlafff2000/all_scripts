@@ -34,6 +34,7 @@ REGISTRY: Dict[str, str] = {
     "Преобразование_исходных_таблиц_ГДИ_в_базу": "misc:check_gdi",
     "Итоговая_таблица_давлений_2006_2025": "pressures:check_total_table",
     "База_давлений_по_замерам": "zamery:check_zamery",
+    "Пересчёт_давлений": "pereschet:check_recalc",
     "Создание_schedule_файла_технологического_режима": "schedule_tr:check_schedule_tr",
 }
 
