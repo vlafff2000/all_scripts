@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, charts, checks, history, scenarios, techmap, wizard
+from . import avg_view, charts, checks, control, forecast, history, historymode, scenarios, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -299,6 +299,82 @@ async def charts_get(request: Request):
     return JSONResponse(data)
 
 
+def _history_run(body: dict):
+    """Шаги истории по настройкам запроса: files (иначе файлы осреднения), mode, dates_file/dates, periods_file/periods,
+    pzrg_file, split (по умолчанию «54/80»), stitch — имя сценария, к которому сшивается прогноз."""
+    p = _project()
+    files = [_clean(f) for f in (body.get("files") or avg_view.sources(p))]
+    if not files:
+        raise ValueError("Не заданы файлы истории")
+    miss = [f for f in files if not os.path.isfile(f)]
+    if miss:
+        raise ValueError("Файл не найден: %s" % miss[0])
+    df = history.import_files(files, "", [history.Template.from_dict(t) for t in p.templates.values()])
+    notes: list = []
+    mode = body.get("mode") or "daily"
+    dates: list = []
+    if mode == "dates":
+        txt = body.get("dates") or (historymode.read_text(_clean(body.get("dates_file"))) if body.get("dates_file") else "")
+        dates, n = historymode.parse_dates(txt)
+        notes += n
+    periods = None
+    ptxt = body.get("periods") or (historymode.read_text(_clean(body.get("periods_file"))) if body.get("periods_file") else "")
+    if ptxt:
+        periods, n = historymode.parse_periods(ptxt)
+        notes += n
+    pz = historymode.read_pzrg(_clean(body["pzrg_file"])) if body.get("pzrg_file") else None
+    split = body.get("split")
+    res = historymode.build_history(df, p, mode, dates, periods, pz, split=split if isinstance(split, dict) else None)
+    res.notes = notes + res.notes
+    steps, stitch = res.steps, None
+    if body.get("stitch"):
+        name = body["stitch"]
+        if name not in p.scenarios:
+            raise KeyError("Нет сценария «%s»" % name)
+        _, b = _build(name)
+        stitch = historymode.stitch(res.steps, b.steps)
+        steps = stitch.steps
+    return p, res, steps, stitch
+
+
+async def history_build(request: Request):
+    try:
+        body = await request.json()
+        p, res, steps, stitch = await run_in_threadpool(_history_run, body)
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    except Exception as e:
+        return _err("История не обработана: %s" % e, 500)
+    notes = res.notes + (stitch.notes if stitch else [])
+    return JSONResponse({"mode": res.mode, "steps": len(steps), "kinds": res.counts(), "notes": notes,
+                         "from": steps[0].start.isoformat() if steps else "", "to": steps[-1].end.isoformat() if steps else "",
+                         "correction": historymode.log_summary(res.log) if res.log else None,
+                         "log": res.log[:200], "stitch": historymode.stitch_issues(steps) if stitch else []})
+
+
+async def history_schedule(request: Request):
+    try:
+        body = await request.json()
+        p, res, steps, stitch = await run_in_threadpool(_history_run, body)
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    except Exception as e:
+        return _err("История не обработана: %s" % e, 500)
+    if not steps:
+        return _err("Нет шагов — schedule пуст")
+    if stitch:  # сшивка с прогнозом: один закрывающий DATES в конце, режим записи — сценария
+        sc = scenarios.Scenarios.from_dict(p.scenarios).resolve(body["stitch"])
+        ctrl = control.Control.from_dict(sc["control"]) if sc["control"] else None
+        text = forecast.render_schedule(steps, decimals=int(sc["decimals"]), control=ctrl, project=p)
+    else:
+        text = historymode.render(res)
+    return PlainTextResponse(text, headers={"Content-Disposition": "attachment; filename*=UTF-8''schedule_history.inc"})
+
+
 def _avg_kind(request: Request, body: dict = None) -> str:
     return str((body or {}).get("kind") or request.query_params.get("kind") or "закачка")
 
@@ -431,6 +507,8 @@ def build_app() -> Starlette:
         Route("/api/scenario/check", scenario_check),
         Route("/api/scenario/schedule", scenario_schedule),
         Route("/api/charts", charts_get),
+        Route("/api/history", history_build, methods=["POST"]),
+        Route("/api/history/schedule", history_schedule, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),
         Route("/api/averaging/sources", averaging_sources, methods=["POST"]),
