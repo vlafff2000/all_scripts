@@ -31,6 +31,31 @@ table.raw thead th { background: var(--head-bg); position: sticky; top: 0; }
 .issues .ошибка { color: var(--bad); }
 .issues .предупреждение { color: var(--warn); }
 @media (max-width: 800px) { .shell { grid-template-columns: 1fr; } }
+.work { min-width: 0; }
+.shell { grid-template-columns: 280px minmax(0, 1fr); }
+.side { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.intro h1 { margin: 0 0 4px; font-size: 24px; }
+.intro p { max-width: 80ch; color: var(--muted); }
+.lead { color: var(--muted); max-width: 80ch; margin: 0 0 10px; }
+.step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.step-head h2 { margin: 0; }
+.step-n { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-strong); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.nav { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; margin-bottom: 6px; background: var(--side-raised); border: 1px solid transparent; border-left: 3px solid transparent; color: var(--side-ink); padding: 8px 10px; }
+.nav span { font-size: 12px; color: var(--side-muted); }
+.nav.on { border-left-color: var(--accent); color: #fff; }
+.slot { border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 12px 14px; background: var(--head-bg); }
+.slot.filled { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+.slot-title { font-weight: 700; margin-bottom: 2px; }
+.example { color: var(--muted); font-size: 12px; font-style: italic; margin: 2px 0; }
+.chip { display: flex; align-items: center; gap: 10px; padding: 5px 8px; margin: 4px 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.chip > span:first-child { font-weight: 700; }
+.chip .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cols { display: grid; gap: 8px; }
+.colrow { display: grid; grid-template-columns: minmax(220px, 1.4fr) minmax(200px, 1fr) minmax(150px, .8fr); gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius); }
+.colrow.missing { border-color: var(--danger-line); background: var(--danger-soft); }
+.colinfo { display: flex; flex-direction: column; gap: 2px; }
+.req { color: var(--danger); }
+@media (max-width: 900px) { .colrow { grid-template-columns: 1fr; } .side { position: static; height: auto; } }
 textarea { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); font: inherit; background: var(--surface); color: var(--ink); }
 .chart { width: 100%; max-width: 640px; height: auto; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0; }

@@ -286,7 +286,7 @@ def build_check(totals_path: str, approved_path: str, gsp_files: Sequence[str], 
     rep = rep or qc.Report("Общие объёмы")
     totals = read_total_volumes(totals_path, rep)
     if totals.empty:
-        rep.add(qc.ERROR, "FILE", "В файле общих объёмов нет ни одной строки с датой и объёмом")
+        rep.add(qc.ERROR, "FILE", "В файле общих объёмов не нашли ни одной строки с датой и объёмом. Нужны два столбца: «Дата» и «Объем»")
         return {"files": [], "summary": None, "days": 0, "max_dev_pct": 0.0, "issues": rep}
     approved, days_in_month, _ = read_approved(approved_path)
     percents = {}
@@ -295,9 +295,9 @@ def build_check(totals_path: str, approved_path: str, gsp_files: Sequence[str], 
         if p:
             percents.update(p)
     if approved is None:
-        rep.add(qc.ERROR, "FILE", "Файл утверждённых объёмов не распознан (нужен заголовок «Номер ГСП» и столбцы месяцев)")
+        rep.add(qc.ERROR, "FILE", "Файл утверждённых объёмов не удалось прочитать. В нём нужен столбец с номером группы скважин (в самом файле он подписан «Номер ГСП») и столбцы месяцев")
     if not percents:
-        rep.add(qc.ERROR, "FILE", "Из файлов ГСП не удалось извлечь доли скважин")
+        rep.add(qc.ERROR, "FILE", "Из файлов по группам скважин не удалось получить доли скважин. Проверьте, что выбраны правильные файлы и что «закачка/отбор» указано верно")
     if approved is None or not percents:
         return {"files": [], "summary": None, "days": 0, "max_dev_pct": 0.0, "issues": rep}
     files = write_gsp_files(percents, approved, days_in_month, totals, os.path.join(folder, "01_Файлы_ГСП_" + mode), year)
@@ -305,5 +305,5 @@ def build_check(totals_path: str, approved_path: str, gsp_files: Sequence[str], 
     summary = write_summary(df, os.path.join(folder, "01_Файлы_ГСП_" + mode))
     dev = float(df["Отклонение (%)"].abs().max()) if "Отклонение (%)" in df and df["Отклонение (%)"].notna().any() else 0.0
     if dev > 1.0:
-        rep.add(qc.WARN, "SUM", "Сумма по ГСП расходится с фактическим объёмом по объекту до %.2f%%" % dev)
+        rep.add(qc.WARN, "SUM", "Сумма по группам скважин расходится с фактическим объёмом по объекту до %.2f%%" % dev)
     return {"files": files, "summary": summary, "days": len(df), "max_dev_pct": dev, "issues": rep}

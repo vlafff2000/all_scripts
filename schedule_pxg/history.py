@@ -300,7 +300,7 @@ def read_schedule(path: str) -> pd.DataFrame:
 
 # ───────────────────────── узнавание формата ─────────────────────────
 
-FORMAT_DB, FORMAT_MONTHLY, FORMAT_DAILY, FORMAT_SCHEDULE = "база расходов", "месячные листы ГСП", \
+FORMAT_DB, FORMAT_MONTHLY, FORMAT_DAILY, FORMAT_SCHEDULE = "база расходов", "месячные листы по группам скважин", \
     "посуточный итог", "schedule"
 
 

@@ -52,12 +52,12 @@ async def preview(request: Request):
     q = request.query_params
     path = _clean(q.get("path"))
     if not os.path.isfile(path):
-        return _err("Файл не найден: %s" % path, 404)
+        return _err("Не нашли файл «%s». Проверьте путь или нажмите «Выбрать файл»." % path, 404)
     hdr = q.get("headerRow")
     try:
         out = await run_in_threadpool(wizard.preview, path, q.get("sheet") or None, int(hdr) if hdr not in (None, "") else None)
     except Exception as e:
-        return _err("Не удалось прочитать файл: %s" % e)
+        return _err("Не получилось открыть файл (%s). Убедитесь, что это Excel-таблица и она не открыта в другой программе." % e)
     return JSONResponse(out)
 
 
@@ -65,14 +65,14 @@ async def trial(request: Request):
     body = await request.json()
     path = _clean(body.get("path"))
     if not os.path.isfile(path):
-        return _err("Файл не найден: %s" % path, 404)
+        return _err("Не нашли файл «%s». Проверьте путь или нажмите «Выбрать файл»." % path, 404)
     try:
         tpl = wizard.template_from(body.get("template") or {})
         return JSONResponse(await run_in_threadpool(wizard.trial, path, tpl))
     except ValueError as e:
         return _err(str(e))
     except Exception as e:
-        return _err("Пробный импорт не удался: %s" % e, 500)
+        return _err("Не получилось прочитать файл по этим столбцам (%s). Проверьте строку заголовка и выбранные столбцы." % e, 500)
 
 
 async def save_template(request: Request):
@@ -641,25 +641,25 @@ async def averaging_manual(request: Request):
 
 
 async def check_export(request: Request):
-    """Кнопка «Проверочный Excel»: файлы ГСП и сводка по общим объёмам газа."""
+    """Кнопка «Проверочный Excel»: файлы по группам скважин и сводка по общим объёмам газа."""
     b = await request.json()
     tot, app = _clean(b.get("totals")), _clean(b.get("approved"))
     gsp = [_clean(x) for x in (b.get("gsp") or []) if _clean(x)]
-    for label, path in [("общих объёмов", tot), ("утверждённых объёмов", app)] + [("ГСП", g) for g in gsp]:
+    for label, path in [("общих объёмов", tot), ("утверждённых объёмов", app)] + [("по группе скважин", g) for g in gsp]:
         if not os.path.isfile(path):
-            return _err("Файл %s не найден: %s" % (label, path), 404)
+            return _err("Не нашли файл %s: %s. Проверьте путь или выберите файл заново." % (label, path), 404)
     if not gsp:
-        return _err("Укажите хотя бы один файл ГСП")
+        return _err("Добавьте хотя бы один файл по группам скважин")
     mode = b.get("mode") if b.get("mode") in (totals.INJ, totals.PROD) else totals.INJ
     try:
         year = int(b.get("year"))
     except (TypeError, ValueError):
-        return _err("Год должен быть числом")
+        return _err("Год начала сезона должен быть числом, например 2025")
     folder = _clean(b.get("folder")) or os.path.join(FOLDER, "Проверка")
     try:
         r = await run_in_threadpool(totals.build_check, tot, app, gsp, mode, year, folder)
     except Exception as e:
-        return _err("Проверочный Excel не создан: %s" % e, 500)
+        return _err("Не получилось создать проверочный Excel (%s). Проверьте, что файлы выбраны верно." % e, 500)
     rep = r["issues"]
     return JSONResponse({"folder": folder, "files": [os.path.basename(f) for f in r["files"]], "summary": r["summary"],
                          "days": r["days"], "maxDevPct": r["max_dev_pct"], "ok": bool(r["files"]),
