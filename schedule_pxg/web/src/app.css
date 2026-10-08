@@ -37,3 +37,6 @@ textarea { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius
 .legend i { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: -1px; border-radius: 2px; }
 table.heat td { text-align: center; padding: 3px 5px; color: #111; }
 table.heat th { text-align: center; }
+
+td.ch input { background: #fff6d6; }
+tr.tot td { border-top: 2px solid #999; }

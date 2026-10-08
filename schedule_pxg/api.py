@@ -13,11 +13,11 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, charts, checks, control, forecast, history, historymode, scenarios, techmap, wizard
+from . import avg_view, charts, checks, control, forecast, history, historymode, scenarios, strategy, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -236,6 +236,151 @@ async def scenario_pattern(request: Request):
     except (ValueError, TypeError) as e:
         return _err(str(e))
     return JSONResponse({"calendar": cal})
+
+
+def _season(p: Project, name: str, index: int):
+    """Сезон календаря сценария: (календарь, запись, тех.карта) или ошибка с кодом."""
+    sc = scenarios.Scenarios.from_dict(p.scenarios)
+    if name not in sc.items:
+        raise KeyError("Нет сценария «%s»" % name)
+    cal = sc.resolve(name)["calendar"]
+    if not 0 <= index < len(cal):
+        raise ValueError("В календаре нет сезона № %d" % (index + 1))
+    e = cal[index]
+    if e["techmap"] not in p.techmaps:
+        raise ValueError("Нет тех.карты «%s» в библиотеке" % e["techmap"])
+    return cal, e, techmap.TechMap.from_dict(p.techmaps[e["techmap"]])
+
+
+def _strategy_view(cal: list, e: dict, tm: techmap.TechMap, table=None) -> dict:
+    base = strategy.base_table(tm)
+    cur = table if table is not None else (strategy.clean(e.get("volumes"), tm) or base)
+    return {"index": cal.index(e), "year": e["year"], "techmap": tm.name, "kind": tm.kind, "months": tm.months, "days": tm.days,
+            "groups": list(base), "base": base, "table": cur, "custom": bool(e.get("volumes")),
+            "totals": strategy.totals(cur, tm.months), "base_totals": strategy.totals(base, tm.months),
+            "changes": strategy.changes(cur, base, tm.months), "percent": e.get("percent", 100.0)}
+
+
+def _strategy_call(f):
+    try:
+        return JSONResponse(f())
+    except KeyError as ex:
+        return _err(str(ex.args[0]), 404)
+    except (ValueError, TypeError) as ex:
+        return _err(str(ex))
+
+
+async def strategy_get(request: Request):
+    q = request.query_params
+
+    def f():
+        cal, e, tm = _season(_project(), q.get("name") or "", int(q.get("index") or 0))
+        return _strategy_view(cal, e, tm)
+    return _strategy_call(f)
+
+
+async def strategy_op(request: Request):
+    """Одна правка таблицы без сохранения (расчёт на сервере, окно только показывает)."""
+    b = await request.json()
+
+    def f():
+        cal, e, tm = _season(_project(), str(b.get("name")), int(b.get("index") or 0))
+        base = strategy.base_table(tm)
+        cur = strategy.clean(b.get("table"), tm) or strategy.clean(e.get("volumes"), tm) or base
+        new = strategy.edit(cur, base, str(b.get("op")), group=b.get("group"), month=b.get("month"), value=b.get("value"))
+        return _strategy_view(cal, e, tm, new)
+    return _strategy_call(f)
+
+
+async def strategy_save(request: Request):
+    """Записывает таблицу в сезон (null — вернуть тех.карту); `all` — ещё и в сезоны с той же тех.картой."""
+    b = await request.json()
+    p = _project()
+
+    def edit(sc):
+        cal, e, tm = _season(p, str(b.get("name")), int(b.get("index") or 0))
+        table = strategy.clean(b.get("table"), tm)
+        if table and table == strategy.base_table(tm):
+            table = None
+        cal = [dict(x) for x in cal]
+        if table:
+            cal[int(b.get("index") or 0)]["volumes"] = table
+        else:
+            cal[int(b.get("index") or 0)].pop("volumes", None)
+        if b.get("all") and table:
+            cal = strategy.apply_to_all(cal, int(b.get("index") or 0))
+        sc.set_value(str(b.get("name")), "calendar", cal)
+    return _scenarios_edit(p, edit)
+
+
+async def strategy_xlsx(request: Request):
+    b = await request.json()
+    import tempfile
+
+    def f():
+        p = _project()
+        sc = scenarios.Scenarios.from_dict(p.scenarios)
+        cal = sc.resolve(str(b.get("name")))["calendar"]
+        seasons = []
+        for i in range(len(cal)):
+            _, e, tm = _season(p, str(b.get("name")), i)
+            seasons.append({"kind": tm.kind, "year": e["year"], "table": strategy.clean(e.get("volumes"), tm) or strategy.base_table(tm)})
+        if not seasons:
+            raise ValueError("В календаре нет сезонов")
+        years = sorted({s["year"] for s in seasons})
+        fd, path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            strategy.save_xlsx(path, seasons, years[0], len(years))
+            with open(path, "rb") as fh:
+                return fh.read()
+        finally:
+            os.remove(path)
+    try:
+        data = await run_in_threadpool(f)
+    except KeyError as ex:
+        return _err(str(ex.args[0]), 404)
+    except ValueError as ex:
+        return _err(str(ex))
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename*=UTF-8''strategy.xlsx"})
+
+
+async def strategy_load(request: Request):
+    """Загрузка листов стратегии из Excel в сезоны сценария (совпадают вид тех.карты и год)."""
+    b = await request.json()
+    path = _clean(b.get("path"))
+    if not os.path.isfile(path):
+        return _err("Файл не найден: %s" % path, 404)
+    p = _project()
+    report: list = []
+
+    def edit(sc):
+        loaded = strategy.load_xlsx(path)
+        cal = [dict(x) for x in sc.resolve(str(b.get("name")))["calendar"]]
+        used = set()
+        for i, e in enumerate(cal):
+            tm = techmap.TechMap.from_dict(p.techmaps[e["techmap"]]) if e["techmap"] in p.techmaps else None
+            if tm is None:
+                continue
+            for k, s in enumerate(loaded):
+                if s["kind"] == tm.kind and s["year"] == int(e["year"]):
+                    t = strategy.clean({g: r for g, r in s["table"].items()}, tm)
+                    if t:
+                        if t == strategy.base_table(tm):
+                            cal[i].pop("volumes", None)
+                        else:
+                            cal[i]["volumes"] = t
+                        used.add(k)
+                        report.append("%s %d → сезон «%s»" % (s["kind"], s["year"], e["techmap"]))
+        for k, s in enumerate(loaded):
+            if k not in used:
+                report.append("Лист %s: нет подходящего сезона в календаре — пропущен" % strategy.sheet_name(s["kind"], s["year"]))
+        sc.set_value(str(b.get("name")), "calendar", cal)
+    resp = _scenarios_edit(p, edit)
+    if resp.status_code != 200:
+        return resp
+    return JSONResponse({"state": _state(), "report": report})
 
 
 def _build(name: str):
@@ -541,6 +686,11 @@ def build_app() -> Starlette:
         Route("/api/scenario/delete", scenario_delete, methods=["POST"]),
         Route("/api/scenario/percents", scenario_percents, methods=["POST"]),
         Route("/api/scenario/pattern", scenario_pattern, methods=["POST"]),
+        Route("/api/strategy", strategy_get),
+        Route("/api/strategy/op", strategy_op, methods=["POST"]),
+        Route("/api/strategy/save", strategy_save, methods=["POST"]),
+        Route("/api/strategy/xlsx", strategy_xlsx, methods=["POST"]),
+        Route("/api/strategy/load", strategy_load, methods=["POST"]),
         Route("/api/scenario/build", scenario_build),
         Route("/api/scenario/check", scenario_check),
         Route("/api/scenario/schedule", scenario_schedule),

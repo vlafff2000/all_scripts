@@ -4,7 +4,8 @@ export interface Template {
 }
 export interface AppState { folder: string; project: string; templates: Template[]; units: string[]; kinds: string[]; techmaps: TechMapInfo[]; scenarios: ScenarioInfo[] }
 export interface ScenarioInfo { name: string; parent: string | null; note: string; percent: number; seasons: number }
-export interface Season { year: number; techmap: string; percent: number; label: string }
+export type StrategyTable = Record<string, Record<string, number>>
+export interface Season { year: number; techmap: string; percent: number; label: string; volumes?: StrategyTable }
 export interface ScenarioValues {
   calendar: Season[]; grid: { step: string; periods: [string, string][]; cuts: string[] }; control: { mode?: string; level?: string; limits?: unknown[] }
   outages: unknown[]; percent: number; tolerance: number; decimals: number; note: string; leap_shelf: boolean
@@ -14,7 +15,7 @@ export interface ScenarioView {
   diff: { field: string; label: string; parent: unknown; own: unknown }[]; fields: Record<string, string>
 }
 export interface BuildView {
-  seasons: { techmap: string; year: number; percent: number; from: string; to: string; steps: number; over: number }[]
+  seasons: { techmap: string; year: number; percent: number; from: string; to: string; steps: number; over: number; strategy?: boolean }[]
   gaps: { from: string; to: string; days: number }[]; notes: string[]; stitch: string[]; steps: number; over: number; rows: number; shares: string
 }
 export interface TechMapInfo { name: string; kind: string; months: string[]; groups: number; total: number; source: string }
@@ -112,7 +113,7 @@ export interface HistoryView {
   log: HistoryLogRow[]; stitch: string[]; table: [string, string, string, number, number, number][]; volumes: Record<string, number>
 }
 export const runHistory = (b: HistoryBody) => call<HistoryView>('/api/history', post(b))
-async function download(url: string, b: HistoryBody, fallback: string) {
+async function download(url: string, b: object, fallback: string) {
   const r = await fetch(url, post(b))
   if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error || 'Ошибка сервера (' + r.status + ')')
   const a = document.createElement('a')
@@ -121,3 +122,18 @@ async function download(url: string, b: HistoryBody, fallback: string) {
 }
 export const downloadHistorySchedule = (b: HistoryBody) => download('/api/history/schedule', b, 'schedule_history.inc')
 export const downloadHistoryLog = (b: HistoryBody) => download('/api/history/log', b, 'correction_log_periods.csv')
+
+export interface StrategyView {
+  index: number; year: number; techmap: string; kind: string; months: string[]; days: Record<string, number>; groups: string[]
+  base: StrategyTable; table: StrategyTable; custom: boolean; percent: number
+  totals: { groups: Record<string, number>; months: Record<string, number>; season: number }
+  base_totals: { groups: Record<string, number>; months: Record<string, number>; season: number }
+  changes: { months: Record<string, number>; season: number }
+}
+export const getStrategy = (name: string, index: number) => call<StrategyView>('/api/strategy?name=' + encodeURIComponent(name) + '&index=' + index)
+export const strategyOp = (name: string, index: number, table: StrategyTable, op: string, extra: { group?: string; month?: string; value?: number } = {}) =>
+  call<StrategyView>('/api/strategy/op', post({ name, index, table, op, ...extra }))
+export const saveStrategy = (name: string, index: number, table: StrategyTable | null, all: boolean) =>
+  call<AppState>('/api/strategy/save', post({ name, index, table, all }))
+export const loadStrategy = (name: string, path: string) => call<{ state: AppState; report: string[] }>('/api/strategy/load', post({ name, path }))
+export const downloadStrategy = (name: string) => download('/api/strategy/xlsx', { name }, 'strategy.xlsx')
