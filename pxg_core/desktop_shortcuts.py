@@ -65,14 +65,14 @@ def create(target: Path, root: Path = ROOT) -> List[Tuple[str, Path]]:
             continue
         path = target / (title + suffix)
         if os.name == 'nt':
-            import win32com.client  # pywin32 лежит в переносной папке
-            link = win32com.client.Dispatch('WScript.Shell').CreateShortCut(str(path))
-            link.TargetPath = str(script)
-            link.WorkingDirectory = str(root)
-            link.IconLocation = str(root / 'icons' / (icon + '.ico')) + ',0'
-            link.Description = title
-            link.WindowStyle = 1
-            link.save()
+            import pythoncom  # pywin32 лежит в переносной папке
+            from win32com.shell import shell  # IShellLink понимает Юникод в именах; WScript.Shell — только символы текущей кодовой страницы
+            link = pythoncom.CoCreateInstance(shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink)
+            link.SetPath(str(script))
+            link.SetWorkingDirectory(str(root))
+            link.SetIconLocation(str(root / 'icons' / (icon + '.ico')), 0)
+            link.SetDescription(title)
+            link.QueryInterface(pythoncom.IID_IPersistFile).Save(str(path.resolve()), 0)
         else:
             path.write_text(desktop_entry(title, script, root / 'icons' / (icon + '.png')), encoding='utf-8')
             path.chmod(0o755)
