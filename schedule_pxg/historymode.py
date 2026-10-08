@@ -27,6 +27,8 @@ MODES = ("daily", "dates")
 RANGE_LO, RANGE_HI = 80000.0, 600000.0           # «рабочий» дебит скважины, м³/сут (границы старых скриптов)
 SPLIT_54_80 = {"54/80": ["54", "80"]}
 _KIND_WORDS = {"prod": PROD, "inj": INJ, "none": NEUTRAL, "отбор": PROD, "закачка": INJ, "нейтральный": NEUTRAL, "нейтр": NEUTRAL}
+LOG_HEAD_RU = ["Начало_периода", "Конец_периода", "Метод_коррекции", "ПЗРГ_сумма", "Скважин_в_диапазоне", "Скважин_вне_диапазона",
+               "Сумма_в_диапазоне", "Сумма_вне_диапазона", "Коэффициент", "Итоговая_сумма", "Расхождение_%", "Категория", "Комментарий"]
 LOG_COLUMNS = ["start", "end", "method", "pzrg", "n_in", "n_out", "sum_in", "sum_out", "coef", "total_after", "discrepancy", "category", "comment"]
 
 
@@ -338,7 +340,8 @@ def model_steps(model_dates: Sequence[date], all_dates: Sequence[date], periods:
 def dates_steps(df: pd.DataFrame, model_dates: Sequence[date], periods: Sequence[Tuple[date, str]],
                 col: str = "rate") -> Tuple[List[fmod.Step], List[dict]]:
     """Шаги «по датам замеров». В schedule дата шага = дата замера (DATES без сдвига, как в старом скрипте): в `Step` начало
-    шага — сутки после неё, конец — до следующей даты, так шаги идут подряд и сшиваются с прогнозом."""
+    шага — сутки после неё, конец — до следующей даты, так шаги идут подряд и сшиваются с прогнозом. Рабочих суток шага
+    столько же, сколько суток в нём: объём шага = расход × сутки."""
     d = _prep(df)
     all_dates = sorted(set(d.loc[d["well"].astype(str).str.strip() != "", "_day"])) if len(d) else []
     ms = model_steps(model_dates, all_dates, periods)
@@ -347,7 +350,9 @@ def dates_steps(df: pd.DataFrame, model_dates: Sequence[date], periods: Sequence
         start = m["model_date"] + timedelta(days=1)
         end = ms[i + 1]["model_date"] if i + 1 < len(ms) else start
         rates = _rates(d, m["kind"], m["from"], m["to"], col)
-        steps.append(fmod.Step(start, max(end, start), 1, m["kind"], rates))
+        last = max(end, start)
+        # work_days = все сутки шага: расход — средний за сутки периода, объём шага (графики, проверки) = расход × сутки
+        steps.append(fmod.Step(start, last, (last - start).days + 1, m["kind"], rates))
         info.append({"model_date": m["model_date"].isoformat(), "from": m["from"].isoformat(), "to": m["to"].isoformat(),
                      "kind": m["kind"], "wells": len(rates), "from_file": m["from_file"]})
     return steps, info
@@ -445,7 +450,8 @@ def stitch(history_steps: Sequence[fmod.Step], forecast_steps: Sequence[fmod.Ste
         res.notes.append("История и прогноз накладываются: убрано шагов истории — %d (прогноз начинается %s)" % (res.cut, f0.isoformat()))
     if keep and keep[-1].end >= f0:
         last = keep[-1]
-        keep[-1] = fmod.Step(last.start, f0 - timedelta(days=1), last.work_days, last.kind, dict(last.rates), dict(last.shut))
+        cut_end = f0 - timedelta(days=1)
+        keep[-1] = fmod.Step(last.start, cut_end, min(last.work_days, (cut_end - last.start).days + 1), last.kind, dict(last.rates), dict(last.shut))
         res.notes.append("Последний шаг истории обрезан по %s — до начала прогноза" % (f0 - timedelta(days=1)).isoformat())
     res.steps = keep
     if keep and keep[-1].end + timedelta(days=1) < f0:
@@ -471,10 +477,8 @@ def stitch_issues(steps: Sequence[fmod.Step]) -> List[str]:
 def write_log_csv(path: str, log: Sequence[dict]) -> str:
     """Журнал поправки — CSV с «;» (как `correction_log_periods.csv` старого скрипта, заголовки по-русски)."""
     import csv
-    head = ["Начало_периода", "Конец_периода", "Метод_коррекции", "ПЗРГ_сумма", "Скважин_в_диапазоне", "Скважин_вне_диапазона",
-            "Сумма_в_диапазоне", "Сумма_вне_диапазона", "Коэффициент", "Итоговая_сумма", "Расхождение_%", "Категория", "Комментарий"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f, delimiter=";")
-        w.writerow(head)
+        w.writerow(LOG_HEAD_RU)
         w.writerows(log_rows(log))
     return os.path.abspath(path)

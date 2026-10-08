@@ -19,12 +19,13 @@ from schedule_pxg import forecast as fmod
 from schedule_pxg import outages as omod
 from schedule_pxg import techmap as tmod
 
-FIELDS = ("calendar", "grid", "control", "outages", "percent", "tolerance", "decimals", "note")
+FIELDS = ("calendar", "grid", "control", "outages", "percent", "tolerance", "decimals", "note", "leap_shelf")
 DEFAULTS = {"calendar": [], "grid": {"step": "day", "periods": [], "cuts": []}, "control": {}, "outages": [],
-            "percent": 100.0, "tolerance": 0.005, "decimals": 2, "note": ""}
+            "percent": 100.0, "tolerance": 0.005, "decimals": 2, "note": "", "leap_shelf": False}
 FIELD_NAMES = {"calendar": "календарь сезонов", "grid": "сетка шагов", "control": "режим управления и лимиты",
                "outages": "отключения", "percent": "процент от тех.карты", "tolerance": "допуск",
-               "decimals": "знаков в дебите", "note": "примечание"}
+               "decimals": "знаков в дебите", "note": "примечание",
+               "leap_shelf": "29 февраля и полка"}
 
 
 def _d(x) -> Optional[date]:
@@ -253,6 +254,8 @@ class Scenarios:
             return cmod.Control.from_dict(value).to_dict() if value else {}
         if key == "outages":
             return [omod.Outage.from_dict(o).to_dict() for o in value]
+        if key == "leap_shelf":
+            return bool(value)
         return str(value) if key == "note" else value
 
     # хранение
@@ -337,7 +340,8 @@ def build(project, values: dict, library: Dict[str, dict], shares_for=None) -> B
         pct = float(values["percent"]) * float(e.get("percent", 100.0)) / 100.0
         sh = shares_for(tm) if shares_for else fmod.Shares.uniform(project, tm)
         fc = fmod.forecast_season(scaled(tm, pct), project, sh, int(e["year"]), grid.get("step", "day"), periods, cuts,
-                                  decimals=int(values["decimals"]), tolerance=float(values["tolerance"]), outages=outs)
+                                  decimals=int(values["decimals"]), tolerance=float(values["tolerance"]), outages=outs,
+                                  leap_shelf=bool(values.get("leap_shelf", False)))
         if not fc.steps:
             res.notes += ["%s (%s): %s" % (name, e["year"], n) for n in fc.notes]
             continue
