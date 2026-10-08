@@ -388,32 +388,6 @@ SPECS: List[WebSpec] = [
         + (v.get("gsp") or "").strip() + "\n" + ((v.get("output") or "").strip() or "БД_ГДИ_объединенная.xlsx") + "\ny\nn\n",
         note="Результат — единая база ГДИ в папке результатов (с листом исправлений дат).",
     ),
-    WebSpec(
-        module="Создание_schedule_файла_технологического_режима",
-        params=(
-            Param("mode", "Режим", "choice", default="закачка", options=(
-                ("закачка", "Закачка: schedule.inc по сезону закачки"),
-                ("отбор", "Отбор: schedule.inc по сезону отбора"),
-                ("прогноз", "Прогноз (базовый): варианты schedule.inc на несколько лет"))),
-            Param("root", "Корневая папка с данными", "folder", required=True,
-                  hint="Папки «Закачка» и «Отбор» (в каждой: файлы ГСП_*.xlsx, «Утверждённые объёмы…», «Посуточн…») и period_of_work.txt; "
-                       "при простой раскладке всё лежит в одной папке"),
-            Param("year", "Год начала сезона", default="2025", required=True),
-            Param("start", "Начальная дата сезона", hint="ДД.ММ.ГГГГ; пусто — 01.04 (закачка) или 01.10 (отбор) этого года"),
-            Param("end", "Конечная дата сезона + 1 день", hint="ДД.ММ.ГГГГ; пусто — 16.10 (закачка) или 01.05 следующего года (отбор)"),
-            Param("forecast_years", "Лет прогноза", default="5", when="mode=прогноз"),
-            Param("percents", "Проценты от базового расхода", default="40, 60, 80, 100, 110", when="mode=прогноз",
-                  hint="Через запятую; базовый расход = 100"),
-            Param("periods", "Файл периодов", "file",
-                  hint="Строки «ДД.ММ.ГГГГ inj|prod|none». Пусто — period_of_work.txt из корневой папки. "
-                       "Для отбора первой должна идти строка prod, для прогноза нужен полный цикл из четырёх периодов"),
-        ),
-        dialogs=("root",),
-        env=(("mode", "PXG_MODE"), ("year", "PXG_YEAR"), ("start", "PXG_START"), ("end", "PXG_END"),
-             ("forecast_years", "PXG_FORECAST_YEARS"), ("percents", "PXG_PERCENTS"), ("periods", "PXG_PERIODS")),
-        note="Результат — папки 01_Файлы_ГСП…, 02_БД_расходов…, 03_Логи… и 04_Schedule… (schedule.inc для INCLUDE в tNavigator). "
-             "«Прогноз с варьированием» требует окна редактора стратегий и пока запускается только из консоли.",
-    ),
 ]
 
 BY_MODULE: Dict[str, WebSpec] = {s.module: s for s in SPECS}
