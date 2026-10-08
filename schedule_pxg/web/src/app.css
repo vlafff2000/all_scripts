@@ -56,3 +56,12 @@ table.raw thead th { background: var(--head-bg); position: sticky; top: 0; }
 .colinfo { display: flex; flex-direction: column; gap: 2px; }
 .req { color: var(--danger); }
 @media (max-width: 900px) { .colrow { grid-template-columns: 1fr; } .side { position: static; height: auto; } }
+textarea { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); font: inherit; background: var(--surface); color: var(--ink); }
+.chart { width: 100%; max-width: 640px; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0; }
+.legend i { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: -1px; border-radius: 2px; }
+table.heat td { text-align: center; padding: 3px 5px; color: #111; }
+table.heat th { text-align: center; }
+
+td.ch input { background: #fff6d6; }
+tr.tot td { border-top: 2px solid #999; }

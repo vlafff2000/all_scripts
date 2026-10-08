@@ -1,146 +1,150 @@
-"""Режимы управления в schedule: контроль (WCONPROD/WCONINJE/GCONPROD/GCONINJE), целевые показатели (WELTARG), WELDRAW.
+"""Режимы управления прогнозом: что задаётся в schedule и какие лимиты стоят (шаг А7).
 
-Предметная логика (Егор, 2026-10-08):
-* WELDRAW задаёт максимальную депрессию скважины или группы скважин и контролем НЕ является. Его выставляют один раз
-  и дальше работают другими ключевыми словами; менять можно в любой точке скедула, но только на нужную дату и сразу
-  с явным числом: «1*» и «снять лимит» не пишутся.
-* Контроль скважины задаёт WCONPROD (отбор) или WCONINJE (закачка), контроль группы — GCONPROD / GCONINJE.
-* Целевой показатель уже заданной скважины меняет WELTARG, повторно WCONPROD для этого не пишется.
-
-Группа в WELDRAW раскрывается в скважины проекта (`Project.wells_of`): запись остаётся однозначной для любого
-расчётного движка. Python 3.8+, только стандартная библиотека.
+Режим задаётся в сценарии (решение 4 плана):
+- `mode` — запись дебитов скважин: `hist` (WCONHIST/WCONINJH, как в старом скрипте) или `rate` (WCONPROD/WCONINJE);
+- `level` — чем управляем: `wells` (дебит скважин, по умолчанию), `groups` (GCONPROD/GCONINJE: цель группы, скважины
+  на режиме GRUP) или `both` (скважины с дебитами и цели групп). Группы и GRUPTREE берутся из дерева групп проекта;
+  цель группы = сумма дебитов её скважин на шаге, так что объём тех.карты сохраняется. `groups` и `both` — только с `rate`
+  (WCONHIST-скважины групповая цель не ведёт);
+- лимиты `Limit`: забойное давление (`bhp`) и максимальная депрессия (`draw`, WELDRAW) для всех скважин, группы или скважины.
+  Конкретнее — приоритетнее: скважина > группа > все; при равенстве выигрывает более поздний.
+- Контроль в `rate`: WCONPROD/WCONINJE пишутся при включении скважины (и смене отбор↔закачка), дальнейшая смена дебита —
+  WELTARG. WELDRAW — НЕ контроль, а максимальная депрессия: задаётся с даты `start` явным числом, действует до следующего
+  значения (поэтому у `draw` нет конца периода, «1*» и снятия лимита нет); менять можно в любой дате, по скважине, группе
+  или всем.
+Хранится в `control.json` проекта. Python 3.8+.
 """
 from __future__ import annotations
 
-import datetime as _dt
-import math
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from typing import Dict, List, Optional
 
-_MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
-PROD, INJ = "prod", "inj"
+MODES = ("hist", "rate")
+LEVELS = ("wells", "groups", "both")
+LEVEL_NAMES = {"wells": "дебит скважин", "groups": "цели групп", "both": "скважины и группы"}
+KINDS = ("bhp", "draw")
+KIND_NAMES = {"bhp": "забойное давление", "draw": "депрессия (WELDRAW)"}
+SCOPES = (None, "отбор", "закачка")
+
+
+def _date(x) -> Optional[date]:
+    if x in (None, ""):
+        return None
+    if isinstance(x, datetime):
+        return x.date()
+    if isinstance(x, date):
+        return x
+    return date.fromisoformat(str(x)[:10])
 
 
 @dataclass
-class Drawdown:
-    """WELDRAW: максимальная депрессия (бар) скважины или группы с этой даты. Значение обязательно."""
-    date: _dt.date
-    target: str
+class Limit:
+    kind: str                         # bhp | draw
     value: float
-    is_group: bool = False
+    well: Optional[str] = None        # скважина...
+    group: Optional[str] = None       # ...или группа (уровня тех.карты); обе пусты — все скважины
+    start: Optional[date] = None      # период действия, включительно; пусто — без границы
+    end: Optional[date] = None
+    scope: Optional[str] = None       # отбор | закачка | None — любой шаг (draw бывает только на отборе)
+
+    def __post_init__(self) -> None:
+        try:
+            self.value = float(self.value)
+        except (TypeError, ValueError):
+            raise ValueError("Лимит: значение обязательно (число)")
+        if self.kind not in KINDS:
+            raise ValueError("Лимит: %s" % ", ".join(KINDS))
+        if self.well and self.group:
+            raise ValueError("Лимит: задайте скважину или группу, не обе")
+        if self.scope not in SCOPES:
+            raise ValueError("Область лимита: отбор, закачка или не задана")
+        if self.kind == "draw" and self.scope == "закачка":
+            raise ValueError("Депрессия (WELDRAW) задаётся только для отбора")
+        self.start = _date(self.start)
+        self.end = _date(self.end)
+        if self.kind == "draw" and self.end:
+            raise ValueError("Депрессия (WELDRAW) действует до следующего значения: задайте новое значение с нужной даты")
+        if self.kind == "draw" and not self.value > 0:
+            raise ValueError("Депрессия (WELDRAW): нужно положительное число")
+        if self.start and self.end and self.end < self.start:
+            raise ValueError("Лимит: конец раньше начала")
+
+    def active(self, d: date, step_kind: str) -> bool:
+        if self.kind == "draw" and step_kind != "отбор":
+            return False
+        if self.scope and self.scope != step_kind:
+            return False
+        return (self.start is None or self.start <= d) and (self.end is None or d <= self.end)
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "value": self.value, "well": self.well, "group": self.group,
+                "start": self.start.isoformat() if self.start else None,
+                "end": self.end.isoformat() if self.end else None, "scope": self.scope}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Limit":
+        return cls(d["kind"], d["value"], d.get("well"), d.get("group"), d.get("start"), d.get("end"), d.get("scope"))
 
 
 @dataclass
-class WellRate:
-    """Дебит скважины (т.м³/сут) с этой даты: первый раз или при смене вида — WCONPROD/WCONINJE, дальше WELTARG."""
-    date: _dt.date
-    well: str
-    rate: float
-    kind: str = PROD
+class Control:
+    mode: str = "hist"
+    level: str = "wells"
+    limits: List[Limit] = field(default_factory=list)
+    field_target: bool = False                                   # ещё и цель всего объекта (группа FIELD)
+    group_names: Dict[str, str] = field(default_factory=dict)    # имя группы проекта -> имя в schedule (по умолчанию то же)
 
+    def __post_init__(self) -> None:
+        if self.mode not in MODES:
+            raise ValueError("Режим записи: %s" % ", ".join(MODES))
+        if self.level not in LEVELS:
+            raise ValueError("Уровень управления: %s" % ", ".join(LEVELS))
+        if self.level != "wells" and self.mode != "rate":
+            raise ValueError("Цели групп (GCONPROD/GCONINJE) работают только с режимом rate (WCONPROD/WCONINJE)")
 
-@dataclass
-class GroupRate:
-    """Дебит группы (т.м³/сут) с этой даты: GCONPROD / GCONINJE."""
-    date: _dt.date
-    group: str
-    rate: float
-    kind: str = PROD
+    @property
+    def groups(self) -> bool:
+        return self.level != "wells"
 
+    def gname(self, group: str) -> str:
+        return self.group_names.get(group, group)
 
-Event = Union[Drawdown, WellRate, GroupRate]
+    def value(self, kind: str, well: str, group: Optional[str], d: date, step_kind: str) -> Optional[float]:
+        """Действующий лимит скважины на дату: скважина > группа > все, при равенстве — более поздний в списке."""
+        best, rank, bstart = None, -1, date.min
+        for lim in self.limits:
+            if lim.kind != kind or not lim.active(d, step_kind):
+                continue
+            r = 2 if lim.well == well else 1 if (lim.group and lim.group == group) else 0 if not lim.well and not lim.group else -1
+            st = lim.start or date.min
+            # у депрессии при равном ранге действует значение с более поздней датой начала
+            if r >= 0 and (r > rank or (r == rank and (kind != "draw" or st >= bstart))):
+                best, rank, bstart = lim.value, r, st
+        return best
 
+    def to_dict(self) -> dict:
+        return {"mode": self.mode, "level": self.level, "limits": [l.to_dict() for l in self.limits],
+                "field_target": self.field_target, "group_names": dict(self.group_names)}
 
-def _num(x: float, what: str) -> float:
-    try:
-        x = float(x)
-    except (TypeError, ValueError):
-        raise ValueError("%s: значение обязательно, «1*» и пустое не пишутся" % what)
-    if not math.isfinite(x):
-        raise ValueError("%s: нужно конечное число" % what)
-    return x
+    @classmethod
+    def from_dict(cls, d: Optional[dict]) -> "Control":
+        d = d or {}
+        return cls(d.get("mode", "hist"), d.get("level", "wells"), [Limit.from_dict(x) for x in d.get("limits", [])],
+                   bool(d.get("field_target", False)), dict(d.get("group_names", {})))
 
-
-def check_event(e: Event) -> None:
-    """Ошибка ValueError с понятным текстом, если событие нельзя записать."""
-    if isinstance(e, Drawdown):
-        if _num(e.value, "Депрессия %s" % e.target) <= 0:
-            raise ValueError("Депрессия %s на %s: нужно положительное число, лимит не снимается" % (e.target, e.date))
-    elif isinstance(e, (WellRate, GroupRate)):
-        if e.kind not in (PROD, INJ):
-            raise ValueError("Вид должен быть prod или inj")
-        if _num(e.rate, "Дебит") < 0:
-            raise ValueError("Дебит не может быть отрицательным")
-    else:
-        raise TypeError("Неизвестное событие: %r" % (e,))
-
-
-def _date_block(d: _dt.date) -> str:
-    return "DATES\n\t%d\t%s\t%d /\n/\n" % (d.day, _MONTHS[d.month - 1], d.year)
-
-
-def _block(keyword: str, rows: Iterable[str]) -> str:
-    return keyword + "\n" + "".join(r + "\n" for r in rows) + "/\n"
-
-
-def render(events: Iterable[Event], wells_of=None, start_date: Optional[_dt.date] = None) -> str:
-    """Текст schedule по событиям (в любом порядке).
-
-    wells_of — функция «группа → список скважин» (обычно `Project.wells_of`), нужна для WELDRAW группы.
-    На одну дату порядок блоков: WELDRAW → контроль → WELTARG. Событие на start_date пишется без DATES
-    (блок начала расчёта), остальные — после своего DATES.
-    """
-    evs = list(events)
-    for e in evs:
-        check_event(e)
-    order = {Drawdown: 0, GroupRate: 1, WellRate: 2}
-    evs.sort(key=lambda e: (e.date, order[type(e)]))
-    state: Dict[Tuple[str, str], str] = {}  # ("well"|"group", имя) -> вид контроля
-    out: List[str] = []
-    for date in sorted({e.date for e in evs}):
-        day = [e for e in evs if e.date == date]
-        parts: List[str] = []
-        draw: List[str] = []
-        for e in day:
-            if isinstance(e, Drawdown):
-                if e.is_group:
-                    if wells_of is None:
-                        raise ValueError("Для группы %s нужен список её скважин" % e.target)
-                    names = list(wells_of(e.target))
-                    if not names:
-                        raise ValueError("В группе %s нет скважин" % e.target)
-                else:
-                    names = [e.target]
-                draw += ["%s\t%.2f\t/" % (n, e.value) for n in names]
-        if draw:
-            parts.append(_block("WELDRAW", draw))
-        for kw_p, kw_i, cls, key in (("GCONPROD", "GCONINJE", GroupRate, "group"),):
-            for kind, kw in ((PROD, kw_p), (INJ, kw_i)):
-                rows = []
-                for e in day:
-                    if isinstance(e, cls) and e.kind == kind:
-                        rows.append(("%s\tGRAT\t1*\t1*\t%.2f\t1*\t/" if kind == PROD else "%s\tGAS\tRATE\t%.2f\t/")
-                                    % (e.group, e.rate))
-                        state[(key, e.group)] = kind
-                if rows:
-                    parts.append(_block(kw, rows))
-        con = {PROD: [], INJ: []}  # WCONPROD / WCONINJE
-        tar: List[str] = []
-        for e in day:
-            if isinstance(e, WellRate):
-                if state.get(("well", e.well)) == e.kind:
-                    tar.append("%s\tGRAT\t%.2f\t/" % (e.well, e.rate))
-                else:
-                    con[e.kind].append(("%s\tOPEN\tGRAT\t1*\t1*\t%.2f\t1*\t/" if e.kind == PROD
-                                        else "%s\tGAS\tOPEN\tRATE\t%.2f\t/") % (e.well, e.rate))
-                    state[("well", e.well)] = e.kind
-        if con[PROD]:
-            parts.append(_block("WCONPROD", con[PROD]))
-        if con[INJ]:
-            parts.append(_block("WCONINJE", con[INJ]))
-        if tar:
-            parts.append(_block("WELTARG", tar))
-        if date != start_date:
-            out.append(_date_block(date))
-        out.append("\n".join(parts))
-    return "\n".join(s for s in out if s) + ("\n" if out else "")
+    def check(self, project=None) -> List[str]:
+        """Замечания для пользователя (не ошибки): лишние лимиты и неизвестные скважины/группы."""
+        notes: List[str] = []
+        if self.mode == "hist" and any(l.kind == "bhp" for l in self.limits):
+            notes.append("Лимит забойного давления не пишется в WCONHIST/WCONINJH — выберите режим rate")
+        if project is not None:
+            for l in self.limits:
+                if l.well and l.well not in project.wells:
+                    notes.append("Лимит: нет скважины «%s»" % l.well)
+                if l.group and l.group not in project.groups:
+                    notes.append("Лимит: нет группы «%s»" % l.group)
+            if self.groups:
+                for w in project.wells_without_group():
+                    notes.append("Скважина «%s» без группы — в цели групп не войдёт" % w)
+        return notes

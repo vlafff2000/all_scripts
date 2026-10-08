@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from schedule_pxg import history as h  # noqa: E402
 from schedule_pxg.project import Project  # noqa: E402
+from tests.golden import golden  # noqa: E402
 
 SAMPLES = os.environ.get("SCHEDULE_TR_SAMPLES") or "/mnt/project-files/schedule-tr-samples"
 have = pytest.mark.skipif(not os.path.isdir(SAMPLES), reason="нет образцов schedule-tr-samples")
@@ -83,38 +84,11 @@ def test_db_format(tmp_path):
     assert h.import_history(p, kind=h.PROD)["kind"].unique().tolist() == [h.PROD]
 
 
-def _old_module():
-    """Старый скрипт «Создание schedule файла ТР» (его верхний слой тянет tkinter, которого может не быть)."""
-    import importlib.util
-    import types
-    saved = {}
-    if importlib.util.find_spec("tkinter") is None:
-        for n in ("tkinter", "tkinter.ttk", "tkinter.messagebox", "tkinter.filedialog", "tkinter.simpledialog"):
-            m = types.ModuleType(n)
-            m.__getattr__ = lambda a: object
-            saved[n] = sys.modules.get(n)
-            sys.modules[n] = m
-        sys.modules["tkinter"].__path__ = []
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(root, "pxg_base", "modules", "Создание_schedule_файла_технологического_режима.py")
-    spec = importlib.util.spec_from_file_location("old_schedule_tr", path)
-    mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    finally:
-        for n, m in saved.items():
-            if m is None:
-                sys.modules.pop(n, None)
-            else:
-                sys.modules[n] = m
-    return mod
-
-
 @have
 @pytest.mark.parametrize("name,kind,year", [("ГСП_9_b.xlsx", "отбор", 2025), ("ГСП_8_a.xlsx", "закачка", 2024)])
 def test_parity_with_old_script_monthly_sheets(name, kind, year):
     """Паритет: на листах месяцев значения совпадают со старой `process_excel_file_intelligent`."""
-    old = _old_module().process_excel_file_intelligent(S(name), year=year, data_type=kind)
+    old = golden("hist_" + name[:-5])      # эталон: старая process_excel_file_intelligent
     new = h.import_history(S(name))
     o = old.assign(well=old["Скважина"].astype(str).str.strip(), date=pd.to_datetime(old["Дата"]))
     j = new.merge(o, on=["well", "date"], how="left")

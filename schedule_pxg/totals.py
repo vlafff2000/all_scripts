@@ -4,19 +4,17 @@
 from __future__ import annotations
 
 import calendar
-import contextlib
-import importlib.util
-import io
 import os
-import sys
-import types
+import re
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
 from pxg_core import qc
-from pxg_core.расходы_файлы import read_excel_safe
+from pxg_core.расходы_файлы import normalize_sheet_name, read_excel_safe
+
+from . import history, techmap
 
 MONTHS = {"Январь": 1, "Февраль": 2, "Март": 3, "Апрель": 4, "Май": 5, "Июнь": 6, "Июль": 7,
           "Август": 8, "Сентябрь": 9, "Октябрь": 10, "Ноябрь": 11, "Декабрь": 12}
@@ -203,33 +201,83 @@ def write_summary(df: pd.DataFrame, folder: str) -> Optional[str]:
     return path
 
 
-# ---- чтение остальных входов старым кодом (тех.карта — шаг 4, доли — шаг 10; до них вызываем проверенные функции) ----
+# ---- чтение остальных входов: тех.карта и доли скважин по дням из файлов ГСП ----
 
-def legacy():
-    """Старый скрипт как модуль; tkinter ему нужен только наверху файла, на машине без него подставляется заглушка."""
-    saved = {}
-    names = ("tkinter", "tkinter.ttk", "tkinter.messagebox", "tkinter.filedialog", "tkinter.simpledialog")
-    if importlib.util.find_spec("tkinter") is None:
-        for n in names:
-            m = types.ModuleType(n)
-            m.__getattr__ = lambda a: object
-            saved[n] = sys.modules.get(n)
-            sys.modules[n] = m
-        sys.modules["tkinter"].__path__ = []
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(root, "pxg_base", "modules", "Создание_schedule_файла_технологического_режима.py")
-    spec = importlib.util.spec_from_file_location("old_schedule_tr", path)
-    mod = importlib.util.module_from_spec(spec)
+def read_approved(path: str):
+    """(объёмы {(ГСП, месяц): м³}, дни работы {месяц: дней}, номера ГСП) или (None, None, None), если файл не распознан.
+    Те же значения, что давал `read_approved_volumes` старого скрипта (тех.карта хранит млн м³)."""
     try:
-        spec.loader.exec_module(mod)
-    finally:
-        for n in names:
-            if n in saved:
-                if saved[n] is None:
-                    sys.modules.pop(n, None)
-                else:
-                    sys.modules[n] = saved[n]
-    return mod
+        tm = techmap.read_techmap(path)
+    except Exception:
+        return None, None, None
+    approved, gsps = {}, []
+    for g, row in tm.volumes.items():
+        try:
+            n = int(float(g))
+        except (TypeError, ValueError):
+            continue
+        gsps.append(n)
+        for m in tm.months:
+            approved[(n, m)] = float(row.get(m, 0.0)) * 1e6
+    return approved, dict(tm.days), gsps
+
+
+def _day_well_volumes(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Лист месяца → таблица «день месяца × скважина» суточных расходов (Qчас · часы). В неё входят все скважины и даты,
+    что есть в обеих таблицах листа, и пустые клетки (там 0): так старый скрипт считал проценты, в том числе для месяцев без газа."""
+    q_title = history._find_text(raw, r"^\s*Q\s*час")
+    if q_title is None:
+        return None
+    t_title = history._find_text(raw.iloc[q_title + 1:].reset_index(drop=True), r"время\s+работы")
+    q = history._block(raw, q_title)
+    t = history._block(raw, q_title + 1 + t_title) if t_title is not None else None
+    if q is None or t is None:
+        return None
+    (qcols, qrows), (tcols, trows) = q, t
+    t_by_date = {d: j for j, d in tcols.items()}
+    rows = []
+    for well, i in qrows.items():
+        ti = trows.get(well)
+        if ti is None:
+            continue
+        for j, d in qcols.items():
+            if d not in t_by_date:
+                continue
+            gas = pd.to_numeric(raw.iat[i, j], errors="coerce")
+            hrs = pd.to_numeric(raw.iat[ti, t_by_date[d]], errors="coerce")
+            rows.append((pd.Timestamp(d).day, well, gas * hrs))
+    if not rows:
+        return None
+    df = pd.DataFrame(rows, columns=["day", "well", "v"])
+    return df.groupby(["day", "well"])["v"].sum().unstack(fill_value=0)
+
+
+def read_percents(path: str, mode: str = INJ):
+    """Доли скважин по дням месяца из файла ГСП: ({(ГСП, месяц): {день: {скважина: %}}}, {(ГСП, месяц): [скважины]}).
+    Проценты округлены до 0,01, как в `process_injection_file_for_percents` старого скрипта. Нет листов или номера ГСП — (None, None)."""
+    expected = ["Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь"] if mode == INJ else \
+        ["Октябрь", "Ноябрь", "Декабрь", "Январь", "Февраль", "Март", "Апрель"]
+    num = re.search(r"\d+", os.path.splitext(os.path.basename(path))[0])
+    sheets = [(s, normalize_sheet_name(s)) for s in history._month_sheets(path)]
+    sheets = [(s, n) for s, n in sheets if n in expected]
+    if not sheets or not num:
+        return None, None
+    gsp = int(num.group())
+    percents, wells = {}, {}
+    for sheet, norm in sheets:
+        raw = read_excel_safe(path, sheet_name=sheet, header=None)
+        if raw is None or raw.empty:
+            continue
+        vol = _day_well_volumes(raw)
+        if vol is None:
+            continue
+        days = {}
+        for day, row in vol.iterrows():
+            tot = row.sum()
+            days[day] = (row / tot * 100).round(2).to_dict() if tot > 0 else {w: 0.0 for w in row.index}
+        percents[(gsp, norm)] = days
+        wells[(gsp, norm)] = list(vol.columns)
+    return percents, wells
 
 
 def build_check(totals_path: str, approved_path: str, gsp_files: Sequence[str], mode: str, year: int, folder: str,
@@ -240,15 +288,12 @@ def build_check(totals_path: str, approved_path: str, gsp_files: Sequence[str], 
     if totals.empty:
         rep.add(qc.ERROR, "FILE", "В файле общих объёмов не нашли ни одной строки с датой и объёмом. Нужны два столбца: «Дата» и «Объем»")
         return {"files": [], "summary": None, "days": 0, "max_dev_pct": 0.0, "issues": rep}
-    old = legacy()
-    with contextlib.redirect_stdout(io.StringIO()):
-        approved, days_in_month, _ = old.read_approved_volumes(approved_path)
-        percents, _wells = {}, {}
-        for f in gsp_files:
-            p, w = old.process_injection_file_for_percents(f, mode)
-            if p:
-                percents.update(p)
-                _wells.update(w)
+    approved, days_in_month, _ = read_approved(approved_path)
+    percents = {}
+    for f in gsp_files:
+        p, _w = read_percents(f, mode)
+        if p:
+            percents.update(p)
     if approved is None:
         rep.add(qc.ERROR, "FILE", "Файл утверждённых объёмов не удалось прочитать. В нём нужен столбец с номером группы скважин (в самом файле он подписан «Номер ГСП») и столбцы месяцев")
     if not percents:

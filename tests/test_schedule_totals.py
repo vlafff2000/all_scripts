@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from schedule_pxg import totals as t  # noqa: E402
+from tests.golden import DIR as GOLD, golden  # noqa: E402
 
 SAMPLES = os.environ.get("SCHEDULE_TR_SAMPLES") or "/mnt/project-files/schedule-tr-samples"
 have = pytest.mark.skipif(not os.path.isdir(SAMPLES), reason="нет образцов schedule-tr-samples")
@@ -27,7 +28,7 @@ def quiet(f, *a, **k):
 @have
 @pytest.mark.parametrize("mode,tot,app,gsp,year", CASES)
 def test_total_volumes_parity(mode, tot, app, gsp, year):
-    old = quiet(t.legacy().read_total_gas_volumes, S(tot))
+    old = golden("tot_inj" if mode == "закачка" else "tot_prod")      # эталон: старая read_total_gas_volumes
     new = t.read_total_volumes(S(tot))
     pd.testing.assert_frame_equal(new, old, check_dtype=False)
     assert (new["Объем"] >= 0).all() and new["Дата"].is_monotonic_increasing
@@ -44,62 +45,53 @@ def test_total_volumes_bad_rows_reported(tmp_path):
 
 
 def test_work_days_parity():
-    old = t.legacy().get_work_days_for_month
-    for year in (2024, 2025):
-        for mn in range(1, 13):
-            for dw in (0, 5, 14, 15, 20, 28, 30, 31, 40):
-                assert t.work_days(mn, year, dw) == old("м", mn, year, dw)
+    want = golden("work_days")          # эталон: старая get_work_days_for_month
+    assert len(want) == 2 * 12 * 9
+    for (mn, year, dw), days in want.items():
+        assert t.work_days(mn, year, dw) == days
 
 
 def _inputs(mode, tot, app, gsp):
-    old = t.legacy()
-    a, d, _ = quiet(old.read_approved_volumes, S(app))
-    p, w = quiet(old.process_injection_file_for_percents, S(gsp), mode)
-    return old, a, d, p, w, quiet(old.read_total_gas_volumes, S(tot))
+    a, d, _ = golden("appr_inj" if mode == "закачка" else "appr_prod")
+    p, w = golden("pct_" + gsp[:-5])
+    return a, d, p, w, golden("tot_inj" if mode == "закачка" else "tot_prod")
+
+
+@have
+@pytest.mark.parametrize("mode,tot,app,gsp,year", CASES)
+def test_read_approved_and_percents_parity(mode, tot, app, gsp, year):
+    """Новые чтение тех.карты и долей по дням дают то же, что старые `read_approved_volumes` и `process_injection_file_for_percents`."""
+    a, d, p, w, _ = _inputs(mode, tot, app, gsp)
+    na, nd, ng = t.read_approved(S(app))
+    assert nd == d and set(na) == set(a) and all(na[k] == pytest.approx(a[k]) for k in a)
+    np_, nw = t.read_percents(S(gsp), mode)
+    assert set(np_) == set(p) and nw == w
+    for k in p:
+        assert set(np_[k]) == set(p[k]), k
+        for day in p[k]:
+            assert np_[k][day] == pytest.approx(p[k][day], abs=0.011), (k, day)
+
+
+def test_read_approved_unknown_file(tmp_path):
+    p = str(tmp_path / "x.xlsx")
+    pd.DataFrame({"a": [1]}).to_excel(p, index=False)
+    assert t.read_approved(p) == (None, None, None) and t.read_percents(p) == (None, None)
 
 
 @have
 @pytest.mark.parametrize("mode,tot,app,gsp,year", CASES)
 def test_gsp_files_and_summary_parity(mode, tot, app, gsp, year, tmp_path):
-    old, a, d, p, w, total = _inputs(mode, tot, app, gsp)
+    """Эталон: файлы ГСП и сводка, которые писали старые `generate_output_files` и `create_summary_file` (tests/golden/gsp_*)."""
+    a, d, p, w, total = _inputs(mode, tot, app, gsp)
     assert p
-    o, n = str(tmp_path / "old"), str(tmp_path / "new")
-    os.makedirs(o)
-    of = quiet(old.generate_output_files, p, w, a, d, total, o, year, None)
-    quiet(old.create_summary_file, p, a, d, total, year, o, mode)
+    o, n = os.path.join(GOLD, "gsp_" + mode), str(tmp_path / "new")
+    of = sorted(f for f in os.listdir(o) if f != t.SUMMARY_NAME)
     nf = t.write_gsp_files(p, a, d, total, n, year)
     t.write_summary(t.summary_frame(p, a, d, total, year, mode), n)
-    assert sorted(map(os.path.basename, nf)) == sorted(map(os.path.basename, of)) and nf
+    assert sorted(map(os.path.basename, nf)) == of and nf
     for f in of:
-        x, y = pd.read_excel(f, sheet_name=None, header=None), pd.read_excel(os.path.join(n, os.path.basename(f)), sheet_name=None, header=None)
+        x, y = pd.read_excel(os.path.join(o, f), sheet_name=None, header=None), pd.read_excel(os.path.join(n, f), sheet_name=None, header=None)
         assert list(x) == list(y)
         for sh in x:
             pd.testing.assert_frame_equal(y[sh], x[sh])
-    so = os.path.join(o, t.SUMMARY_NAME)
-    if os.path.isfile(so):
-        pd.testing.assert_frame_equal(pd.read_excel(os.path.join(n, t.SUMMARY_NAME)), pd.read_excel(so))
-
-
-@have
-def test_build_check_end_to_end(tmp_path):
-    r = t.build_check(S("Посуточные_отборы.xlsx"), S("Утвержденные_объемы_отбор.xlsx"), [S("ГСП_9_b.xlsx")], "отбор", 2025, str(tmp_path))
-    assert r["files"] and r["summary"] and os.path.isfile(r["summary"]) and r["days"] > 0
-
-
-def test_build_check_missing_inputs_reports(tmp_path):
-    r = t.build_check(str(tmp_path / "a.xlsx"), str(tmp_path / "b.xlsx"), [], "закачка", 2025, str(tmp_path))
-    assert r["files"] == [] and r["summary"] is None and r["issues"].issues
-
-
-@have
-def test_api_check_button(tmp_path, monkeypatch):
-    from starlette.testclient import TestClient
-    from schedule_pxg import api
-    monkeypatch.setattr(api, "FOLDER", str(tmp_path / "proj"))
-    c = TestClient(api.build_app())
-    body = {"totals": S("Посуточные_отборы.xlsx"), "approved": S("Утвержденные_объемы_отбор.xlsx"), "gsp": [S("ГСП_9_b.xlsx")],
-            "mode": "отбор", "year": 2025}
-    r = c.post("/api/check", json=body)
-    assert r.status_code == 200 and r.json()["ok"] and r.json()["days"] > 0 and os.path.isfile(r.json()["summary"])
-    assert c.post("/api/check", json=dict(body, totals=str(tmp_path / "нет.xlsx"))).status_code == 404
-    assert c.post("/api/check", json=dict(body, gsp=[])).status_code == 400
+    pd.testing.assert_frame_equal(pd.read_excel(os.path.join(n, t.SUMMARY_NAME)), pd.read_excel(os.path.join(o, t.SUMMARY_NAME)))

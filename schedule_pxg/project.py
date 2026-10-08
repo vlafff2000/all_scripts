@@ -38,6 +38,11 @@ class Project:
         self.well_group: Dict[str, str] = {}  # скважина -> группа
         self.sets: Dict[str, List[str]] = {}  # свободный набор -> скважины
         self.templates: Dict[str, dict] = {}  # шаблоны импорта (history.Template.to_dict), сохраняет мастер
+        self.techmaps: Dict[str, dict] = {}  # библиотека тех.карт (techmap.TechMap.to_dict)
+        self.outages: List[dict] = []  # отключения скважин (outages.Outage.to_dict)
+        self.control: dict = {}  # режим управления и лимиты (control.Control.to_dict)
+        self.scenarios: dict = {}  # сценарии и ветви (scenarios.Scenarios.to_dict)
+        self.averaging: dict = {}  # выбор комбинаций лет, исключения, ручные доли (averaging.Averaging.to_dict)
 
     # скважины
     def add_well(self, name: str, synonyms=(), well_type: str = "эксплуатационная", group: Optional[str] = None) -> None:
@@ -117,6 +122,11 @@ class Project:
         _write_json(os.path.join(folder, "groups.json"), {"groups": self.groups, "well_group": self.well_group})
         _write_json(os.path.join(folder, "sets.json"), self.sets)
         _write_json(os.path.join(folder, "templates.json"), self.templates)
+        _write_json(os.path.join(folder, "techmaps.json"), self.techmaps)
+        _write_json(os.path.join(folder, "outages.json"), self.outages)
+        _write_json(os.path.join(folder, "control.json"), self.control)
+        _write_json(os.path.join(folder, "scenarios.json"), self.scenarios)
+        _write_json(os.path.join(folder, "averaging.json"), self.averaging)
 
     @classmethod
     def load(cls, folder: str) -> "Project":
@@ -128,4 +138,9 @@ class Project:
         p.well_group = g.get("well_group", {})
         p.sets = _read_json(os.path.join(folder, "sets.json"), {})
         p.templates = _read_json(os.path.join(folder, "templates.json"), {})
+        p.techmaps = _read_json(os.path.join(folder, "techmaps.json"), {})
+        p.outages = _read_json(os.path.join(folder, "outages.json"), [])
+        p.control = _read_json(os.path.join(folder, "control.json"), {})
+        p.scenarios = _read_json(os.path.join(folder, "scenarios.json"), {})
+        p.averaging = _read_json(os.path.join(folder, "averaging.json"), {})
         return p

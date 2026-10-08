@@ -1,4 +1,10 @@
 import { useEffect, useState } from 'react'
+import Averaging from './Averaging'
+import Charts from './Charts'
+import History from './History'
+import Scenarios from './Scenarios'
+import Strategies from './Strategies'
+import TechMaps from './TechMaps'
 import { AppState, CheckResult, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runCheck, runTrial, saveTemplate } from './api'
 
 type Field = 'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind'
@@ -37,10 +43,11 @@ function FileSlot({ title, help, example, value, onChange, onPick, busy }:
   )
 }
 
-type Tab = 'history' | 'volumes'
+type Wiz = 'history' | 'volumes'
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('history')
+  const [wiz, setWiz] = useState<Wiz>('history')
+  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios' | 'strategies' | 'charts' | 'history'>('import')
   const [st, setSt] = useState<AppState | null>(null)
   const [path, setPath] = useState('')
   const [pv, setPv] = useState<Preview | null>(null)
@@ -96,13 +103,23 @@ export default function App() {
     <div className="shell">
       <aside className="side">
         <h1>Скедул ПХГ</h1>
+        <div className="tabs">
+          <button className={tab === 'import' ? 'on' : ''} onClick={() => setTab('import')}>Импорт истории</button>
+          <button className={tab === 'techmaps' ? 'on' : ''} onClick={() => setTab('techmaps')}>Тех.карты</button>
+          <button className={tab === 'averaging' ? 'on' : ''} onClick={() => setTab('averaging')}>Осреднение</button>
+          <button className={tab === 'scenarios' ? 'on' : ''} onClick={() => setTab('scenarios')}>Сценарии</button>
+          <button className={tab === 'strategies' ? 'on' : ''} onClick={() => setTab('strategies')}>Стратегии</button>
+          <button className={tab === 'charts' ? 'on' : ''} onClick={() => setTab('charts')}>Графики</button>
+          <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>История</button>
+        </div>
+        {tab === 'import' && <>
         <p className="muted">Загрузка данных</p>
         <h2>Что загружаем</h2>
-        <button className={'nav' + (tab === 'history' ? ' on' : '')} onClick={() => setTab('history')}>
+        <button className={'nav' + (wiz === 'history' ? ' on' : '')} onClick={() => setWiz('history')}>
           <b>История работы скважин</b><span>таблица с датой, скважиной и расходом</span></button>
-        <button className={'nav' + (tab === 'volumes' ? ' on' : '')} onClick={() => setTab('volumes')}>
+        <button className={'nav' + (wiz === 'volumes' ? ' on' : '')} onClick={() => setWiz('volumes')}>
           <b>Объёмы по группам скважин</b><span>проверочный Excel из общих объёмов</span></button>
-        {tab === 'history' && <>
+        {wiz === 'history' && <>
           <h2>Сохранённые шаблоны</h2>
           {st && st.templates.length === 0 && <p className="muted small">Пока нет. Шаблон запоминает, в каких столбцах что лежит, чтобы не настраивать такой же файл заново.</p>}
           {st?.templates.map(t => (
@@ -112,11 +129,12 @@ export default function App() {
             </div>
           ))}
         </>}
+        </>}
         {st && <p className="muted small">Проект: {st.folder}</p>}
       </aside>
-      <main className="work">
+      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
         {msg && <p className="note warn">{msg}</p>}
-        {tab === 'history' && <>
+        {wiz === 'history' && <>
           <div className="intro">
             <h1>Загрузка истории работы скважин</h1>
             <p>Покажите программе Excel-файл с историей, и она переложит его в свою таблицу. Всего четыре шага: выбрать файл, показать, где заголовок,
@@ -217,7 +235,7 @@ export default function App() {
           </>}
         </>}
 
-        {tab === 'volumes' && <>
+        {wiz === 'volumes' && <>
           <div className="intro">
             <h1>Объёмы по группам скважин</h1>
             <p>Программа берёт общий объём газа по объекту и раскладывает его по группам скважин и по скважинам внутри группы, так же как делал старый скрипт.
@@ -269,7 +287,7 @@ export default function App() {
             {res && res.issues.length > 0 && <ul className="issues">{res.issues.map((i, k) => <li key={k} className={i.level}>{i.message}</li>)}</ul>}
           </Step>
         </>}
-      </main>
+      </main>}
     </div>
   )
 }
