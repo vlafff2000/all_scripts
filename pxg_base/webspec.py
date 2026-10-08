@@ -199,6 +199,29 @@ SPECS: List[WebSpec] = [
         note="Результат — «daily_well_data_2019_01_2024_04.xlsx» с листами «Отбор» и «Закачка».",
     ),
     WebSpec(
+        module="Пересчёт_давлений",
+        params=(
+            Param("db", "База давлений по замерам", "file", required=True,
+                  hint="Результат модуля «База давлений по замерам»: книга с листом «Данные»"),
+            Param("refs", "Справочники: альтитуды и перфорации", "file", required=True,
+                  hint="Книга с листами «Альтитуды» (скважина, Z) и «Перфорации» (абсолютная отметка верха перфораций)"),
+            Param("excluded", "Скважины без пересчёта", default="8, 11, 110, 122, 447",
+                  hint="Номера через запятую: их давление берётся как есть"),
+            Param("level_sign", "Знак уровня жидкости", "choice", default="auto", options=(
+                ("auto", "Всегда ниже устья (−|Нст|)"), ("as_is", "Как записано в отчёте"))),
+            Param("add_atm", "Прибавлять 1 атм (1,01325) к давлению в барах", "bool", default=""),
+            Param("inc_mean", "Include: среднее пластовое", "bool", default="1"),
+            Param("inc_exploit", "Include: эксплуатационные", "bool", default="1"),
+            Param("inc_obs", "Include: наблюдательные с пересчётом", "bool", default="1"),
+            Param("inc_obs_raw", "Include: наблюдательные без пересчёта", "bool", default=""),
+            Param("output", "Имя файла результата", default="Пересчёт_давлений.xlsx"),
+        ),
+        args=(("db", "db"), ("refs", "refs"), ("excluded", "excluded"), ("level_sign", "level-sign"), ("add_atm", "add-atm"),
+              ("inc_mean", "inc-mean"), ("inc_exploit", "inc-exploit"), ("inc_obs", "inc-obs"), ("inc_obs_raw", "inc-obs-raw"),
+              ("output", "output")),
+        note="Лист «Пересчёт» показывает для каждой строки способ расчёта; строки без альтитуды или отметки перфорации остаются без давления, а не считаются по нулям, как в Excel.",
+    ),
+    WebSpec(
         module="База_давлений_по_замерам",
         params=(
             Param("folder", "Папка с файлами «Результаты замеров»", "folder", required=True,
