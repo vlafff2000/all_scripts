@@ -1,8 +1,6 @@
 """Тех.карты «Скедул ПХГ»: импорт, паритет со старым read_approved_volumes, рабочие дни, библиотека, проверки."""
-import importlib
 import os
 import sys
-import types
 
 import pytest
 
@@ -10,35 +8,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pxg_core import qc  # noqa: E402
 from schedule_pxg import techmap as tmod  # noqa: E402
+from tests.golden import golden  # noqa: E402
 from schedule_pxg.project import Project  # noqa: E402
 
 SAMPLES = os.environ.get("SCHEDULE_TR_SAMPLES") or "/mnt/project-files/schedule-tr-samples"
 have = pytest.mark.skipif(not os.path.isdir(SAMPLES), reason="нет образцов schedule-tr-samples")
 INJ = os.path.join(SAMPLES, "Утвержденные_объемы_закачка.xlsx")
 PROD = os.path.join(SAMPLES, "Утвержденные_объемы_отбор.xlsx")
-OLD = "pxg_base.modules.Создание_schedule_файла_технологического_режима"
-
-
-def old_module():
-    names = ("tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "tkinter.simpledialog")
-    saved = {n: sys.modules.get(n) for n in names}
-    for name in names:
-        sys.modules.setdefault(name, types.ModuleType(name))
-    try:
-        return importlib.import_module(OLD)
-    except Exception as e:  # старый скрипт тянет GUI и лишние библиотеки
-        pytest.skip("старый скрипт не импортируется: %s" % e)
-    finally:  # заглушки не должны оставаться в sys.modules: на них падают другие тесты паритета
-        for n, v in saved.items():
-            if v is None:
-                sys.modules.pop(n, None)
 
 
 @have
 @pytest.mark.parametrize("path", [INJ, PROD])
 def test_parity_with_read_approved_volumes(path):
-    old = old_module()
-    approved, days, gsp = old.read_approved_volumes(path)
+    """Эталон: результат старой `read_approved_volumes` на образцах (tests/golden)."""
+    approved, days, gsp = golden("appr_inj" if path == INJ else "appr_prod")
     tm = tmod.read_techmap(path)
     assert tm.days == days and [int(g) for g in tm.volumes] == gsp
     for (g, m), v in approved.items():

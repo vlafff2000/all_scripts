@@ -1,11 +1,7 @@
 """Ядро прогноза «Скедул ПХГ»: сетка шагов, доли, остаток округления, запись и паритет со старым скриптом."""
-import contextlib
-import importlib
-import io
 import os
 import sys
-import types
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
@@ -16,32 +12,14 @@ from schedule_pxg import forecast as fc  # noqa: E402
 from schedule_pxg import history as hist  # noqa: E402
 from schedule_pxg import techmap as tmod  # noqa: E402
 from schedule_pxg.project import Project  # noqa: E402
+from tests.golden import golden  # noqa: E402
 
 SAMPLES = os.environ.get("SCHEDULE_TR_SAMPLES") or "/mnt/project-files/schedule-tr-samples"
 have = pytest.mark.skipif(not os.path.isdir(SAMPLES), reason="нет образцов schedule-tr-samples")
-OLD = "pxg_base.modules.Создание_schedule_файла_технологического_режима"
 
 
 def S(name):
     return os.path.join(SAMPLES, name)
-
-
-def old_module():
-    """Старый скрипт тянет tkinter: на время импорта подставляем заглушки и убираем их, чтобы не мешать другим тестам."""
-    names = ("tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "tkinter.simpledialog")
-    saved = {n: sys.modules.get(n) for n in names}
-    for n in names:
-        sys.modules[n] = types.ModuleType(n)
-    try:
-        return importlib.import_module(OLD)
-    except Exception as e:
-        pytest.skip("старый скрипт не импортируется: %s" % e)
-    finally:
-        for n, v in saved.items():
-            if v is None:
-                sys.modules.pop(n, None)
-            else:
-                sys.modules[n] = v
 
 
 # ---------------------------------------------------------------- без образцов
@@ -216,21 +194,9 @@ def _sample_project():
 def test_parity_with_old_forecast_rates(tmp_path):
     """Старый create_forecast_multiple_scenarios (одна группа, сутки) и ядро с теми же долями по дням и профилем
     посуточного файла: дебиты каждой скважины в каждые сутки совпадают."""
-    old = old_module()
-    with contextlib.redirect_stdout(io.StringIO()):
-        pi, wi = old.process_injection_file_for_percents(S("ГСП_9_a.xlsx"), "закачка")
-        pp, wp = old.process_injection_file_for_percents(S("ГСП_9_b.xlsx"), "отбор")
-        ai, di, _ = old.read_approved_volumes(S("Утвержденные_объемы_закачка.xlsx"))
-        ap, dp, _ = old.read_approved_volumes(S("Утвержденные_объемы_отбор.xlsx"))
-        ti = old.read_total_gas_volumes(S("Посуточная_закачка.xlsx"))
-        tp = old.read_total_gas_volumes(S("Посуточные_отборы.xlsx"))
-        ai = {k: v for k, v in ai.items() if k[0] == 9}
-        ap = {k: v for k, v in ap.items() if k[0] == 9}
-        periods = [{"date": datetime(2025, 11, 1), "type": "prod"}, {"date": datetime(2026, 4, 15), "type": "none"},
-                   {"date": datetime(2026, 4, 27), "type": "inj"}, {"date": datetime(2026, 10, 16), "type": "none"},
-                   {"date": datetime(2026, 11, 1), "type": "prod"}]
-        res = old.create_forecast_multiple_scenarios(pi, wi, pp, wp, ai, ap, di, dp, ti, tp, periods, str(tmp_path), 2025, 1, [100])
-    old_df = hist.read_schedule(res[0]["file"])
+    pi, pp = golden("pct_ГСП_9_a")[0], golden("pct_ГСП_9_b")[0]
+    ti, tp = golden("tot_inj"), golden("tot_prod")
+    old_df = golden("forecast_9")        # schedule старого create_forecast_multiple_scenarios на этих данных
     assert len(old_df) > 5000
 
     proj = _sample_project()
@@ -318,21 +284,7 @@ def test_first_month_work_days_effect_on_result():
 def test_old_script_splits_object_volume_by_equal_group_weights(tmp_path):
     """Расхождение со старым скриптом: он складывает проценты групп с равным весом и умножает на объём ВСЕГО ОБЪЕКТА,
     поэтому объёмы групп по тех.карте (сентябрь: ГСП 8 — 220, ГСП 9 — 266 млн м³) расходятся к 243/243. Ядро держит объём каждой группы."""
-    old = old_module()
-    pct, wells = {}, {}
-    with contextlib.redirect_stdout(io.StringIO()):
-        for f in ("ГСП_8_a.xlsx", "ГСП_9_a.xlsx"):
-            a, b = old.process_injection_file_for_percents(S(f), "закачка")
-            pct.update(a)
-            wells.update(b)
-        ai, di, _ = old.read_approved_volumes(S("Утвержденные_объемы_закачка.xlsx"))
-        ai = {k: v for k, v in ai.items() if k[0] in (8, 9)}
-        ti = old.read_total_gas_volumes(S("Посуточная_закачка.xlsx"))
-        periods = [{"date": datetime(2025, 11, 1), "type": "prod"}, {"date": datetime(2026, 4, 15), "type": "none"},
-                   {"date": datetime(2026, 4, 27), "type": "inj"}, {"date": datetime(2026, 10, 16), "type": "none"},
-                   {"date": datetime(2026, 11, 1), "type": "prod"}]
-        res = old.create_forecast_multiple_scenarios(pct, wells, {}, {}, ai, {}, di, {}, ti, None, periods, str(tmp_path), 2025, 1, [100])
-    df = hist.read_schedule(res[0]["file"])
+    df = golden("forecast_sept")       # сентябрь из schedule старого скрипта на группах 8 и 9
     proj = _sample_project()
     sept = df[df["date"].dt.month == 9]
     got = sept.groupby(sept["well"].map(proj.group_at_level))["rate"].sum() / 1e6

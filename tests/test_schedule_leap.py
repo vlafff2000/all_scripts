@@ -12,7 +12,8 @@ from schedule_pxg import forecast as fc  # noqa: E402
 from schedule_pxg import historymode as hm  # noqa: E402
 from schedule_pxg import scenarios as sc  # noqa: E402
 from schedule_pxg import techmap as tmod  # noqa: E402
-from tests.test_schedule_forecast import _project, _tm, old_module  # noqa: E402
+from tests.golden import golden  # noqa: E402
+from tests.test_schedule_forecast import _project, _tm  # noqa: E402
 
 
 def feb_map(days=28, vol=280.0):
@@ -41,8 +42,8 @@ def feb_total(f, year):
     {d: 100.0 + (0.4 if d % 2 else 0.0) for d in range(1, 29)},                             # допуск 1 м³ из старого скрипта
 ])
 def test_shelf_parity_with_old_script(vols):
-    old = old_module()
-    want, info = old.adjust_february_last_shelf({(2, d): v for d, v in vols.items()})
+    cases = [m for m in test_shelf_parity_with_old_script.pytestmark[0].args[1]]
+    want, info = golden("shelf")[cases.index(vols)]     # эталон: старая adjust_february_last_shelf
     got, g = fc.shelf_feb29(vols)
     assert g["shelf_days"] == info["shelf_days"] and g["n_days"] == info["n_days"]
     assert got == {d: want[(2, d)] for d in got} and set(got) == {d for (m, d) in want}

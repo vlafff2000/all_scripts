@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from schedule_pxg import scenarios as sc  # noqa: E402
 from schedule_pxg import strategy as st  # noqa: E402
 from schedule_pxg import techmap as tmod  # noqa: E402
-from tests.test_schedule_forecast import old_module  # noqa: E402
+from tests.golden import golden  # noqa: E402
 from tests.test_schedule_scenarios import _lib, _proj  # noqa: E402
 
 
@@ -21,11 +21,9 @@ def _tm():
 
 
 def test_apply_strategy_parity_with_old_function():
-    old = old_module()
     t = _tm()
     strategy = {"1": {"Май": 40.0, "Июнь": 5.5}, "9": {"Май": 7.0}}     # группы 9 в тех.карте нет — не добавляется
-    approved = {(g, m): x * 1000 for g, r in t.volumes.items() for m, x in r.items()}   # старый код держит тыс. м³
-    want = old.apply_strategy_to_volumes(approved, strategy, {}, sum(approved.values()))
+    want = golden("strategy")           # эталон: старая apply_strategy_to_volumes (в тыс. м³) на этих данных
     got = st.apply_strategy(t, strategy)
     for g, r in got.volumes.items():
         for m, x in r.items():

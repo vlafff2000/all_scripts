@@ -137,3 +137,6 @@ export const saveStrategy = (name: string, index: number, table: StrategyTable |
   call<AppState>('/api/strategy/save', post({ name, index, table, all }))
 export const loadStrategy = (name: string, path: string) => call<{ state: AppState; report: string[] }>('/api/strategy/load', post({ name, path }))
 export const downloadStrategy = (name: string) => download('/api/strategy/xlsx', { name }, 'strategy.xlsx')
+export interface CheckInput { totals: string; approved: string; gsp: string[]; mode: string; year: number; folder: string }
+export interface CheckResult { folder: string; files: string[]; summary: string | null; days: number; maxDevPct: number; ok: boolean; issues: { level: string; message: string }[] }
+export const runCheck = (b: CheckInput) => call<CheckResult>('/api/check', post(b))

@@ -1,6 +1,4 @@
 """Шаг А10: осреднение истории, комбинации лет, три показателя, совет и выбор долей."""
-import contextlib
-import io
 import os
 import sys
 
@@ -13,7 +11,8 @@ from schedule_pxg import forecast as fc  # noqa: E402
 from schedule_pxg import history as hist  # noqa: E402
 from schedule_pxg import techmap as tmod  # noqa: E402
 from schedule_pxg.project import Project  # noqa: E402
-from tests.test_schedule_forecast import S, _project, have, old_module, _sample_project  # noqa: E402
+from tests.golden import golden  # noqa: E402
+from tests.test_schedule_forecast import S, _project, have, _sample_project  # noqa: E402
 
 MONTHS = ["Май", "Июнь"]
 # доли скважин a, b, c одинаковы в мае и июне; объём группы за месяц — 100
@@ -188,9 +187,7 @@ def test_parity_year_share_with_shares_from_history():
 @have
 def test_parity_with_old_script_day_percents():
     """Месячная доля = Σ(процент старого скрипта по дню × объём группы за день) / объём группы за месяц."""
-    old = old_module()
-    with contextlib.redirect_stdout(io.StringIO()):
-        pct, _wells = old.process_injection_file_for_percents(S("ГСП_9_a.xlsx"), "закачка")
+    pct, _wells = golden("pct_ГСП_9_a")
     proj = _sample_project()
     h = hist.import_history(S("ГСП_9_a.xlsx"))
     h = h[h["kind"] == "закачка"]

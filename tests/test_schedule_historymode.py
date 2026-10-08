@@ -1,7 +1,4 @@
 """Режим «история» «Скедул ПХГ» (А13): шаги по суткам и по датам замеров, поправка по ПЗРГ, сшивка; паритет со старыми скриптами."""
-import contextlib
-import importlib.util
-import io
 import os
 import sys
 from datetime import date, timedelta
@@ -13,45 +10,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from schedule_pxg import forecast as fc  # noqa: E402
+from tests.golden import golden  # noqa: E402
 from schedule_pxg import historymode as hm  # noqa: E402
 from schedule_pxg.project import Project  # noqa: E402
 
-OLD_DIR = os.path.join(ROOT, "apps", "schedule_tr")
-OLD_DAILY = os.path.join(OLD_DIR, "Schedule_по_пропорциональным_коэффициентам_шаг_1_сутки.py")
-OLD_DATES = os.path.join(OLD_DIR, "Schedule_по_датам_замеров_давлений.py")
 PROD, INJ = "отбор", "закачка"
-
-
-def old(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    except Exception as e:
-        pytest.skip("старый скрипт не импортируется: %s" % e)
-    return mod
 
 
 def frame(rows):
     """rows: (скважина, дата, расход, вид)."""
     return pd.DataFrame({"well": [r[0] for r in rows], "date": pd.to_datetime([r[1] for r in rows]),
                          "rate": [float(r[2]) for r in rows], "hours": 24.0, "kind": [r[3] for r in rows]})
-
-
-def old_periods():
-    """PERIODS в виде старых скриптов: словари с datetime и типом prod/inj/none, конец — за сутки до начала следующего."""
-    kinds = {INJ: "inj", PROD: "prod", "нейтральный": "none"}
-    ends = [PERIODS[1][0] - timedelta(days=1), PERIODS[2][0] - timedelta(days=1), date(2026, 12, 31)]
-    return [{"start": pd.Timestamp(a).to_pydatetime(), "end": pd.Timestamp(e).to_pydatetime(), "type": kinds[k]}
-            for (a, k), e in zip(PERIODS, ends)]
-
-
-def old_frames(df):
-    """Таблицы листов «Отборы» и «Закачка» в виде старых скриптов."""
-    def one(kind):
-        d = df[df["kind"] == kind]
-        return pd.DataFrame({"Скважина": d["well"].values, "Дата": d["date"].values, "Суточный_расход_газа": d["rate"].values})
-    return one(PROD), one(INJ)
 
 
 def blocks(text):
@@ -132,30 +101,19 @@ def sample():
 PERIODS = [(date(2026, 5, 1), INJ), (date(2026, 5, 5), "нейтральный"), (date(2026, 10, 1), PROD)]
 
 
-def test_daily_text_parity_with_old_script(tmp_path):
-    o = old(OLD_DAILY, "old_daily")
-    h = sample()
-    res = hm.build_history(h, mode="daily", periods=PERIODS)
-    prod, inj = old_frames(hm.split_wells(h))
-    out = str(tmp_path / "old.inc")
-    with contextlib.redirect_stdout(io.StringIO()):
-        o.create_include_file(prod, inj, old_periods(), out)
-    new = hm.render(res)
-    assert blocks(new) == blocks(open(out, encoding="utf-8").read())
+def test_daily_text_parity_with_old_script():
+    """Эталон: schedule старого скрипта (`create_include_file`, шаг сутки) на тех же данных, снят до его удаления."""
+    res = hm.build_history(sample(), mode="daily", periods=PERIODS)
+    assert blocks(hm.render(res)) == golden("hm_daily_blocks")
 
 
 def test_daily_pzrg_parity_with_old_correction():
-    o = old(OLD_DAILY, "old_daily2")
     h = hm.split_wells(sample())
     inj = h[h["kind"] == INJ]
     pz = pd.DataFrame({"date": pd.to_datetime(["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04"]),
                        "rate": [450000.0, 200000.0, 0.0, 600000.0]})
     got, log, notes = hm.correct_pzrg(inj, pz)
-    old_df = old_frames(h)[1]
-    pz_old = pz.rename(columns={"date": "Дата", "rate": "Суточный_расход_ПЗРГ"})
-    with contextlib.redirect_stdout(io.StringIO()):
-        fixed = o.calculate_correction_coefficients(old_df, pz_old, None)
-    assert list(got["rate_corr"]) == pytest.approx(list(fixed["Суточный_расход_газа_скорректированный"]))
+    assert list(got["rate_corr"]) == pytest.approx(golden("hm_daily_pzrg"))
     methods = {r["start"]: r["method"] for r in log}
     assert methods["2026-05-03"] == "SKIP" and methods["2026-05-01"] in ("IN_RANGE_ONLY", "ALL_WELLS")
     assert hm.log_summary(log)["skipped"] == 3  # ПЗРГ = 0 и два дня без ПЗРГ
@@ -175,34 +133,20 @@ def test_correct_set_branches():
 DATES = [date(2026, 5, 3), date(2026, 5, 5), date(2026, 10, 2)]
 
 
-def test_dates_text_parity_with_old_script(tmp_path):
-    o = old(OLD_DATES, "old_dates")
-    h = sample()
-    res = hm.build_history(h, mode="dates", model_dates=DATES, periods=PERIODS)
-    prod, inj = old_frames(hm.split_wells(h))
-    allv = sorted(set(pd.to_datetime(prod["Дата"]).tolist() + pd.to_datetime(inj["Дата"]).tolist()))
-    to_dt = lambda d: pd.Timestamp(d).to_pydatetime()
-    per = old_periods()
-    steps = o.get_model_dates_and_periods([to_dt(d) for d in DATES], [v.to_pydatetime() for v in allv], per)
-    out = str(tmp_path / "old.inc")
-    with contextlib.redirect_stdout(io.StringIO()):
-        o.create_include_file(prod, inj, steps, out)
-    assert blocks(hm.render(res)) == blocks(open(out, encoding="utf-8").read())
+def test_dates_text_parity_with_old_script():
+    """Эталон: schedule старого скрипта «по датам замеров» (`get_model_dates_and_periods` + `create_include_file`)."""
+    res = hm.build_history(sample(), mode="dates", model_dates=DATES, periods=PERIODS)
+    assert blocks(hm.render(res)) == golden("hm_dates_blocks")
     assert [i["from_file"] for i in res.info][:3] == [True, True, True] and not res.info[-1]["from_file"]
 
 
 def test_dates_pzrg_single_period_matches_old_function():
-    o = old(OLD_DATES, "old_dates2")
     h = hm.split_wells(sample())
     inj = h[h["kind"] == INJ]
     pz = pd.DataFrame({"date": pd.date_range("2026-05-01", "2026-05-06"), "rate": [450000.0] * 6})
     a, b = date(2026, 5, 1), date(2026, 5, 4)
     got, log, _ = hm.correct_pzrg(inj, pz, {INJ: [(a, b)]})
-    od = old_frames(h)[1]
-    with contextlib.redirect_stdout(io.StringIO()):
-        fixed = o.calculate_correction_coefficients_for_period(
-            od, pz.rename(columns={"date": "Дата", "rate": "Суточный_расход_ПЗРГ"}), pd.Timestamp(a), pd.Timestamp(b), None)
-    assert list(got["rate_corr"]) == pytest.approx(list(fixed["Суточный_расход_газа_скорректированный"]))
+    assert list(got["rate_corr"]) == pytest.approx(golden("hm_dates_pzrg"))
 
 
 def test_correction_windows_do_not_share_boundary_day():
