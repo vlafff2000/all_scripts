@@ -46,7 +46,7 @@ RUNTIMES = {
 }
 
 # Tracked application files that go into the folder (tests, interface sources and dev scripts stay out).
-INCLUDE = ['pxg_base', 'gsp_maps', 'pxg_core', 'README.md', 'requirements.txt']
+INCLUDE = ['pxg_base', 'gsp_maps', 'pxg_core', 'schedule_pxg', 'tnav_results', 'README.md', 'requirements.txt']
 SDIST_ONLY = {'proxy-tools', 'odfpy'}  # чистый Python, опубликован только исходниками
 SKIP_TOOLS = set()
 
@@ -55,6 +55,10 @@ WINDOWS_LAUNCHERS = {
                     '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base --app %*',
     'Karty_GSP.bat': 'rem Карты ГСП: окно приложения (или браузер, если окно недоступно).\r\n'
                      '"%~dp0python\\python.exe" -s -X utf8 -m gsp_maps %*',
+    'Perechislit_UNRST.bat': 'rem Перетащите файл .UNRST на этот файл: рядом ляжет отчёт *_keywords.txt.\r\n'
+                             'if "%~1"=="" (echo Перетащите файл .UNRST на этот файл. & pause & exit /b 1)\r\n'
+                             '"%~dp0python\\python.exe" -s -X utf8 -m tnav_results.list_restart --report-next-to "%~1"\r\n'
+                             'pause\r\nexit /b 0',
     'PXG_Base_console.bat': 'rem База ПХГ: консольное меню модулей.\r\n'
                             '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base %*',
 }
@@ -65,6 +69,10 @@ WINDOWS_SUFFIX = '\r\nif errorlevel 1 pause\r\n'
 LINUX_LAUNCHERS = {
     'pxg_base.sh': '# База ПХГ в браузере.\nexec "$PY" -s -X utf8 -m pxg_base --browser "$@"',
     'karty_gsp.sh': '# Карты ГСП в браузере.\nexec "$PY" -s -X utf8 -m gsp_maps --browser "$@"',
+    'perechislit_unrst.sh': '# Перечислитель ключевых слов и дат UNRST: ./perechislit_unrst.sh РАСЧЁТ.UNRST (отчёт рядом).\n'
+                            'if [ $# -lt 1 ]; then echo "Использование: $0 файл.UNRST (или перетащите файл на значок)"; read -n 1 -s -r -p "Нажмите любую клавишу..."; exit 1; fi\n'
+                            '"$PY" -s -X utf8 -m tnav_results.list_restart --report-next-to "$1" || true\n'
+                            'echo; read -n 1 -s -r -p "Нажмите любую клавишу..."; echo',
     'pxg_base_console.sh': '# База ПХГ: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
@@ -82,6 +90,9 @@ README = '''База ПХГ — переносная версия ({target})
    {five} — консольное меню тех же модулей.
 3. {maps} — «Карты ГСП»: секторные диаграммы расходов газа и воды по скважинам на карте с бегунком времени.
    Положение скважин берётся из карты-сетки Excel и/или из координат X, Y (tNavigator).
+
+4. {unrst} — «Перечислитель UNRST»: перетащите на него файл расчёта .UNRST (или запустите с путём к файлу в терминале);
+   рядом с файлом появится отчёт *_keywords.txt: даты, ключевые слова, есть ли SGAS и PRESSURE. Окно закроется после нажатия клавиши.
 
 Результаты запусков «Базы ПХГ» складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
 Другая папка результатов по умолчанию: переменная окружения PXG_RUNS_DIR.
@@ -174,7 +185,7 @@ def write_launchers(target, folder):
         for name, body in WINDOWS_LAUNCHERS.items():
             (folder / name).write_bytes((WINDOWS_PREFIX + body + WINDOWS_SUFFIX).encode('utf-8'))
         text = README.format(target='Windows', example='C:\\GasAtlas', six='PXG_Base.bat',
-                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', note=WINDOWS_NOTE)
+                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', unrst='Perechislit_UNRST.bat', note=WINDOWS_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_bytes(text.replace('\n', '\r\n').encode('utf-8-sig'))
     else:
         for name, body in LINUX_LAUNCHERS.items():
@@ -182,7 +193,7 @@ def write_launchers(target, folder):
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
-                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', note=LINUX_NOTE)
+                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', unrst='perechislit_unrst.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')
 
 
