@@ -185,3 +185,58 @@ def test_describe_egrid_reports_coarsening(tmp_path):
                   _blk("ACTNUMC", "INTE", [1, 0, 1, 1]) + _blk("ACTNUM", "INTE", [1, 1, 1, 1]))
     text = "\n".join(describe_egrid(str(p)))
     assert "укрупнение ячеек" in text and "= 2 + 1 = 3" in text
+
+
+def _coarse_grid(path):
+    """2x2x2; слой k=1 укрупнён в один блок (опорная ячейка g=4, мелкие g=4..7 активны в ACTNUMC)."""
+    z = []
+    for k in range(2):
+        for top in (0, 1):
+            z += [1000.0 + 10 * (k + top)] * 16
+    coord = []
+    for pj in range(3):
+        for pi in range(3):
+            coord += [100.0 * pi, 100.0 * pj, 0.0, 100.0 * pi, 100.0 * pj, 2000.0]
+    act = [1, 1, 1, 1, 1, 0, 0, 0]
+    path.write_bytes(_blk("GRIDHEAD", "INTE", [1, 2, 2, 2] + [0] * 29) + _blk("COORD", "REAL", coord) +
+                     _blk("ZCORN", "REAL", z) + _blk("CORSNUM", "INTE", [0] * 4 + [1] * 4) +
+                     _blk("ACTNUMC", "INTE", [1] * 8) + _blk("ACTNUM", "INTE", act) +
+                     _blk("ENDGRID", "INTE", []) + _blk("LGR", "CHAR", ["LGR1"]) +
+                     _blk("GRIDHEAD", "INTE", [1, 9, 9, 9] + [0] * 29))
+    return str(path)
+
+
+def test_coarsening_units_columns_volume_and_notes(tmp_path):
+    m = CellModel(read_egrid(_coarse_grid(tmp_path / "K.EGRID")))
+    assert m.n_active == 5 and m.coarse and len(m.notes) == 2 and "LGR1" in m.notes[1]
+    assert [m.unit_at((i, j, 1)) for j in (0, 1) for i in (0, 1)] == [4, 4, 4, 4]
+    porv_full = [1.0] * 4 + [2.0, 3.0, 4.0, 5.0]               # PORV на всю сетку: блок = 14 сумма
+    sg = [0.5, 0.0, 0.0, 0.0, 0.5]                              # единицы: 4 верхних ячейки + блок
+    r = gas_pore_volume(m, porv_full, sg, 0.1)
+    assert r.total == pytest.approx(0.5 * 1.0 + 0.5 * 14.0)
+    g = gwc_map(m, sg, 0.1)
+    # колонны (1,0),(0,1),(1,1): верх без газа, блок с газом -> подошва сетки; колонна (0,0): газ сверху и в блоке
+    assert g[(0, 0)] == pytest.approx(1020.0) and g[(1, 1)] == pytest.approx(1020.0)
+    # давление блока относится ко всем его мелким ячейкам
+    sg2 = [0.0] * 4 + [0.0]
+    assert gwc_map(m, sg2, 0.1) == {}
+
+
+def test_dual_porosity_arrays(tmp_path):
+    m = _model(tmp_path)
+    porv2 = PORV + [5.0] * 12                      # матрица + трещины
+    sg2 = SG + [0.5] * 12
+    r = gas_pore_volume(m, porv2, sg2, 0.3)
+    assert r.total == pytest.approx(10 * (0.8 + 0.8 + 0.9 + 0.6 + 0.4 + 0.9 + 0.9) + 5 * 0.5 * 12)
+    assert gwc_map(m, sg2, 0.3) == gwc_map(m, SG, 0.3)         # ГВК по матрице
+    with pytest.raises(ValueError):
+        gas_pore_volume(m, PORV, sg2, 0.3)
+
+
+def test_porv_check_in_describe(tmp_path):
+    from tnav_results.describe_model import describe
+    eg = _coarse_grid(tmp_path / "K.EGRID")
+    init = tmp_path / "K.INIT"
+    init.write_bytes(_blk("PORV", "REAL", [1.0] * 4 + [2.0, 3.0, 4.0, 5.0]))
+    text = describe([eg, str(init)])
+    assert "Сверка INIT и EGRID" in text and "по ячейкам ACTNUM 6" in text and "неопорных ячейках" in text and "3 из них" in text

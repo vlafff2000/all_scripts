@@ -14,11 +14,11 @@ import sys
 from collections import OrderedDict
 
 try:
-    from .ecl import iter_blocks
+    from .ecl import iter_blocks, read_all
     from . import grid_info
 except ImportError:  # запуск просто как скрипт
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from tnav_results.ecl import iter_blocks
+    from tnav_results.ecl import iter_blocks, read_all
     from tnav_results import grid_info
 
 
@@ -124,6 +124,23 @@ def describe_unsmry(path, ti, startdat, unit):
     return out
 
 
+def porv_check(egrid, init):
+    """Сверка PORV (на всю сетку) с активностью: помогает понять, как PORV записан при укрупнении ячеек."""
+    g = {b.keyword: v for b, v in read_all(egrid, ["ACTNUM", "ACTNUMC", "CORSNUM"])}
+    porv = {b.keyword: v for b, v in read_all(init, ["PORV"])}.get("PORV")
+    if porv is None or "ACTNUM" not in g or len(porv) != len(g["ACTNUM"]):
+        return []
+    tot = sum(porv)
+    act = sum(v for v, a in zip(porv, g["ACTNUM"]) if a)
+    out = ["PORV: сумма по всей сетке %.6g, по ячейкам ACTNUM %.6g" % (tot, act)]
+    if "ACTNUMC" in g:
+        out[0] += ", по ячейкам ACTNUMC %.6g" % sum(v for v, a in zip(porv, g["ACTNUMC"]) if a)
+    if "CORSNUM" in g and any(g["CORSNUM"]):
+        zero = sum(1 for v, c, a in zip(porv, g["CORSNUM"], g["ACTNUM"]) if c and not a and v != 0)
+        out.append("PORV ненулевой в неопорных ячейках укрупнённых блоков: %d из них" % zero)
+    return out
+
+
 def describe(paths):
     by_ext = {}
     for p in paths:
@@ -133,6 +150,10 @@ def describe(paths):
         lines += describe_egrid(by_ext[".EGRID"]) + [""]
     if ".INIT" in by_ext:
         lines += describe_init(by_ext[".INIT"]) + [""]
+    if ".EGRID" in by_ext and ".INIT" in by_ext:
+        chk = porv_check(by_ext[".EGRID"], by_ext[".INIT"])
+        if chk:
+            lines += ["Сверка INIT и EGRID"] + ["  " + c for c in chk] + [""]
     if ".SMSPEC" in by_ext:
         part, tinfo = describe_smspec(by_ext[".SMSPEC"])
         lines += part + [""]
