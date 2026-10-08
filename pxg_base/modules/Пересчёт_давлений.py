@@ -27,7 +27,7 @@ def main(argv=None):
         excluded="скважины без пересчёта через запятую (по умолчанию 8, 11, 110, 122, 447)",
         level_sign="auto: уровень всегда ниже устья (−|Нст|); as_is: знак как в отчёте",
         add_atm="да: прибавлять 1,01325 (абсолютное давление в барах)",
-        inc_mean="include: среднее пластовое", inc_exploit="include: эксплуатационные",
+        avg_file="книга с исходниками по эксплуатационным: столбец «Р среднее по ПХГ»", inc_mean="include: среднее пластовое", inc_exploit="include: эксплуатационные",
         inc_obs="include: наблюдательные с пересчётом", inc_obs_raw="include: наблюдательные без пересчёта",
         output="имя файла результата")
     db_path = параметры.ask_path("База давлений по замерам", args.db)
@@ -59,7 +59,17 @@ def main(argv=None):
     if missing:
         print("⚠️ Нет отметки перфорации: %s" % ", ".join(map(str, missing[:30])))
 
-    inc = pc.include_frames(res, atm)
+    avg = None
+    avg_path = параметры.ask_path("Исходники по эксплуатационным (Р среднее по ПХГ), Enter - посчитать", args.avg_file if args.avg_file is not None else "")
+    if avg_path:
+        avg = pc.read_average(avg_path)
+        print("📈 Среднее пластовое из файла: %d дат" % len(avg))
+        if avg.empty:
+            print("⚠️ В файле не найден столбец со словом «среднее» и датами в первом столбце; среднее будет посчитано")
+            avg = None
+    elif _yes(args.inc_mean, True):
+        print("ℹ️ Файл со средним пластовым не указан: среднее считается по Рпл эксплуатационных скважин")
+    inc = pc.include_frames(res, atm, avg)
     wanted = {"include_среднее_пластовое": _yes(args.inc_mean, True), "include_эксплуатационные": _yes(args.inc_exploit, True),
               "include_набл_с_пересчётом": _yes(args.inc_obs, True),
               "include_набл_без_пересчёта": _yes(args.inc_obs_raw, False)}
