@@ -6,12 +6,12 @@
 ## Чтение исходников
 | Функция | Файл | Что делает | Шаг | Состояние |
 |---|---|---|---|---|
-| `get_excel_engine`, `read_excel_safe` | ТР | выбор движка и безопасное чтение Excel | 2 | ☐ (брать `pxg_core/расходы_файлы.py`) |
-| `normalize_sheet_name`, `find_matching_sheets` | ТР | поиск листов месяцев по названию | 2 | ☐ |
-| `find_wells_count`, `extract_table_data`, `find_time_table_intelligent`, `is_empty_sheet` | ТР | таблица расходов и таблица времени работы на месячном листе | 2 | ☐ |
-| `process_excel_file_intelligent`, `process_year_data`, `create_db_file` | ТР | годовая папка → база расходов | 2 | ☐ |
-| `update_data_type_by_periods`, `load_periods_file`, `get_period_for_date`, `get_period_type` | ТР, Сут, Зам | файл периодов закачки/отбора, вид по дате | 2, 8 | ☐ |
-| `parse_date` | ТР, Сут, Зам | разбор дат в разных форматах | 2 | ☐ |
+| `get_excel_engine`, `read_excel_safe` | ТР | выбор движка и безопасное чтение Excel | 2 | ✅ `history.py` вызывает `pxg_core/расходы_файлы.read_excel_safe` |
+| `normalize_sheet_name`, `find_matching_sheets` | ТР | поиск листов месяцев по названию | 2 | ✅ `normalize_sheet_name` из `pxg_core`, `history._month_sheets` |
+| `find_wells_count`, `extract_table_data`, `find_time_table_intelligent`, `is_empty_sheet` | ТР | таблица расходов и таблица времени работы на месячном листе | 2 | ≈ `history.read_monthly_sheet`: блоки ищутся по заголовкам «Qчас» и «Время работы», столбец скважин — слева от первой даты; тест паритета со старым `process_excel_file_intelligent` на ГСП_9_b и ГСП_8_a |
+| `process_excel_file_intelligent`, `process_year_data`, `create_db_file` | ТР | годовая папка → база расходов | 2 | ≈ одна книга → таблица (`read_monthly_workbook`), несколько файлов → `import_files`; обход годовых папок остаётся в «Базе ПХГ» |
+| `update_data_type_by_periods`, `load_periods_file`, `get_period_for_date`, `get_period_type` | ТР, Сут, Зам | файл периодов закачки/отбора, вид по дате | 2, 8 | ≈ вид берётся из названий листов/файла/столбца «Тип данных»; проверка «дата вне сезона» в `check_history`; файл периодов — шаг 8 |
+| `parse_date` | ТР, Сут, Зам | разбор дат в разных форматах | 2 | ✅ даты через `pd.to_datetime`; нечитаемые отбрасываются, в QC — `qc.parse_date` |
 | `read_pzrg_file(_fixed)`, `transform_combined_wells` | ТР, Сут, Зам | файл ПЗРГ, объединённые скважины | 13 | ☐ |
 | `load_dates_from_file`, `load_periods_from_file`, `get_model_dates_and_periods` | Зам | даты замеров → шаги модели | 13 | ☐ |
 | `get_missing_periods_interactive`, `select_date_range_interactive` | Сут | вопросы в консоли о пропущенных периодах и диапазоне дат | 13 | ≈ станут полями сценария |
@@ -39,8 +39,20 @@
 |---|---|---|---|---|
 | `create_include_file` | ТР, Сут, Зам | запись schedule по истории (шаг сутки / по датам) | 13 | ☐ |
 | `calculate_correction_coefficients(_for_period)` | ТР, Сут, Зам | поправочные коэффициенты по ПЗРГ | 13 | ☐ |
-| `is_valid_well_data` | ТР, Сут, Зам | отсев некорректных расходов | 2 | ☐ |
+| `is_valid_well_data` | ТР, Сут, Зам | отсев некорректных расходов | 2 | ≈ в таблице строки сохраняются, проблемные (минус, нет числа, нуль при часах) попадают в отчёт `check_history` |
 | `check_correction_results`, `create_correction_report` | Сут | проверка и отчёт по поправкам | 9, 13 | ☐ |
+
+## Импорт истории (шаг 2)
+| Возможность | Состояние |
+|---|---|
+| Единая таблица «скважина, дата, расход (м³/сут), часы, вид» | ✅ `schedule_pxg/history.py` |
+| База расходов (`БД_расходы.xlsx`) | ✅ `DB_TEMPLATE` |
+| Месячные листы ГСП_*_a/b (Qчас · часы) | ✅ тест паритета |
+| Посуточные итоги закачки/отбора | ✅ (скважина пустая = по объекту) |
+| Существующий schedule (WCONHIST/WCONINJH) | ✅ `read_schedule`; дата записи = DATES + 1 сутки, как пишет старый скрипт |
+| Утверждённые объёмы | — это тех.карта, шаг 4 (формат не принимается как история, отчёт «не узнан») |
+| Шаблон для нового формата (лист, заголовок, столбцы, единицы) | ✅ `Template` (хранение и мастер — шаг 3) |
+| QC после импорта | ✅ `check_history` на `pxg_core/qc.py` |
 
 ## Каркас приложения (шаг 1)
 | Возможность | Состояние |
