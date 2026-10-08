@@ -5,7 +5,7 @@ import History from './History'
 import Scenarios from './Scenarios'
 import Strategies from './Strategies'
 import TechMaps from './TechMaps'
-import { AppState, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runTrial, saveTemplate } from './api'
+import { AppState, CheckResult, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runCheck, runTrial, saveTemplate } from './api'
 
 type Field = 'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind'
 const FIELDS: { key: Field; label: string; hint: string }[] = [
@@ -48,6 +48,14 @@ export default function App() {
   const test = () => guard(async () => { setTrial(await runTrial(path.trim(), tpl)) })
   const save = () => guard(async () => { setSt(await saveTemplate(tpl)); setMsg('Шаблон «' + tpl.name + '» сохранён в проекте') })
   const remove = (name: string) => guard(async () => { setSt(await deleteTemplate(name)) })
+  const [ck, setCk] = useState({ totals: '', approved: '', gsp: '', mode: 'закачка', year: String(new Date().getFullYear()), folder: '' })
+  const [res, setRes] = useState<CheckResult | null>(null)
+  const setC = (k: string, v: string) => { setCk(c => ({ ...c, [k]: v })); setRes(null) }
+  const pickC = (k: 'totals' | 'approved') => guard(async () => { const r = await pickFile(ck[k]); if (r.path) setC(k, r.path) })
+  const gspList = ck.gsp.split('\n').map(x => x.trim()).filter(Boolean)
+  const check = () => guard(async () => {
+    setRes(await runCheck({ totals: ck.totals.trim(), approved: ck.approved.trim(), gsp: gspList, mode: ck.mode, year: Number(ck.year), folder: ck.folder.trim() }))
+  })
   const cols = pv ? pv.columns.filter(c => c) : []
 
   return (
@@ -162,6 +170,33 @@ export default function App() {
             </section>
           )}
         </>}
+        <section className="card">
+          <h2>Проверочный Excel по общим объёмам</h2>
+          <p className="muted">Раскладывает общий объём газа по ГСП и скважинам, как старый скрипт, и сверяет сумму с фактом по объекту.</p>
+          <div className="grid">
+            <label>Общие объёмы (дата, м³/сут)
+              <span className="row"><input className="grow" value={ck.totals} onChange={e => setC('totals', e.target.value)} />
+                <button onClick={() => pickC('totals')} disabled={busy}>Выбрать…</button></span></label>
+            <label>Утверждённые объёмы
+              <span className="row"><input className="grow" value={ck.approved} onChange={e => setC('approved', e.target.value)} />
+                <button onClick={() => pickC('approved')} disabled={busy}>Выбрать…</button></span></label>
+            <label>Файлы ГСП (по одному пути в строке)
+              <textarea rows={3} value={ck.gsp} onChange={e => setC('gsp', e.target.value)} /></label>
+            <label>Режим
+              <select value={ck.mode} onChange={e => setC('mode', e.target.value)}><option>закачка</option><option>отбор</option></select></label>
+            <label>Год начала сезона
+              <input type="number" value={ck.year} onChange={e => setC('year', e.target.value)} /></label>
+            <label>Папка результата <span className="muted small">· пусто = «Проверка» в проекте</span>
+              <input value={ck.folder} onChange={e => setC('folder', e.target.value)} /></label>
+          </div>
+          <div className="row">
+            <button className="primary" onClick={check} disabled={busy || !ck.totals.trim() || !ck.approved.trim() || gspList.length === 0}>Создать проверочный Excel</button>
+          </div>
+          {res && (res.ok
+            ? <p className="note">Готово: файлов ГСП {res.files.length}, дней в сводке {res.days}, наибольшее расхождение {res.maxDevPct}%. Папка: {res.folder}</p>
+            : <p className="note warn">Файлы не созданы.</p>)}
+          {res && res.issues.length > 0 && <ul className="issues">{res.issues.map((i, k) => <li key={k} className={i.level}>{i.message}</li>)}</ul>}
+        </section>
         {msg && <p className="note warn">{msg}</p>}
       </main>}
     </div>

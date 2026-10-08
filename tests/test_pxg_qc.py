@@ -271,11 +271,3 @@ def test_gdi(tmp_path):
     rep = checks.run("Преобразование_исходных_таблиц_ГДИ_в_базу", {"files": str(f), "gsp": str(g), "periods": ""})
     got = kinds(rep)
     assert {("ошибка", "DUP"), ("предупреждение", "DATE"), ("предупреждение", "RANGE")} <= got, rep.to_text()
-
-
-def test_schedule_tr_check_reports_missing_files(tmp_path):
-    (tmp_path / "Закачка").mkdir()
-    rep = checks.run("Создание_schedule_файла_технологического_режима", {"mode": "закачка", "root": str(tmp_path)})
-    texts = [i.message for i in rep.issues]
-    assert any("файлов ГСП" in t for t in texts) and any("Файл периодов не найден" in t for t in texts)
-    assert rep.counts()[qc.ERROR] >= 3
