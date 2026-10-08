@@ -269,7 +269,7 @@ def smoke_test(folder):
     env = {k: v for k, v in os.environ.items() if not k.startswith('PYTHON')}
     env.update(PYTHONNOUSERSITE='1', MPLBACKEND='Agg')
     code = ('import sys, tkinter, pandas, numpy, openpyxl, xlsxwriter, xlrd, python_calamine, odf, starlette, uvicorn, pxg_core.расходы_файлы;'
-            + ('import webview, win32api, win32com.client;' if os.name == 'nt' else '') +
+            + ('import webview, win32api, win32com.shell.shell;' if os.name == 'nt' else '') +
             'import pxg_base.api as a;a.build_app();import gsp_maps.api as m;m.build_app();import schedule_pxg.api as s;s.build_app();'
             'assert sys.prefix.startswith({!r}), sys.prefix;print("ok", sys.version.split()[0])').format(str(folder))
     subprocess.check_call([str(python), '-s', '-c', code], cwd=str(folder), env=env)
