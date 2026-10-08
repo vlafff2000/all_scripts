@@ -1,0 +1,52 @@
+# «Скедул ПХГ»: паритет со старыми скриптами
+
+Источники: **ТР** — `pxg_base/modules/Создание_schedule_файла_технологического_режима.py`; **Сут** — `apps/schedule_tr/Schedule_по_пропорциональным_коэффициентам_шаг_1_сутки.py`; **Зам** — `apps/schedule_tr/Schedule_по_датам_замеров_давлений.py`.
+Правило: проверенную математику не переписываем, вызываем старый код и сверяем тестом на образцах `schedule-tr-samples/` (папка проекта). ☐ — не сделано, ✅ — сделано, ≈ — сделано иначе (с пояснением). Колонка «Шаг» — пункт потока А из `schedule-app/plan.md`.
+
+## Чтение исходников
+| Функция | Файл | Что делает | Шаг | Состояние |
+|---|---|---|---|---|
+| `get_excel_engine`, `read_excel_safe` | ТР | выбор движка и безопасное чтение Excel | 2 | ☐ (брать `pxg_core/расходы_файлы.py`) |
+| `normalize_sheet_name`, `find_matching_sheets` | ТР | поиск листов месяцев по названию | 2 | ☐ |
+| `find_wells_count`, `extract_table_data`, `find_time_table_intelligent`, `is_empty_sheet` | ТР | таблица расходов и таблица времени работы на месячном листе | 2 | ☐ |
+| `process_excel_file_intelligent`, `process_year_data`, `create_db_file` | ТР | годовая папка → база расходов | 2 | ☐ |
+| `update_data_type_by_periods`, `load_periods_file`, `get_period_for_date`, `get_period_type` | ТР, Сут, Зам | файл периодов закачки/отбора, вид по дате | 2, 8 | ☐ |
+| `parse_date` | ТР, Сут, Зам | разбор дат в разных форматах | 2 | ☐ |
+| `read_pzrg_file(_fixed)`, `transform_combined_wells` | ТР, Сут, Зам | файл ПЗРГ, объединённые скважины | 13 | ☐ |
+| `load_dates_from_file`, `load_periods_from_file`, `get_model_dates_and_periods` | Зам | даты замеров → шаги модели | 13 | ☐ |
+| `get_missing_periods_interactive`, `select_date_range_interactive` | Сут | вопросы в консоли о пропущенных периодах и диапазоне дат | 13 | ≈ станут полями сценария |
+
+## Тех.карта и доли
+| Функция | Файл | Что делает | Шаг | Состояние |
+|---|---|---|---|---|
+| `read_approved_volumes`, `read_total_gas_volumes` | ТР | утверждённые объёмы по группам и месяцам, итоги | 4 | ☐ |
+| `get_work_days_for_month` | ТР | рабочие дни месяца (крайние месяцы сезона) | 4 | ☐ |
+| `process_injection_file_for_percents` | ТР | проценты скважин по истории | 10 | ☐ (заменяется осреднением) |
+
+## Прогноз
+| Функция | Файл | Что делает | Шаг | Состояние |
+|---|---|---|---|---|
+| `generate_output_files`, `create_summary_file` | ТР | schedule и сводный Excel | 5 | ☐ |
+| `create_forecast_include_file` | ТР | базовый прогноз | 5 | ☐ |
+| `create_forecast_combined` | ТР | прогноз закачка+отбор | 5 | ☐ |
+| `adjust_february_last_shelf` | ТР | «полка» февраля | 14 | ☐ |
+| `apply_strategy_to_volumes`, `generate_schedule_with_variation`, `create_forecast_multiple_scenarios`, `generate_forecast_with_strategies`, `StrategyEditor` | ТР | прогноз с варьированием (стратегии, окно редактора) | 14 | ☐ (редактор — в веб-интерфейс) |
+| `ask_forecast_params(_web)` | ТР | параметры прогноза | 8 | ≈ настройки сценария |
+| `select_mode_gui`, `select_folder_gui`, `find_files_in_root`, `web_stop`, `main` | ТР, Сут, Зам | окна выбора, поиск файлов, запуск | — | ≈ заменяются интерфейсом приложения |
+
+## История
+| Функция | Файл | Что делает | Шаг | Состояние |
+|---|---|---|---|---|
+| `create_include_file` | ТР, Сут, Зам | запись schedule по истории (шаг сутки / по датам) | 13 | ☐ |
+| `calculate_correction_coefficients(_for_period)` | ТР, Сут, Зам | поправочные коэффициенты по ПЗРГ | 13 | ☐ |
+| `is_valid_well_data` | ТР, Сут, Зам | отсев некорректных расходов | 2 | ☐ |
+| `check_correction_results`, `create_correction_report` | Сут | проверка и отчёт по поправкам | 9, 13 | ☐ |
+
+## Каркас приложения (шаг 1)
+| Возможность | Состояние |
+|---|---|
+| Проект объекта в папке, JSON-файлы (запись через временный файл) | ✅ `schedule_pxg/project.py` |
+| Скважины: имя в модели, синонимы из исходников, тип | ✅ тест `test_resolve_synonym_case_insensitive` |
+| Дерево групп любой глубины, уровень тех.карты в проекте | ✅ |
+| Свободные наборы скважин | ✅ |
+| Веб-интерфейс проекта | ☐ шаги 3–8 |
