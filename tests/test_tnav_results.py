@@ -58,3 +58,17 @@ def test_egrid_summary_restart(tmp_path):
     assert list(read_restart_keyword(str(rs), steps[1], "PRESSURE")) == [200.0, 2.0]
     out = subprocess.run([sys.executable, "-m", "tnav_results.list_restart", str(rs)], capture_output=True, text=True)
     assert "SGAS: НЕТ" in out.stdout and "PRESSURE: есть" in out.stdout and "Всего шагов: 2" in out.stdout
+
+
+def test_describe_model(tmp_path):
+    (tmp_path / "M.EGRID").write_bytes(_blk("GRIDHEAD", "INTE", [1, 2, 1, 1] + [0] * 29) + _blk("ACTNUM", "INTE", [1, 0]) +
+                                       _blk("ZCORN", "REAL", [10.0, 20.0] * 8))
+    (tmp_path / "M.INIT").write_bytes(_blk("PORV", "REAL", [5.0, 7.0]))
+    (tmp_path / "M.SMSPEC").write_bytes(_blk("STARTDAT", "INTE", [1, 1, 2020, 0, 0, 0]) + _blk("KEYWORDS", "CHAR", ["TIME", "WGPR"]) +
+                                        _blk("WGNAMES", "CHAR", [":+:+:+:+", "W1"]) + _blk("UNITS", "CHAR", ["DAYS", "SM3/DAY"]))
+    (tmp_path / "M.UNSMRY").write_bytes(b"".join(_blk("PARAMS", "REAL", [31.0 * (i + 1), 1.0]) for i in range(2)))
+    files = [str(tmp_path / n) for n in ("M.EGRID", "M.INIT", "M.SMSPEC", "M.UNSMRY")]
+    out = subprocess.run([sys.executable, str(__import__("pathlib").Path(__file__).parents[1] / "tnav_results" / "describe_model.py")] + files,
+                         capture_output=True, text=True, cwd="/").stdout
+    assert "2 x 1 x 1" in out and "активных ячеек: 1" in out and "сумма 12" in out
+    assert "скважин: 1" in out and "шагов (PARAMS): 2" in out and "2020-01-01" in out
