@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Averaging from './Averaging'
+import Charts from './Charts'
 import Scenarios from './Scenarios'
 import TechMaps from './TechMaps'
 import { AppState, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runTrial, saveTemplate } from './api'
@@ -23,7 +24,7 @@ export default function App() {
   const [trial, setTrial] = useState<Trial | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios'>('import')
+  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios' | 'charts'>('import')
 
   useEffect(() => { getState().then(setSt).catch(e => setMsg(e.message)) }, [])
 
@@ -56,6 +57,7 @@ export default function App() {
           <button className={tab === 'techmaps' ? 'on' : ''} onClick={() => setTab('techmaps')}>Тех.карты</button>
           <button className={tab === 'averaging' ? 'on' : ''} onClick={() => setTab('averaging')}>Осреднение</button>
           <button className={tab === 'scenarios' ? 'on' : ''} onClick={() => setTab('scenarios')}>Сценарии</button>
+          <button className={tab === 'charts' ? 'on' : ''} onClick={() => setTab('charts')}>Графики</button>
         </div>
         {tab === 'import' && <><h2>Шаблоны проекта</h2>
         {st && st.templates.length === 0 && <p className="muted">Пока нет. Сопоставьте столбцы нового файла и сохраните шаблон.</p>}
@@ -67,7 +69,7 @@ export default function App() {
         ))}</>}
         {st && <p className="muted small">Проект: {st.folder}</p>}
       </aside>
-      {tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
+      {tab === 'charts' && st ? <Charts st={st} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
         <section className="card">
           <h2>1. Файл</h2>
           <div className="row">

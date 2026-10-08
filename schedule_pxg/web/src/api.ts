@@ -91,3 +91,11 @@ export const avgChoose = (kind: string, well: string, combo: number[] | null) =>
 export const avgAdvice = (kind: string, wells?: string[]) => call<AvgView>('/api/averaging/advice', avgBody(kind, { wells }))
 export const avgExclude = (kind: string, well: string, year: number, on: boolean) => call<AvgView>('/api/averaging/exclude', avgBody(kind, { well, year, on }))
 export const avgManual = (kind: string, well: string, month: string, share: number | null) => call<AvgView>('/api/averaging/manual', avgBody(kind, { well, month, share }))
+
+export interface ChartSeries { key: string; label: string; kind: string; season: string; total: number; steps: [string, string, number, number, number, number | null][] }
+export interface ChartsView {
+  by: string; target: string; unit: string; scenarios: { name: string; series: ChartSeries[]; notes: string[] }[]
+  totals: { scenario: string; label: string; kind: string; total: number }[]; targets: { groups: string[]; wells: string[] }
+}
+export const getCharts = (names: string[], by: string, target: string) =>
+  call<ChartsView>('/api/charts?' + new URLSearchParams({ names: names.join('|'), by, target }))
