@@ -339,3 +339,87 @@ def test_old_script_splits_object_volume_by_equal_group_weights(tmp_path):
     assert got["ГСП 8"] == pytest.approx(243.0, abs=0.01) and got["ГСП 9"] == pytest.approx(243.0, abs=0.01)
     tm = tmod.read_techmap(S("Утвержденные_объемы_закачка.xlsx"))
     assert (tm.volumes["8"]["Сентябрь"], tm.volumes["9"]["Сентябрь"]) == (220.0, 266.0)
+
+
+# ---------------------------------------------------------------- отключения (А6)
+
+from schedule_pxg import outages as om  # noqa: E402
+
+
+def _outage_case(fate, groups=None, end=date(2026, 5, 31)):
+    p = _project(groups or {"ГСП 1": ["10", "11", "12"], "ГСП 2": ["20", "21"]})
+    tm = _tm(months=("Май",), days=(31,), vols={"1": {"Май": 31.0}, "2": {"Май": 31.0}})
+    sh = fc.Shares()
+    sh.set_month("ГСП 1", "Май", {"10": 0.5, "11": 0.3, "12": 0.2})
+    sh.set_month("ГСП 2", "Май", {"20": 0.5, "21": 0.5})
+    o = [om.Outage("10", date(2026, 5, 11), end, "ремонт", "", fate)]
+    return fc.forecast_season(tm, p, sh, 2026, step="month", decimals=0, outages=o), o
+
+
+def test_outage_cuts_step_and_is_shut_in_schedule():
+    f, o = _outage_case("group")
+    assert [(s.start, s.end) for s in f.steps] == [(date(2026, 5, 1), date(2026, 5, 10)), (date(2026, 5, 11), date(2026, 5, 31))]
+    assert f.steps[0].shut == {} and f.steps[1].shut == {"10": "ремонт"} and "10" not in f.steps[1].rates
+    txt = fc.render_schedule(f.steps, mode="rate")
+    assert "10\tSHUT\t/  -- отключена: ремонт" in txt
+    assert txt.count("'*'\tSHUT") == 2 and txt.count("10\tSHUT") == 1
+
+
+def test_outage_volume_to_group_keeps_group_and_object_totals():
+    f, _ = _outage_case("group")
+    r = {x["name"]: x for x in f.rows if x["level"] == "группа"}
+    assert not f.over() and r["ГСП 1"]["written"] == pytest.approx(31e6)
+    # 20 суток отключения: доля 0,5 делится 3:2 между 11 и 12
+    s1 = f.steps[1]
+    assert s1.rates["11"] == pytest.approx(1e6 * (0.3 + 0.5 * 0.6)) and s1.rates["12"] == pytest.approx(1e6 * (0.2 + 0.5 * 0.4))
+    assert s1.rates["20"] == pytest.approx(500000) and f.moved[0]["fate"] == "group" and f.moved[0]["lost"] == 0
+
+
+def test_outage_volume_to_object_goes_to_all_working_wells():
+    f, _ = _outage_case("object")
+    s1 = f.steps[1]
+    # 0,5 млн м³/сут делится по объёму дня: 11:0,3 12:0,2 20:0,5 21:0,5 (всего 1,5)
+    assert s1.rates["20"] == pytest.approx(500000 + 500000 * 0.5 / 1.5) and s1.rates["11"] == pytest.approx(300000 + 500000 * 0.3 / 1.5)
+    obj = [x for x in f.rows if x["level"] == "объект"][0]
+    assert obj["written"] == pytest.approx(62e6)
+    g = {x["name"]: x for x in f.rows if x["level"] == "группа"}
+    assert g["ГСП 2"]["over"] and g["ГСП 2"]["written"] > g["ГСП 2"]["target"]   # группа получила чужой объём — видно в сверке
+
+
+def test_outage_lose_drops_volume():
+    f, _ = _outage_case("lose")
+    obj = [x for x in f.rows if x["level"] == "объект"][0]
+    assert obj["written"] == pytest.approx(62e6 - 0.5e6 * 21)
+    assert f.moved[0]["lost"] == pytest.approx(0.5e6 * 21) and f.over()
+
+
+def test_outage_whole_group_off_loses_and_noted():
+    p = _project({"ГСП 1": ["10"]})
+    tm = _tm(months=("Май",), days=(31,), vols={"1": {"Май": 31.0}})
+    sh = fc.Shares(); sh.set_month("ГСП 1", "Май", {"10": 1})
+    f = fc.forecast_season(tm, p, sh, 2026, step="month", decimals=0, outages=[om.Outage("10", date(2026, 5, 1))])
+    assert f.moved[0]["lost"] == pytest.approx(31e6) and any("все скважины группы" in n for n in f.notes)
+
+
+def test_outage_object_all_off_lost():
+    p = _project({"ГСП 1": ["10"]})
+    tm = _tm(months=("Май",), days=(31,), vols={"1": {"Май": 31.0}})
+    sh = fc.Shares(); sh.set_month("ГСП 1", "Май", {"10": 1})
+    f = fc.forecast_season(tm, p, sh, 2026, step="month", decimals=0, outages=[om.Outage("10", date(2026, 5, 1), None, fate="object")])
+    assert f.moved[0]["lost"] == pytest.approx(31e6) and any("объект целиком" in n for n in f.notes)
+
+
+def test_outage_roundtrip_validation_and_project_storage(tmp_path):
+    o = om.Outage("10", "2026-05-11", None, "ремонт", "заметка", "object")
+    assert om.Outage.from_dict(o.to_dict()) == o and o.covers(date(2027, 1, 1))
+    with pytest.raises(ValueError):
+        om.Outage("10", date(2026, 5, 2), date(2026, 5, 1))
+    with pytest.raises(ValueError):
+        om.Outage("10", date(2026, 5, 2), fate="сжечь")
+    p = _project({"Г": ["10"]})
+    notes = om.check([om.Outage("99", date(2026, 5, 1)), om.Outage("10", date(2026, 5, 1), date(2026, 5, 9)),
+                      om.Outage("10", date(2026, 5, 5))], p)
+    assert len(notes) == 2
+    p.outages = [o.to_dict()]
+    p.save(str(tmp_path))
+    assert Project.load(str(tmp_path)).outages == [o.to_dict()]

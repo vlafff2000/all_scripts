@@ -20,6 +20,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import pandas as pd
 
+from schedule_pxg import outages as omod
 from schedule_pxg import techmap as tmod
 
 STEPS = ("day", "week", "decade", "half", "month")
@@ -230,6 +231,7 @@ class Step:
     work_days: int
     kind: str                                   # закачка | отбор | нейтральный (никто не работает)
     rates: Dict[str, float] = field(default_factory=dict)   # скважина -> м³/сут (средний за рабочие сутки шага)
+    shut: Dict[str, str] = field(default_factory=dict)      # отключённые на шаге скважины -> причина
 
     @property
     def days(self) -> int:
@@ -244,6 +246,7 @@ class Forecast:
     steps: List[Step] = field(default_factory=list)
     rows: List[dict] = field(default_factory=list)      # сверка с тех.картой: level, name, month, year, target, written, diff, rel, over
     notes: List[str] = field(default_factory=list)
+    moved: List[dict] = field(default_factory=list)     # объём отключённых скважин: well, month, year, fate, volume (м³), lost (м³)
     tolerance: float = 0.005
 
     def over(self) -> List[dict]:
@@ -279,10 +282,14 @@ def forecast_season(tm: tmod.TechMap, project, shares: Shares, first_year: int, 
                     periods: Optional[Sequence[Tuple[date, str]]] = None, cuts: Iterable[date] = (),
                     work_dates: Optional[Dict[str, Sequence[date]]] = None,
                     day_weights: Optional[Dict[date, float]] = None, decimals: int = 2,
-                    tolerance: float = 0.005, spread: bool = True) -> Forecast:
+                    tolerance: float = 0.005, spread: bool = True,
+                    outages: Optional[Sequence[omod.Outage]] = None) -> Forecast:
     """Прогноз одного сезона по тех.карте. `first_year` — год первого месяца сезона.
     `day_weights` — профиль объёма месяца по датам (по умолчанию равномерно по рабочим дням).
-    `spread=False` — дебиты не округляются и остаток не размазывается (запись форматом `.2f`, как в старом скрипте)."""
+    `spread=False` — дебиты не округляются и остаток не размазывается (запись форматом `.2f`, как в старом скрипте).
+    `outages` — отключения скважин: объём скважины в дни отключения уходит по её переключателю (`outages.FATES`);
+    начало и конец отключения режут шаг."""
+    outages = list(outages or [])
     fc = Forecast(tolerance=tolerance)
     kind = tm.kind if tm.kind in tmod.KINDS else NEUTRAL
     wd = season_work_dates(tm, first_year, work_dates)
@@ -298,6 +305,20 @@ def forecast_season(tm: tmod.TechMap, project, shares: Shares, first_year: int, 
     group_rows: Dict[Tuple[str, str, int], float] = {}   # (группа, месяц, год) -> объём тех.карты, м³
     well_target: Dict[Tuple[str, str, int], float] = {}  # (скважина, месяц, год) -> целевой объём
     well_group: Dict[str, str] = {}
+    pool: Dict[date, List[Tuple[str, float]]] = {}       # дата -> [(отключённая скважина, объём)], переданный всему объекту
+    moved: Dict[Tuple[str, str, int, str], List[float]] = {}  # (скважина, месяц, год, судьба) -> [объём, потеряно]
+
+    def put(well: str, x: date, m: str, y: int, vol: float, pg: str) -> None:
+        well_day.setdefault(well, {})[x] = well_day.get(well, {}).get(x, 0.0) + vol
+        well_group[well] = pg
+        key = (well, m, y)
+        well_target[key] = well_target.get(key, 0.0) + vol
+
+    def note_moved(well: str, m: str, y: int, fate: str, vol: float, lost: float) -> None:
+        slot = moved.setdefault((well, m, y, fate), [0.0, 0.0])
+        slot[0] += vol
+        slot[1] += lost
+
     for g, vols in tm.volumes.items():
         pg = tmod.match_group(project, g)
         for (m, y), days in wd.items():
@@ -328,18 +349,54 @@ def forecast_season(tm: tmod.TechMap, project, shares: Shares, first_year: int, 
                     fc.notes.append("%s, %s, %s: нет долей скважин — объём дня потерян" % (pg, m, x.isoformat()))
                     continue
                 day_vol = vol * wt / total_w
-                for well, s in sh.items():
-                    well_day.setdefault(well, {})[x] = well_day.get(well, {}).get(x, 0.0) + day_vol * s
-                    well_group[well] = pg
-                    key = (well, m, y)
-                    well_target[key] = well_target.get(key, 0.0) + day_vol * s
+                off = omod.shut_on(outages, x) if outages else {}
+                live = {k: v for k, v in sh.items() if k not in off}
+                live_sum = sum(live.values())
+                for well, s in live.items():
+                    put(well, x, m, y, day_vol * s, pg)
+                # доли отключённых скважин — по судьбе (считаем отдельно, чтобы не путать с обычным распределением)
+                for well, o in off.items():
+                    if well not in sh:
+                        continue
+                    v = day_vol * sh[well]
+                    if o.fate == "group" and live_sum > 0:
+                        for k, s in live.items():
+                            put(k, x, m, y, v * s / live_sum, pg)
+                        note_moved(well, m, y, o.fate, v, 0.0)
+                    elif o.fate == "object":
+                        pool.setdefault(x, []).append((well, v))
+                        note_moved(well, m, y, o.fate, v, 0.0)
+                    else:
+                        note_moved(well, m, y, o.fate, v, v)
+                        if o.fate == "group":
+                            fc.notes.append("%s, %s: все скважины группы отключены — объём %s потерян" % (pg, x.isoformat(), "{:.0f}".format(v)))
+
+    # переданное всему объекту: работающим скважинам пропорционально их объёму в этот день
+    for x, items in sorted(pool.items()):
+        m, y = tmod.MONTHS[x.month - 1], x.year
+        base = {k: d[x] for k, d in well_day.items() if d.get(x, 0.0) > 0}
+        tot = sum(base.values())
+        if tot <= 0:
+            fc.notes.append("%s: объект целиком отключён — переданный объём потерян" % x.isoformat())
+            for well, v in items:
+                moved[(well, m, y, "object")][1] += v
+            continue
+        v_all = sum(v for _, v in items)
+        for k, b in base.items():
+            put(k, x, m, y, v_all * b / tot, well_group[k])
+    for (well, m, y, fate), (v, lost) in sorted(moved.items(), key=lambda kv: (kv[0][2], tmod.MONTHS.index(kv[0][1]), _wkey(kv[0][0]))):
+        fc.moved.append({"well": well, "month": m, "year": y, "fate": fate, "volume": v, "lost": lost})
 
     # шаги
+    cuts = list(cuts) + omod.cut_dates(outages)
     grid = build_grid(all_work[0], all_work[-1], work_set, step, periods, cuts)
     steps: List[Step] = []
     for a, b in grid:
         n = sum(1 for k in range((b - a).days + 1) if a + timedelta(days=k) in work_set)
-        steps.append(Step(a, b, n, kind if n else NEUTRAL))
+        st = Step(a, b, n, kind if n else NEUTRAL)
+        if outages:
+            st.shut = {w: o.reason for w, o in omod.shut_on(outages, a).items()}
+        steps.append(st)
     unit = 10.0 ** (-decimals)
     for well, per_day in well_day.items():
         by_month: Dict[Tuple[str, int], List[Tuple[int, int, float]]] = {}
@@ -406,7 +463,10 @@ def render_schedule(steps: Sequence[Step], mode: str = "hist", dates_shift: int 
     for st in steps:
         out.append("DATES\n%s\n/\n" % _fmt_date(st.start - timedelta(days=dates_shift)))
         wells = sorted((w for w, r in st.rates.items() if r > 0), key=_wkey)
-        out.append("\nWELOPEN\n'*'\tSHUT\t/\n/\n")
+        out.append("\nWELOPEN\n'*'\tSHUT\t/\n")
+        for w in sorted(st.shut, key=_wkey):  # отключённые скважины названы явно (после '*', чтобы остались закрытыми)
+            out.append("%s\tSHUT\t/%s\n" % (w, "  -- отключена: " + st.shut[w] if st.shut[w] else "  -- отключена"))
+        out.append("/\n")
         if wells:
             out.append("\n")
             inj = st.kind == "закачка"
