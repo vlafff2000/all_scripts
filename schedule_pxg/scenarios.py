@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from schedule_pxg import control as cmod
 from schedule_pxg import forecast as fmod
 from schedule_pxg import outages as omod
+from schedule_pxg import strategy as smod
 from schedule_pxg import techmap as tmod
 
 FIELDS = ("calendar", "grid", "control", "outages", "percent", "tolerance", "decimals", "note", "leap_shelf")
@@ -38,10 +39,14 @@ def _d(x) -> Optional[date]:
 
 # ---------------------------------------------------------------- календарь
 
-def season_entry(year: int, techmap: str, percent: float = 100.0, label: str = "") -> dict:
+def season_entry(year: int, techmap: str, percent: float = 100.0, label: str = "", volumes: Optional[dict] = None) -> dict:
+    """Сезон календаря. `volumes` — стратегия варьирования (группа → месяц → млн м³), заменяет объёмы тех.карты."""
     if float(percent) <= 0:
         raise ValueError("Процент сезона должен быть больше нуля")
-    return {"year": int(year), "techmap": techmap, "percent": float(percent), "label": label}
+    e = {"year": int(year), "techmap": techmap, "percent": float(percent), "label": label}
+    if volumes:
+        e["volumes"] = {str(g): {str(m): float(x) for m, x in r.items()} for g, r in volumes.items()}
+    return e
 
 
 def season_span(tm: tmod.TechMap, year: int) -> Tuple[date, date]:
@@ -244,7 +249,7 @@ class Scenarios:
                 raise ValueError("Знаков в дебите — от 0 до 6")
             return int(value)
         if key == "calendar":
-            return [season_entry(e["year"], e["techmap"], e.get("percent", 100.0), e.get("label", "")) for e in value]
+            return [season_entry(e["year"], e["techmap"], e.get("percent", 100.0), e.get("label", ""), e.get("volumes")) for e in value]
         if key == "grid":
             g = {"step": value.get("step", "day"), "periods": [[str(_d(a)), b] for a, b in value.get("periods", [])],
                  "cuts": [str(_d(c)) for c in value.get("cuts", [])]}
@@ -336,7 +341,7 @@ def build(project, values: dict, library: Dict[str, dict], shares_for=None) -> B
         if name not in library:
             res.notes.append("Сезон %s: нет тех.карты «%s» — пропущен" % (e["year"], name))
             continue
-        tm = tmod.TechMap.from_dict(library[name])
+        tm = smod.apply_strategy(tmod.TechMap.from_dict(library[name]), e.get("volumes"))
         pct = float(values["percent"]) * float(e.get("percent", 100.0)) / 100.0
         sh = shares_for(tm) if shares_for else fmod.Shares.uniform(project, tm)
         fc = fmod.forecast_season(scaled(tm, pct), project, sh, int(e["year"]), grid.get("step", "day"), periods, cuts,
@@ -356,7 +361,7 @@ def build(project, values: dict, library: Dict[str, dict], shares_for=None) -> B
         res.steps += fc.steps
         res.rows += [dict(r, season="%s (%s)" % (name, e["year"])) for r in fc.rows]
         res.seasons.append({"techmap": name, "year": int(e["year"]), "percent": pct, "from": first.isoformat(), "to": last.isoformat(),
-                            "steps": len(fc.steps), "over": len(fc.over()), "notes": fc.notes})
+                            "steps": len(fc.steps), "over": len(fc.over()), "notes": fc.notes, "strategy": bool(e.get("volumes"))})
         res.notes += ["%s (%s): %s" % (name, e["year"], n) for n in fc.notes]
         prev_end = last
     return res

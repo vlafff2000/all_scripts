@@ -3,6 +3,7 @@ import Averaging from './Averaging'
 import Charts from './Charts'
 import History from './History'
 import Scenarios from './Scenarios'
+import Strategies from './Strategies'
 import TechMaps from './TechMaps'
 import { AppState, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runTrial, saveTemplate } from './api'
 
@@ -25,7 +26,7 @@ export default function App() {
   const [trial, setTrial] = useState<Trial | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios' | 'charts' | 'history'>('import')
+  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios' | 'strategies' | 'charts' | 'history'>('import')
 
   useEffect(() => { getState().then(setSt).catch(e => setMsg(e.message)) }, [])
 
@@ -58,6 +59,7 @@ export default function App() {
           <button className={tab === 'techmaps' ? 'on' : ''} onClick={() => setTab('techmaps')}>Тех.карты</button>
           <button className={tab === 'averaging' ? 'on' : ''} onClick={() => setTab('averaging')}>Осреднение</button>
           <button className={tab === 'scenarios' ? 'on' : ''} onClick={() => setTab('scenarios')}>Сценарии</button>
+          <button className={tab === 'strategies' ? 'on' : ''} onClick={() => setTab('strategies')}>Стратегии</button>
           <button className={tab === 'charts' ? 'on' : ''} onClick={() => setTab('charts')}>Графики</button>
           <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>История</button>
         </div>
@@ -71,7 +73,7 @@ export default function App() {
         ))}</>}
         {st && <p className="muted small">Проект: {st.folder}</p>}
       </aside>
-      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
+      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
         <section className="card">
           <h2>1. Файл</h2>
           <div className="row">

@@ -52,7 +52,7 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
     setSt(await percentBranches(sel, ps))
   })
   const run = () => guard(async () => { setBuild(await buildScenario(sel)) })
-  const upd = (i: number, patch: Partial<Season>) => setCal(c => c.map((e, k) => (k === i ? { ...e, ...patch } : e)))
+  const upd = (i: number, patch: Partial<Season>) => setCal(c => c.map((e, k) => (k === i ? { ...e, ...patch, ...(patch.techmap && patch.techmap !== e.techmap ? { volumes: undefined } : {}) } : e)))
 
   const v = view?.values
   const isBranch = !!view?.parent
@@ -155,7 +155,7 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
           {build && <>
             <p className="note">Шагов: {build.steps}. Расхождений с тех.картой сверх допуска: {build.over} из {build.rows}. {build.stitch.length ? 'Стык: есть замечания.' : 'Стык сезонов без дыр и наложений.'}</p>
             <table className="raw"><thead><tr><th>Тех.карта</th><th>Год</th><th>%</th><th>С</th><th>По</th><th>Шагов</th><th>Сверх допуска</th></tr></thead>
-              <tbody>{build.seasons.map((s, i) => <tr key={i}><td>{s.techmap}</td><td>{s.year}</td><td className="num">{s.percent}</td><td>{s.from}</td><td>{s.to}</td>
+              <tbody>{build.seasons.map((s, i) => <tr key={i}><td>{s.techmap}{s.strategy && <span className="muted small" title="Объёмы заменены стратегией"> · стратегия</span>}</td><td>{s.year}</td><td className="num">{s.percent}</td><td>{s.from}</td><td>{s.to}</td>
                 <td className="num">{s.steps}</td><td className={'num' + (s.over ? ' bad' : '')}>{s.over}</td></tr>)}</tbody></table>
             {build.gaps.length > 0 && <p className="muted small">Между сезонами скважины закрыты (нейтральный шаг): {build.gaps.map(g => g.from + ' — ' + g.to + ' (' + g.days + ' сут)').join('; ')}.</p>}
             {[...build.stitch, ...build.notes].length > 0 && <ul className="issues">{[...build.stitch, ...build.notes].map((n, i) => <li key={i} className="warn">{n}</li>)}</ul>}
