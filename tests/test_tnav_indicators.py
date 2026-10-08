@@ -176,3 +176,12 @@ def test_full_grid_porv_is_compressed_by_actnum(tmp_path):
     assert r.total == pytest.approx(gas_pore_volume(m, porv_act, sg, 0.3).total)
     with pytest.raises(ValueError):
         gas_pore_volume(m, porv_full[:5], sg, 0.3)
+
+
+def test_describe_egrid_reports_coarsening(tmp_path):
+    from tnav_results.describe_model import describe_egrid
+    p = tmp_path / "C.EGRID"
+    p.write_bytes(_blk("GRIDHEAD", "INTE", [1, 2, 2, 1] + [0] * 29) + _blk("CORSNUM", "INTE", [1, 1, 0, 0]) +
+                  _blk("ACTNUMC", "INTE", [1, 0, 1, 1]) + _blk("ACTNUM", "INTE", [1, 1, 1, 1]))
+    text = "\n".join(describe_egrid(str(p)))
+    assert "укрупнение ячеек" in text and "= 2 + 1 = 3" in text

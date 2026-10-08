@@ -15,9 +15,11 @@ from collections import OrderedDict
 
 try:
     from .ecl import iter_blocks
+    from . import grid_info
 except ImportError:  # запуск просто как скрипт
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from tnav_results.ecl import iter_blocks
+    from tnav_results import grid_info
 
 
 def _headers(path, want=()):
@@ -56,6 +58,9 @@ def describe_egrid(path):
         out.append("  глубины ZCORN, м: " + _rng(d["ZCORN"]))
     if "MAPAXES" in d:
         out.append("  MAPAXES: " + " ".join("%g" % x for x in d["MAPAXES"]))
+    if any(k in ("CORSNUM", "ACTNUMC") for k, _t, _c in heads):
+        out.append("  укрупнение ячеек (COARSEN):")
+        out += ["    " + ln for ln in grid_info.describe(path).splitlines()[1:]]
     n_grid = sum(1 for k, _t, _c in heads if k == "GRIDHEAD")
     lgr = [k for k, _t, _c in heads if k.startswith("LGR") or k in ("ENDGRID", "ENDLGR")]
     out.append("  блоков GRIDHEAD: %d (больше одного — есть локальные сетки LGR)%s" % (n_grid, "; LGR-ключи: " + ", ".join(sorted(set(lgr))) if lgr else ""))
