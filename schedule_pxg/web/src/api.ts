@@ -121,3 +121,4 @@ async function download(url: string, b: HistoryBody, fallback: string) {
 }
 export const downloadHistorySchedule = (b: HistoryBody) => download('/api/history/schedule', b, 'schedule_history.inc')
 export const downloadHistoryLog = (b: HistoryBody) => download('/api/history/log', b, 'correction_log_periods.csv')
+export const downloadHistoryReport = (b: HistoryBody) => download('/api/history/report', b, 'correction_report.xlsx')

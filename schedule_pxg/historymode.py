@@ -284,6 +284,7 @@ class HistoryResult:
     notes: List[str] = field(default_factory=list)
     log: List[dict] = field(default_factory=list)        # журнал поправки по ПЗРГ
     mode: str = "daily"
+    data: Optional[pd.DataFrame] = None                  # таблица истории после деления скважин и поправки (rate_corr)
 
     def counts(self) -> dict:
         c: Dict[str, int] = {}
@@ -408,6 +409,7 @@ def build_history(df: pd.DataFrame, project=None, mode: str = "daily", model_dat
         far = [r for r in res.log if r["method"] != "SKIP" and r["category"] >= 2]
         if far:
             res.notes.append("После поправки расхождение с ПЗРГ больше 1 %% в %d периодах (наибольшее %.1f %%)" % (len(far), max(r["discrepancy"] for r in far)))
+    res.data = d
     res.steps, res.info = (dates_steps(d, model_dates, per, col) if mode == "dates" else daily_steps(d, per, col))
     if not res.steps:
         res.notes.append("Нет ни одной даты с расходом — шагов нет")
@@ -481,4 +483,108 @@ def write_log_csv(path: str, log: Sequence[dict]) -> str:
         w = csv.writer(f, delimiter=";")
         w.writerow(LOG_HEAD_RU)
         w.writerows(log_rows(log))
+    return os.path.abspath(path)
+
+
+# ---------------------------------------------------------------- Excel-отчёт по поправкам
+
+CATEGORY_TEXT = {0: "Идеально (<0.1%)", 1: "Хорошо (<1%)", 2: "Удовл. (<5%)", 3: "Плохо (>=5%)"}
+_CATEGORY_FILL = {0: "C6EFCE", 1: "FFEB9C", 2: "FFC7CE", 3: "FF0000"}
+DETAIL_HEAD = ["Дата", "Скважина", "Тип", "Суточный расход до корр.", "Суточный расход после корр.", "Коэффициент",
+               "В диапазоне?", "Сумма в диапазоне", "Сумма вне диапазона"]
+STATS_HEAD = ["Начало периода", "Конец периода", "Всего скважин", "В диапазоне", "Вне диапазона", "ПЗРГ (сут)", "Сумма до корр.",
+              "Сумма после корр.", "Расхождение %", "Метод", "Коэффициент", "Категория"]
+
+
+def detail_rows(res: HistoryResult, lo: float = RANGE_LO, hi: float = RANGE_HI) -> List[list]:
+    """Строки листа «Детали по скважинам»: каждая скважина каждых суток периода, где поправка делалась (SKIP пропускаются).
+    Коэффициент — отношение расхода после к расходу до (1, если расход до = 0); «в диапазоне» — по расходу до поправки."""
+    if res.data is None or "rate_corr" not in res.data.columns:
+        return []
+    d = res.data
+    d = d[d["well"].astype(str).str.strip() != ""].copy()
+    d["_day"] = pd.to_datetime(d["date"]).dt.normalize().dt.date
+    rows: List[list] = []
+    for r in res.log:
+        if r["method"] == "SKIP":
+            continue
+        a, b = date.fromisoformat(r["start"]), date.fromisoformat(r["end"])
+        sub = d[(d["_day"] >= a) & (d["_day"] <= b)]
+        sub = sub[sub["kind"].isin((PROD, INJ))]
+        for kind in (PROD, INJ):
+            for _, x in sub[sub["kind"] == kind].sort_values(["_day"], kind="stable").iterrows():
+                before = 0.0 if pd.isna(x["rate"]) else float(x["rate"])
+                after = 0.0 if pd.isna(x["rate_corr"]) else float(x["rate_corr"])
+                inr = lo <= before <= hi
+                rows.append([x["_day"].strftime("%d.%m.%Y"), str(x["well"]).strip(), "Добыча" if kind == PROD else "Закачка",
+                             before, after, after / before if before != 0 else 1.0, "Да" if inr else "Нет",
+                             before if inr else 0.0, 0.0 if inr else before])
+    return rows
+
+
+def stats_rows(log: Sequence[dict]) -> List[list]:
+    """Строки листа «Статистика по периодам» (без SKIP); последний столбец — текст категории."""
+    out = []
+    for r in log:
+        if r["method"] == "SKIP":
+            continue
+        out.append([date.fromisoformat(r["start"]).strftime("%d.%m.%Y"), date.fromisoformat(r["end"]).strftime("%d.%m.%Y"),
+                    r["n_in"] + r["n_out"], r["n_in"], r["n_out"], r["pzrg"], r["sum_in"] + r["sum_out"], r["total_after"],
+                    r["discrepancy"], r["method"], r["coef"], CATEGORY_TEXT[r["category"]]])
+    return out
+
+
+def write_correction_xlsx(path: str, res: HistoryResult, lo: float = RANGE_LO, hi: float = RANGE_HI) -> str:
+    """Excel-отчёт по поправкам (как `create_correction_report` старого скрипта): листы «Сводная информация» (журнал),
+    «Детали по скважинам», «Статистика по периодам» (вместо «по дням»: в режиме по датам замеров поправка делается на период)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    def head(ws, row, titles, color):
+        for c, t in enumerate(titles, 1):
+            cell = ws.cell(row=row, column=c, value=t)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
+
+    def widths(ws, limit):
+        for col in ws.columns:
+            n = max((len(str(c.value)) for c in col if c.value is not None and type(c).__name__ != "MergedCell"), default=0)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = min(n + 2, limit)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Сводная информация"
+    ws["A1"] = "ОТЧЕТ ПО КОРРЕКЦИИ ДАННЫХ"
+    ws["A1"].font = Font(size=14, bold=True)
+    ws["A2"] = "Дата создания: %s" % datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    ws["A4"] = "СТАТИСТИКА КОРРЕКЦИИ"
+    ws["A4"].font = Font(bold=True)
+    head(ws, 6, LOG_HEAD_RU, "C6EFCE")
+    for i, row in enumerate(log_rows(res.log), 7):
+        for c, v in enumerate(row, 1):
+            ws.cell(row=i, column=c, value=v)
+    widths(ws, 50)
+
+    wd = wb.create_sheet("Детали по скважинам")
+    wd["A1"] = "ДЕТАЛЬНАЯ ИНФОРМАЦИЯ ПО КОРРЕКЦИИ СКВАЖИН"
+    wd["A1"].font = Font(size=14, bold=True)
+    head(wd, 3, DETAIL_HEAD, "DDEBF7")
+    for i, row in enumerate(detail_rows(res, lo, hi), 4):
+        for c, v in enumerate(row, 1):
+            wd.cell(row=i, column=c, value=v)
+    widths(wd, 30)
+
+    wt = wb.create_sheet("Статистика по периодам")
+    wt["A1"] = "СТАТИСТИКА КОРРЕКЦИИ ПО ПЕРИОДАМ"
+    wt["A1"].font = Font(size=14, bold=True)
+    head(wt, 3, STATS_HEAD, "FFF2CC")
+    inv = {v: k for k, v in CATEGORY_TEXT.items()}
+    for i, row in enumerate(stats_rows(res.log), 4):
+        for c, v in enumerate(row, 1):
+            wt.cell(row=i, column=c, value=v)
+        color = _CATEGORY_FILL[inv[row[-1]]]
+        wt.cell(row=i, column=len(row)).fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
+    widths(wt, 25)
+    wb.save(path)
     return os.path.abspath(path)

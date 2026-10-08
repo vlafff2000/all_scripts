@@ -305,3 +305,54 @@ def test_api_history_stitch_with_scenario(client, monkeypatch):
     assert r["to"] == "2026-06-30" and r["stitch"] == [] and any("нейтральным шагом" in n for n in r["notes"])
     t = c.post("/api/history/schedule", json={"files": [xl], "stitch": "Базовый"}).text
     assert t.count("DATES") > 30 and "JUN" in t and t.rstrip().endswith("-" * 80)
+
+
+def test_correction_xlsx_parity_with_old_report(tmp_path):
+    """Excel-отчёт по поправкам: детали по скважинам и статистика совпадают с `create_correction_report` старого скрипта."""
+    from openpyxl import load_workbook
+    o = old(OLD_DAILY, "old_daily_report")
+    h = hm.split_wells(sample())
+    d = h[h["kind"] == INJ]
+    pz = pd.DataFrame({"date": pd.to_datetime(["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04"]),
+                       "rate": [450000.0, 200000.0, 0.0, 600000.0]})
+    inj_only = sample()[sample()["kind"] == INJ]
+    res = hm.build_history(inj_only, mode="daily", periods=PERIODS, pzrg=pz)
+    assert res.data is not None and "rate_corr" in res.data
+    new_path = hm.write_correction_xlsx(str(tmp_path / "new.xlsx"), res)
+    # старый скрипт: тот же журнал в его формате и таблицы закачки/отбора после его поправки
+    cols = ["Дата", "Метод_коррекции", "ПЗРГ_сут", "Скважин_в_диапазоне", "Скважин_вне_диапазона", "Сумма_в_диапазоне",
+            "Сумма_вне_диапазона", "Коэффициент", "Итоговая_сумма_сут", "Расхождение_%", "Категория", "Комментарий"]
+    rows = [[r["start"], r["method"], r["pzrg"], r["n_in"], r["n_out"], r["sum_in"], r["sum_out"], r["coef"], r["total_after"],
+             r["discrepancy"], r["category"], r["comment"]] for r in res.log]
+    logcsv = str(tmp_path / "log.csv")
+    pd.DataFrame(rows, columns=cols).to_csv(logcsv, sep=";", index=False, encoding="utf-8")
+    pz_old = pz.rename(columns={"date": "Дата", "rate": "Суточный_расход_ПЗРГ"})
+    prod_old, inj_old = old_frames(h)
+    with contextlib.redirect_stdout(io.StringIO()):
+        inj_old = o.calculate_correction_coefficients(inj_old, pz_old, None)
+        o.create_correction_report(logcsv, prod_old, inj_old, str(tmp_path / "old.xlsx"))
+    a = load_workbook(new_path)
+    b = load_workbook(str(tmp_path / "old.xlsx"))
+    assert a.sheetnames[:2] == b.sheetnames[:2]
+
+    def body(ws, first):
+        return [[c for c in r] for r in ws.iter_rows(min_row=first, values_only=True) if any(v is not None for v in r)]
+    na, nb = body(a["Детали по скважинам"], 4), body(b["Детали по скважинам"], 4)
+    assert len(na) == len(nb) > 0
+    key = lambda r: (r[0], r[1], r[2])  # noqa: E731
+    for x, y in zip(sorted(na, key=key), sorted(nb, key=key)):
+        assert x[:3] == y[:3] and x[6] == y[6]
+        assert list(x[3:6]) + list(x[7:9]) == pytest.approx(list(y[3:6]) + list(y[7:9]))
+    sa, sb = body(a["Статистика по периодам"], 4), body(b["Статистика по дням"], 4)
+    assert len(sa) == len(sb) == 3
+    for x, y in zip(sa, sb):      # ours: начало, конец, всего, в диапазоне, вне, ПЗРГ, до, после, расхождение, метод, коэффициент, категория
+        assert x[0] == y[0] and x[2:5] == y[1:4] and x[9] == y[8] and x[11] == y[10]
+        assert list(x[5:9]) + [x[10]] == pytest.approx(list(y[4:8]) + [y[9]])
+    assert [r[2] for r in body(a["Сводная информация"], 7)] == [r[1] for r in body(b["Сводная информация"], 7)]  # методы по периодам
+
+
+def test_correction_xlsx_empty_and_api(tmp_path):
+    res = hm.build_history(sample(), mode="daily", periods=PERIODS)
+    assert res.log == []
+    p = hm.write_correction_xlsx(str(tmp_path / "e.xlsx"), res)
+    assert os.path.isfile(p)

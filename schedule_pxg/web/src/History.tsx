@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AppState, HistoryBody, HistoryView, downloadHistoryLog, downloadHistorySchedule, pickFile, runHistory } from './api'
+import { AppState, HistoryBody, HistoryView, downloadHistoryLog, downloadHistoryReport, downloadHistorySchedule, pickFile, runHistory } from './api'
 
 const KINDS: Record<string, string> = { закачка: 'закачка', отбор: 'отбор', нейтральный: 'нейтральный' }
 const fmt = (x: number) => Math.round(x).toLocaleString('ru-RU')
@@ -54,6 +54,7 @@ export default function History({ st }: { st: AppState }) {
           <button className="primary" disabled={busy || !ready} onClick={run}>Посчитать</button>
           {view && view.steps > 0 && <button disabled={busy} onClick={() => guard(() => downloadHistorySchedule(body()))}>Скачать schedule.inc</button>}
           {view?.correction && <button disabled={busy} onClick={() => guard(() => downloadHistoryLog(body()))}>Журнал поправки (CSV)</button>}
+          {view?.correction && <button disabled={busy} onClick={() => guard(() => downloadHistoryReport(body()))}>Отчёт по поправкам (Excel)</button>}
         </div>
         {msg && <p className="note warn">{msg}</p>}
       </section>
