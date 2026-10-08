@@ -6,8 +6,12 @@
   на режиме GRUP) или `both` (скважины с дебитами и цели групп). Группы и GRUPTREE берутся из дерева групп проекта;
   цель группы = сумма дебитов её скважин на шаге, так что объём тех.карты сохраняется. `groups` и `both` — только с `rate`
   (WCONHIST-скважины групповая цель не ведёт);
-- лимиты `Limit`: забойное давление (`bhp`, в WCONPROD/WCONINJE) и депрессия (`draw`, WELDRAW) для всех скважин, группы
-  или скважины, по периодам. Конкретнее — приоритетнее: скважина > группа > все; при равенстве выигрывает более поздний.
+- лимиты `Limit`: забойное давление (`bhp`) и максимальная депрессия (`draw`, WELDRAW) для всех скважин, группы или скважины.
+  Конкретнее — приоритетнее: скважина > группа > все; при равенстве выигрывает более поздний.
+- Контроль в `rate`: WCONPROD/WCONINJE пишутся при включении скважины (и смене отбор↔закачка), дальнейшая смена дебита —
+  WELTARG. WELDRAW — НЕ контроль, а максимальная депрессия: задаётся с даты `start` явным числом, действует до следующего
+  значения (поэтому у `draw` нет конца периода, «1*» и снятия лимита нет); менять можно в любой дате, по скважине, группе
+  или всем.
 Хранится в `control.json` проекта. Python 3.8+.
 """
 from __future__ import annotations
@@ -45,6 +49,10 @@ class Limit:
     scope: Optional[str] = None       # отбор | закачка | None — любой шаг (draw бывает только на отборе)
 
     def __post_init__(self) -> None:
+        try:
+            self.value = float(self.value)
+        except (TypeError, ValueError):
+            raise ValueError("Лимит: значение обязательно (число)")
         if self.kind not in KINDS:
             raise ValueError("Лимит: %s" % ", ".join(KINDS))
         if self.well and self.group:
@@ -55,9 +63,12 @@ class Limit:
             raise ValueError("Депрессия (WELDRAW) задаётся только для отбора")
         self.start = _date(self.start)
         self.end = _date(self.end)
+        if self.kind == "draw" and self.end:
+            raise ValueError("Депрессия (WELDRAW) действует до следующего значения: задайте новое значение с нужной даты")
+        if self.kind == "draw" and not self.value > 0:
+            raise ValueError("Депрессия (WELDRAW): нужно положительное число")
         if self.start and self.end and self.end < self.start:
             raise ValueError("Лимит: конец раньше начала")
-        self.value = float(self.value)
 
     def active(self, d: date, step_kind: str) -> bool:
         if self.kind == "draw" and step_kind != "отбор":
@@ -101,13 +112,15 @@ class Control:
 
     def value(self, kind: str, well: str, group: Optional[str], d: date, step_kind: str) -> Optional[float]:
         """Действующий лимит скважины на дату: скважина > группа > все, при равенстве — более поздний в списке."""
-        best, rank = None, -1
+        best, rank, bstart = None, -1, date.min
         for lim in self.limits:
             if lim.kind != kind or not lim.active(d, step_kind):
                 continue
             r = 2 if lim.well == well else 1 if (lim.group and lim.group == group) else 0 if not lim.well and not lim.group else -1
-            if r >= rank and r >= 0:
-                best, rank = lim.value, r
+            st = lim.start or date.min
+            # у депрессии при равном ранге действует значение с более поздней датой начала
+            if r >= 0 and (r > rank or (r == rank and (kind != "draw" or st >= bstart))):
+                best, rank, bstart = lim.value, r, st
         return best
 
     def to_dict(self) -> dict:

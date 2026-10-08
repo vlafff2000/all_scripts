@@ -28,7 +28,7 @@ def _steps(kind="отбор"):
 
 def test_no_control_text_unchanged():
     st = _steps()
-    assert fc.render_schedule(st, mode="rate", bhp_prod=30.0) == fc.render_schedule(st, control=cm.Control("rate", limits=[cm.Limit("bhp", 30.0)]))
+    assert "WELTARG" not in fc.render_schedule(st, mode="rate", bhp_prod=30.0)      # без control — как в А5, WCONPROD на каждом шаге
     assert fc.render_schedule(st) == fc.render_schedule(st, control=cm.Control("hist"))
 
 
@@ -41,9 +41,14 @@ def test_validation_and_roundtrip(tmp_path):
         cm.Limit("draw", 5, scope="закачка")
     with pytest.raises(ValueError):
         cm.Limit("bhp", 5, well="1", group="Г")
+    for bad in (0, -1, None, "1*", float("nan")):          # WELDRAW: только явное положительное число, без «1*»
+        with pytest.raises(ValueError):
+            cm.Limit("draw", bad)
+    with pytest.raises(ValueError):                         # конца периода нет: новое значение задаётся с новой даты
+        cm.Limit("draw", 5, end="2026-02-01")
     with pytest.raises(ValueError):
         fc.render_schedule(_steps(), control=cm.Control("rate", "groups"))
-    c = cm.Control("rate", "both", [cm.Limit("draw", 12.5, group="ГСП 1", start="2026-01-05", end=date(2026, 2, 1))], True, {"ГСП 1": "G1"})
+    c = cm.Control("rate", "both", [cm.Limit("draw", 12.5, group="ГСП 1", start="2026-01-05")], True, {"ГСП 1": "G1"})
     assert cm.Control.from_dict(c.to_dict()).to_dict() == c.to_dict()
     p = _proj()
     p.control = c.to_dict()
@@ -99,20 +104,33 @@ def test_group_target_zeroed_when_group_stops_and_on_kind_change():
     assert "GCONINJE\n'ГСП 1'\tGAS\tRATE\t0.00\t/  -- цель снята" in t2 and "GCONPROD\n'ГСП 1'\tGRAT\t2*\t20.00" in t2
 
 
-def test_weldraw_written_on_change_and_only_for_production():
-    c = cm.Control("rate", limits=[cm.Limit("draw", 15, group="ГСП 1", end="2026-01-10"), cm.Limit("draw", 8, well="20")])
+def test_weldraw_set_once_changed_by_date_never_one_star():
+    c = cm.Control("rate", limits=[cm.Limit("draw", 15, group="ГСП 1"), cm.Limit("draw", 8, well="20"),
+                                   cm.Limit("draw", 12, group="ГСП 1", start="2026-01-11")])
     t = fc.render_schedule(_steps(), control=c, project=_proj())
-    assert t.count("WELDRAW") == 2
-    first = t.split("WELDRAW")[1]
+    assert t.count("WELDRAW") == 2 and "1*\t/  -- лимит" not in t and "лимит снят" not in t
+    first, second = t.split("WELDRAW")[1], t.split("WELDRAW")[2]
     assert "10\t15\t/" in first and "11\t15\t/" in first and "20\t8\t/" in first
-    second = t.split("WELDRAW")[2]
-    assert "10\t1*\t/  -- лимит снят" in second and "20" not in second.split("DATES")[0].replace("10\t1*", "")
+    assert "10\t12\t/" in second and "20" not in second.split("DATES")[0] and "11" not in second.split("DATES")[0]
     assert "WELDRAW" not in fc.render_schedule(_steps("закачка"), control=c, project=_proj())
-    # скважина, закрытая на шаге, сохраняет лимит и не пишется заново
+    # скважина, закрытая на шаге, не переписывается, пока значение не менялось
     st = [fc.Step(date(2026, 1, 1), date(2026, 1, 5), 5, "отбор", {"10": 1.0}), fc.Step(date(2026, 1, 6), date(2026, 1, 10), 5, "отбор", {"11": 1.0}),
           fc.Step(date(2026, 1, 11), date(2026, 1, 15), 5, "отбор", {"10": 1.0})]
     t3 = fc.render_schedule(st, control=cm.Control("rate", limits=[cm.Limit("draw", 3)]), project=_proj())
-    assert t3.count("WELDRAW") == 2 and "лимит снят" not in t3 and t3.count("10\t3\t/") == 1
+    assert t3.count("WELDRAW") == 2 and t3.count("10\t3\t/") == 1
+
+
+def test_control_wconprod_then_weltarg_and_shut():
+    c = cm.Control("rate")
+    st = _steps() + [fc.Step(date(2026, 1, 21), date(2026, 1, 30), 10, "отбор", {"10": 200.0})]
+    t = fc.render_schedule(st, control=c, project=_proj())
+    assert t.count("WCONPROD") == 1 and "WELDRAW" not in t
+    assert "WELTARG\n10\tGRAT\t200.00\t/\n/" in t                         # 10: 100 → 200, WCONPROD заново не пишется
+    assert t.count("20\tSHUT\t/") == 1 and t.count("11\tSHUT\t/") == 1     # 11 остановлена на шаге 2, 20 — на шаге 3
+    mix = [fc.Step(date(2026, 1, 1), date(2026, 1, 5), 5, "закачка", {"10": 10.0}),
+           fc.Step(date(2026, 1, 6), date(2026, 1, 10), 5, "отбор", {"10": 20.0})]
+    t2 = fc.render_schedule(mix, control=c, project=_proj())
+    assert "WCONINJE" in t2 and "WCONPROD\n10\tOPEN\tGRAT\t2*\t20.00" in t2 and "WELTARG" not in t2   # смена вида — новый контроль
 
 
 def test_hist_mode_and_forecast_conservation_with_group_targets():
