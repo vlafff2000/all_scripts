@@ -46,6 +46,7 @@ RUNTIMES = {
 }
 
 # Tracked application files that go into the folder (tests, interface sources and dev scripts stay out).
+# Значки ярлыков (tools/icons) кладутся в папку icons/ рядом с запускалками.
 INCLUDE = ['pxg_base', 'gsp_maps', 'pxg_core', 'schedule_pxg', 'tnav_results', 'README.md', 'requirements.txt']
 SDIST_ONLY = {'proxy-tools', 'odfpy'}  # чистый Python, опубликован только исходниками
 SKIP_TOOLS = set()
@@ -68,6 +69,11 @@ WINDOWS_LAUNCHERS = {
                         'if "%FOUND%"=="0" (echo Файлы расчёта не найдены: положите их в папку %~dp0 и запустите снова.) else '
                         '"%~dp0python\\python.exe" -s -X utf8 -m tnav_results.describe_model --report-next-to "%~dp0*.EGRID" "%~dp0*.INIT" "%~dp0*.SMSPEC" "%~dp0*.UNSMRY"\r\n'
                         'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
+    'Skedul_PXG.bat': 'rem Скедул ПХГ: окно приложения (или браузер, если окно недоступно).\r\n'
+                      '"%~dp0python\\python.exe" -s -X utf8 -m schedule_pxg %*',
+    'Sozdat_yarlyki.bat': 'rem Создаёт ярлыки со значками на рабочем столе (Remove: --remove).\r\n'
+                          '"%~dp0python\\python.exe" -s -X utf8 -m pxg_core.desktop_shortcuts %*\r\n'
+                          'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
     'PXG_Base_console.bat': 'rem База ПХГ: консольное меню модулей.\r\n'
                             '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base %*',
 }
@@ -97,6 +103,10 @@ LINUX_LAUNCHERS = {
                        '  "$PY" -s -X utf8 -m tnav_results.describe_model --report-next-to "${FILES[@]}" || true\n'
                        'fi\n'
                        'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+    'skedul_pxg.sh': '# Скедул ПХГ в браузере.\nexec "$PY" -s -X utf8 -m schedule_pxg --browser "$@"',
+    'sozdat_yarlyki.sh': '# Ярлыки со значками на рабочем столе: bash sozdat_yarlyki.sh (убрать: bash sozdat_yarlyki.sh --remove).\n'
+                         '"$PY" -s -X utf8 -m pxg_core.desktop_shortcuts "$@"\n'
+                         'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
     'pxg_base_console.sh': '# База ПХГ: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
@@ -120,6 +130,12 @@ README = '''База ПХГ — переносная версия ({target})
 
 5. {descr} — описание остальных файлов расчёта (EGRID, INIT, SMSPEC, UNSMRY) в этой же папке: размеры сетки, число активных ячеек,
    вектора и даты. Отчёт <имя>_model.txt ложится рядом.
+
+6. {sched} — «Скедул ПХГ»: программа скедулов (история, сопоставление столбцов, объёмы, проверочный Excel).
+
+7. {shortcuts} — один раз создаёт на рабочем столе ярлыки со своим значком для каждого приложения
+   (База ПХГ, Карты ГСП, Скедул ПХГ, Перечислитель UNRST, Описание расчёта, консоль). Папку программы после этого не переносите:
+   ярлыки ссылаются на неё; перенесли — запустите {shortcuts} ещё раз. Убрать ярлыки: {shortcuts} --remove.
 
 Результаты запусков «Базы ПХГ» складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
 Другая папка результатов по умолчанию: переменная окружения PXG_RUNS_DIR.
@@ -207,12 +223,19 @@ def copy_application(folder):
     log('Файлов приложения: {}'.format(count))
 
 
+def copy_icons(folder):
+    icons = folder / 'icons'
+    icons.mkdir(exist_ok=True)
+    for item in sorted((ROOT / 'tools' / 'icons').iterdir()):
+        shutil.copy2(str(item), str(icons / item.name))
+
+
 def write_launchers(target, folder):
     if target == 'windows':
         for name, body in WINDOWS_LAUNCHERS.items():
             (folder / name).write_bytes((WINDOWS_PREFIX + body + WINDOWS_SUFFIX).encode('utf-8'))
         text = README.format(target='Windows', example='C:\\GasAtlas', six='PXG_Base.bat',
-                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', note=WINDOWS_NOTE)
+                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', sched='Skedul_PXG.bat', shortcuts='Sozdat_yarlyki.bat', note=WINDOWS_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_bytes(text.replace('\n', '\r\n').encode('utf-8-sig'))
     else:
         for name, body in LINUX_LAUNCHERS.items():
@@ -220,7 +243,7 @@ def write_launchers(target, folder):
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
-                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', note=LINUX_NOTE)
+                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', sched='skedul_pxg.sh', shortcuts='sozdat_yarlyki.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')
 
 
@@ -246,8 +269,8 @@ def smoke_test(folder):
     env = {k: v for k, v in os.environ.items() if not k.startswith('PYTHON')}
     env.update(PYTHONNOUSERSITE='1', MPLBACKEND='Agg')
     code = ('import sys, tkinter, pandas, numpy, openpyxl, xlsxwriter, xlrd, python_calamine, odf, starlette, uvicorn, pxg_core.расходы_файлы;'
-            + ('import webview, win32api;' if os.name == 'nt' else '') +
-            'import pxg_base.api as a;a.build_app();import gsp_maps.api as m;m.build_app();'
+            + ('import webview, win32api, win32com.client;' if os.name == 'nt' else '') +
+            'import pxg_base.api as a;a.build_app();import gsp_maps.api as m;m.build_app();import schedule_pxg.api as s;s.build_app();'
             'assert sys.prefix.startswith({!r}), sys.prefix;print("ok", sys.version.split()[0])').format(str(folder))
     subprocess.check_call([str(python), '-s', '-c', code], cwd=str(folder), env=env)
 
@@ -274,6 +297,7 @@ def main(argv=None):
     with tempfile.TemporaryDirectory() as tmp:
         install_packages(args.target, python_dir / spec['site'], Path(tmp))
     copy_application(folder)
+    copy_icons(folder)
     write_launchers(args.target, folder)
     if (args.target == 'windows') == (os.name == 'nt'):
         smoke_test(folder)
