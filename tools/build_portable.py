@@ -55,6 +55,8 @@ WINDOWS_LAUNCHERS = {
                     '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base --app %*',
     'Karty_GSP.bat': 'rem Карты ГСП: окно приложения (или браузер, если окно недоступно).\r\n'
                      '"%~dp0python\\python.exe" -s -X utf8 -m gsp_maps %*',
+    'Skedul_PXG.bat': 'rem Скедул ПХГ: окно приложения (или браузер, если окно недоступно).\r\n'
+                      '"%~dp0python\\python.exe" -s -X utf8 -m schedule_pxg %*',
     'Perechislit_UNRST.bat': 'rem Двойной щелчок: берёт все *.UNRST из этой папки; можно и перетащить файл на этот значок.\r\n'
                              'set FOUND=0\r\n'
                              'if not "%~1"=="" (set FOUND=1 & "%~dp0python\\python.exe" -s -X utf8 -m tnav_results.list_restart --report-next-to "%~1" & goto :done)\r\n'
@@ -78,6 +80,7 @@ WINDOWS_SUFFIX = '\r\nif errorlevel 1 pause\r\n'
 LINUX_LAUNCHERS = {
     'pxg_base.sh': '# База ПХГ в браузере.\nexec "$PY" -s -X utf8 -m pxg_base --browser "$@"',
     'karty_gsp.sh': '# Карты ГСП в браузере.\nexec "$PY" -s -X utf8 -m gsp_maps --browser "$@"',
+    'skedul_pxg.sh': '# Скедул ПХГ в браузере.\nexec "$PY" -s -X utf8 -m schedule_pxg --browser "$@"',
     'perechislit_unrst.sh': '# Перечислитель UNRST: bash perechislit_unrst.sh (без аргументов берёт все *.UNRST из этой папки и из папки запуска);\n'
                             '# можно указать пути: bash perechislit_unrst.sh /путь/РАСЧЁТ.UNRST. Отчёт <имя>_keywords.txt ложится рядом с файлом.\n'
                             'START="${OLDPWD:-.}"; FOUND=0\n'
@@ -118,7 +121,10 @@ README = '''База ПХГ — переносная версия ({target})
 4. {unrst} — «Перечислитель UNRST»: положите файлы расчёта .UNRST в эту папку и запустите (двойной щелчок или `bash {unrst}`);
    все найденные *.UNRST обрабатываются по очереди (можно и указать путь к файлу). Рядом с файлом появится отчёт *_keywords.txt: даты, ключевые слова, есть ли SGAS и PRESSURE. Окно закроется после нажатия клавиши.
 
-5. {descr} — описание остальных файлов расчёта (EGRID, INIT, SMSPEC, UNSMRY) в этой же папке: размеры сетки, число активных ячеек,
+5. {schedule} — «Скедул ПХГ»: история и прогноз скедулов tNavigator, сценарии, графики, выгрузка schedule-файлов.
+   Проект по умолчанию лежит в папке Скедул_ПХГ/Объект вашего профиля (переменная SCHEDULE_PXG_PROJECT меняет место).
+
+6. {descr} — описание остальных файлов расчёта (EGRID, INIT, SMSPEC, UNSMRY) в этой же папке: размеры сетки, число активных ячеек,
    вектора и даты. Отчёт <имя>_model.txt ложится рядом.
 
 Результаты запусков «Базы ПХГ» складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
@@ -136,7 +142,7 @@ python\\python.exe в этой папке (сборка python-build-standalone,
 LINUX_NOTE = '''
 Приложение открывается в браузере по умолчанию. Если браузер не открылся,
 откройте адрес, который программа напечатала в терминале.
-Если файл не запускается двойным щелчком: chmod +x *.sh, затем ./pxg_base.sh
+Если файл не запускается двойным щелчком: chmod +x *.sh, затем ./pxg_base.sh (на РЕД ОС без аргументов: bash skedul_pxg.sh в папке с файлами)
 '''
 
 
@@ -212,7 +218,7 @@ def write_launchers(target, folder):
         for name, body in WINDOWS_LAUNCHERS.items():
             (folder / name).write_bytes((WINDOWS_PREFIX + body + WINDOWS_SUFFIX).encode('utf-8'))
         text = README.format(target='Windows', example='C:\\GasAtlas', six='PXG_Base.bat',
-                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', note=WINDOWS_NOTE)
+                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', schedule='Skedul_PXG.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', note=WINDOWS_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_bytes(text.replace('\n', '\r\n').encode('utf-8-sig'))
     else:
         for name, body in LINUX_LAUNCHERS.items():
@@ -220,7 +226,7 @@ def write_launchers(target, folder):
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
-                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', note=LINUX_NOTE)
+                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', schedule='skedul_pxg.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')
 
 
@@ -247,7 +253,7 @@ def smoke_test(folder):
     env.update(PYTHONNOUSERSITE='1', MPLBACKEND='Agg')
     code = ('import sys, tkinter, pandas, numpy, openpyxl, xlsxwriter, xlrd, python_calamine, odf, starlette, uvicorn, pxg_core.расходы_файлы;'
             + ('import webview, win32api;' if os.name == 'nt' else '') +
-            'import pxg_base.api as a;a.build_app();import gsp_maps.api as m;m.build_app();'
+            'import pxg_base.api as a;a.build_app();import gsp_maps.api as m;m.build_app();import schedule_pxg.api as s;s.build_app();'
             'assert sys.prefix.startswith({!r}), sys.prefix;print("ok", sys.version.split()[0])').format(str(folder))
     subprocess.check_call([str(python), '-s', '-c', code], cwd=str(folder), env=env)
 
