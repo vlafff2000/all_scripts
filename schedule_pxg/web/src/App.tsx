@@ -1,4 +1,10 @@
 import { useEffect, useState } from 'react'
+import Averaging from './Averaging'
+import Charts from './Charts'
+import History from './History'
+import Scenarios from './Scenarios'
+import Strategies from './Strategies'
+import TechMaps from './TechMaps'
 import { AppState, CheckResult, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runCheck, runTrial, saveTemplate } from './api'
 
 type Field = 'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind'
@@ -20,6 +26,7 @@ export default function App() {
   const [trial, setTrial] = useState<Trial | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios' | 'strategies' | 'charts' | 'history'>('import')
 
   useEffect(() => { getState().then(setSt).catch(e => setMsg(e.message)) }, [])
 
@@ -55,18 +62,26 @@ export default function App() {
     <div className="shell">
       <aside className="side">
         <h1>Скедул ПХГ</h1>
-        <p className="muted">Мастер импорта истории</p>
-        <h2>Шаблоны проекта</h2>
+        <div className="tabs">
+          <button className={tab === 'import' ? 'on' : ''} onClick={() => setTab('import')}>Импорт истории</button>
+          <button className={tab === 'techmaps' ? 'on' : ''} onClick={() => setTab('techmaps')}>Тех.карты</button>
+          <button className={tab === 'averaging' ? 'on' : ''} onClick={() => setTab('averaging')}>Осреднение</button>
+          <button className={tab === 'scenarios' ? 'on' : ''} onClick={() => setTab('scenarios')}>Сценарии</button>
+          <button className={tab === 'strategies' ? 'on' : ''} onClick={() => setTab('strategies')}>Стратегии</button>
+          <button className={tab === 'charts' ? 'on' : ''} onClick={() => setTab('charts')}>Графики</button>
+          <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>История</button>
+        </div>
+        {tab === 'import' && <><h2>Шаблоны проекта</h2>
         {st && st.templates.length === 0 && <p className="muted">Пока нет. Сопоставьте столбцы нового файла и сохраните шаблон.</p>}
         {st?.templates.map(t => (
           <div key={t.name} className="tpl-item">
             <button className="link" onClick={() => { setTpl(t); setTrial(null) }}>{t.name}</button>
             <button className="x" title="Удалить шаблон" onClick={() => remove(t.name)}>×</button>
           </div>
-        ))}
+        ))}</>}
         {st && <p className="muted small">Проект: {st.folder}</p>}
       </aside>
-      <main className="work">
+      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
         <section className="card">
           <h2>1. Файл</h2>
           <div className="row">
@@ -183,7 +198,7 @@ export default function App() {
           {res && res.issues.length > 0 && <ul className="issues">{res.issues.map((i, k) => <li key={k} className={i.level}>{i.message}</li>)}</ul>}
         </section>
         {msg && <p className="note warn">{msg}</p>}
-      </main>
+      </main>}
     </div>
   )
 }
