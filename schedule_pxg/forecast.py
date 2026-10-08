@@ -486,6 +486,8 @@ def render_schedule(steps: Sequence[Step], mode: str = "hist", dates_shift: int 
     if control is not None and control.groups:
         out.append(gruptree(steps, project, control))
     draw_state: Dict[str, float] = {}               # скважина -> действующая депрессия, уже записанная в WELDRAW
+    ctl_rate = control is not None and mode == "rate"
+    wstate: Dict[str, Dict[str, str]] = {}          # открытая скважина -> {"inj", "rate", "bhp"}, уже записанные (WCON*/WELTARG)
     gstate: Dict[Tuple[str, str], bool] = {}        # (вид шага, группа) -> цель записана ранее
 
     def tail():
@@ -505,6 +507,14 @@ def render_schedule(steps: Sequence[Step], mode: str = "hist", dates_shift: int 
     for st in steps:
         out.append("DATES\n%s\n/\n" % _fmt_date(st.start - timedelta(days=dates_shift)))
         wells = sorted((w for w, r in st.rates.items() if r > 0), key=_wkey)
+        if ctl_rate:
+            out.append(_well_control(st, wells, control, bhp, rate, wstate, st is steps[0], grp_level=control.level == "groups"))
+            if control.groups and st.kind in ("отбор", "закачка"):
+                out.append(_group_targets(st, project, control, gstate, rate))
+            if st.kind == "отбор":
+                out.append(_weldraw(st, wells, gof, control, draw_state))
+            tail()
+            continue
         out.append("\nWELOPEN\n'*'\tSHUT\t/\n")
         for w in sorted(st.shut, key=_wkey):  # отключённые скважины названы явно (после '*', чтобы остались закрытыми)
             out.append("%s\tSHUT\t/%s\n" % (w, "  -- отключена: " + st.shut[w] if st.shut[w] else "  -- отключена"))
@@ -574,18 +584,57 @@ def _gcon(inj: bool, items: List[Tuple[str, float]], rate: str, note: str) -> st
     return "\nGCONPROD\n" + "".join("%s\tGRAT\t2*\t%s\t/%s\n" % (_q(n), rate.format(v), note) for n, v in items) + "/\n"
 
 
+def _well_control(st: Step, wells: List[str], control: "cmod.Control", bhp, rate: str, wstate: Dict[str, Dict[str, str]],
+                  first: bool, grp_level: bool) -> str:
+    """Скважины шага в режиме `rate`: контроль (WCONPROD/WCONINJE) пишется при первом включении и смене вида отбор↔закачка,
+    дальнейшая смена дебита или забойного — WELTARG; остановка — WELOPEN SHUT. Скважина, чьё состояние не изменилось, не пишется."""
+    inj = st.kind == "закачка"
+    shut_lines: List[str] = []
+    if first:
+        shut_lines.append("'*'\tSHUT\t/\n")
+    for w in sorted(st.shut, key=_wkey):
+        shut_lines.append("%s\tSHUT\t/%s\n" % (w, "  -- отключена: " + st.shut[w] if st.shut[w] else "  -- отключена"))
+        wstate.pop(w, None)
+    for w in sorted((w for w in wstate if w not in wells), key=_wkey):
+        shut_lines.append("%s\tSHUT\t/\n" % w)
+        del wstate[w]
+    cur = {w: {"inj": "1" if inj else "0", "rate": rate.format(st.rates[w]), "bhp": bhp(st, w)} for w in wells}
+    new = [w for w in wells if w not in wstate or wstate[w]["inj"] != cur[w]["inj"]]
+    tar = [w for w in wells if w not in new and (wstate[w]["rate"] != cur[w]["rate"] and not grp_level or wstate[w]["bhp"] != cur[w]["bhp"])]
+    out = "\nWELOPEN\n" + "".join(shut_lines) + "/\n" if shut_lines else ""
+    if new:
+        out += "\n"
+        if inj:
+            out += "WCONINJE\n" + "".join(
+                ("%s\tGAS\tOPEN\tGRUP\t2*\t%s\t/\n" % (w, cur[w]["bhp"])) if grp_level else
+                ("%s\tGAS\tOPEN\tRATE\t%s\t1*\t%s\t/\n" % (w, cur[w]["rate"], cur[w]["bhp"])) for w in new) + "/\n\n"
+        else:
+            out += "WCONPROD\n" + "".join(
+                ("%s\tOPEN\tGRUP\t5*\t%s\t/\n" % (w, cur[w]["bhp"])) if grp_level else
+                ("%s\tOPEN\tGRAT\t2*\t%s\t2*\t%s\t/\n" % (w, cur[w]["rate"], cur[w]["bhp"])) for w in new) + "/\n\n"
+        out += "WEFAC\n" + "".join("%s\t1.000\t/\n" % w for w in new) + "/\n"
+    lines: List[str] = []
+    for w in tar:
+        if not grp_level and wstate[w]["rate"] != cur[w]["rate"]:
+            lines.append("%s\t%s\t%s\t/\n" % (w, "RATE" if inj else "GRAT", cur[w]["rate"]))
+        if wstate[w]["bhp"] != cur[w]["bhp"] and cur[w]["bhp"] != "1*":
+            lines.append("%s\tBHP\t%s\t/\n" % (w, cur[w]["bhp"]))
+    if lines:
+        out += "\nWELTARG\n" + "".join(lines) + "/\n"
+    wstate.update(cur)
+    return out
+
+
 def _weldraw(st: Step, wells: List[str], gof, control: "cmod.Control", state: Dict[str, float]) -> str:
-    """WELDRAW шага: пишутся только изменения лимита депрессии (новое значение или снятие `1*`)."""
-    now: Dict[str, float] = {}
+    """WELDRAW шага: максимальная депрессия (не контроль). Пишется только на шаге, где значение скважины появилось или изменилось,
+    всегда с числом; «1*» и снятие лимита не пишутся — сменить значение можно новым лимитом с нужной даты."""
+    lines: List[str] = []
     for w in wells:
         v = control.value("draw", w, gof(w), st.start, st.kind)
-        if v is not None:
-            now[w] = v
-    lines = ["%s\t%g\t/\n" % (w, now[w]) for w in sorted(now, key=_wkey) if state.get(w) != now[w]]
-    lines += ["%s\t1*\t/  -- лимит снят\n" % w for w in sorted(state, key=_wkey) if w in wells and w not in now]
-    for w in wells:  # закрытая на шаге скважина сохраняет прежний лимит
-        state.pop(w, None)
-    state.update(now)
+        if v is not None and state.get(w) != v:
+            lines.append("%s\t%g\t/\n" % (w, v))
+            state[w] = v
+    lines.sort(key=lambda l: _wkey(l.split("\t")[0]))
     return "\nWELDRAW\n" + "".join(lines) + "/\n" if lines else ""
 
 
