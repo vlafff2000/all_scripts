@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, checks, history, scenarios, techmap, wizard
+from . import avg_view, charts, checks, history, scenarios, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -275,6 +275,30 @@ async def scenario_schedule(request: Request):
     return PlainTextResponse(scenarios.render(b, p), headers={"Content-Disposition": "attachment; filename*=UTF-8''schedule.inc"})
 
 
+def _charts_data(names: list, by: str, target: str):
+    p = _project()
+    sc = scenarios.Scenarios.from_dict(p.scenarios)
+    fn, _ = avg_view.shares_for(p)
+    builds = {n: scenarios.build(p, sc.resolve(n), p.techmaps, fn) for n in names}
+    return charts.compare(builds, p, by, target or None)
+
+
+async def charts_get(request: Request):
+    names = [n for n in (request.query_params.get("names") or "").split("|") if n]
+    if not names:
+        return _err("Выберите хотя бы один сценарий")
+    miss = [n for n in names if n not in _project().scenarios]
+    if miss:
+        return _err("Нет сценария «%s»" % miss[0], 404)
+    try:
+        data = await run_in_threadpool(_charts_data, names, request.query_params.get("by") or "total", request.query_params.get("target") or "")
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    except ValueError as e:
+        return _err(str(e))
+    return JSONResponse(data)
+
+
 def _avg_kind(request: Request, body: dict = None) -> str:
     return str((body or {}).get("kind") or request.query_params.get("kind") or "закачка")
 
@@ -406,6 +430,7 @@ def build_app() -> Starlette:
         Route("/api/scenario/build", scenario_build),
         Route("/api/scenario/check", scenario_check),
         Route("/api/scenario/schedule", scenario_schedule),
+        Route("/api/charts", charts_get),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),
         Route("/api/averaging/sources", averaging_sources, methods=["POST"]),
