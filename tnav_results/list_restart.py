@@ -32,6 +32,8 @@ def main(argv=None) -> int:
     seen = OrderedDict()  # ключевое слово -> (тип, элементов, шагов)
     nsteps = 0
     for st in iter_restart_steps(a.unrst):
+        if st.seqnum is None:  # служебный заголовок файла (TNAVHEAD, BASEPATH), не рестарт
+            continue
         nsteps += 1
         kws = [b.keyword for b in st.blocks]
         for b in st.blocks:

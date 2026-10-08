@@ -62,6 +62,12 @@ WINDOWS_LAUNCHERS = {
                              'if "%FOUND%"=="0" echo Файлы *.UNRST не найдены: положите расчёт в папку %~dp0 и запустите снова.\r\n'
                              ':done\r\n'
                              'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
+    'Opisat_model.bat': 'rem Двойной щелчок: описывает EGRID, INIT, SMSPEC, UNSMRY из этой папки, отчёт <имя>_model.txt рядом.\r\n'
+                        'set FOUND=0\r\n'
+                        'for %%F in ("%~dp0*.EGRID" "%~dp0*.INIT" "%~dp0*.SMSPEC" "%~dp0*.UNSMRY") do set FOUND=1\r\n'
+                        'if "%FOUND%"=="0" (echo Файлы расчёта не найдены: положите их в папку %~dp0 и запустите снова.) else '
+                        '"%~dp0python\\python.exe" -s -X utf8 -m tnav_results.describe_model --report-next-to "%~dp0*.EGRID" "%~dp0*.INIT" "%~dp0*.SMSPEC" "%~dp0*.UNSMRY"\r\n'
+                        'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
     'PXG_Base_console.bat': 'rem База ПХГ: консольное меню модулей.\r\n'
                             '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base %*',
 }
@@ -82,6 +88,15 @@ LINUX_LAUNCHERS = {
                             'for f in "${FILES[@]}"; do FOUND=1; echo "=== $f"; "$PY" -s -X utf8 -m tnav_results.list_restart --report-next-to "$f" || true; done\n'
                             '[ "$FOUND" = 0 ] && echo "Файлы *.UNRST не найдены: положите расчёт рядом со скриптом ($PWD) и запустите снова."\n'
                             'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+    'opisat_model.sh': '# Описание расчёта: bash opisat_model.sh (берёт *.EGRID, *.INIT, *.SMSPEC, *.UNSMRY из этой папки и папки запуска, отчёт <имя>_model.txt рядом).\n'
+                       'START="${OLDPWD:-.}"; FILES=(); DIRS=("$PWD"); [ "$START" != "$PWD" ] && DIRS+=("$START")\n'
+                       'if [ $# -gt 0 ]; then FILES=("$@"); else\n'
+                       '  for d in "${DIRS[@]}"; do for e in EGRID INIT SMSPEC UNSMRY egrid init smspec unsmry; do for f in "$d"/*.$e; do [ -f "$f" ] && FILES+=("$f"); done; done; done\n'
+                       'fi\n'
+                       'if [ ${#FILES[@]} -eq 0 ]; then echo "Файлы расчёта не найдены: положите их рядом со скриптом ($PWD) и запустите снова."; else\n'
+                       '  "$PY" -s -X utf8 -m tnav_results.describe_model --report-next-to "${FILES[@]}" || true\n'
+                       'fi\n'
+                       'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
     'pxg_base_console.sh': '# База ПХГ: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
@@ -102,6 +117,9 @@ README = '''База ПХГ — переносная версия ({target})
 
 4. {unrst} — «Перечислитель UNRST»: положите файлы расчёта .UNRST в эту папку и запустите (двойной щелчок или `bash {unrst}`);
    все найденные *.UNRST обрабатываются по очереди (можно и указать путь к файлу). Рядом с файлом появится отчёт *_keywords.txt: даты, ключевые слова, есть ли SGAS и PRESSURE. Окно закроется после нажатия клавиши.
+
+5. {descr} — описание остальных файлов расчёта (EGRID, INIT, SMSPEC, UNSMRY) в этой же папке: размеры сетки, число активных ячеек,
+   вектора и даты. Отчёт <имя>_model.txt ложится рядом.
 
 Результаты запусков «Базы ПХГ» складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
 Другая папка результатов по умолчанию: переменная окружения PXG_RUNS_DIR.
@@ -194,7 +212,7 @@ def write_launchers(target, folder):
         for name, body in WINDOWS_LAUNCHERS.items():
             (folder / name).write_bytes((WINDOWS_PREFIX + body + WINDOWS_SUFFIX).encode('utf-8'))
         text = README.format(target='Windows', example='C:\\GasAtlas', six='PXG_Base.bat',
-                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', unrst='Perechislit_UNRST.bat', note=WINDOWS_NOTE)
+                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', note=WINDOWS_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_bytes(text.replace('\n', '\r\n').encode('utf-8-sig'))
     else:
         for name, body in LINUX_LAUNCHERS.items():
@@ -202,7 +220,7 @@ def write_launchers(target, folder):
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
-                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', unrst='perechislit_unrst.sh', note=LINUX_NOTE)
+                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')
 
 
