@@ -14,11 +14,11 @@ import sys
 from collections import OrderedDict
 
 try:
-    from .ecl import iter_blocks
+    from .ecl import iter_blocks, read_all
     from . import grid_info
 except ImportError:  # запуск просто как скрипт
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from tnav_results.ecl import iter_blocks
+    from tnav_results.ecl import iter_blocks, read_all
     from tnav_results import grid_info
 
 
@@ -126,7 +126,6 @@ def describe_unsmry(path, ti, startdat, unit):
 
 def porv_check(egrid, init):
     """Сверка PORV (на всю сетку) с активностью: помогает понять, как PORV записан при укрупнении ячеек."""
-    from .ecl import read_all
     g = {b.keyword: v for b, v in read_all(egrid, ["ACTNUM", "ACTNUMC", "CORSNUM"])}
     porv = {b.keyword: v for b, v in read_all(init, ["PORV"])}.get("PORV")
     if porv is None or "ACTNUM" not in g or len(porv) != len(g["ACTNUM"]):
