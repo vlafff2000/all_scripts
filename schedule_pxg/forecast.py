@@ -152,6 +152,33 @@ def shares_from_history(hist: pd.DataFrame, project, months: Optional[Iterable[s
     return sh
 
 
+# ---------------------------------------------------------------- 29 февраля и «полка»
+
+def shelf_feb29(daily: Dict[int, float]) -> Tuple[Dict[int, float], Optional[dict]]:
+    """Високосный февраль: последняя «полка» (подряд идущие дни февраля с одинаковым значением, считая с конца) растягивается
+    с N до N+1 суток за счёт 29-го; значение каждого дня полки умножается на N/(N+1), сумма полки не меняется
+    (`adjust_february_last_shelf` старого скрипта). `daily` — {день февраля: значение}; нулевые и отрицательные дни не считаются.
+    Возвращает (новый словарь с 29-м днём, сведения о полке или None, если положительных дней нет)."""
+    out = dict(daily)
+    pos = sorted((d, v) for d, v in daily.items() if v > 0)
+    if not pos:
+        return out, None
+    last = pos[-1][1]
+    shelf = [pos[-1][0]]
+    for i in range(len(pos) - 2, -1, -1):
+        day, v = pos[i]
+        if abs(v - last) < 1 and pos[i + 1][0] - day == 1:
+            shelf.append(day)
+        else:
+            break
+    n = len(shelf)
+    scale = n / (n + 1)
+    for d in shelf:
+        out[d] = last * scale
+    out[29] = last * scale
+    return out, {"shelf_days": sorted(shelf), "n_days": n, "old_volume": last, "new_volume": last * scale, "scale": scale}
+
+
 # ---------------------------------------------------------------- сетка шагов
 
 def season_months(tm: tmod.TechMap, first_year: int) -> List[Tuple[str, int]]:
@@ -279,21 +306,49 @@ def _spread(items: List[Tuple[int, int, float]]) -> Dict[int, float]:
     return {i: float(v) for i, v in base.items()}
 
 
+def _leap_february(wd: Dict[Tuple[str, int], List[date]], day_weights: Optional[Dict[date, float]], fc: "Forecast"):
+    """Добавляет 29 февраля в `wd` и пересчитывает веса полки; возвращает новый `day_weights` (или прежний, если ничего не менялось)."""
+    for (m, y), days in list(wd.items()):
+        feb = tmod.MONTHS[1]
+        if m != feb or not calendar.isleap(y) or not days:
+            continue
+        if date(y, 2, 29) in days or days[-1] != date(y, 2, 28):
+            continue
+        known = [day_weights[x] for x in days if day_weights is not None and day_weights.get(x) is not None]
+        mean = sum(known) / len(known) if known else 1.0
+        base = {x.day: (day_weights.get(x) if day_weights is not None and day_weights.get(x) is not None else mean) for x in days}
+        new, info = shelf_feb29(base)
+        if info is None:
+            continue
+        dw = {x: 1.0 for v in wd.values() for x in v} if day_weights is None else dict(day_weights)
+        for d, v in new.items():
+            dw[date(y, 2, d)] = v
+        wd[(m, y)] = list(days) + [date(y, 2, 29)]
+        fc.notes.append("Февраль %d високосный: добавлено 29-е, полка из %d сут (%d–%d февраля) растянута, расход ×%d/%d; объём месяца прежний"
+                        % (y, info["n_days"], info["shelf_days"][0], info["shelf_days"][-1], info["n_days"], info["n_days"] + 1))
+        day_weights = dw
+    return day_weights
+
+
 def forecast_season(tm: tmod.TechMap, project, shares: Shares, first_year: int, step: str = "day",
                     periods: Optional[Sequence[Tuple[date, str]]] = None, cuts: Iterable[date] = (),
                     work_dates: Optional[Dict[str, Sequence[date]]] = None,
                     day_weights: Optional[Dict[date, float]] = None, decimals: int = 2,
                     tolerance: float = 0.005, spread: bool = True,
-                    outages: Optional[Sequence[omod.Outage]] = None) -> Forecast:
+                    outages: Optional[Sequence[omod.Outage]] = None, leap_shelf: bool = False) -> Forecast:
     """Прогноз одного сезона по тех.карте. `first_year` — год первого месяца сезона.
     `day_weights` — профиль объёма месяца по датам (по умолчанию равномерно по рабочим дням).
     `spread=False` — дебиты не округляются и остаток не размазывается (запись форматом `.2f`, как в старом скрипте).
     `outages` — отключения скважин: объём скважины в дни отключения уходит по её переключателю (`outages.FATES`);
-    начало и конец отключения режут шаг."""
+    начало и конец отключения режут шаг.
+    `leap_shelf` — в високосном феврале, если рабочие дни кончаются 28-м, добавляется 29-е и растягивается последняя «полка»
+    (`shelf_feb29`); объём месяца не меняется. Если 29-е уже рабочее (по карте), ничего не делается."""
     outages = list(outages or [])
     fc = Forecast(tolerance=tolerance)
     kind = tm.kind if tm.kind in tmod.KINDS else NEUTRAL
     wd = season_work_dates(tm, first_year, work_dates)
+    if leap_shelf:
+        day_weights = _leap_february(wd, day_weights, fc)
     all_work = sorted(x for v in wd.values() for x in v)
     if not all_work:
         fc.notes.append("В сезоне нет рабочих дней — шагов нет")

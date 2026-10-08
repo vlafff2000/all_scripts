@@ -7,7 +7,7 @@ export interface ScenarioInfo { name: string; parent: string | null; note: strin
 export interface Season { year: number; techmap: string; percent: number; label: string }
 export interface ScenarioValues {
   calendar: Season[]; grid: { step: string; periods: [string, string][]; cuts: string[] }; control: { mode?: string; level?: string; limits?: unknown[] }
-  outages: unknown[]; percent: number; tolerance: number; decimals: number; note: string
+  outages: unknown[]; percent: number; tolerance: number; decimals: number; note: string; leap_shelf: boolean
 }
 export interface ScenarioView {
   name: string; parent: string | null; values: ScenarioValues; origin: Record<string, string>; children: string[]; notes: string[]
@@ -99,3 +99,25 @@ export interface ChartsView {
 }
 export const getCharts = (names: string[], by: string, target: string) =>
   call<ChartsView>('/api/charts?' + new URLSearchParams({ names: names.join('|'), by, target }))
+
+export interface HistoryBody {
+  mode: 'daily' | 'dates'; files?: string[]; dates?: string; periods?: string; pzrg_file?: string; split?: Record<string, string[]>; stitch?: string
+}
+export interface HistoryLogRow {
+  start: string; end: string; method: string; pzrg: number; coef: number; total_after: number; discrepancy: number; category: number; comment: string
+}
+export interface HistoryView {
+  mode: string; steps: number; kinds: Record<string, number>; notes: string[]; from: string; to: string; sources: string[]
+  correction: { periods: number; corrected: number; skipped: number; worst: number; by_method: Record<string, number> } | null
+  log: HistoryLogRow[]; stitch: string[]; table: [string, string, string, number, number, number][]; volumes: Record<string, number>
+}
+export const runHistory = (b: HistoryBody) => call<HistoryView>('/api/history', post(b))
+async function download(url: string, b: HistoryBody, fallback: string) {
+  const r = await fetch(url, post(b))
+  if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error || 'Ошибка сервера (' + r.status + ')')
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(await r.blob()); a.download = fallback; a.click()
+  URL.revokeObjectURL(a.href)
+}
+export const downloadHistorySchedule = (b: HistoryBody) => download('/api/history/schedule', b, 'schedule_history.inc')
+export const downloadHistoryLog = (b: HistoryBody) => download('/api/history/log', b, 'correction_log_periods.csv')

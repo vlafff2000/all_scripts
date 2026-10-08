@@ -1,6 +1,8 @@
 """HTTP/JSON для «Скедул ПХГ» (Starlette, как в Атласе 6, Базе ПХГ и Картах ГСП). Мастер импорта (А3) и библиотека тех.карт (А4)."""
 from __future__ import annotations
 
+import csv
+import io
 import os
 import subprocess
 import sys
@@ -351,7 +353,43 @@ async def history_build(request: Request):
     return JSONResponse({"mode": res.mode, "steps": len(steps), "kinds": res.counts(), "notes": notes,
                          "from": steps[0].start.isoformat() if steps else "", "to": steps[-1].end.isoformat() if steps else "",
                          "correction": historymode.log_summary(res.log) if res.log else None,
-                         "log": res.log[:200], "stitch": historymode.stitch_issues(steps) if stitch else []})
+                         "log": res.log[:200], "stitch": historymode.stitch_issues(steps) if stitch else [],
+                         "table": _steps_table(steps), "volumes": _kind_volumes(steps),
+                         "sources": [os.path.basename(f) for f in (body.get("files") or avg_view.sources(p))]})
+
+
+def _steps_table(steps, limit: int = 300) -> list:
+    """Шаги для таблицы: начало, конец, вид, скважин в записи, суммарный расход (м³/сут), объём шага (м³)."""
+    return [[s.start.isoformat(), s.end.isoformat(), s.kind, len(s.rates), sum(s.rates.values()),
+             sum(s.rates.values()) * s.work_days] for s in steps[:limit]]
+
+
+def _kind_volumes(steps) -> dict:
+    out: dict = {}
+    for s in steps:
+        out[s.kind] = out.get(s.kind, 0.0) + sum(s.rates.values()) * s.work_days
+    return out
+
+
+async def history_log(request: Request):
+    """Журнал поправки по ПЗРГ — CSV с «;» (как `correction_log_periods.csv` старого скрипта)."""
+    try:
+        body = await request.json()
+        _, res, _, _ = await run_in_threadpool(_history_run, body)
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    except Exception as e:
+        return _err("История не обработана: %s" % e, 500)
+    if not res.log:
+        return _err("Журнала нет: ПЗРГ не задан")
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(historymode.LOG_HEAD_RU)
+    w.writerows(historymode.log_rows(res.log))
+    return PlainTextResponse("\ufeff" + buf.getvalue(), media_type="text/csv",
+                             headers={"Content-Disposition": "attachment; filename*=UTF-8''correction_log_periods.csv"})
 
 
 async def history_schedule(request: Request):
@@ -509,6 +547,7 @@ def build_app() -> Starlette:
         Route("/api/charts", charts_get),
         Route("/api/history", history_build, methods=["POST"]),
         Route("/api/history/schedule", history_schedule, methods=["POST"]),
+        Route("/api/history/log", history_log, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),
         Route("/api/averaging/sources", averaging_sources, methods=["POST"]),
