@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import history, scenarios, techmap, wizard
+from . import checks, history, scenarios, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -252,6 +252,15 @@ async def scenario_build(request: Request):
                          "shares": "доли скважин берутся поровну в группе, пока не подключено осреднение истории (шаг 10)"})
 
 
+async def scenario_check(request: Request):
+    name = request.query_params.get("name") or ""
+    if name not in _project().scenarios:
+        return _err("Нет сценария «%s»" % name, 404)
+    p, b = await run_in_threadpool(_build, name)
+    rep = await run_in_threadpool(checks.check_build, b, p)
+    return JSONResponse(rep.to_dict())
+
+
 async def scenario_schedule(request: Request):
     name = request.query_params.get("name") or ""
     if name not in _project().scenarios:
@@ -309,6 +318,7 @@ def build_app() -> Starlette:
         Route("/api/scenario/percents", scenario_percents, methods=["POST"]),
         Route("/api/scenario/pattern", scenario_pattern, methods=["POST"]),
         Route("/api/scenario/build", scenario_build),
+        Route("/api/scenario/check", scenario_check),
         Route("/api/scenario/schedule", scenario_schedule),
         Route("/api/pick", pick),
     ]
