@@ -38,13 +38,13 @@ python -m gsp_maps --server                # только сервер, порт
 
 | Система | Архив | Python | Запуск |
 |---|---|---|---|
-| Windows 10 и новее, x64 | `PXG_Base_portable_windows_x64.zip` | 3.14 | `PXG_Base.bat`, `Karty_GSP.bat`, `PXG_Base_console.bat` |
-| Linux x86_64, glibc 2.17+ (целевая система РЕД ОС 7.3) | `PXG_Base_portable_linux_x64.tar.gz` | 3.13 | `pxg_base.sh`, `karty_gsp.sh`, `pxg_base_console.sh` |
+| Windows 10 и новее, x64 | `PXG_Base_portable_windows_x64.zip` | 3.14 | `PXG_Base.bat`, `Karty_GSP.bat`, `Skedul_PXG.bat`, `PXG_Base_console.bat` |
+| Linux x86_64, glibc 2.17+ (целевая система РЕД ОС 7.3) | `PXG_Base_portable_linux_x64.tar.gz` | 3.13 | `pxg_base.sh`, `karty_gsp.sh`, `skedul_pxg.sh`, `pxg_base_console.sh` |
 
 Для РЕД ОС 7.3 берутся только колёса manylinux2014, поэтому numpy и pandas там на последних версиях, у которых такие колёса ещё есть (numpy 2.2, pandas 2.3). Результаты «Базы ПХГ» пишутся в папку `pxg_runs` рядом с архивом.
 
 Сборка вручную (нужны интернет и Python 3.9+): `python tools/build_portable.py windows` или `linux`, результат в `dist/`.
-В GitHub: Actions → «Portable archives» → Run workflow (или тег `v*`). Задание собирает оба архива, запускает «Базу ПХГ» и «Карты ГСП» из распакованного архива и выкладывает архивы как артефакты. Обычный CI (`CI`) гоняет тесты на Python 3.11 и 3.14 при каждом PR.
+В GitHub: Actions → «Portable archives» → Run workflow (или тег `v*`). Задание собирает оба архива, запускает «Базу ПХГ», «Карты ГСП» и «Скедул ПХГ» из распакованного архива и выкладывает архивы как артефакты. Обычный CI (`CI`) гоняет тесты на Python 3.11 и 3.14 при каждом PR.
 
 ## Что дальше
 - «Карты ГСП»: html-карта и GIF из старого скрипта не переносятся (PNG и Excel остаются); дальше развивается интерактивная карта и сверка по `docs/parity/gsp_maps.md`.
