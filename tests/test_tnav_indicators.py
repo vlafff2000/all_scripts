@@ -155,3 +155,12 @@ def test_well_pressure_and_connections(tmp_path):
 
     ur = _unrst(tmp_path / "W.UNRST", [SG], [PORV], with_wells=True)
     assert read_well_connections(ur) == {"OBS1": [(0, 0, 0), (0, 1, 0)]}
+
+
+def test_grid_info_coarse(tmp_path, capsys):
+    from tnav_results.grid_info import describe
+    p = tmp_path / "C.EGRID"
+    p.write_bytes(_blk("GRIDHEAD", "INTE", [1, 2, 2, 1] + [0] * 29) + _blk("CORSNUM", "INTE", [1, 1, 0, 0]) +
+                  _blk("ACTNUMC", "INTE", [1, 0, 1, 1]) + _blk("ACTNUM", "INTE", [1, 1, 1, 1]))
+    s = describe(str(p), 3)
+    assert "ACTNUM > 0: 4;  ACTNUMC > 0: 3" in s and "блоков 1" in s and "= 2 + 1 = 3" in s
