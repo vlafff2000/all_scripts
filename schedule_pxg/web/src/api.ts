@@ -2,7 +2,13 @@ export interface Template {
   name: string; sheet: string | number | null; header_row: number
   well: string; date: string; rate: string; hourly: string; hours: string; kind: string; kind_default: string; unit: string
 }
-export interface AppState { folder: string; project: string; templates: Template[]; units: string[]; kinds: string[] }
+export interface AppState { folder: string; project: string; templates: Template[]; units: string[]; kinds: string[]; techmaps: TechMapInfo[] }
+export interface TechMapInfo { name: string; kind: string; months: string[]; groups: number; total: number; source: string }
+export interface TechMapData {
+  name: string; kind: string; months: string[]; days: Record<string, number>; volumes: Record<string, Record<string, number>>
+  wells: Record<string, number>; totals: Record<string, number>; source: string
+}
+export interface TechMapView { techmap: TechMapData; summary: string; issues: { level: string; message: string }[]; kinds: string[] }
 export interface Preview {
   sheets: string[]; sheet: string; rows: string[][]; headerRow: number; columns: string[]
   suggest: Record<'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind', string>; unit: string; total: number; format: string | null
@@ -31,3 +37,7 @@ export const runTrial = (path: string, template: Template) => call<Trial>('/api/
 export const saveTemplate = (template: Template) => call<AppState>('/api/template', post({ template }))
 export const deleteTemplate = (name: string) => call<AppState>('/api/template/delete', post({ name }))
 export const pickFile = (start: string) => call<{ path: string }>('/api/pick?start=' + encodeURIComponent(start))
+export const readTechMap = (path: string, name: string, kind: string) => call<TechMapView>('/api/techmap/read', post({ path, name, kind }))
+export const getTechMap = (name: string) => call<TechMapView>('/api/techmap?name=' + encodeURIComponent(name))
+export const saveTechMap = (techmap: TechMapData, overwrite: boolean) => call<AppState>('/api/techmap/save', post({ techmap, overwrite }))
+export const deleteTechMap = (name: string) => call<AppState>('/api/techmap/delete', post({ name }))
