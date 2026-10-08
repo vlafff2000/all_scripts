@@ -164,3 +164,15 @@ def test_grid_info_coarse(tmp_path, capsys):
                   _blk("ACTNUMC", "INTE", [1, 0, 1, 1]) + _blk("ACTNUM", "INTE", [1, 1, 1, 1]))
     s = describe(str(p), 3)
     assert "ACTNUM > 0: 4;  ACTNUMC > 0: 3" in s and "блоков 1" in s and "= 2 + 1 = 3" in s
+def test_full_grid_porv_is_compressed_by_actnum(tmp_path):
+    act = [1] * 12
+    act[3] = act[7] = 0
+    m = _model(tmp_path, act)
+    sg = [0.8] * 10
+    porv_full = [float(g + 1) for g in range(12)]
+    porv_act = [v for v, a in zip(porv_full, act) if a]
+    r = gas_pore_volume(m, porv_full, sg, 0.3)
+    assert r.total == pytest.approx(0.8 * sum(porv_act)) and r.cells == 10
+    assert r.total == pytest.approx(gas_pore_volume(m, porv_act, sg, 0.3).total)
+    with pytest.raises(ValueError):
+        gas_pore_volume(m, porv_full[:5], sg, 0.3)
