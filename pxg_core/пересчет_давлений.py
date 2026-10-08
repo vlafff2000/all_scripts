@@ -86,6 +86,34 @@ def read_refs(path: str) -> Refs:
     return refs
 
 
+def read_average(path: str) -> pd.DataFrame:
+    """Дата и «Р среднее по ПХГ» из книги с исходниками по эксплуатационным скважинам (как в Excel: значение вводится вручную, не считается).
+
+    Ищется лист, в первых строках которого есть столбец со словом «среднее»; даты — в первом столбце.
+    """
+    import datetime as dt
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    try:
+        for ws in wb.worksheets:
+            rows = list(ws.iter_rows(values_only=True))
+            col = None
+            for r in rows[:5]:
+                col = next((i for i, c in enumerate(r) if "средн" in str(c or "").lower()), None)
+                if col is not None:
+                    break
+            if col is None:
+                continue
+            out = [(r[0], _num(r[col])) for r in rows if r and isinstance(r[0], (dt.datetime, dt.date)) and len(r) > col and _num(r[col]) is not None]
+            if out:
+                df = pd.DataFrame(out, columns=["Дата", "Среднее пластовое, кгс/см2"])
+                df["Дата"] = pd.to_datetime(df["Дата"])
+                return df.sort_values("Дата").reset_index(drop=True)
+    finally:
+        wb.close()
+    return pd.DataFrame(columns=["Дата", "Среднее пластовое, кгс/см2"])
+
+
 def level_value(raw, sign: str) -> Optional[float]:
     """Уровень жидкости E, м: «auto» — всегда ниже устья (−|Нст|), «as_is» — как в отчёте."""
     v = _num(raw)
@@ -155,8 +183,12 @@ def read_measurements(path: str) -> pd.DataFrame:
     return df.dropna(subset=["Скважина"])
 
 
-def include_frames(res: pd.DataFrame, add_atm: bool = False) -> Dict[str, pd.DataFrame]:
-    """Include-таблицы «скважина, дата, давление (бар)» как в Excel-файле."""
+def include_frames(res: pd.DataFrame, add_atm: bool = False, average: Optional[pd.DataFrame] = None) -> Dict[str, pd.DataFrame]:
+    """Include-таблицы «скважина, дата, давление (бар)» как в Excel-файле.
+
+    Среднее пластовое берётся готовым столбцом из `average` (как в Excel, без пересчёта единиц); без него считается как среднее Рпл
+    эксплуатационных скважин по дате, в барах.
+    """
     bar = "Рпл на верх перфораций, бар"
 
     def triple(df, col):
@@ -168,8 +200,11 @@ def include_frames(res: pd.DataFrame, add_atm: bool = False) -> Dict[str, pd.Dat
     res = res.assign(_raw=raw_bar)
     exploit = res[res["Категория"] == "Эксплуатационные"]
     obs = res[res["Категория"] != "Эксплуатационные"]
-    mean = (exploit.dropna(subset=["Дата", "_raw"]).groupby("Дата")["_raw"].mean().reset_index())
-    mean.columns = ["Дата", "Среднее пластовое, бар"]
+    if average is not None and len(average):
+        mean = average.rename(columns={"Среднее пластовое, кгс/см2": "Среднее пластовое"})
+    else:
+        mean = (exploit.dropna(subset=["Дата", "_raw"]).groupby("Дата")["_raw"].mean().reset_index())
+        mean.columns = ["Дата", "Среднее пластовое, бар (расчёт по эксплуатационным)"]
     return {
         "include_среднее_пластовое": mean,
         "include_эксплуатационные": triple(exploit, "_raw"),

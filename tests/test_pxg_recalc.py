@@ -90,3 +90,33 @@ def test_check_reports_missing_reference(tmp_path):
     texts = [(i.message, i.well) for i in rep.issues]
     assert any("Нет альтитуды" in m and w == "99" for m, w in texts)
     assert any("Нет отметки перфорации" in m and w == "4" for m, w in texts) is False   # у скв. 4 нет уровня: пересчёт не нужен
+
+
+def make_exploit_source(path):
+    """Короткий аналог листа исходников по эксплуатационным: дата, пары Руст/Рпл, последний столбец «Р среднее по ПХГ»."""
+    import datetime as dt
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Эксплуатационные_исходники"
+    ws.append(["Число, месяц, год", 4, 4, "Р среднее по ПХГ"])
+    ws.append([None, "Р устье", "Р пл.", None])
+    ws.append([dt.datetime(2000, 1, 1), 86.2, 91.8, 94.7])
+    ws.append([dt.datetime(2000, 2, 1), 86.0, 91.5, 94.9])
+    wb.save(path)
+
+
+def test_average_taken_from_file_as_is(tmp_path):
+    make_exploit_source(tmp_path / "src.xlsx")
+    avg = pc.read_average(str(tmp_path / "src.xlsx"))
+    assert list(avg.iloc[:, 1]) == [94.7, 94.9] and len(avg) == 2
+    make_refs(tmp_path / "refs.xlsx")
+    make_db(tmp_path / "db.xlsx")
+    base = {"db": str(tmp_path / "db.xlsx"), "refs": str(tmp_path / "refs.xlsx"), "output": "r.xlsx",
+            "inc_mean": "1", "inc_exploit": "1", "inc_obs": "1"}
+    run_module("Пересчёт_давлений", dict(base, avg_file=str(tmp_path / "src.xlsx")), tmp_path / "o1")
+    got = pd.read_excel(tmp_path / "o1" / "r.xlsx", sheet_name="include_среднее_пластовое")
+    assert list(got.iloc[:, 1]) == [94.7, 94.9]
+    # без файла среднее считается по Рпл эксплуатационных и подписано как расчёт
+    run_module("Пересчёт_давлений", dict(base, output="r2.xlsx"), tmp_path / "o2")
+    calc = pd.read_excel(tmp_path / "o2" / "r2.xlsx", sheet_name="include_среднее_пластовое")
+    assert "расчёт" in calc.columns[1] and calc.iloc[0, 1] == pytest.approx(91.8 * 0.980665)
