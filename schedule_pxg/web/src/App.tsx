@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Averaging from './Averaging'
 import Scenarios from './Scenarios'
 import TechMaps from './TechMaps'
 import { AppState, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runTrial, saveTemplate } from './api'
@@ -22,7 +23,7 @@ export default function App() {
   const [trial, setTrial] = useState<Trial | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState<'import' | 'techmaps' | 'scenarios'>('import')
+  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios'>('import')
 
   useEffect(() => { getState().then(setSt).catch(e => setMsg(e.message)) }, [])
 
@@ -53,6 +54,7 @@ export default function App() {
         <div className="tabs">
           <button className={tab === 'import' ? 'on' : ''} onClick={() => setTab('import')}>Импорт истории</button>
           <button className={tab === 'techmaps' ? 'on' : ''} onClick={() => setTab('techmaps')}>Тех.карты</button>
+          <button className={tab === 'averaging' ? 'on' : ''} onClick={() => setTab('averaging')}>Осреднение</button>
           <button className={tab === 'scenarios' ? 'on' : ''} onClick={() => setTab('scenarios')}>Сценарии</button>
         </div>
         {tab === 'import' && <><h2>Шаблоны проекта</h2>
@@ -65,7 +67,7 @@ export default function App() {
         ))}</>}
         {st && <p className="muted small">Проект: {st.folder}</p>}
       </aside>
-      {tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
+      {tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
         <section className="card">
           <h2>1. Файл</h2>
           <div className="row">

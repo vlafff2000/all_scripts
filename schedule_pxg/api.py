@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import checks, history, scenarios, techmap, wizard
+from . import avg_view, checks, history, scenarios, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -239,7 +239,10 @@ async def scenario_pattern(request: Request):
 def _build(name: str):
     p = _project()
     sc = scenarios.Scenarios.from_dict(p.scenarios)
-    return p, scenarios.build(p, sc.resolve(name), p.techmaps)
+    fn, notes = avg_view.shares_for(p)
+    b = scenarios.build(p, sc.resolve(name), p.techmaps, fn)
+    b.notes += list(dict.fromkeys(notes))
+    return p, b
 
 
 async def scenario_build(request: Request):
@@ -249,7 +252,8 @@ async def scenario_build(request: Request):
     p, b = await run_in_threadpool(_build, name)
     return JSONResponse({"seasons": b.seasons, "gaps": b.gaps, "notes": b.notes, "stitch": b.stitch_issues(), "steps": len(b.steps),
                          "over": len(b.over()), "rows": len(b.rows),
-                         "shares": "доли скважин берутся поровну в группе, пока не подключено осреднение истории (шаг 10)"})
+                         "shares": ("доли скважин — из осреднения истории (файлов: %d)" % len(avg_view.sources(p)) if avg_view.sources(p)
+                                    else "доли скважин поровну в группе: файлы истории для осреднения не заданы")})
 
 
 async def scenario_check(request: Request):
@@ -269,6 +273,88 @@ async def scenario_schedule(request: Request):
     if not b.steps:
         return _err("В сценарии нет сезонов с рабочими днями — schedule пуст")
     return PlainTextResponse(scenarios.render(b, p), headers={"Content-Disposition": "attachment; filename*=UTF-8''schedule.inc"})
+
+
+def _avg_kind(request: Request, body: dict = None) -> str:
+    return str((body or {}).get("kind") or request.query_params.get("kind") or "закачка")
+
+
+def _avg_call(f, kind: str, save: bool = False):
+    """Единая обёртка: загрузка осреднения вида, действие, сохранение настроек, ответ-представление."""
+    p = _project()
+    try:
+        a = avg_view.get(p, kind)
+        f(a)
+        if save:
+            avg_view.save(p, kind, a)
+            p.save(FOLDER)
+        return JSONResponse(avg_view.view(p, kind))
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    except Exception as e:
+        return _err("Осреднение не удалось: %s" % e, 500)
+
+
+async def averaging_get(request: Request):
+    return await run_in_threadpool(_avg_call, lambda a: None, _avg_kind(request))
+
+
+async def averaging_well(request: Request):
+    p = _project()
+    try:
+        return JSONResponse(await run_in_threadpool(avg_view.well_view, p, _avg_kind(request), request.query_params.get("well") or ""))
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    except ValueError as e:
+        return _err(str(e))
+
+
+async def averaging_sources(request: Request):
+    b = await request.json()
+    p = _project()
+    try:
+        avg_view.set_sources(p, [_clean(x) for x in b.get("paths") or [] if _clean(x)], b.get("params"))
+    except ValueError as e:
+        return _err(str(e))
+    p.save(FOLDER)
+    return await run_in_threadpool(_avg_call, lambda a: None, _avg_kind(request, b))
+
+
+async def averaging_choose(request: Request):
+    b = await request.json()
+    w = str(b.get("well") or "")
+
+    def act(a):
+        if b.get("combo"):
+            a.choose(w, [int(y) for y in b["combo"]])
+        else:
+            a.choice.pop(w, None)
+    return await run_in_threadpool(_avg_call, act, _avg_kind(request, b), True)
+
+
+async def averaging_advice(request: Request):
+    b = await request.json()
+    return await run_in_threadpool(_avg_call, lambda a: a.apply_advice(b.get("wells") or None), _avg_kind(request, b), True)
+
+
+async def averaging_exclude(request: Request):
+    b = await request.json()
+    w, y = str(b.get("well") or ""), int(b.get("year"))
+    return await run_in_threadpool(_avg_call, lambda a: a.exclude(w, y) if b.get("on", True) else a.include(w, y), _avg_kind(request, b), True)
+
+
+async def averaging_manual(request: Request):
+    b = await request.json()
+    w, m = str(b.get("well") or ""), str(b.get("month") or "")
+
+    def act(a):
+        if b.get("share") is None:
+            a.clear_manual(w, m)
+        else:
+            a.set_manual(w, m, float(b["share"]))
+    return await run_in_threadpool(_avg_call, act, _avg_kind(request, b), True)
 
 
 _PICK = (
@@ -320,6 +406,13 @@ def build_app() -> Starlette:
         Route("/api/scenario/build", scenario_build),
         Route("/api/scenario/check", scenario_check),
         Route("/api/scenario/schedule", scenario_schedule),
+        Route("/api/averaging", averaging_get),
+        Route("/api/averaging/well", averaging_well),
+        Route("/api/averaging/sources", averaging_sources, methods=["POST"]),
+        Route("/api/averaging/choose", averaging_choose, methods=["POST"]),
+        Route("/api/averaging/advice", averaging_advice, methods=["POST"]),
+        Route("/api/averaging/exclude", averaging_exclude, methods=["POST"]),
+        Route("/api/averaging/manual", averaging_manual, methods=["POST"]),
         Route("/api/pick", pick),
     ]
     if DIST.is_dir():

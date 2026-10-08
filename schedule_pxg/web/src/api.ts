@@ -67,3 +67,27 @@ export const expandPattern = (pattern: string[], firstYear: number, untilYear: n
   call<{ calendar: Season[] }>('/api/scenario/pattern', post({ pattern, firstYear, untilYear }))
 export const buildScenario = (name: string) => call<BuildView>('/api/scenario/build?name=' + encodeURIComponent(name))
 export const scheduleUrl = (name: string) => '/api/scenario/schedule?name=' + encodeURIComponent(name)
+
+export interface AvgWell {
+  well: string; group: string; advice: number[] | null; adviceBy: string; choice: number[] | null; chosen: number[] | null
+  excluded: number[]; manual: number; holdout: number | null
+}
+export interface AvgView {
+  kind: string; months: string[]; years: number[]; skippedYears: number[]; combos: string[]; wells: AvgWell[]
+  heat: { well: string; values: (number | null)[] }[]; groups: Record<string, Record<string, Record<string, { share: number | null; manual: boolean }>>>
+  sums: Record<string, Record<string, number | null>>; exclusions: { well: string; year: number; reason: string; auto: boolean }[]
+  unknown: string[]; params: { max_years: number; last_k: number; metric: string }; sources: string[]
+}
+export interface AvgWellView {
+  well: string; group: string; months: string[]; years: number[]; byYear: Record<string, (number | null)[]>; mean: (number | null)[]
+  chosen: number[] | null; manual: Record<string, number>; autoExcluded: Record<string, string>; autoMonths: Record<string, string[]>
+  table: { years: string; n: number; holdout: number | null; closeness: number | null; stability: number | null; advice: boolean; chosen: boolean }[]
+}
+const avgBody = (kind: string, rest: object) => post({ kind, ...rest })
+export const getAveraging = (kind: string) => call<AvgView>('/api/averaging?kind=' + encodeURIComponent(kind))
+export const getAveragingWell = (kind: string, well: string) => call<AvgWellView>('/api/averaging/well?kind=' + encodeURIComponent(kind) + '&well=' + encodeURIComponent(well))
+export const setAvgSources = (kind: string, paths: string[], params: object) => call<AvgView>('/api/averaging/sources', avgBody(kind, { paths, params }))
+export const avgChoose = (kind: string, well: string, combo: number[] | null) => call<AvgView>('/api/averaging/choose', avgBody(kind, { well, combo }))
+export const avgAdvice = (kind: string, wells?: string[]) => call<AvgView>('/api/averaging/advice', avgBody(kind, { wells }))
+export const avgExclude = (kind: string, well: string, year: number, on: boolean) => call<AvgView>('/api/averaging/exclude', avgBody(kind, { well, year, on }))
+export const avgManual = (kind: string, well: string, month: string, share: number | null) => call<AvgView>('/api/averaging/manual', avgBody(kind, { well, month, share }))
