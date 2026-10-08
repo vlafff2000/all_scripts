@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import TechMaps from './TechMaps'
 import { AppState, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runTrial, saveTemplate } from './api'
 
 type Field = 'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind'
@@ -20,6 +21,7 @@ export default function App() {
   const [trial, setTrial] = useState<Trial | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [tab, setTab] = useState<'import' | 'techmaps'>('import')
 
   useEffect(() => { getState().then(setSt).catch(e => setMsg(e.message)) }, [])
 
@@ -47,18 +49,21 @@ export default function App() {
     <div className="shell">
       <aside className="side">
         <h1>Скедул ПХГ</h1>
-        <p className="muted">Мастер импорта истории</p>
-        <h2>Шаблоны проекта</h2>
+        <div className="tabs">
+          <button className={tab === 'import' ? 'on' : ''} onClick={() => setTab('import')}>Импорт истории</button>
+          <button className={tab === 'techmaps' ? 'on' : ''} onClick={() => setTab('techmaps')}>Тех.карты</button>
+        </div>
+        {tab === 'import' && <><h2>Шаблоны проекта</h2>
         {st && st.templates.length === 0 && <p className="muted">Пока нет. Сопоставьте столбцы нового файла и сохраните шаблон.</p>}
         {st?.templates.map(t => (
           <div key={t.name} className="tpl-item">
             <button className="link" onClick={() => { setTpl(t); setTrial(null) }}>{t.name}</button>
             <button className="x" title="Удалить шаблон" onClick={() => remove(t.name)}>×</button>
           </div>
-        ))}
+        ))}</>}
         {st && <p className="muted small">Проект: {st.folder}</p>}
       </aside>
-      <main className="work">
+      {tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
         <section className="card">
           <h2>1. Файл</h2>
           <div className="row">
@@ -148,7 +153,7 @@ export default function App() {
           )}
         </>}
         {msg && <p className="note warn">{msg}</p>}
-      </main>
+      </main>}
     </div>
   )
 }

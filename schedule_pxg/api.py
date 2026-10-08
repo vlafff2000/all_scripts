@@ -1,4 +1,4 @@
-"""HTTP/JSON для «Скедул ПХГ» (Starlette, как в Атласе 6, Базе ПХГ и Картах ГСП). Пока — мастер импорта (шаг А3)."""
+"""HTTP/JSON для «Скедул ПХГ» (Starlette, как в Атласе 6, Базе ПХГ и Картах ГСП). Мастер импорта (А3) и библиотека тех.карт (А4)."""
 from __future__ import annotations
 
 import os
@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import history, wizard
+from . import history, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -37,7 +37,8 @@ def _clean(path) -> str:
 def _state() -> dict:
     p = _project()
     return {"folder": FOLDER, "project": p.name, "templates": list(p.templates.values()),
-            "units": list(history.UNITS), "kinds": list(history.KINDS)}
+            "units": list(history.UNITS), "kinds": list(history.KINDS),
+            "techmaps": [techmap.summary(techmap.TechMap.from_dict(d)) for d in p.techmaps.values()]}
 
 
 async def state(request: Request):
@@ -93,6 +94,58 @@ async def delete_template(request: Request):
     return JSONResponse(await run_in_threadpool(_state))
 
 
+def _techmap_view(tm: techmap.TechMap, p: Project) -> dict:
+    rep = techmap.check_techmap(tm, p)
+    return {"techmap": tm.to_dict(), "summary": rep.summary(), "issues": [{"level": i.level, "message": i.message + (
+        " (%s)" % i.date if i.date else "") + (" — %s" % i.well if i.well else "")} for i in rep.issues],
+        "kinds": list(techmap.KINDS)}
+
+
+async def techmap_read(request: Request):
+    body = await request.json()
+    path = _clean(body.get("path"))
+    if not os.path.isfile(path):
+        return _err("Файл не найден: %s" % path, 404)
+    try:
+        tm = await run_in_threadpool(techmap.read_techmap, path, 0, str(body.get("name") or ""), str(body.get("kind") or ""))
+    except ValueError as e:
+        return _err(str(e))
+    except Exception as e:
+        return _err("Не удалось прочитать файл: %s" % e, 500)
+    return JSONResponse(_techmap_view(tm, _project()))
+
+
+async def techmap_get(request: Request):
+    p = _project()
+    name = request.query_params.get("name") or ""
+    if name not in p.techmaps:
+        return _err("Нет тех.карты «%s»" % name, 404)
+    return JSONResponse(_techmap_view(techmap.TechMap.from_dict(p.techmaps[name]), p))
+
+
+async def techmap_save(request: Request):
+    body = await request.json()
+    p = _project()
+    try:
+        tm = techmap.TechMap.from_dict(body.get("techmap") or {})
+        techmap.add_to_library(p, tm, overwrite=bool(body.get("overwrite")))
+    except ValueError as e:
+        return _err(str(e))
+    p.save(FOLDER)
+    return JSONResponse(await run_in_threadpool(_state))
+
+
+async def techmap_delete(request: Request):
+    body = await request.json()
+    p = _project()
+    try:
+        techmap.remove_from_library(p, str(body.get("name") or ""))
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    p.save(FOLDER)
+    return JSONResponse(await run_in_threadpool(_state))
+
+
 _PICK = (
     "import sys, tkinter\nfrom tkinter import filedialog\n"
     "start = sys.argv[1]\n"
@@ -127,6 +180,10 @@ def build_app() -> Starlette:
         Route("/api/trial", trial, methods=["POST"]),
         Route("/api/template", save_template, methods=["POST"]),
         Route("/api/template/delete", delete_template, methods=["POST"]),
+        Route("/api/techmap/read", techmap_read, methods=["POST"]),
+        Route("/api/techmap", techmap_get),
+        Route("/api/techmap/save", techmap_save, methods=["POST"]),
+        Route("/api/techmap/delete", techmap_delete, methods=["POST"]),
         Route("/api/pick", pick),
     ]
     if DIST.is_dir():
