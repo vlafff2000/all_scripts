@@ -97,7 +97,7 @@ async def delete_template(request: Request):
 def _techmap_view(tm: techmap.TechMap, p: Project) -> dict:
     rep = techmap.check_techmap(tm, p)
     return {"techmap": tm.to_dict(), "summary": rep.summary(), "issues": [{"level": i.level, "message": i.message + (
-        " (%s)" % i.when if i.when else "") + (" — %s" % i.well if i.well else "")} for i in rep.issues],
+        " (%s)" % i.date if i.date else "") + (" — %s" % i.well if i.well else "")} for i in rep.issues],
         "kinds": list(techmap.KINDS)}
 
 
