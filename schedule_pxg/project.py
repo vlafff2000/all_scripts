@@ -40,6 +40,7 @@ class Project:
         self.templates: Dict[str, dict] = {}  # шаблоны импорта (history.Template.to_dict), сохраняет мастер
         self.techmaps: Dict[str, dict] = {}  # библиотека тех.карт (techmap.TechMap.to_dict)
         self.outages: List[dict] = []  # отключения скважин (outages.Outage.to_dict)
+        self.control: dict = {}  # режим управления и лимиты (control.Control.to_dict)
 
     # скважины
     def add_well(self, name: str, synonyms=(), well_type: str = "эксплуатационная", group: Optional[str] = None) -> None:
@@ -121,6 +122,7 @@ class Project:
         _write_json(os.path.join(folder, "templates.json"), self.templates)
         _write_json(os.path.join(folder, "techmaps.json"), self.techmaps)
         _write_json(os.path.join(folder, "outages.json"), self.outages)
+        _write_json(os.path.join(folder, "control.json"), self.control)
 
     @classmethod
     def load(cls, folder: str) -> "Project":
@@ -134,4 +136,5 @@ class Project:
         p.templates = _read_json(os.path.join(folder, "templates.json"), {})
         p.techmaps = _read_json(os.path.join(folder, "techmaps.json"), {})
         p.outages = _read_json(os.path.join(folder, "outages.json"), [])
+        p.control = _read_json(os.path.join(folder, "control.json"), {})
         return p

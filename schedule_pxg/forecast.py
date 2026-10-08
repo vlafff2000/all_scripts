@@ -20,6 +20,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import pandas as pd
 
+from schedule_pxg import control as cmod
 from schedule_pxg import outages as omod
 from schedule_pxg import techmap as tmod
 
@@ -444,21 +445,62 @@ def _fmt_date(d: date) -> str:
     return "\t%d\t%s\t%d /" % (d.day, _MON[d.month - 1], d.year)
 
 
+def _q(name: str) -> str:
+    return "'%s'" % name
+
+
+def gruptree(steps: Sequence[Step], project, control: "cmod.Control") -> str:
+    """GRUPTREE из дерева групп проекта: группы скважин с дебитами в шагах и их предки, родитель корня — FIELD."""
+    used = set()
+    for st in steps:
+        for w, r in st.rates.items():
+            g = project.group_at_level(w) if r > 0 else None
+            if g:
+                used.update(project.path(g))
+    lines = []
+    for g in sorted(used, key=lambda x: (len(project.path(x)), x)):
+        par = project.groups.get(g)
+        lines.append("%s\t%s\t/\n" % (_q(control.gname(g)), _q(control.gname(par)) if par else "'FIELD'"))
+    return "GRUPTREE\n" + "".join(lines) + "/\n\n" + "-" * 80 + "\n\n" if lines else ""
+
+
 def render_schedule(steps: Sequence[Step], mode: str = "hist", dates_shift: int = 1, decimals: int = 2,
                     bhp_prod: Optional[float] = None, bhp_inj: Optional[float] = None,
-                    stray_slash: bool = True, close: bool = True) -> str:
+                    stray_slash: bool = True, close: bool = True,
+                    control: Optional["cmod.Control"] = None, project=None) -> str:
     """Текст schedule. Блок шага: DATES (начало шага − `dates_shift` сут: так пишет старый скрипт, дата замера = DATES + 1),
     WELOPEN '*' SHUT, дебиты скважин (`hist`: WCONHIST/WCONINJH; `rate`: WCONPROD/WCONINJE с необязательным
     лимитом забойного давления), WEFAC. `stray_slash` — лишняя «/» после блока, как в файлах старого скрипта.
-    `close` — в конце DATES, закрывающий последний шаг."""
+    `close` — в конце DATES, закрывающий последний шаг.
+    `control` (`control.Control`) вместо `mode`/`bhp_*`: режим записи, лимиты по скважинам/группам/периодам (забойное,
+    WELDRAW) и цели групп GCONPROD/GCONINJE с GRUPTREE (нужен `project`). Без `control` текст прежний."""
+    if control is not None:
+        mode = control.mode
+        if control.groups and project is None:
+            raise ValueError("Для целей групп нужен проект (дерево групп)")
     if mode not in MODES:
         raise ValueError("Режим записи: %s" % ", ".join(MODES))
     rate = "{:.%df}" % decimals
     sep = "-" * 80
     out: List[str] = []
+    if control is not None and control.groups:
+        out.append(gruptree(steps, project, control))
+    draw_state: Dict[str, float] = {}               # скважина -> действующая депрессия, уже записанная в WELDRAW
+    gstate: Dict[Tuple[str, str], bool] = {}        # (вид шага, группа) -> цель записана ранее
 
     def tail():
         out.append(("\n/" if stray_slash else "") + "\n" + sep + "\n\n")
+
+    def gof(w: str) -> Optional[str]:
+        return project.group_at_level(w) if project is not None else None
+
+    def bhp(st: Step, w: str) -> str:
+        inj = st.kind == "закачка"
+        if control is not None:
+            v = control.value("bhp", w, gof(w), st.start, st.kind)
+        else:
+            v = bhp_inj if inj else bhp_prod
+        return "1*" if v is None else "%g" % v
 
     for st in steps:
         out.append("DATES\n%s\n/\n" % _fmt_date(st.start - timedelta(days=dates_shift)))
@@ -476,18 +518,75 @@ def render_schedule(steps: Sequence[Step], mode: str = "hist", dates_shift: int 
                 else:
                     out.append("WCONHIST\n" + "".join("%s\tOPEN\tGRAT\t1*\t1*\t%s\t1*\t/\n" % (w, rate.format(st.rates[w])) for w in wells) + "/\n\n")
             else:
+                grp = control is not None and control.level == "groups"  # скважины ведёт группа: режим GRUP
                 if inj:
-                    b = "1*" if bhp_inj is None else "%g" % bhp_inj
-                    out.append("WCONINJE\n" + "".join("%s\tGAS\tOPEN\tRATE\t%s\t1*\t%s\t/\n" % (w, rate.format(st.rates[w]), b) for w in wells) + "/\n\n")
+                    out.append("WCONINJE\n" + "".join(
+                        ("%s\tGAS\tOPEN\tGRUP\t2*\t%s\t/\n" % (w, bhp(st, w))) if grp else
+                        ("%s\tGAS\tOPEN\tRATE\t%s\t1*\t%s\t/\n" % (w, rate.format(st.rates[w]), bhp(st, w))) for w in wells) + "/\n\n")
                 else:
-                    b = "1*" if bhp_prod is None else "%g" % bhp_prod
-                    out.append("WCONPROD\n" + "".join("%s\tOPEN\tGRAT\t2*\t%s\t2*\t%s\t/\n" % (w, rate.format(st.rates[w]), b) for w in wells) + "/\n\n")
+                    out.append("WCONPROD\n" + "".join(
+                        ("%s\tOPEN\tGRUP\t5*\t%s\t/\n" % (w, bhp(st, w))) if grp else
+                        ("%s\tOPEN\tGRAT\t2*\t%s\t2*\t%s\t/\n" % (w, rate.format(st.rates[w]), bhp(st, w))) for w in wells) + "/\n\n")
             out.append("WEFAC\n" + "".join("%s\t1.000\t/\n" % w for w in wells) + "/\n")
+        if control is not None:
+            if control.groups and st.kind in ("отбор", "закачка"):
+                out.append(_group_targets(st, project, control, gstate, rate))
+            if st.kind == "отбор":
+                out.append(_weldraw(st, wells, gof, control, draw_state))
         tail()
     if close and steps:
         out.append("DATES\n%s\n/\n" % _fmt_date(steps[-1].end + timedelta(days=1 - dates_shift)))
         tail()
     return "".join(out)
+
+
+def _group_targets(st: Step, project, control: "cmod.Control", gstate: Dict[Tuple[str, str], bool], rate: str) -> str:
+    """GCONPROD/GCONINJE шага: цель группы = сумма дебитов её скважин; группы, у которых цель была и пропала, обнуляются."""
+    tot: Dict[str, float] = {}
+    for w, r in st.rates.items():
+        g = project.group_at_level(w) if r > 0 else None
+        if g:
+            tot[g] = tot.get(g, 0.0) + r
+    inj = st.kind == "закачка"
+    key = "закачка" if inj else "отбор"
+    lines: List[str] = []
+    names = sorted(tot)
+    if control.field_target and tot:
+        lines.append(("FIELD", sum(tot.values())))
+    lines += [(control.gname(g), tot[g]) for g in names]
+    zero = [(control.gname(g), 0.0) for (k, g), _ in sorted(gstate.items()) if k == key and g not in tot]
+    zero_other = [(k, g) for (k, g) in gstate if k != key]
+    out = ""
+    for k, g in zero_other:  # цель другого вида (закачка ↔ отбор) снимаем
+        out += _gcon(k == "закачка", [(control.gname(g), 0.0)], rate, "  -- цель снята")
+    if lines or zero:
+        out += _gcon(inj, lines, rate, "") + (_gcon(inj, zero, rate, "  -- цель снята") if zero else "")
+    gstate.clear()
+    gstate.update({(key, g): True for g in tot})
+    return out
+
+
+def _gcon(inj: bool, items: List[Tuple[str, float]], rate: str, note: str) -> str:
+    if not items:
+        return ""
+    if inj:
+        return "\nGCONINJE\n" + "".join("%s\tGAS\tRATE\t%s\t/%s\n" % (_q(n), rate.format(v), note) for n, v in items) + "/\n"
+    return "\nGCONPROD\n" + "".join("%s\tGRAT\t2*\t%s\t/%s\n" % (_q(n), rate.format(v), note) for n, v in items) + "/\n"
+
+
+def _weldraw(st: Step, wells: List[str], gof, control: "cmod.Control", state: Dict[str, float]) -> str:
+    """WELDRAW шага: пишутся только изменения лимита депрессии (новое значение или снятие `1*`)."""
+    now: Dict[str, float] = {}
+    for w in wells:
+        v = control.value("draw", w, gof(w), st.start, st.kind)
+        if v is not None:
+            now[w] = v
+    lines = ["%s\t%g\t/\n" % (w, now[w]) for w in sorted(now, key=_wkey) if state.get(w) != now[w]]
+    lines += ["%s\t1*\t/  -- лимит снят\n" % w for w in sorted(state, key=_wkey) if w in wells and w not in now]
+    for w in wells:  # закрытая на шаге скважина сохраняет прежний лимит
+        state.pop(w, None)
+    state.update(now)
+    return "\nWELDRAW\n" + "".join(lines) + "/\n" if lines else ""
 
 
 def write_schedule(path: str, steps: Sequence[Step], **kw) -> str:
