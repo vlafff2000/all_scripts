@@ -79,3 +79,48 @@ def test_api_roundtrip(flat, tmp_path, monkeypatch):
     assert c.post("/api/template", json={"template": tpl}).json()["templates"][0]["name"] == "чужой"
     assert c.post("/api/template/delete", json={"name": "чужой"}).json()["templates"] == []
     assert c.get("/api/preview", params={"path": "/нет"}).status_code == 404
+
+
+def _book(tmp_path, name, rows, sheet="Данные"):
+    p = tmp_path / name
+    pd.DataFrame(rows).to_excel(p, header=False, index=False, sheet_name=sheet)
+    return str(p)
+
+
+def test_daily_total_two_columns_with_unit(tmp_path):
+    """«Фактический суточный объём по объекту»: дата и объём, без скважин; единица — млн м3."""
+    rows = [["Дата", "Объём, млн.м3"]] + [[d, 1.5] for d in pd.date_range("2024-05-01", periods=3)]
+    f = _book(tmp_path, "факт.xlsx", rows)
+    assert wizard.guess_unit("Объём, млн.м3") == "млн.м3"
+    tpl = wizard.template_from({"name": "факт", "header_row": 0, "well": "", "date": "Дата", "rate": "Объём, млн.м3",
+                                "unit": "млн.м3", "kind_default": "закачка"})
+    r = wizard.trial(f, tpl)
+    assert r["rows"] == 3 and r["wells"] == 0 and r["sample"][0][0] == "" and r["sample"][0][2] == 1.5e6
+
+
+def test_matrix_dates_in_rows(tmp_path):
+    rows = [["Дата", "101", "102", "103"]]
+    for i, d in enumerate(pd.date_range("2024-05-01", periods=3)):
+        rows.append([d, 10.0, 20.0, None if i == 1 else 5.0])
+    f = _book(tmp_path, "матрица.xlsx", rows)
+    tpl = wizard.template_from({"name": "м", "layout": "matrix", "date": "Дата", "well": "", "unit": "тыс.м3", "kind_default": "отбор"})
+    r = wizard.trial(f, tpl)
+    assert r["rows"] == 8 and r["wells"] == 3 and r["kinds"] == {"отбор": 8}
+    df = history.read_by_template(f, tpl)
+    assert df[(df.well == "101") & (df.date == "2024-05-02")]["rate"].iloc[0] == 10000.0
+
+
+def test_matrix_dates_in_columns(tmp_path):
+    days = list(pd.date_range("2024-05-01", periods=3))
+    rows = [["Скважина"] + days, ["101", 1, 2, 3], ["102", 4, None, 6]]
+    f = _book(tmp_path, "матрица_т.xlsx", rows)
+    tpl = wizard.template_from({"name": "т", "layout": "matrix_t", "well": "Скважина", "kind_default": "закачка"})
+    df = history.read_by_template(f, tpl)
+    assert len(df) == 5 and df[df.well == "102"]["rate"].tolist() == [4.0, 6.0]
+
+
+def test_layout_validation(tmp_path):
+    with pytest.raises(ValueError):
+        wizard.template_from({"name": "x", "layout": "нет"})
+    with pytest.raises(ValueError):
+        wizard.trial("x.xlsx", wizard.template_from({"name": "x", "layout": "matrix", "date": ""}))

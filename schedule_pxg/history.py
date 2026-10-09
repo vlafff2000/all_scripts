@@ -25,7 +25,8 @@ INJ, PROD, NEUTRAL = "закачка", "отбор", "нейтральный"
 KINDS = (INJ, PROD, NEUTRAL)
 
 # единицы расхода → множитель к м³/сут
-UNITS = {"м3/сут": 1.0, "тыс.м3/сут": 1000.0, "млн.м3/сут": 1e6, "м3/ч": 24.0, "тыс.м3/ч": 24000.0}
+UNITS = {"м3/сут": 1.0, "тыс.м3/сут": 1000.0, "млн.м3/сут": 1e6, "м3/ч": 24.0, "тыс.м3/ч": 24000.0,
+         "м3": 1.0, "тыс.м3": 1000.0, "млн.м3": 1e6}  # «м3», «тыс.м3», «млн.м3» — объём за сутки (файлы «фактический суточный объём»)
 
 _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10,
            "nov": 11, "dec": 12}
@@ -73,6 +74,8 @@ class Template:
     kind: str = ""               # столбец вида; если пусто — берётся kind_default
     kind_default: str = ""
     unit: str = "м3/сут"         # единица столбца rate
+    layout: str = "table"        # table — одна строка = сутки (скважина пустая → итог по объекту);
+    #                              matrix — даты в строках, скважины в столбцах; matrix_t — скважины в строках, даты в столбцах
     extra: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -88,6 +91,40 @@ DB_TEMPLATE = Template(
     hourly="Часовой расход газа", hours="Время работы", kind="Тип данных")
 
 _KIND_WORDS = {"отбор": PROD, "закачка": INJ, "нейтральный период": NEUTRAL, "нейтральный": NEUTRAL}
+
+
+def _kinds(body: pd.DataFrame, tpl: Template, sh) -> pd.Series:
+    if tpl.kind and tpl.kind in body.columns:
+        return body[tpl.kind].astype(str).str.strip().str.lower().map(lambda x: _KIND_WORDS.get(x, NEUTRAL))
+    return pd.Series(tpl.kind_default or _kind_from_text(str(sh)) or NEUTRAL, index=body.index)
+
+
+def _read_matrix(body: pd.DataFrame, tpl: Template, sh, rep: Optional[qc.Report], path: str) -> Optional[pd.DataFrame]:
+    """Матрица: matrix — столбец дат + по столбцу на скважину; matrix_t — столбец скважин + по столбцу на дату.
+    Пустые ячейки пропускаются; единица tpl.unit относится ко всем значениям."""
+    key = tpl.date if tpl.layout == "matrix" else tpl.well
+    if not key or key not in body.columns:
+        if rep is not None:
+            rep.error("HEADER", "Нет столбца «%s»" % key, file=path, sheet=sh)
+        return None
+    pos = list(body.columns).index(key)
+    keys = body.iloc[:, pos]
+    parts = []
+    for j, name in enumerate(body.columns):
+        if j == pos or not str(name).strip() or str(name).lower().startswith("unnamed"):
+            continue
+        vals = pd.to_numeric(body.iloc[:, j], errors="coerce") * UNITS[tpl.unit]
+        if tpl.layout == "matrix":
+            d, w = pd.to_datetime(keys, dayfirst=True, errors="coerce"), pd.Series(_well(name), index=body.index)
+        else:
+            dd = pd.to_datetime(str(name), dayfirst=True, errors="coerce")
+            if pd.isna(dd):
+                continue
+            d, w = pd.Series(dd, index=body.index), keys.map(lambda v: "" if pd.isna(v) else _well(v))
+        keep = d.notna() & vals.notna()
+        if keep.any():
+            parts.append(_frame(w[keep], d[keep], vals[keep], [np.nan] * int(keep.sum()), _kinds(body, tpl, sh)[keep]))
+    return pd.concat(parts, ignore_index=True) if parts else None
 
 
 def read_by_template(path: str, tpl: Template, rep: Optional[qc.Report] = None) -> pd.DataFrame:
@@ -111,7 +148,13 @@ def read_by_template(path: str, tpl: Template, rep: Optional[qc.Report] = None) 
                 return None
             return body[name]
 
-        wells, dates = col(tpl.well), col(tpl.date)
+        if tpl.layout in ("matrix", "matrix_t"):
+            df = _read_matrix(body, tpl, sh, rep, path)
+            if df is not None:
+                out.append(df)
+            continue
+        dates = col(tpl.date)
+        wells = col(tpl.well) if tpl.well else pd.Series("", index=body.index)  # без столбца скважины — итог по объекту
         if wells is None or dates is None:
             continue
         rate, hourly, hours = col(tpl.rate), col(tpl.hourly), col(tpl.hours)
@@ -122,11 +165,8 @@ def read_by_template(path: str, tpl: Template, rep: Optional[qc.Report] = None) 
             r = pd.to_numeric(hourly, errors="coerce") * h
         else:
             r = pd.Series(np.nan, index=body.index)
-        if tpl.kind and tpl.kind in body.columns:
-            kinds = body[tpl.kind].astype(str).str.strip().str.lower().map(lambda x: _KIND_WORDS.get(x, NEUTRAL))
-        else:
-            kinds = pd.Series(tpl.kind_default or _kind_from_text(str(sh)) or NEUTRAL, index=body.index)
-        d = pd.to_datetime(dates, errors="coerce")
+        kinds = _kinds(body, tpl, sh)
+        d = pd.to_datetime(dates, dayfirst=True, errors="coerce")
         keep = d.notna() & wells.notna()
         out.append(_frame(wells[keep].map(_well), d[keep], r[keep], h[keep], kinds[keep]))
     return pd.concat(out, ignore_index=True) if out else _empty()
