@@ -124,3 +124,15 @@ def test_layout_validation(tmp_path):
         wizard.template_from({"name": "x", "layout": "нет"})
     with pytest.raises(ValueError):
         wizard.trial("x.xlsx", wizard.template_from({"name": "x", "layout": "matrix", "date": ""}))
+
+
+def test_trial_without_name_but_save_needs_it(flat, tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from schedule_pxg import api
+    monkeypatch.setattr(api, "FOLDER", str(tmp_path / "proj"))
+    c = TestClient(api.build_app())
+    pv = c.get("/api/preview", params={"path": flat}).json()
+    tpl = {"name": "", "sheet": pv["sheet"], "header_row": pv["headerRow"], "unit": pv["unit"], **pv["suggest"]}
+    assert c.post("/api/trial", json={"path": flat, "template": tpl}).json()["rows"] == 10
+    r = c.post("/api/template", json={"template": tpl})
+    assert r.status_code == 400 and "название" in r.json()["error"]
