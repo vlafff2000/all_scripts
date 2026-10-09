@@ -328,7 +328,7 @@ def scaled(tm: tmod.TechMap, percent: float) -> tmod.TechMap:
     return out
 
 
-def build(project, values: dict, library: Dict[str, dict], shares_for=None) -> Build:
+def build(project, values: dict, library: Dict[str, dict], shares_for=None, day_weights_for=None) -> Build:
     """Сшивает сезоны календаря. `values` — итог `Scenarios.resolve`; `shares_for(tm)` даёт `Shares` для тех.карты
     (по умолчанию доли поровну между скважинами группы). Объём сезона = объём тех.карты × процент сценария × процент сезона."""
     res = Build(values=values)
@@ -352,7 +352,8 @@ def build(project, values: dict, library: Dict[str, dict], shares_for=None) -> B
         tm = smod.apply_strategy(tmod.TechMap.from_dict(library[name]), e.get("volumes"))
         pct = float(values["percent"]) * float(e.get("percent", 100.0)) / 100.0
         sh = shares_for(tm) if shares_for else fmod.Shares.uniform(project, tm)
-        fc = fmod.forecast_season(scaled(tm, pct), project, sh, int(e["year"]), grid.get("step", "day"), periods, cuts,
+        dw = day_weights_for(tm, int(e["year"])) if day_weights_for else None
+        fc = fmod.forecast_season(scaled(tm, pct), project, sh, int(e["year"]), grid.get("step", "day"), periods, cuts, day_weights=dw,
                                   decimals=int(values["decimals"]), tolerance=float(values["tolerance"]), outages=outs)
         if not fc.steps:
             res.notes += ["%s (%s): %s" % (name, e["year"], n) for n in fc.notes]
