@@ -18,9 +18,9 @@ button.quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--line-
 /* ---------- форма ---------- */
 .param-card { display: grid; gap: 14px; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
-.field { display: grid; gap: 3px; align-content: start; background: var(--bg); border: 1px solid transparent; border-radius: var(--radius); padding: 7px 10px; }
+.field { display: grid; gap: 3px; align-content: start; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 10px; }
 .field.wide { grid-column: 1 / -1; }
-.field:hover, .field:focus-within { border-color: var(--line); }
+.field:hover { border-color: var(--line-strong); }
 .field:focus-within { border-color: var(--accent); background: var(--surface); }
 .field.invalid { border-color: var(--danger); background: var(--danger-soft); }
 .field-label { font-size: 12px; color: var(--muted); }
@@ -97,3 +97,7 @@ table.files { border-collapse: collapse; width: 100%; font-size: 14px; }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
 table.qc td { vertical-align: top; }
 button.quiet.current { font-weight: 700; }
+
+/* подсказка в пустом поле не должна выглядеть как введённое значение */
+.field input::placeholder, .field textarea::placeholder { font-weight: 400; color: var(--muted); opacity: .85; }
+button.quiet { min-height: 34px; }
