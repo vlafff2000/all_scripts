@@ -20,13 +20,12 @@ from schedule_pxg import outages as omod
 from schedule_pxg import strategy as smod
 from schedule_pxg import techmap as tmod
 
-FIELDS = ("calendar", "grid", "control", "outages", "percent", "tolerance", "decimals", "note", "leap_shelf")
+FIELDS = ("calendar", "grid", "control", "outages", "percent", "tolerance", "decimals", "note")
 DEFAULTS = {"calendar": [], "grid": {"step": "day", "periods": [], "cuts": []}, "control": {}, "outages": [],
-            "percent": 100.0, "tolerance": 0.005, "decimals": 2, "note": "", "leap_shelf": False}
+            "percent": 100.0, "tolerance": 0.005, "decimals": 2, "note": ""}
 FIELD_NAMES = {"calendar": "календарь сезонов", "grid": "сетка шагов", "control": "режим управления и лимиты",
                "outages": "отключения", "percent": "процент от тех.карты", "tolerance": "допуск",
-               "decimals": "знаков в дебите", "note": "примечание",
-               "leap_shelf": "29 февраля и полка"}
+               "decimals": "знаков в дебите", "note": "примечание"}
 
 
 def _d(x) -> Optional[date]:
@@ -65,14 +64,15 @@ def month_after(year: int, month_idx: int) -> Tuple[int, int]:
 def expand_pattern(library: Dict[str, dict], pattern: Sequence[str], first_year: int, until_year: int) -> List[dict]:
     """«Повторить до года»: тех.карты `pattern` идут по кругу, пока сезон начинается не позже `until_year`.
     Чередование A, B, A — шаблон [A, B]; полный год — [закачка, отбор]. Год каждого сезона выбирается так, чтобы он
-    начинался сразу после предыдущего (январь после декабря — следующий год)."""
+    начинался сразу после предыдущего (январь после декабря — следующий год). Соседние сезоны могут делить пограничный
+    месяц (отбор октябрь–апрель и закачка апрель–октябрь): тогда следующий сезон начинается в том же году."""
     if not pattern:
         raise ValueError("Шаблон календаря пуст")
     for name in pattern:
         if name not in library:
             raise ValueError("Нет тех.карты «%s»" % name)
     out: List[dict] = []
-    year, nxt = first_year, None
+    year, nxt, prev_len, prev_last = first_year, None, 0, (first_year, 0)
     i = 0
     while True:
         name = pattern[i % len(pattern)]
@@ -82,12 +82,17 @@ def expand_pattern(library: Dict[str, dict], pattern: Sequence[str], first_year:
         first = tmod.MONTHS.index(tm.months[0])
         if nxt is not None:
             y, m = nxt
-            year = y if first >= m else y + 1
+            ly, lm = prev_last
+            if prev_len > 1 and len(tm.months) > 1 and first == lm:  # общий пограничный месяц: тот же год
+                year = ly
+            else:
+                year = y if first >= m else y + 1
         if year > until_year or i > 400:
             break
         out.append(season_entry(year, name))
         last_y = fmod.season_months(tm, year)[-1]
         nxt = month_after(last_y[1], tmod.MONTHS.index(last_y[0]))
+        prev_len, prev_last = len(tm.months), (last_y[1], tmod.MONTHS.index(last_y[0]))
         i += 1
     return out
 
@@ -121,6 +126,8 @@ class Scenarios:
 
     def __init__(self, items: Optional[Dict[str, dict]] = None) -> None:
         self.items: Dict[str, dict] = copy.deepcopy(items or {})
+        for it in self.items.values():  # старое поле «29 февраля и полка»: високосный год теперь учитывается всегда
+            it.get("values", {}).pop("leap_shelf", None)
 
     # создание
     def add(self, name: str, values: Optional[dict] = None) -> None:
@@ -259,8 +266,6 @@ class Scenarios:
             return cmod.Control.from_dict(value).to_dict() if value else {}
         if key == "outages":
             return [omod.Outage.from_dict(o).to_dict() for o in value]
-        if key == "leap_shelf":
-            return bool(value)
         return str(value) if key == "note" else value
 
     # хранение
@@ -345,8 +350,7 @@ def build(project, values: dict, library: Dict[str, dict], shares_for=None) -> B
         pct = float(values["percent"]) * float(e.get("percent", 100.0)) / 100.0
         sh = shares_for(tm) if shares_for else fmod.Shares.uniform(project, tm)
         fc = fmod.forecast_season(scaled(tm, pct), project, sh, int(e["year"]), grid.get("step", "day"), periods, cuts,
-                                  decimals=int(values["decimals"]), tolerance=float(values["tolerance"]), outages=outs,
-                                  leap_shelf=bool(values.get("leap_shelf", False)))
+                                  decimals=int(values["decimals"]), tolerance=float(values["tolerance"]), outages=outs)
         if not fc.steps:
             res.notes += ["%s (%s): %s" % (name, e["year"], n) for n in fc.notes]
             continue

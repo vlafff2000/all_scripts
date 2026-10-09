@@ -8,7 +8,7 @@ export type StrategyTable = Record<string, Record<string, number>>
 export interface Season { year: number; techmap: string; percent: number; label: string; volumes?: StrategyTable }
 export interface ScenarioValues {
   calendar: Season[]; grid: { step: string; periods: [string, string][]; cuts: string[] }; control: { mode?: string; level?: string; limits?: unknown[] }
-  outages: unknown[]; percent: number; tolerance: number; decimals: number; note: string; leap_shelf: boolean
+  outages: unknown[]; percent: number; tolerance: number; decimals: number; note: string
 }
 export interface ScenarioView {
   name: string; parent: string | null; values: ScenarioValues; origin: Record<string, string>; children: string[]; notes: string[]
