@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import PageHead from './PageHead'
 import {
   AppState, Season, StrategyView, downloadStrategy, getScenario, getStrategy, loadStrategy, pickFile, saveStrategy, strategyOp,
 } from './api'
@@ -54,6 +55,7 @@ export default function Strategies({ st, setSt }: { st: AppState; setSt: (s: App
 
   return (
     <main className="workspace">
+      <PageHead title="Стратегии" lede="Свои объёмы по группам и месяцам вместо объёмов тех.карты, в том числе с процентным варьированием." />
       <section className="card">
         <h2>Стратегии варьирования</h2>
         <p className="muted small">Объёмы сезона по группам и месяцам (млн м³) вместо объёмов тех.карты. Процент сценария и сезона применяется после замены; ветвь сценария может иметь свою стратегию.</p>

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState } from 'react'
+import PageHead from './PageHead'
 import { AppState, TechMapView, deleteTechMap, getTechMap, pickFile, readTechMap, saveTechMap } from './api'
 
 const fmt = (x: number | undefined) => (x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: 3 }))
@@ -34,6 +35,7 @@ export default function TechMaps({ st, setSt }: { st: AppState; setSt: (s: AppSt
 
   return (
     <main className="workspace">
+      <PageHead title="Тех.карты" lede="Библиотека утверждённых объёмов: из неё берутся сезоны сценариев." />
       <section className="card">
         <h2>Библиотека тех.карт</h2>
         {st.techmaps.length === 0 ? <p className="muted">Пока пусто. Загрузите файл «Утверждённые объёмы» ниже и сохраните его в проект.</p> : (

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import PageHead from './PageHead'
 import { sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Averaging from './Averaging'
 import Charts from './Charts'
@@ -158,6 +159,7 @@ export default function App() {
       </aside>
       {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'results' && st ? <Results st={st} setSt={setSt} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="workspace">
         {msg && <p className="note warn">{msg}</p>}
+        <PageHead title="Импорт истории" lede="Загрузка Excel-файлов с историей работы скважин и с объёмами по группам." />
         <div className="segmented wiz-switch" role="radiogroup" aria-label="Что загружаем">
           <button type="button" role="radio" aria-checked={wiz === 'history'} onClick={() => setWiz('history')}>История работы скважин</button>
           <button type="button" role="radio" aria-checked={wiz === 'volumes'} onClick={() => setWiz('volumes')}>Объёмы по группам скважин</button>
@@ -174,7 +176,7 @@ export default function App() {
                 </span>))}</div>
             </section>)}
           <div className="intro">
-            <h1>Загрузка истории работы скважин</h1>
+            <h2>Загрузка истории работы скважин</h2>
             <p>Покажите программе Excel-файл с историей, и она переложит его в свою таблицу. Всего четыре шага: выбрать файл, показать, где заголовок,
               сказать, в каком столбце что лежит, и проверить результат. Знакомые файлы (база расходов, листы по группам скважин, посуточные итоги) программа узнаёт сама.</p>
           </div>
@@ -284,7 +286,7 @@ export default function App() {
 
         {wiz === 'volumes' && <>
           <div className="intro">
-            <h1>Объёмы по группам скважин</h1>
+            <h2>Объёмы по группам скважин</h2>
             <p>Программа берёт общий объём газа по объекту и раскладывает его по группам скважин и по скважинам внутри группы, так же как делал старый скрипт.
               В конце сверяет сумму с общим объёмом и показывает расхождения. Загрузите три вида файлов ниже.</p>
           </div>

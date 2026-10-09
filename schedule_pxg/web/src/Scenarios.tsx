@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import PageHead from './PageHead'
 import {
   AppState, BuildView, ScenarioInfo, ScenarioView, Season, buildScenario, createScenario, deleteScenario, expandPattern, getScenario,
   inheritScenario, percentBranches, scheduleUrl, setScenario,
@@ -67,6 +68,7 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
 
   return (
     <main className="workspace">
+      <PageHead title="Сценарии" lede="Основные сценарии и их ветви: у ветви хранятся только отличия от родителя." />
       <section className="card">
         <h2>Сценарии и ветви</h2>
         {st.scenarios.length === 0 && <p className="muted">Пока нет. Создайте основной сценарий: у него полные настройки, ветви хранят только отличия.</p>}

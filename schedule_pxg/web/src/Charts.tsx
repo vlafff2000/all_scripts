@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import PageHead from './PageHead'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { DataZoomComponent, GridComponent, TitleComponent, ToolboxComponent, TooltipComponent } from 'echarts/components'
@@ -120,6 +121,7 @@ export default function Charts({ st }: { st: AppState }) {
 
   return (
     <main className="workspace">
+      <PageHead title="Графики" lede="Расходы и накопленные объёмы по сценариям: проверьте, что сезоны стыкуются и объёмы похожи на ожидаемые." />
       <section className="card">
         <h2>Графики расходов и накопленных объёмов</h2>
         {st.scenarios.length === 0 ? <p className="muted">Сначала создайте сценарий с календарём сезонов (вкладка «Сценарии»).</p> : <>

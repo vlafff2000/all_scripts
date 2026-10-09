@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState } from 'react'
+import PageHead from './PageHead'
 import { AppState, HistoryBody, HistoryView, downloadHistoryLog, downloadHistorySchedule, pickFile, runHistory } from './api'
 
 const KINDS: Record<string, string> = { закачка: 'закачка', отбор: 'отбор', нейтральный: 'нейтральный' }
@@ -29,6 +30,7 @@ export default function History({ st }: { st: AppState }) {
 
   return (
     <main className="workspace">
+      <PageHead title="История" lede="Schedule по фактическим расходам: для расчёта на прошедший период." />
       <section className="card">
         <h2>Режим «история»</h2>
         <p className="muted small">Schedule по фактическим расходам из файлов осреднения (вкладка «Осреднение»). Два варианта сетки шагов — как у прежних скриптов.</p>
