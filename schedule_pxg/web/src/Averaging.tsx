@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import PageHead from './PageHead'
 import ColumnWizard from './ColumnWizard'
+import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
+import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 import {
   AppState, AvgDaily, AvgParams, AvgStatus, AvgView, AvgWellView, avgAdvice, avgChoose, avgExclude, avgManual, buildSources, getAvgDaily, getAvgStatus,
   getAveraging, getAveragingWell, setAvgParams,
 } from './api'
 
-const COLORS = ['#2f6fb0', '#c4622d', '#3f9a6a', '#8a5bb0', '#b09a2f', '#2f9aa8', '#b0426b', '#6b7a8a']
 const pct = (x: number | null | undefined, d = 1) => (x == null ? '—' : (x * 100).toFixed(d) + ' %')
 const fillCounts = (f: { how: string }[]) => f.reduce((a: Record<string, number>, x) => { a[x.how] = (a[x.how] || 0) + 1; return a }, {})
 const num = (s: string) => Number(s.replace(',', '.'))
@@ -19,55 +20,35 @@ function heat(v: number | null, max: number) {
   return 'hsl(' + Math.round(130 - 130 * t) + ', 55%, ' + Math.round(80 - 18 * t) + '%)'
 }
 
-function Lines({ w, onMonth }: { w: AvgWellView; onMonth: (m: string) => void }) {
-  const W = 560, H = 220, L = 44, B = 26, T = 10
-  const all = [...Object.values(w.byYear).flat(), ...w.mean].filter((x): x is number => x != null)
-  const max = Math.max(0.05, ...all) * 1.1
-  const X = (i: number) => L + (w.months.length < 2 ? (W - L - 10) / 2 : (i * (W - L - 10)) / (w.months.length - 1))
-  const Y = (v: number) => T + (H - T - B) * (1 - v / max)
-  const path = (vals: (number | null)[]) => vals.map((v, i) => (v == null ? '' : (i && vals[i - 1] != null ? 'L' : 'M') + X(i) + ',' + Y(v))).join('')
-  const used = new Set(w.chosen || [])
-  return (
-    <svg viewBox={'0 0 ' + W + ' ' + H} className="chart" role="img" aria-label="Доли скважины по годам и выбранное среднее">
-      {[0, .25, .5, .75, 1].map(t => <g key={t}><line x1={L} x2={W - 10} y1={Y(max * t)} y2={Y(max * t)} stroke="var(--line)" />
-        <text x={L - 6} y={Y(max * t) + 4} textAnchor="end" fontSize="11" fill="var(--muted)">{(max * t * 100).toFixed(0)}%</text></g>)}
-      {w.months.map((m, i) => <text key={m} x={X(i)} y={H - 8} textAnchor="middle" fontSize="11" fill="var(--muted)" style={{ cursor: 'pointer' }} onClick={() => onMonth(m)}>{m.slice(0, 3)}</text>)}
-      {w.years.map((y, k) => <path key={y} d={path(w.byYear[String(y)])} fill="none" stroke={COLORS[k % COLORS.length]}
-        strokeWidth={used.has(y) ? 1.8 : 1} strokeDasharray={used.has(y) ? undefined : '4 3'} opacity={used.has(y) ? 1 : .55} />)}
-      <path d={path(w.mean)} fill="none" stroke="var(--ink)" strokeWidth="3.5" />
-      {w.months.map((m, i) => w.manual[m] != null && <circle key={m} cx={X(i)} cy={Y(w.manual[m])} r="5" fill="var(--warn)" stroke="var(--surface)"><title>правлено вручную: {pct(w.manual[m])}</title></circle>)}
-    </svg>
-  )
+const pc = (vals: (number | null)[]) => vals.map(v => (v == null ? null : v * 100))
+
+/** Доли скважины по месяцам: линия на год, выбранное среднее жирно, правки вручную — точки (общий график, как в Газовом Атласе). */
+function Lines({ w }: { w: AvgWellView }) {
+  const chart = useMemo(() => {
+    const used = new Set(w.chosen || [])
+    const series = w.years.map((y, k) => mkSeries({
+      name: String(y) + (w.autoExcluded[String(y)] ? ' (простой)' : ''), slot: k, x: w.months, y: pc(w.byYear[String(y)]),
+      dashed: !used.has(y), width: used.has(y) ? 2 : 1.2, opacity: used.has(y) ? 1 : .6,
+    }))
+    series.push(mkSeries({ name: 'выбранное среднее', color: '#4a5a64', width: 3.5, x: w.months, y: pc(w.mean) }))
+    const man = w.months.filter(m => w.manual[m] != null)
+    if (man.length) series.push(mkSeries({ name: 'правка вручную', kind: 'points', color: '#d9480f', x: man, y: man.map(m => w.manual[m] * 100) }))
+    return mkChart('sched-avg-' + w.well, 'Доли скважины ' + w.well + ' по годам', mkAxis('Месяц', '', 'category', { categories: w.months }), mkAxis('Доля в группе', '%'), series)
+  }, [w])
+  return <ChartView chart={chart} excludeMode={false} onExclude={() => {}} />
 }
 
-function Legend({ w }: { w: AvgWellView }) {
-  return <div className="legend small">{w.years.map((y, k) => <span key={y}><i style={{ background: COLORS[k % COLORS.length] }} />{y}{w.autoExcluded[String(y)] ? ' (простой)' : ''}</span>)}
-    <span><i style={{ background: 'var(--ink)' }} />выбранное среднее</span></div>
-}
-
+/** Состав группы по месяцам: столбики-доли скважин. */
 function GroupBars({ v, group }: { v: AvgView; group: string }) {
-  const ws = Object.keys(v.groups[group] || {})
-  const W = 560, H = 190, L = 44, B = 26, T = 8
-  const bw = (W - L - 10) / Math.max(1, v.months.length)
-  return (
-    <svg viewBox={'0 0 ' + W + ' ' + H} className="chart" role="img" aria-label="Состав группы по месяцам">
-      {v.months.map((m, i) => {
-        let acc = 0
-        const sum = v.sums[group]?.[m] || 0
-        return <g key={m}>
-          {ws.map((w, k) => {
-            const s = (v.groups[group][w][m]?.share || 0) / (sum || 1)
-            const y0 = T + (H - T - B) * (1 - acc - s)
-            acc += s
-            return <rect key={w} x={L + i * bw + 3} width={bw - 6} y={y0} height={(H - T - B) * s} fill={COLORS[k % COLORS.length]} opacity={v.groups[group][w][m]?.manual ? 1 : .85}>
-              <title>{w}: {pct(s)}{v.groups[group][w][m]?.manual ? ' (вручную)' : ''}</title></rect>
-          })}
-          <text x={L + i * bw + bw / 2} y={H - 8} textAnchor="middle" fontSize="11" fill="var(--muted)">{m.slice(0, 3)}</text>
-        </g>
-      })}
-      {[0, .5, 1].map(t => <text key={t} x={L - 6} y={T + (H - T - B) * (1 - t) + 4} textAnchor="end" fontSize="11" fill="var(--muted)">{t * 100}%</text>)}
-    </svg>
-  )
+  const chart = useMemo(() => {
+    const ws = Object.keys(v.groups[group] || {})
+    const series = ws.map((w, k) => mkSeries({
+      name: w, kind: 'bar', slot: k, x: v.months, stack: 'состав',
+      y: v.months.map(m => ((v.groups[group][w][m]?.share || 0) / (v.sums[group]?.[m] || 1)) * 100),
+    }))
+    return mkChart('sched-comp-' + group, 'Состав группы ' + group + ' по месяцам', mkAxis('Месяц', '', 'category', { categories: v.months }), mkAxis('Доля', '%', 'value', { minimum: 0, maximum: 100 }), series)
+  }, [v, group])
+  return <ChartView chart={chart} excludeMode={false} onExclude={() => {}} />
 }
 
 const FILL_COLORS: Record<string, string> = { 'окно ±3 суток': '#e0b43a', 'окно ±7 суток': '#e08a3a', 'доля месяца': '#d4523a', 'поровну': '#8a5bb0' }
@@ -77,47 +58,25 @@ const METHOD_HELP: Record<string, string> = {
   recency: 'последний сезон весит больше предыдущих', trimmed: 'отбрасывает самый большой и самый малый сезон (от 3 сезонов)',
 }
 
-/** Суточный профиль долей скважин группы: линия на каждую скважину, сутки, заполненные запасными правилами, подсвечены полосами. */
+/** Суточный профиль долей скважин группы: линия на скважину; сутки, заполненные запасными правилами, отмечены на оси (события). */
 function DailyChart({ d, group }: { d: AvgDaily; group: string }) {
   const g = d.groups[group]
-  const [hover, setHover] = useState<number | null>(null)
-  if (!g) return null
-  const W = 760, H = 250, L = 46, B = 28, T = 10, R = 10
-  const names = Object.keys(g.wells)
-  const all = names.flatMap(w => g.wells[w]).filter((x): x is number => x != null)
-  const max = Math.max(0.05, ...all) * 1.1
-  const n = Math.max(2, d.days)
-  const X = (i: number) => L + (i * (W - L - R)) / (n - 1)
-  const Y = (v: number) => T + (H - T - B) * (1 - v / max)
-  const path = (vals: (number | null)[]) => vals.map((v, i) => (v == null ? '' : (i && vals[i - 1] != null ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1))).join('')
-  const ticks = (d.dates || []).map((x, i) => [x, i] as [string, number]).filter(([x]) => x.endsWith('-01'))
-  const bw = Math.max(1.5, (W - L - R) / n)
-  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    const r = e.currentTarget.getBoundingClientRect()
-    const x = ((e.clientX - r.left) / r.width) * W
-    setHover(Math.min(n - 1, Math.max(0, Math.round(((x - L) * (n - 1)) / (W - L - R)))))
-  }
-  const hv = hover != null ? names.map((w, k) => [w, g.wells[w][hover], k] as [string, number | null, number]).filter(x => x[1] != null) : []
-  const fill = hover != null ? g.filled.find(f => f.day === hover) : undefined
-  return (
-    <div>
-      <svg viewBox={'0 0 ' + W + ' ' + H} className="chart wide" role="img" aria-label="Суточные доли скважин группы" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
-        {g.filled.map(f => <rect key={f.day} x={X(f.day) - bw / 2} y={T} width={bw} height={H - T - B} fill={FILL_COLORS[f.how] || '#d4523a'} opacity=".28" />)}
-        {[0, .25, .5, .75, 1].map(t => <g key={t}><line x1={L} x2={W - R} y1={Y(max * t)} y2={Y(max * t)} stroke="var(--line)" />
-          <text x={L - 6} y={Y(max * t) + 4} textAnchor="end" fontSize="11" fill="var(--muted)">{(max * t * 100).toFixed(0)}%</text></g>)}
-        {ticks.map(([x, i]) => <g key={x}><line x1={X(i)} x2={X(i)} y1={H - B} y2={H - B + 4} stroke="var(--muted)" />
-          <text x={X(i)} y={H - 10} textAnchor="middle" fontSize="11" fill="var(--muted)">{MONTH_SHORT[Number(x.slice(5, 7)) - 1]}</text></g>)}
-        {names.map((w, k) => <path key={w} d={path(g.wells[w])} fill="none" stroke={COLORS[k % COLORS.length]} strokeWidth="1.6" />)}
-        {hover != null && <line x1={X(hover)} x2={X(hover)} y1={T} y2={H - B} stroke="var(--ink)" strokeDasharray="3 3" />}
-      </svg>
-      <div className="muted small" style={{ minHeight: 20 }}>
-        {hover != null ? <>Сутки {hover + 1}{d.dates ? ' (' + d.dates[hover].split('-').reverse().join('.') + ' в последнем выбранном сезоне)' : ''}: {hv.map(([w, v]) => w + ' ' + pct(v, 1)).join(' · ')}{fill ? ' · заполнено: ' + fill.how : ''}</> : 'Наведите курсор на график, чтобы увидеть доли скважин за сутки.'}
-      </div>
-      <div className="legend small">{names.map((w, k) => <span key={w}><i style={{ background: COLORS[k % COLORS.length] }} />{w}</span>)}</div>
-    </div>
-  )
+  const chart = useMemo(() => {
+    if (!g) return null
+    const names = Object.keys(g.wells)
+    const x = Array.from({ length: Math.max(2, d.days) }, (_, i) => i + 1)
+    const c = mkChart('sched-daily-' + group, 'Суточные доли скважин группы ' + group, mkAxis('Сутки сезона', 'сут'), mkAxis('Доля в группе', '%'),
+      names.map((w, k) => mkSeries({ name: w, slot: k, x, y: pc(g.wells[w]) })))
+    c.events = g.filled.map(f => ({ x: f.day + 1, label: 'заполнено: ' + f.how, kind: 'other' as const, well: '' }))
+    return c
+  }, [d, g, group])
+  if (!chart) return null
+  return <div>
+    <ChartView chart={chart} excludeMode={false} onExclude={() => {}} />
+    <p className="muted small">Сутки отсчитываются от старта сезона; отметки на оси — сутки, где данных не было и доли заполнены по запасному правилу (список ниже).
+      {d.dates ? ' Календарные даты — по последнему выбранному сезону.' : ''}</p>
+  </div>
 }
-const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
 
 export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppState) => void }) {
   const [kind, setKind] = useState('закачка')
@@ -260,9 +219,10 @@ export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppS
 
         {row && wv && <div className="card">
           <h2>Скважина {wv.well} <span className="muted small">группа {wv.group}</span></h2>
-          <Lines w={wv} onMonth={m => setEdit({ month: m, text: wv.manual[m] != null ? String(wv.manual[m] * 100) : '' })} />
-          <Legend w={wv} />
-          <div className="muted small">Тонкие линии — доли по годам (пунктир — год не в выбранной комбинации), толстая — итоговое среднее. Клик по названию месяца — задать долю вручную.</div>
+          <Lines w={wv} />
+          <div className="row small"><span className="muted">Поправить долю вручную, месяц:</span>
+            {wv.months.map(m => <button key={m} className="quiet" onClick={() => setEdit({ month: m, text: wv.manual[m] != null ? String(wv.manual[m] * 100) : '' })}>{m.slice(0, 3)}</button>)}</div>
+          <div className="muted small">Тонкие линии — доли по годам (пунктир — год не в выбранной комбинации), толстая — итоговое среднее. Кнопки месяцев под графиком — задать долю вручную.</div>
           {edit && <div className="row"><label>{edit.month}, доля %<input value={edit.text} onChange={e => setEdit({ ...edit, text: e.target.value })} /></label>
             <button className="primary" disabled={busy} onClick={() => act(() => avgManual(kind, wv.well, edit.month, num(edit.text) / 100)).then(() => setEdit(null))}>Задать вручную</button>
             <button disabled={busy} onClick={() => act(() => avgManual(kind, wv.well, edit.month, null)).then(() => setEdit(null))}>Убрать правку</button>
@@ -285,7 +245,6 @@ export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppS
         {g && <div className="card">
           <h2>Группа <select value={g} onChange={e => setGrp(e.target.value)}>{groups.map(x => <option key={x}>{x}</option>)}</select></h2>
           <GroupBars v={v} group={g} />
-          <div className="legend small">{Object.keys(v.groups[g] || {}).map((w, k) => <span key={w}><i style={{ background: COLORS[k % COLORS.length] }} />{w}</span>)}</div>
           <div className="muted small">Столбец — состав группы за месяц после нормировки на 100 %. Сумма долей до нормировки: {v.months.map(m => m.slice(0, 3) + ' ' + pct(v.sums[g]?.[m], 0)).join(' · ')}.</div>
         </div>}
         {v.exclusions.length > 0 && <div className="card"><h2>Исключённые годы</h2>

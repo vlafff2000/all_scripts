@@ -1,0 +1,30 @@
+/* Оболочка графика Атласа (рамка, кнопки, всплывающее меню) — выдержки из web/src/styles.css Атласа,
+   нужные ChartView вне Атласа. Рисование самого графика — chart.css (копия). */
+figure.chart { margin: 0; width: 100%; max-width: none; height: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 12px 6px; }
+.chart figcaption { font-weight: 700; font-size: 16px; padding: 0 4px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.chart-canvas { height: 380px; }
+.chart.exclude-mode { border-color: var(--danger-line); }
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 16px; }
+.chart-stack { display: grid; gap: 14px; }
+@media (max-width: 760px) { .chart-grid { grid-template-columns: 1fr; } }
+.chart button.quiet { background: none; border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 9px; color: var(--muted); cursor: pointer; font-size: 13px; }
+.chart button.quiet:hover { color: var(--ink); border-color: var(--line-strong); }
+.chart button.quiet.on { color: var(--accent-strong); border-color: var(--accent); background: var(--accent-soft); }
+.chart .download { position: relative; font-weight: 400; }
+.chart .popover {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; width: 280px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 8px 24px var(--shadow); padding: 10px; display: grid; gap: 8px; font-weight: 400;
+}
+.chart .popover.right { left: auto; right: 0; width: 220px; }
+.chart .popover-actions { display: flex; gap: 6px; }
+.chart .popover-actions button { flex: 1; background: var(--bg); border: 0; border-radius: var(--radius); padding: 5px; font-size: 13px; cursor: pointer; color: var(--ink); }
+.chart .popover-actions button:hover { background: var(--accent-soft); }
+.chart .popover-foot { font-size: 12px; color: var(--muted); display: grid; gap: 2px; margin: 0; }
+.chart .popover-hint { font-size: 11px; }
+.chart .inline-field { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.chart .popover .inline-field { justify-content: space-between; }
+.chart .inline-field select, .chart .inline-field input { border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 8px; background: var(--surface); color: var(--ink); }
+.chart .field-error { font-size: 12px; color: var(--danger); margin: 0; }
+.chart .search { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; }
+.tip-go { margin-top: 6px; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--line-strong); background: transparent; color: var(--accent, inherit); cursor: pointer; }
