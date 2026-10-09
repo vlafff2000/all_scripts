@@ -1,3 +1,4 @@
+import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 export interface Template {
   name: string; sheet: string | number | null; header_row: number
   well: string; date: string; rate: string; hourly: string; hours: string; kind: string; group: string; kind_default: string; unit: string; layout?: string
@@ -52,7 +53,8 @@ export const getPreview = (path: string, sheet?: string, headerRow?: number) => 
 export const runTrial = (path: string, template: Template) => call<Trial>('/api/trial', post({ path, template }))
 export const saveTemplate = (template: Template) => call<AppState>('/api/template', post({ template }))
 export const deleteTemplate = (name: string) => call<AppState>('/api/template/delete', post({ name }))
-export const pickFile = (start: string) => call<{ path: string }>('/api/pick?start=' + encodeURIComponent(start))
+// Свой проводник вместо окна Tk; результат того же вида, пустой путь — отмена.
+export const pickFile = async (start: string) => ({ path: (await openFilePicker({ start })) || '' })
 export const readTechMap = (path: string, name: string, kind: string) => call<TechMapView>('/api/techmap/read', post({ path, name, kind }))
 export const getTechMap = (name: string) => call<TechMapView>('/api/techmap?name=' + encodeURIComponent(name))
 export const saveTechMap = (techmap: TechMapData, overwrite: boolean) => call<AppState>('/api/techmap/save', post({ techmap, overwrite }))
