@@ -74,3 +74,37 @@ def test_api(tmp_path, monkeypatch):
     assert c.get("/api/results/series", params={"scenario": "Базовый", "keyword": "XXX"}).status_code == 404
     c.post("/api/results/attach", json={"scenario": "Базовый", "path": ""})
     assert c.get("/api/results/series", params={"scenario": "Базовый", "keyword": "WBHP"}).status_code == 404
+
+
+def test_indicators(tmp_path, monkeypatch):
+    pytest.importorskip("starlette")
+    from starlette.testclient import TestClient
+    from schedule_pxg import api
+    from tests.test_tnav_indicators import PORV, SG, _egrid, _unrst
+    mdl = tmp_path / "m"
+    mdl.mkdir()
+    _egrid(mdl / "M.EGRID")
+    (mdl / "M.INIT").write_bytes(_blk("PORV", "REAL", PORV))
+    sg2 = [min(1.0, v + 0.1) if v else 0.0 for v in SG]
+    _unrst(mdl / "M.UNRST", [SG, sg2], [[100.0] * 12, [200.0] * 12])
+    rows, notes = results.indicators(str(mdl), threshold=0.3)
+    assert [r["date"] for r in rows] == ["2026-01-01", "2026-02-01"] and rows[1]["gas_pore_volume"] > rows[0]["gas_pore_volume"]
+    assert rows[0]["gwc_min"] is not None and rows[0]["columns"] > 0
+    one, _ = results.indicators(str(mdl), [dt.datetime(2026, 1, 25)], 0.3)       # ближайший шаг к дате
+    assert [r["date"] for r in one] == ["2026-02-01"]
+    with pytest.raises(ValueError):
+        results.indicators(str(mdl), threshold=1.5)
+    with pytest.raises(ValueError):
+        results.indicators(str(tmp_path / "m" / "none"))
+
+    folder = str(tmp_path / "proj")
+    monkeypatch.setattr(api, "FOLDER", folder)
+    p = Project()
+    p.scenarios = {"Базовый": {"parent": None, "values": {}}}
+    p.results = {"Базовый": str(mdl)}
+    p.save(folder)
+    c = TestClient(api.build_app())
+    r = c.get("/api/results/indicators", params={"scenario": "Базовый", "sg": "0.3", "dates": "2026-01-02"}).json()
+    assert [x["date"] for x in r["rows"]] == ["2026-01-01"]
+    assert c.get("/api/results/indicators", params={"scenario": "Базовый", "dates": "не дата"}).status_code == 400
+    assert c.get("/api/results/indicators", params={"scenario": "Нет"}).status_code == 404

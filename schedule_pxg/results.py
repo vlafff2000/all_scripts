@@ -92,3 +92,35 @@ def describe(path: str) -> dict:
         s = read_summary(f["SMSPEC"], f["UNSMRY"])
         info.update(start=str(s.dates[0].date()) if s.dates else None, end=str(s.dates[-1].date()) if s.dates else None, steps=len(s.dates))
     return info
+
+
+def indicators(path: str, dates: Optional[Sequence[dt.datetime]] = None, threshold: Optional[float] = None) -> Tuple[List[dict], List[str]]:
+    """Газонасыщенный поровый объём и ГВК (min/среднее/среднее по площади/max) по датам.
+
+    dates — нужные даты (берётся ближайший шаг рестарта); без дат — все шаги UNRST. Порог Sg по умолчанию 0,01.
+    Возвращает (строки, предупреждения модели: LGR и т. п.). Нужны EGRID, INIT и UNRST с SGAS. Кубы читаются по одному шагу, поэтому большой UNRST целиком в память не попадает.
+    """
+    from tnav_results.indicators import DEFAULT_SG_THRESHOLD, indicators_over_time, load_model, pick_step
+    from tnav_results import iter_restart_steps
+
+    f = find_files(path)
+    miss = [k for k in ("EGRID", "INIT", "UNRST") if k not in f]
+    if miss:
+        raise ValueError("Для показателей нужны файлы %s (не найдены: %s)" % (", ".join(("EGRID", "INIT", "UNRST")), ", ".join(miss)))
+    th = DEFAULT_SG_THRESHOLD if threshold is None else float(threshold)
+    if not 0 <= th < 1:
+        raise ValueError("Порог Sg должен быть от 0 до 1")
+    model = load_model(f["EGRID"])
+    steps = None
+    if dates:
+        all_steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
+        picked = {pick_step(all_steps, d).seqnum: pick_step(all_steps, d) for d in dates}
+        steps = [picked[k] for k in sorted(picked)]
+    rows = indicators_over_time(model, f["INIT"], f["UNRST"], th, steps=steps)
+    if not rows:
+        raise ValueError("В UNRST нет SGAS: газонасыщенность не записана")
+    out = []
+    for d, v, g in rows:
+        out.append({"date": str(d.date()) if d else "", "gas_pore_volume": v.total, "cells": v.cells, "columns": g.columns,
+                    "gwc_min": g.min, "gwc_mean": g.mean, "gwc_mean_area": g.mean_area, "gwc_max": g.max})
+    return out, list(model.notes)
