@@ -145,12 +145,18 @@ export interface StrategyView {
   totals: { groups: Record<string, number>; months: Record<string, number>; season: number }
   base_totals: { groups: Record<string, number>; months: Record<string, number>; season: number }
   changes: { months: Record<string, number>; season: number }
+  target: number; residual: number; percents: Record<string, number>; locks: [string, string][]
 }
+export interface StrategyExtra { group?: string; month?: string; value?: number; groups?: string[]; months?: string[]; mode?: string }
+export interface CopyReport { index: number; year: number; techmap: string; moved: number; skipped: string[]; delta: number; message: string }
 export const getStrategy = (name: string, index: number) => call<StrategyView>('/api/strategy?name=' + encodeURIComponent(name) + '&index=' + index)
-export const strategyOp = (name: string, index: number, table: StrategyTable, op: string, extra: { group?: string; month?: string; value?: number } = {}) =>
-  call<StrategyView>('/api/strategy/op', post({ name, index, table, op, ...extra }))
-export const saveStrategy = (name: string, index: number, table: StrategyTable | null, all: boolean) =>
-  call<AppState>('/api/strategy/save', post({ name, index, table, all }))
+export const strategyOp = (name: string, index: number, table: StrategyTable, op: string, extra: StrategyExtra = {},
+  locks: [string, string][] = [], target?: number) =>
+  call<StrategyView>('/api/strategy/op', post({ name, index, table, op, locks, target, ...extra }))
+export const saveStrategy = (name: string, index: number, table: StrategyTable | null, all: boolean, locks: [string, string][] = []) =>
+  call<AppState>('/api/strategy/save', post({ name, index, table, all, locks }))
+export const copyStrategy = (name: string, index: number, table: StrategyTable, locks: [string, string][], targets: number[]) =>
+  call<AppState & { report: CopyReport[] }>('/api/strategy/copy', post({ name, index, table, locks, targets }))
 export const loadStrategy = (name: string, path: string) => call<{ state: AppState; report: string[] }>('/api/strategy/load', post({ name, path }))
 export const downloadStrategy = (name: string) => download('/api/strategy/xlsx', { name }, 'strategy.xlsx')
 export interface SourcesView {
