@@ -42,6 +42,7 @@ class Project:
         self.outages: List[dict] = []  # отключения скважин (outages.Outage.to_dict)
         self.control: dict = {}  # режим управления и лимиты (control.Control.to_dict)
         self.scenarios: dict = {}  # сценарии и ветви (scenarios.Scenarios.to_dict)
+        self.results: Dict[str, str] = {}  # сценарий -> путь к модели с результатами расчёта (results.py)
         self.averaging: dict = {}  # выбор комбинаций лет, исключения, ручные доли (averaging.Averaging.to_dict)
 
     # скважины
@@ -127,6 +128,7 @@ class Project:
         _write_json(os.path.join(folder, "control.json"), self.control)
         _write_json(os.path.join(folder, "scenarios.json"), self.scenarios)
         _write_json(os.path.join(folder, "averaging.json"), self.averaging)
+        _write_json(os.path.join(folder, "results.json"), self.results)
 
     @classmethod
     def load(cls, folder: str) -> "Project":
@@ -143,4 +145,5 @@ class Project:
         p.control = _read_json(os.path.join(folder, "control.json"), {})
         p.scenarios = _read_json(os.path.join(folder, "scenarios.json"), {})
         p.averaging = _read_json(os.path.join(folder, "averaging.json"), {})
+        p.results = _read_json(os.path.join(folder, "results.json"), {})
         return p
