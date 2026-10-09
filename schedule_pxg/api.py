@@ -5,6 +5,8 @@ import csv
 import datetime as dt
 import io
 import os
+
+from pxg_core import fs_browse
 import subprocess
 import sys
 from pathlib import Path
@@ -813,6 +815,7 @@ def build_app() -> Starlette:
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
         Route("/api/pick", pick),
+        *fs_browse.routes(),
         Route("/api/check", check_export, methods=["POST"]),
     ]
     if DIST.is_dir():
