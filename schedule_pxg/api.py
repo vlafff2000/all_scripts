@@ -441,7 +441,7 @@ async def scenario_build(request: Request):
     p, b = await run_in_threadpool(_build, name)
     return JSONResponse({"seasons": b.seasons, "gaps": b.gaps, "notes": b.notes, "stitch": b.stitch_issues(), "steps": len(b.steps),
                          "over": len(b.over()), "rows": len(b.rows),
-                         "shares": ("доли скважин — из осреднения истории (файлов: %d)" % len(avg_view.sources(p)) if avg_view.sources(p)
+                         "shares": ("доли скважин — из осреднения истории (файлов: %d)" % len(sources.flow_paths(p)) if sources.flow_paths(p)
                                     else "доли скважин поровну в группе: файлы истории для осреднения не заданы")})
 
 
@@ -489,10 +489,10 @@ async def charts_get(request: Request):
 
 
 def _history_run(body: dict):
-    """Шаги истории по настройкам запроса: files (иначе файлы осреднения), mode, dates_file/dates, periods_file/periods,
-    pzrg_file, split (по умолчанию «54/80»), stitch — имя сценария, к которому сшивается прогноз."""
+    """Шаги истории по настройкам запроса: files (иначе база расходов проекта), mode, dates_file/dates, periods_file/periods,
+    pzrg_file (иначе эталонный суточный объём проекта), split (по умолчанию «54/80»), stitch — имя сценария, к которому сшивается прогноз."""
     p = _project()
-    files = [_clean(f) for f in (body.get("files") or avg_view.sources(p))]
+    files = [_clean(f) for f in (body.get("files") or sources.flow_paths(p))]
     if not files:
         raise ValueError("Не заданы файлы истории")
     miss = [f for f in files if not os.path.isfile(f)]
@@ -521,7 +521,8 @@ def _history_run(body: dict):
     if ptxt:
         periods, n = historymode.parse_periods(ptxt)
         notes += n
-    pz = historymode.read_pzrg(_clean(body["pzrg_file"])) if body.get("pzrg_file") else None
+    # эталон: файл запроса, иначе «Эталонный суточный объём» проекта
+    pz = historymode.read_pzrg(_clean(body["pzrg_file"])) if body.get("pzrg_file") else sources.pzrg_from_project(p)
     split = body.get("split")
     res = historymode.build_history(df, p, mode, dates, periods, pz, split=split if isinstance(split, dict) else None)
     res.notes = notes + res.notes
@@ -552,7 +553,7 @@ async def history_build(request: Request):
                          "correction": historymode.log_summary(res.log) if res.log else None,
                          "log": res.log[:200], "stitch": historymode.stitch_issues(steps) if stitch else [],
                          "table": _steps_table(steps), "volumes": _kind_volumes(steps),
-                         "sources": [os.path.basename(f) for f in (body.get("files") or avg_view.sources(p))]})
+                         "sources": [os.path.basename(f) for f in (body.get("files") or sources.flow_paths(p))]})
 
 
 def _steps_table(steps, limit: int = 300) -> list:
@@ -688,11 +689,12 @@ async def sources_build(request: Request):
                              issues=[{"level": i.level, "message": i.message, "well": getattr(i, "well", "")} for i in rep.issues[:200]]))
 
 
-async def averaging_sources(request: Request):
+async def averaging_params(request: Request):
+    """Параметры осреднения; источник истории задаётся в /api/sources/set."""
     b = await request.json()
     p = _project()
     try:
-        avg_view.set_sources(p, [_clean(x) for x in b.get("paths") or [] if _clean(x)], b.get("params"))
+        avg_view.set_params(p, b.get("params") or {})
     except ValueError as e:
         return _err(str(e))
     p.save(FOLDER)
@@ -889,7 +891,7 @@ def build_app() -> Starlette:
         Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),
-        Route("/api/averaging/sources", averaging_sources, methods=["POST"]),
+        Route("/api/averaging/params", averaging_params, methods=["POST"]),
         Route("/api/averaging/choose", averaging_choose, methods=["POST"]),
         Route("/api/averaging/advice", averaging_advice, methods=["POST"]),
         Route("/api/averaging/exclude", averaging_exclude, methods=["POST"]),
