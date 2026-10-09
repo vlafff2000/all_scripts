@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import averaging as av
 from . import forecast as fc
-from . import history
+from . import sources as src
 from . import techmap as tmod
 from .project import Project
 
@@ -19,7 +19,7 @@ _cache: Dict[tuple, "av.Averaging"] = {}
 
 
 def sources(p: Project) -> List[str]:
-    return [str(s) for s in (p.averaging.get("sources") or [])]
+    return src.flow_paths(p)
 
 
 def params(p: Project) -> dict:
@@ -34,10 +34,8 @@ def months_of(p: Project, kind: str) -> List[str]:
 
 
 def set_sources(p: Project, paths: List[str], prm: Optional[dict] = None) -> None:
-    bad = [s for s in paths if not os.path.isfile(s)]
-    if bad:
-        raise ValueError("Файл не найден: %s" % ", ".join(bad))
-    p.averaging["sources"] = list(paths)
+    fl = p.sources.get("flows") or {}
+    src.set_flows(p, paths, fl.get("template", ""), fl.get("kind_default", ""))
     if prm:
         cur = params(p)
         for k in ("max_years", "last_k"):
@@ -67,8 +65,7 @@ def get(p: Project, kind: str) -> "av.Averaging":
            tuple(sorted((w, g) for w, g in p.well_group.items())), tuple((w, tuple(d.get("synonyms", ()))) for w, d in sorted(p.wells.items())))
     base = _cache.get(key)
     if base is None:
-        tpls = [history.Template.from_dict(t) for t in p.templates.values()]
-        hist = history.import_files(paths, kind, tpls)
+        hist = src.load_project_history(p, kind)
         base = av.Averaging.from_history(hist, p, months, kind, max_years=prm["max_years"], last_k=prm["last_k"], metric=prm["metric"])
         _cache.clear()
         _cache[key] = base
