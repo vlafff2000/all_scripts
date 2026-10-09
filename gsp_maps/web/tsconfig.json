@@ -12,7 +12,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "types": ["vite/client"],
-    "paths": { "react": ["./node_modules/@types/react"], "react/*": ["./node_modules/@types/react/*"], "react-dom/*": ["./node_modules/@types/react-dom/*"] }
+    "paths": { "react": ["./node_modules/@types/react"], "react/*": ["./node_modules/@types/react/*"], "react-dom/*": ["./node_modules/@types/react-dom/*"], "echarts": ["./node_modules/echarts"], "echarts/*": ["./node_modules/echarts/*"] }
   },
-  "include": ["src", "vite.config.ts", "../../pxg_core/web-ui/*.tsx"]
+  "include": ["src", "vite.config.ts", "../../pxg_core/web-ui/*.tsx", "../../pxg_core/web-ui/chart/*.ts", "../../pxg_core/web-ui/chart/*.tsx"]
 }
