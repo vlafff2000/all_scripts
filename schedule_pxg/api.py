@@ -9,6 +9,7 @@ import os
 from pxg_core import fs_browse
 import subprocess
 import sys
+from urllib.parse import quote
 from pathlib import Path
 
 from starlette.applications import Starlette
@@ -20,7 +21,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, charts, checks, control, forecast, history, historymode, results, scenarios, sources, strategy, strategy_ops, techmap, totals, wizard
+from . import avg_view, charts, checks, control, forecast, history, historymode, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -648,8 +649,15 @@ async def averaging_well(request: Request):
 
 
 def _sources_view(p: Project) -> dict:
+    daily = None
+    if (p.sources.get("daily_total") or {}).get("path"):
+        try:
+            df = sources.load_daily_total(p)
+            daily = {"days": len(df), "from": str(df["Дата"].min().date()) if len(df) else "", "to": str(df["Дата"].max().date()) if len(df) else ""}
+        except Exception as e:
+            daily = {"days": 0, "from": "", "to": "", "error": str(e)}
     return {"sources": p.sources, "wells": len(p.wells), "groups": len(p.groups),
-            "withoutGroup": len(p.wells_without_group())}
+            "withoutGroup": len(p.wells_without_group()), "techmaps": len(p.techmaps), "daily": daily}
 
 
 async def sources_get(request: Request):
@@ -675,6 +683,16 @@ async def sources_set(request: Request):
         return _err(str(e))
     p.save(FOLDER)
     return JSONResponse(_sources_view(p))
+
+
+async def sources_sample(request: Request):
+    """Образец файла разбивки скважин на группы: два столбца «Скважина» и «Группа»."""
+    import io
+    import pandas as pd
+    buf = io.BytesIO()
+    pd.DataFrame({"Скважина": ["101", "102", "103", "201", "202"], "Группа": ["ГСП 1", "ГСП 1", "ГСП 1", "СП 2", "СП 2"]}).to_excel(buf, index=False)
+    return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename*=UTF-8''%s" % quote("Образец_разбивки_на_группы.xlsx")})
 
 
 async def sources_build(request: Request):
@@ -734,32 +752,6 @@ async def averaging_manual(request: Request):
         else:
             a.set_manual(w, m, float(b["share"]))
     return await run_in_threadpool(_avg_call, act, _avg_kind(request, b), True)
-
-
-async def check_export(request: Request):
-    """Кнопка «Проверочный Excel»: файлы по группам скважин и сводка по общим объёмам газа."""
-    b = await request.json()
-    tot, app = _clean(b.get("totals")), _clean(b.get("approved"))
-    gsp = [_clean(x) for x in (b.get("gsp") or []) if _clean(x)]
-    for label, path in [("общих объёмов", tot), ("утверждённых объёмов", app)] + [("по группе скважин", g) for g in gsp]:
-        if not os.path.isfile(path):
-            return _err("Не нашли файл %s: %s. Проверьте путь или выберите файл заново." % (label, path), 404)
-    if not gsp:
-        return _err("Добавьте хотя бы один файл по группам скважин")
-    mode = b.get("mode") if b.get("mode") in (totals.INJ, totals.PROD) else totals.INJ
-    try:
-        year = int(b.get("year"))
-    except (TypeError, ValueError):
-        return _err("Год начала сезона должен быть числом, например 2025")
-    folder = _clean(b.get("folder")) or os.path.join(FOLDER, "Проверка")
-    try:
-        r = await run_in_threadpool(totals.build_check, tot, app, gsp, mode, year, folder)
-    except Exception as e:
-        return _err("Не получилось создать проверочный Excel (%s). Проверьте, что файлы выбраны верно." % e, 500)
-    rep = r["issues"]
-    return JSONResponse({"folder": folder, "files": [os.path.basename(f) for f in r["files"]], "summary": r["summary"],
-                         "days": r["days"], "maxDevPct": r["max_dev_pct"], "ok": bool(r["files"]),
-                         "issues": [{"level": i.level, "message": i.message} for i in rep.issues[:20]]})
 
 
 async def results_get(request: Request):
@@ -874,7 +866,7 @@ def build_app() -> Starlette:
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
         *fs_browse.routes(),
-        Route("/api/check", check_export, methods=["POST"]),
+        Route("/api/sources/sample", sources_sample),
     ]
     if DIST.is_dir():
         routes.append(Mount("/", StaticFiles(directory=str(DIST), html=True)))

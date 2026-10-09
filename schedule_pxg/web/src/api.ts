@@ -140,9 +140,17 @@ export const saveStrategy = (name: string, index: number, table: StrategyTable |
   call<AppState>('/api/strategy/save', post({ name, index, table, all }))
 export const loadStrategy = (name: string, path: string) => call<{ state: AppState; report: string[] }>('/api/strategy/load', post({ name, path }))
 export const downloadStrategy = (name: string) => download('/api/strategy/xlsx', { name }, 'strategy.xlsx')
-export interface CheckInput { totals: string; approved: string; gsp: string[]; mode: string; year: number; folder: string }
-export interface CheckResult { folder: string; files: string[]; summary: string | null; days: number; maxDevPct: number; ok: boolean; issues: { level: string; message: string }[] }
-export const runCheck = (b: CheckInput) => call<CheckResult>('/api/check', post(b))
+export interface SourcesView {
+  sources: { flows?: { paths: string[]; template: string; kind_default: string }; groups?: { mode: 'file' | 'column'; path: string }; daily_total?: { path: string; unit: string } }
+  wells: number; groups: number; withoutGroup: number; techmaps: number
+  daily: { days: number; from: string; to: string; error?: string } | null
+}
+export interface SourcesCheck extends SourcesView { summary: string; issues: { level: string; message: string; well: string }[] }
+export const getSources = () => call<SourcesView>('/api/sources')
+export const setSources = (body: { flows?: { paths: string[]; template?: string; kind_default?: string }; groups?: { mode: string; path: string }; daily_total?: { path: string; unit: string } }) =>
+  call<SourcesView>('/api/sources/set', post(body))
+export const buildSources = () => call<SourcesCheck>('/api/sources/build', post({}))
+export const pickFiles = async (start: string) => ((await openFilePicker({ start, mode: 'files' })) || '').split('\n').filter(Boolean)
 
 export interface ResultsInfo {
   scenario: string; path: string; files: Record<string, string>; missing: string[]; start: string | null; end: string | null; steps: number

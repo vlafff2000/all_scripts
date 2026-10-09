@@ -136,6 +136,13 @@ def test_api_flow_builds_wells_for_empty_project(tmp_path, monkeypatch):
     r = c.post("/api/sources/build").json()
     assert r["wells"] == 3 and r["groups"] == 1 and r["withoutGroup"] == 0
     assert c.post("/api/sources/set", json={"flows": {"paths": ["/нет/файла.xlsx"]}}).status_code == 400
+    assert r["techmaps"] == len(p.techmaps) and r["daily"] is None
+    sample = c.get("/api/sources/sample")                 # образец формата разбивки читается тем же чтением
+    assert sample.status_code == 200
+    f = tmp_path / "образец.xlsx"
+    f.write_bytes(sample.content)
+    assert src.read_groups_file(str(f)) == {"101": ["ГСП 1"], "102": ["ГСП 1"], "103": ["ГСП 1"], "201": ["СП 2"], "202": ["СП 2"]}
+    assert c.post("/api/check", json={}).status_code in (404, 405)   # проверочного Excel в импорте больше нет
     v = c.get("/api/averaging", params={"kind": "закачка"})
     assert v.status_code == 200 and {w["well"] for w in v.json()["wells"]} == {"101", "102", "215"}
 

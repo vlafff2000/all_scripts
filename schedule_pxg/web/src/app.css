@@ -97,3 +97,10 @@ button.danger:hover:not(:disabled) { background: var(--danger-soft); }
 /* флажки и переключатели стоят в строке с подписью, а не над ней */
 label:has(> input[type='checkbox']), label:has(> input[type='radio']) { flex-direction: row; align-items: center; gap: 8px; }
 input[type='checkbox'], input[type='radio'] { width: 16px; height: 16px; accent-color: var(--accent-strong); }
+.src-help { margin: 6px 0 0; max-width: 90ch; }
+.src-status { margin: 4px 0 0; }
+.row.between { justify-content: space-between; align-items: center; }
+a.btn { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-decoration: none; font: inherit; }
+a.btn:hover { border-color: var(--accent); }
+.wizard { display: flex; flex-direction: column; gap: 10px; }
+.src-help a { color: var(--accent-strong); }
