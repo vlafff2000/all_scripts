@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+
+from pxg_core import fs_browse
 import subprocess
 import sys
 from pathlib import Path
@@ -179,6 +181,7 @@ def build_app() -> Starlette:
         Route("/api/export", export, methods=["POST"]),
         Route("/api/image", save_image, methods=["POST"]),
         Route("/api/pick", pick),
+        *fs_browse.routes(),
         Route("/api/open-folder", open_folder, methods=["POST"]),
         Route("/api/files/{name:path}", files),
     ]
