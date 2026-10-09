@@ -1,3 +1,4 @@
+import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 export interface ParamOption { value: string; label: string }
 export interface Param {
   id: string; label: string; kind: 'folder' | 'file' | 'paths' | 'lines' | 'choice' | 'bool' | 'text'
@@ -30,8 +31,8 @@ export const getJob = (id: string, since: number) => call<Job>(`/api/jobs/${id}?
 export const fileUrl = (id: string, name: string) =>
   `/api/jobs/${id}/files/${name.split('/').map(encodeURIComponent).join('/')}`
 export const getJobs = () => call<{ jobs: Job[] }>('/api/jobs').then(r => r.jobs)
-export const pickPath = (kind: 'folder' | 'file', start: string) =>
-  call<{ path: string }>(`/api/pick?kind=${kind}&start=${encodeURIComponent(start)}`).then(r => r.path)
+// Свой проводник вместо окна Tk; пустая строка — отмена.
+export const pickPath = async (kind: 'folder' | 'file', start: string) => (await openFilePicker({ start, mode: kind })) || ''
 export const openFolder = (id: string) => call<{ ok: boolean }>(`/api/jobs/${id}/open`, { method: 'POST' })
 
 export interface QcIssue {

@@ -762,25 +762,6 @@ async def check_export(request: Request):
                          "issues": [{"level": i.level, "message": i.message} for i in rep.issues[:20]]})
 
 
-_PICK = (
-    "import sys, tkinter\nfrom tkinter import filedialog\n"
-    "start = sys.argv[1]\n"
-    "root = tkinter.Tk(); root.withdraw(); root.attributes('-topmost', True)\n"
-    "opts = {'initialdir': start} if start else {}\n"
-    "out = filedialog.askopenfilename(filetypes=[('Таблицы Excel', '*.xlsx *.xlsm *.xls'), ('Все файлы', '*.*')], **opts)\n"
-    "sys.stdout.buffer.write((out or '').encode('utf-8'))\n"
-)
-
-
-def _pick(start: str) -> str:
-    start = start if start and os.path.isdir(start) else (os.path.dirname(start) if start and os.path.isdir(os.path.dirname(start)) else "")
-    done = subprocess.run([sys.executable, "-c", _PICK, start], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=900)
-    if done.returncode != 0:
-        lines = done.stderr.decode("utf-8", "replace").strip().splitlines()
-        raise RuntimeError(lines[-1] if lines else "диалог недоступен")
-    return done.stdout.decode("utf-8", "replace").strip()
-
-
 async def results_get(request: Request):
     p = _project()
     name = request.query_params.get("scenario") or ""
@@ -846,14 +827,6 @@ async def results_indicators(request: Request):
     return JSONResponse({"rows": rows, "notes": notes})
 
 
-async def pick(request: Request):
-    try:
-        path = await run_in_threadpool(_pick, request.query_params.get("start") or "")
-    except Exception as e:
-        return _err("Окно выбора недоступно (%s). Введите путь вручную." % e, 501)
-    return JSONResponse({"path": os.path.normpath(path) if path else ""})
-
-
 def build_app() -> Starlette:
     routes = [
         Route("/api/state", state),
@@ -900,7 +873,6 @@ def build_app() -> Starlette:
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
-        Route("/api/pick", pick),
         *fs_browse.routes(),
         Route("/api/check", check_export, methods=["POST"]),
     ]

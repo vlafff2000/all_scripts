@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react'
 // Сборка попадает в gsp_maps/web/dist, её раздаёт сам сервер, Node пользователю не нужен.
 export default defineConfig({
   plugins: [react()],
+  // общие компоненты из pxg_core/web-ui берут react из node_modules приложения
+  resolve: { dedupe: ['react', 'react-dom'] },
   base: '/',
   server: { port: 5175, fs: { allow: ['../..'] }, proxy: { '/api': 'http://127.0.0.1:8767' } },
   build: { outDir: 'dist', emptyOutDir: true },

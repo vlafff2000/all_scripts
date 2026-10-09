@@ -10,8 +10,8 @@ interface Last { dir: string; recent: string[] }
 
 export interface PickerOptions {
   start?: string
-  /** 'file' — один файл, 'folder' — папка */
-  mode?: 'file' | 'folder'
+  /** 'file' — один файл, 'files' — несколько (вернётся по пути на строку), 'folder' — папка */
+  mode?: 'file' | 'files' | 'folder'
   /** расширения, которые показываем (без «Все файлы») */
   filter?: string
   title?: string
@@ -50,6 +50,8 @@ const icon = (it: Item) => (it.dir ? '📁' : /^(xlsx|xlsm|xls|ods)$/.test(it.ex
 
 function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) => void }) {
   const folderMode = opts.mode === 'folder'
+  const multi = opts.mode === 'files'
+  const [marked, setMarked] = useState<string[]>([])
   const [places, setPlaces] = useState<Place[]>([])
   const [recent, setRecent] = useState<string[]>([])
   const [list, setList] = useState<Listing | null>(null)
@@ -107,8 +109,10 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
   const activate = (it: Item) => {
     if (!list) return
     if (it.dir) { if (!it.locked) open(join(list.path, it.name)); return }
-    if (!folderMode) choose(join(list.path, it.name))
+    if (!folderMode) { multi ? toggle(it.name) : choose(join(list.path, it.name)) }
   }
+  const toggle = (name: string) => setMarked(m => (m.includes(name) ? m.filter(x => x !== name) : [...m, name]))
+  const chooseMany = () => { if (!list) return; const files = marked.map(n => join(list.path, n)); void remember({ dir: list.path, file: files[files.length - 1] }); done(files.join('\n')) }
   const resort = (k: 'name' | 'mtime' | 'size') => {
     const d = sort === k ? !desc : false
     setSort(k); setDesc(d); void load(dirRef.current, { sort: k, desc: d })
@@ -123,7 +127,8 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
     else if (e.key === 'Backspace' && list?.parent) { e.preventDefault(); open(list.parent) }
     else if (e.key === 'Enter') {
       e.preventDefault()
-      if (sel >= 0 && items[sel]) activate(items[sel])
+      if (multi && marked.length && !(sel >= 0 && items[sel]?.dir)) chooseMany()
+      else if (sel >= 0 && items[sel]) activate(items[sel])
       else if (folderMode && list) choose(list.path)
     }
   }
@@ -133,13 +138,13 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
   }, [sel])
 
   const cur = items[sel]
-  const canPick = folderMode ? !!list && !list.error : !!cur && !cur.dir
+  const canPick = folderMode ? !!list && !list.error : multi ? marked.length > 0 : !!cur && !cur.dir
 
   return (
     <div className="fp-back" onMouseDown={e => { if (e.target === e.currentTarget) close(null) }} onKeyDown={onKey}>
       <div className="fp-win" role="dialog" aria-label={opts.title || 'Выбор файла'}>
         <div className="fp-head">
-          <b>{opts.title || (folderMode ? 'Выбор папки' : 'Выбор файла')}</b>
+          <b>{opts.title || (folderMode ? 'Выбор папки' : multi ? 'Выбор файлов' : 'Выбор файла')}</b>
           <button className="fp-x" onClick={() => close(null)} aria-label="Закрыть">✕</button>
         </div>
         <div className="fp-bar">
@@ -178,8 +183,8 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
             {items.map((it, i) => (
               <div key={it.name} role="option" aria-selected={i === sel}
                 className={'fp-row' + (i === sel ? ' sel' : '') + (it.locked ? ' locked' : '')}
-                onClick={() => setSel(i)} onDoubleClick={() => activate(it)}>
-                <span className="fp-n" title={it.name}>{icon(it)} {it.name}{it.locked ? ' (нет доступа)' : ''}</span>
+                onClick={() => { setSel(i); if (multi && !it.dir) toggle(it.name) }} onDoubleClick={() => (multi && !it.dir ? undefined : activate(it))}>
+                <span className="fp-n" title={it.name}>{multi && !it.dir && <input type="checkbox" readOnly checked={marked.includes(it.name)} />} {icon(it)} {it.name}{it.locked ? ' (нет доступа)' : ''}</span>
                 <span className="fp-d">{it.mtime}</span>
                 <span className="fp-s">{it.dir ? '' : fmtSize(it.size)}</span>
               </div>))}
@@ -191,10 +196,10 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
           {!folderMode && <label><input type="checkbox" checked={all} onChange={e => { setAll(e.target.checked); void load(dirRef.current, { all: e.target.checked }) }} /> Все файлы</label>}
           <label><input type="checkbox" checked={hidden} onChange={e => { setHidden(e.target.checked); void load(dirRef.current, { hidden: e.target.checked }) }} /> Скрытые</label>
           <span className="fp-sp" />
-          <span className="fp-pick">{folderMode ? (list?.path || '') : cur && !cur.dir ? cur.name : ''}</span>
+          <span className="fp-pick">{folderMode ? (list?.path || '') : multi ? (marked.length ? 'Выбрано: ' + marked.length : '') : cur && !cur.dir ? cur.name : ''}</span>
           <button onClick={() => close(null)}>Отмена</button>
-          <button className="primary" disabled={!canPick} onClick={() => (folderMode ? list && choose(list.path) : cur && choose(join(list!.path, cur.name)))}>
-            {folderMode ? 'Выбрать эту папку' : 'Открыть'}</button>
+          <button className="primary" disabled={!canPick} onClick={() => (folderMode ? list && choose(list.path) : multi ? chooseMany() : cur && choose(join(list!.path, cur.name)))}>
+            {folderMode ? 'Выбрать эту папку' : multi ? 'Добавить' : 'Открыть'}</button>
         </div>
       </div>
     </div>

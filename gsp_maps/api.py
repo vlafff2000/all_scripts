@@ -138,36 +138,6 @@ async def open_folder(request: Request):
     return JSONResponse({"ok": True})
 
 
-_PICK = (
-    "import sys, tkinter\nfrom tkinter import filedialog\n"
-    "kind, start = sys.argv[1], sys.argv[2]\n"
-    "root = tkinter.Tk(); root.withdraw(); root.attributes('-topmost', True)\n"
-    "opts = {'initialdir': start} if start else {}\n"
-    "if kind == 'folder':\n    out = filedialog.askdirectory(mustexist=True, **opts)\n"
-    "elif kind == 'files':\n    out = '\\n'.join(filedialog.askopenfilenames(**opts))\n"
-    "else:\n    out = filedialog.askopenfilename(filetypes=[('Таблицы и тексты', '*.xlsx *.xlsm *.xls *.txt *.csv *.dat'), ('Все файлы', '*.*')], **opts)\n"
-    "sys.stdout.buffer.write((out or '').encode('utf-8'))\n"
-)
-
-
-def _pick(kind: str, start: str) -> str:
-    start = start if start and os.path.isdir(start) else (os.path.dirname(start) if start and os.path.isdir(os.path.dirname(start)) else "")
-    done = subprocess.run([sys.executable, "-c", _PICK, kind, start], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=900)
-    if done.returncode != 0:
-        lines = done.stderr.decode("utf-8", "replace").strip().splitlines()
-        raise RuntimeError(lines[-1] if lines else "диалог недоступен")
-    return done.stdout.decode("utf-8", "replace").strip()
-
-
-async def pick(request: Request):
-    kind = request.query_params.get("kind") or "file"
-    try:
-        path = await run_in_threadpool(_pick, kind, request.query_params.get("start") or "")
-    except Exception as e:
-        return _err("Окно выбора недоступно (%s). Введите путь вручную." % e, 501)
-    return JSONResponse({"path": "\n".join(os.path.normpath(p) for p in path.splitlines()) if path else ""})
-
-
 def build_app() -> Starlette:
     routes = [
         Route("/api/state", state),
@@ -180,7 +150,6 @@ def build_app() -> Starlette:
         Route("/api/summary", summary),
         Route("/api/export", export, methods=["POST"]),
         Route("/api/image", save_image, methods=["POST"]),
-        Route("/api/pick", pick),
         *fs_browse.routes(),
         Route("/api/open-folder", open_folder, methods=["POST"]),
         Route("/api/files/{name:path}", files),
