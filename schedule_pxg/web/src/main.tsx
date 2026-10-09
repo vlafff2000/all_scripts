@@ -6,6 +6,7 @@ import '@fontsource/pt-sans/latin-700.css'
 import './prefs'
 import App from './App'
 import '../../../pxg_core/web-ui/base.css'
+import '../../../pxg_core/web-ui/filepicker.css'
 import './styles.css'
 import './app.css'
 
