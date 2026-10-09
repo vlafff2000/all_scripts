@@ -3,7 +3,7 @@ export interface Template {
   well: string; date: string; rate: string; hourly: string; hours: string; kind: string; kind_default: string; unit: string
 }
 export interface AppState { folder: string; project: string; templates: Template[]; units: string[]; kinds: string[]; techmaps: TechMapInfo[]; scenarios: ScenarioInfo[] }
-export interface ScenarioInfo { name: string; parent: string | null; note: string; percent: number; seasons: number }
+export interface ScenarioInfo { name: string; parent: string | null; note: string; percent: number; seasons: number; results?: string }
 export type StrategyTable = Record<string, Record<string, number>>
 export interface Season { year: number; techmap: string; percent: number; label: string; volumes?: StrategyTable }
 export interface ScenarioValues {
@@ -140,3 +140,15 @@ export const downloadStrategy = (name: string) => download('/api/strategy/xlsx',
 export interface CheckInput { totals: string; approved: string; gsp: string[]; mode: string; year: number; folder: string }
 export interface CheckResult { folder: string; files: string[]; summary: string | null; days: number; maxDevPct: number; ok: boolean; issues: { level: string; message: string }[] }
 export const runCheck = (b: CheckInput) => call<CheckResult>('/api/check', post(b))
+
+export interface ResultsInfo {
+  scenario: string; path: string; files: Record<string, string>; missing: string[]; start: string | null; end: string | null; steps: number
+  vectors: { keyword: string; label: string; unit: string; objects: number }[]
+}
+export interface IndicatorRow { date: string; gas_pore_volume: number; cells: number; columns: number; gwc_min: number | null; gwc_mean: number | null; gwc_mean_area: number | null; gwc_max: number | null }
+export const getResults = (scenario: string) => call<ResultsInfo>('/api/results?scenario=' + encodeURIComponent(scenario))
+export const attachResults = (scenario: string, path: string) => call<{ scenario: string; path: string }>('/api/results/attach', post({ scenario, path }))
+export const getResultSeries = (scenario: string, keyword: string, objects: string[]) =>
+  call<{ keyword: string; series: Record<string, { dates: string[]; values: number[] }> }>('/api/results/series?' + new URLSearchParams({ scenario, keyword, objects: objects.join('|') }))
+export const getIndicators = (scenario: string, sg: string, dates: string[]) =>
+  call<{ rows: IndicatorRow[]; notes: string[] }>('/api/results/indicators?' + new URLSearchParams({ scenario, sg, dates: dates.join('|') }))

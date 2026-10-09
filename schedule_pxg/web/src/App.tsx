@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Averaging from './Averaging'
 import Charts from './Charts'
+import Results from './Results'
 import History from './History'
 import Scenarios from './Scenarios'
 import Strategies from './Strategies'
@@ -47,7 +48,7 @@ type Wiz = 'history' | 'volumes'
 
 export default function App() {
   const [wiz, setWiz] = useState<Wiz>('history')
-  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios' | 'strategies' | 'charts' | 'history'>('import')
+  const [tab, setTab] = useState<'import' | 'techmaps' | 'averaging' | 'scenarios' | 'strategies' | 'charts' | 'results' | 'history'>('import')
   const [st, setSt] = useState<AppState | null>(null)
   const [path, setPath] = useState('')
   const [pv, setPv] = useState<Preview | null>(null)
@@ -110,6 +111,7 @@ export default function App() {
           <button className={tab === 'scenarios' ? 'on' : ''} onClick={() => setTab('scenarios')}>Сценарии</button>
           <button className={tab === 'strategies' ? 'on' : ''} onClick={() => setTab('strategies')}>Стратегии</button>
           <button className={tab === 'charts' ? 'on' : ''} onClick={() => setTab('charts')}>Графики</button>
+          <button className={tab === 'results' ? 'on' : ''} onClick={() => setTab('results')}>Результаты расчёта</button>
           <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>История</button>
         </div>
         {tab === 'import' && <>
@@ -132,7 +134,7 @@ export default function App() {
         </>}
         {st && <p className="muted small">Проект: {st.folder}</p>}
       </aside>
-      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
+      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'results' && st ? <Results st={st} setSt={setSt} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : <main className="work">
         {msg && <p className="note warn">{msg}</p>}
         {wiz === 'history' && <>
           <div className="intro">
