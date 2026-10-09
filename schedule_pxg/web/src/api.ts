@@ -1,6 +1,6 @@
 export interface Template {
   name: string; sheet: string | number | null; header_row: number
-  well: string; date: string; rate: string; hourly: string; hours: string; kind: string; kind_default: string; unit: string
+  well: string; date: string; rate: string; hourly: string; hours: string; kind: string; kind_default: string; unit: string; layout?: string
 }
 export interface AppState { folder: string; project: string; templates: Template[]; units: string[]; kinds: string[]; techmaps: TechMapInfo[]; scenarios: ScenarioInfo[] }
 export interface ScenarioInfo { name: string; parent: string | null; note: string; percent: number; seasons: number; results?: string }

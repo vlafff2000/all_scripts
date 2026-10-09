@@ -17,6 +17,8 @@ from . import history
 from .history import Template
 from .project import Project
 
+LAYOUTS = ("table", "matrix", "matrix_t")
+
 # слова в заголовке → поле шаблона (порядок важен: «часовой расход» раньше «расход»)
 _HINTS = [
     ("hours", r"врем\w* работ|часы работ|^часы|hours"),
@@ -27,7 +29,8 @@ _HINTS = [
     ("kind", r"тип|вид|режим"),
 ]
 _UNIT_HINTS = [("тыс.м3/сут", r"тыс\.?\s*м[3³]\s*/\s*сут"), ("млн.м3/сут", r"млн\.?\s*м[3³]\s*/\s*сут"),
-               ("тыс.м3/ч", r"тыс\.?\s*м[3³]\s*/\s*ч"), ("м3/ч", r"м[3³]\s*/\s*ч")]
+               ("тыс.м3/ч", r"тыс\.?\s*м[3³]\s*/\s*ч"), ("м3/ч", r"м[3³]\s*/\s*ч"),
+               ("тыс.м3", r"тыс\.?\s*м[3³]"), ("млн.м3", r"млн\.?\s*м[3³]")]
 
 
 def _cell(v) -> str:
@@ -110,8 +113,10 @@ def template_from(d: dict) -> Template:
     elif isinstance(sheet, str) and sheet.isdigit():
         sheet = int(sheet)
     fields = {k: d[k] for k in ("name", "header_row", "well", "date", "rate", "hourly", "hours", "kind",
-                                "kind_default", "unit") if k in d}
+                                "kind_default", "unit", "layout") if k in d}
     fields["header_row"] = int(fields.get("header_row") or 0)
+    if fields.get("layout", "table") not in LAYOUTS:
+        raise ValueError("Неизвестный вид таблицы: %s" % fields["layout"])
     if not fields.get("name"):
         raise ValueError("Укажите название шаблона")
     if fields.get("unit", "м3/сут") not in history.UNITS:
@@ -124,10 +129,17 @@ def template_from(d: dict) -> Template:
 def trial(path: str, tpl: Template, sample: int = 12) -> dict:
     """Пробный импорт по шаблону: сколько строк, скважин, период, образец и замечания QC. Ничего не сохраняет."""
     rep = qc.Report("Пробный импорт")
-    if not tpl.well or not tpl.date:
-        raise ValueError("Выберите столбцы «Скважина» и «Дата»")
-    if not (tpl.rate or tpl.hourly):
-        raise ValueError("Выберите столбец расхода (суточного или часового)")
+    if tpl.layout == "matrix":
+        if not tpl.date:
+            raise ValueError("Выберите столбец «Дата»: остальные столбцы будут скважинами")
+    elif tpl.layout == "matrix_t":
+        if not tpl.well:
+            raise ValueError("Выберите столбец с названиями скважин: заголовки остальных должны быть датами")
+    else:
+        if not tpl.date:
+            raise ValueError("Выберите столбец «Дата»")
+        if not (tpl.rate or tpl.hourly):
+            raise ValueError("Выберите столбец расхода (суточного или часового)")
     df = history.read_by_template(path, tpl, rep)
     if df.empty:
         return {"rows": 0, "wells": 0, "from": "", "to": "", "sample": [], "kinds": {},

@@ -10,14 +10,14 @@ import { AppState, CheckResult, Preview, Template, Trial, deleteTemplate, getPre
 
 type Field = 'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind'
 const FIELDS: { key: Field; label: string; help: string; need?: boolean }[] = [
-  { key: 'well', label: 'Номер скважины', help: 'Столбец, где записан номер или название скважины.', need: true },
+  { key: 'well', label: 'Номер скважины', help: 'Столбец, где записан номер или название скважины. Если файл — один объект целиком (дата и объём), оставьте пустым.', need: true },
   { key: 'date', label: 'Дата', help: 'Столбец с датой работы скважины (одна строка = одни сутки).', need: true },
   { key: 'rate', label: 'Суточный расход', help: 'Объём газа за сутки. Если такого столбца нет, оставьте пустым: возьмём часовой расход × часы работы.' },
   { key: 'hourly', label: 'Часовой расход', help: 'Нужен только если нет суточного расхода (м³/ч).' },
   { key: 'hours', label: 'Часы работы за сутки', help: 'Сколько часов скважина работала в эти сутки. Можно не указывать.' },
   { key: 'kind', label: 'Закачка или отбор', help: 'Столбец, где написано, что делала скважина. Если такого столбца нет, выберите вид ниже.' },
 ]
-const empty = (): Template => ({ name: '', sheet: null, header_row: 0, well: '', date: '', rate: '', hourly: '', hours: '', kind: '', kind_default: '', unit: 'м3/сут' })
+const empty = (): Template => ({ name: '', sheet: null, header_row: 0, well: '', date: '', rate: '', hourly: '', hours: '', kind: '', kind_default: '', unit: 'м3/сут', layout: 'table' })
 
 function Step({ n, title, lead, children }: { n: number; title: string; lead?: string; children: React.ReactNode }) {
   return (
@@ -98,7 +98,8 @@ export default function App() {
     const r = pv.rows[pv.headerRow + 1]
     return j >= 0 && r && r[j] ? r[j] : ''
   }
-  const needMore = !!pv && (!tpl.well || !tpl.date || !(tpl.rate || tpl.hourly))
+  const layout = tpl.layout || 'table'
+  const needMore = !!pv && (layout === 'matrix' ? !tpl.date : layout === 'matrix_t' ? !tpl.well : !tpl.date || !(tpl.rate || tpl.hourly))
 
   return (
     <div className="shell">
@@ -182,9 +183,17 @@ export default function App() {
             <Step n={3} title="Скажите, в каком столбце что лежит"
               lead="Для каждого пункта выберите столбец из вашего файла. Подсказки уже расставлены автоматически: проверьте их. Обязательные пункты отмечены звёздочкой.">
               <div className="cols">
-                {FIELDS.map(f => (
-                  <div key={f.key} className={'colrow' + (f.need && !tpl[f.key] ? ' missing' : '')}>
-                    <div className="colinfo"><b>{f.label}{f.need && <span className="req"> *</span>}</b><span className="muted small">{f.help}</span></div>
+                <div className="colrow">
+                  <div className="colinfo"><b>Как устроена таблица</b><span className="muted small">Разные файлы устроены по-разному: выберите ближайший вариант.</span></div>
+                  <select value={layout} onChange={e => set('layout', e.target.value)}>
+                    <option value="table">Список: одна строка = одни сутки (скважины нет — это итог по объекту)</option>
+                    <option value="matrix">Матрица: даты в строках, скважины в столбцах</option>
+                    <option value="matrix_t">Матрица: скважины в строках, даты в столбцах</option>
+                  </select><span />
+                </div>
+                {FIELDS.filter(f => layout === 'table' || (layout === 'matrix' ? f.key === 'date' || f.key === 'kind' : f.key === 'well' || f.key === 'kind')).map(f => (
+                  <div key={f.key} className={'colrow' + (f.need && f.key !== 'well' && !tpl[f.key] || layout === 'matrix_t' && f.key === 'well' && !tpl.well ? ' missing' : '')}>
+                    <div className="colinfo"><b>{f.label}{(f.need && f.key !== 'well' || layout === 'matrix_t' && f.key === 'well') && <span className="req"> *</span>}</b><span className="muted small">{f.help}</span></div>
                     <select value={tpl[f.key]} onChange={e => set(f.key, e.target.value)}>
                       <option value="">— не указывать —</option>
                       {cols.map(c => <option key={c}>{c}</option>)}
@@ -193,7 +202,7 @@ export default function App() {
                   </div>
                 ))}
                 <div className="colrow">
-                  <div className="colinfo"><b>В каких единицах расход</b><span className="muted small">Как подписан столбец с расходом. Программа пересчитает в м³/сут.</span></div>
+                  <div className="colinfo"><b>В каких единицах значения</b><span className="muted small">Как подписан расход или объём за сутки (м³, тыс. м³, млн м³ …). Программа пересчитает в м³/сут.</span></div>
                   <select value={tpl.unit} onChange={e => set('unit', e.target.value)}>{st?.units.map(u => <option key={u}>{u}</option>)}</select><span />
                 </div>
                 <div className="colrow">
@@ -206,7 +215,7 @@ export default function App() {
               </div>
               <div className="row">
                 <button className="primary" onClick={test} disabled={busy || needMore}>Проверить на этом файле</button>
-                {needMore && <span className="muted small">Сначала выберите номер скважины, дату и расход.</span>}
+                {needMore && <span className="muted small">Сначала выберите нужные столбцы (отмечены звёздочкой).</span>}
                 {!needMore && <span className="muted small">Ничего не сохраняется: просто покажем, что получится.</span>}
               </div>
             </Step>
