@@ -96,7 +96,7 @@ export default function Averaging({ st }: { st: AppState }) {
   const g = grp && groups.includes(grp) ? grp : groups[0] || ''
 
   return (
-    <main className="work">
+    <main className="workspace">
       <div className="card">
         <h2>Осреднение истории: источники</h2>
         <div className="row">

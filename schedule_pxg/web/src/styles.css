@@ -59,7 +59,5 @@ button.quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--line-
 @media (prefers-reduced-motion: reduce) { .dot { animation: none; } .shell { transition: none; } }
 
 
-.tabs { display: flex; gap: 6px; margin: 8px 0 12px; flex-wrap: wrap; }
-.tabs button.on { background: var(--accent, #2f6f9f); color: #fff; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .bad { background: rgba(200, 60, 60, .18); }

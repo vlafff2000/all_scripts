@@ -66,7 +66,7 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
   const calDirty = v ? JSON.stringify(cal) !== JSON.stringify(v.calendar) : false
 
   return (
-    <main className="work">
+    <main className="workspace">
       <section className="card">
         <h2>Сценарии и ветви</h2>
         {st.scenarios.length === 0 && <p className="muted">Пока нет. Создайте основной сценарий: у него полные настройки, ветви хранят только отличия.</p>}

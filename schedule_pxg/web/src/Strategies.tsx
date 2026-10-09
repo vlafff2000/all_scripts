@@ -53,7 +53,7 @@ export default function Strategies({ st, setSt }: { st: AppState; setSt: (s: App
   }
 
   return (
-    <main className="work">
+    <main className="workspace">
       <section className="card">
         <h2>Стратегии варьирования</h2>
         <p className="muted small">Объёмы сезона по группам и месяцам (млн м³) вместо объёмов тех.карты. Процент сценария и сезона применяется после замены; ветвь сценария может иметь свою стратегию.</p>
