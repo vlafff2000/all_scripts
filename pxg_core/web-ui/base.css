@@ -146,3 +146,22 @@ kbd { font-family: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; b
 .theme-switch.segmented { display: flex; }
 .theme-switch.segmented button { box-shadow: none; padding: 4px; flex: 1; color: var(--side-muted); }
 .theme-switch.segmented button[aria-checked='true'] { background: var(--side); color: var(--side-ink); }
+
+/* ---------- узкое окно: меню сверху одной полосой, а не на весь экран ---------- */
+@media (max-width: 900px) {
+  .shell.shell, .shell.shell.collapsed { grid-template-columns: minmax(0, 1fr); }
+  .shell.shell .sidebar { flex-direction: row; flex-wrap: wrap; align-items: center; align-content: flex-start; height: auto; min-height: 0; gap: 8px 12px; padding: 10px 12px; overflow: visible; }
+  .shell.shell .sidebar .brand { padding: 0; flex-direction: row; gap: 10px; }
+  .shell.shell .sidebar .side-toggle, .shell.shell .sidebar .side-project { display: none; }
+  .shell.shell .sidebar .brand-name { display: inline; }
+  .shell.shell .sidebar .side-search { margin: 0 0 0 auto; padding: 6px 10px; }
+  .shell.shell .sidebar nav { order: 3; flex: 1 0 100%; display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+  .shell.shell .sidebar nav section, .shell.shell .sidebar nav ul { display: flex; gap: 4px; }
+  .shell.shell .sidebar nav h2 { display: none; }
+  .shell.shell .sidebar nav a { white-space: nowrap; justify-content: flex-start; padding: 8px 12px; border-left-width: 0; border-bottom: 3px solid transparent; }
+  .shell.shell .sidebar nav a[aria-current='page'] { border-bottom-color: var(--accent); }
+  .shell.shell .sidebar nav a .side-label { display: inline; }
+  .shell.shell .sidebar .theme-switch { margin: 0 0 0 auto; width: auto; flex-direction: row; }
+  .shell.shell .sidebar .theme-switch .side-label { display: none; }
+  .shell.shell .sidebar .side-search + nav { margin-top: 0; }
+}
