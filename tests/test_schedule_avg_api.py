@@ -35,8 +35,11 @@ def test_empty_sources_is_an_error_not_a_crash(client):
 
 def test_averaging_flow_and_persistence(client):
     c, xl, folder = client
-    assert c.post("/api/averaging/sources", json={"paths": [xl + "нет"]}).status_code == 400
-    v = c.post("/api/averaging/sources", json={"paths": [xl], "params": {"max_years": 4, "metric": "mape"}, "kind": "закачка"}).json()
+    assert c.post("/api/sources/set", json={"flows": {"paths": [xl + "нет"]}}).status_code == 400
+    assert c.post("/api/averaging/sources", json={"paths": [xl]}).status_code in (404, 405)  # импорта в «Осреднении» больше нет
+    assert c.post("/api/sources/set", json={"flows": {"paths": [xl]}}).status_code == 200
+    assert c.post("/api/averaging/params", json={"params": {"metric": "нет"}}).status_code == 400
+    v = c.post("/api/averaging/params", json={"params": {"max_years": 4, "metric": "mape"}, "kind": "закачка"}).json()
     assert v["years"] == [2022, 2023, 2024, 2025] and len(v["combos"]) == 15 and v["params"]["metric"] == "mape"
     assert {w["well"] for w in v["wells"]} == {"a", "b", "c"} and len(v["heat"]) == 3
     assert abs(sum(v["sums"]["1"].values()) / len(v["sums"]["1"]) - 1) < 1e-6
@@ -62,7 +65,7 @@ def test_averaging_flow_and_persistence(client):
 
 def test_stitch_uses_averaged_shares(client):
     c, xl, _ = client
-    c.post("/api/averaging/sources", json={"paths": [xl], "kind": "закачка"})
+    c.post("/api/sources/set", json={"flows": {"paths": [xl]}})
     c.post("/api/averaging/choose", json={"kind": "закачка", "well": "a", "combo": [2022]})
     c.post("/api/scenario/create", json={"name": "Основа"})
     cal = [{"year": 2026, "techmap": "Закачка A", "percent": 100, "label": ""}]
@@ -75,3 +78,33 @@ def test_stitch_uses_averaged_shares(client):
     tot = sum(w.values())
     # a — год 2022 (.5), b — совет (.45), c — .2, сумма нормируется; поровну было бы по 1/3
     assert tot > 0 and w["a"] / tot == pytest.approx(.5 / 1.15, abs=.01) and w["c"] / tot == pytest.approx(.2 / 1.15, abs=.01)
+
+
+def test_parity_with_direct_from_history(client):
+    """R6: осреднение из базы проекта даёт те же доли и совет, что `Averaging.from_history` по тем же файлам."""
+    c, xl, folder = client
+    c.post("/api/sources/set", json={"flows": {"paths": [xl]}})
+    c.post("/api/averaging/params", json={"params": {"max_years": 4, "metric": "mape"}})
+    from schedule_pxg import averaging as av, avg_view
+    from schedule_pxg.project import Project
+    p = Project.load(folder)
+    months = avg_view.months_of(p, "закачка")
+    direct = av.Averaging.from_history(hist.import_files([xl], "закачка", [hist.Template.from_dict(t) for t in p.templates.values()]),
+                                       p, months, "закачка", max_years=4, last_k=3, metric="mape")
+    got = avg_view.get(p, "закачка")
+    assert got.years == direct.years and got.share == direct.share
+    assert {w: got.advice(w) for w in got.share} == {w: direct.advice(w) for w in direct.share}
+
+
+def test_history_mode_takes_reference_from_project(client, tmp_path):
+    """R6: эталон режима «История» — из источников проекта, без файла ПЗРГ в запросе."""
+    c, xl, folder = client
+    ref = str(tmp_path / "ref.xlsx")
+    pd.DataFrame({"Дата": pd.to_datetime(["2023-05-01", "2023-05-02"]), "Объем": [3.0, 3.0]}).to_excel(ref, index=False)
+    c.post("/api/sources/set", json={"flows": {"paths": [xl]}, "daily_total": {"path": ref, "unit": "м3/сут"}})
+    from schedule_pxg import sources as src
+    from schedule_pxg.project import Project
+    pz = src.pzrg_from_project(Project.load(folder))
+    assert list(pz.columns) == ["date", "rate"] and pz["rate"].tolist() == [3.0, 3.0]
+    r = c.post("/api/history", json={"mode": "daily"})
+    assert r.status_code == 200 and r.json()["correction"] is not None

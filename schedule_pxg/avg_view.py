@@ -1,6 +1,6 @@
 """Осреднение истории для интерфейса и сшивки сценариев (шаг А11): источники истории, кэш, представление, выбор по скважине.
 
-Настройки живут в `Project.averaging`: `sources` (пути к файлам истории), `params` (глубина, показатель ошибки) и по виду
+История берётся из источников проекта (`sources.load_project_history`). Настройки — в `Project.averaging`: `params` (глубина, показатель ошибки) и по виду
 (`закачка`/`отбор`) — `Averaging.to_dict()` (выбор, исключения, ручные доли). Python 3.8+.
 """
 from __future__ import annotations
@@ -33,19 +33,17 @@ def months_of(p: Project, kind: str) -> List[str]:
     return []
 
 
-def set_sources(p: Project, paths: List[str], prm: Optional[dict] = None) -> None:
-    fl = p.sources.get("flows") or {}
-    src.set_flows(p, paths, fl.get("template", ""), fl.get("kind_default", ""))
-    if prm:
-        cur = params(p)
-        for k in ("max_years", "last_k"):
-            if k in prm:
-                cur[k] = int(prm[k])
-        if "metric" in prm:
-            if prm["metric"] not in av.METRICS:
-                raise ValueError("Показатель ошибки: %s" % ", ".join(av.METRICS))
-            cur["metric"] = prm["metric"]
-        p.averaging["params"] = cur
+def set_params(p: Project, prm: dict) -> None:
+    """Параметры осреднения (глубина, показатель ошибки). Источник истории — только `Project.sources` (см. sources.py)."""
+    cur = params(p)
+    for k in ("max_years", "last_k"):
+        if k in prm:
+            cur[k] = int(prm[k])
+    if "metric" in prm:
+        if prm["metric"] not in av.METRICS:
+            raise ValueError("Показатель ошибки: %s" % ", ".join(av.METRICS))
+        cur["metric"] = prm["metric"]
+    p.averaging["params"] = cur
     _cache.clear()
 
 

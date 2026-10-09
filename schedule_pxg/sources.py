@@ -110,6 +110,14 @@ def load_daily_total(p: Project, rep: Optional[qc.Report] = None) -> pd.DataFram
     return df
 
 
+def pzrg_from_project(p: Project):
+    """Эталонный суточный объём проекта в виде таблицы ПЗРГ (`date`, `rate`, м³/сут) для `historymode`; нет эталона — None."""
+    df = load_daily_total(p)
+    if not len(df):
+        return None
+    return pd.DataFrame({"date": df["Дата"], "rate": df["Объем"]}).reset_index(drop=True)
+
+
 # ───────────────────────── разбивка на группы ─────────────────────────
 
 def _match(cell, hints) -> bool:
