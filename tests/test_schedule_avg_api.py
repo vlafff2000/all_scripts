@@ -66,6 +66,7 @@ def test_averaging_flow_and_persistence(client):
 def test_stitch_uses_averaged_shares(client):
     c, xl, _ = client
     c.post("/api/sources/set", json={"flows": {"paths": [xl]}})
+    c.post("/api/averaging/params", json={"params": {"mode": "month"}})  # выбор комбинаций лет и правки действуют в режиме «по месяцам»
     c.post("/api/averaging/choose", json={"kind": "закачка", "well": "a", "combo": [2022]})
     c.post("/api/scenario/create", json={"name": "Основа"})
     cal = [{"year": 2026, "techmap": "Закачка A", "percent": 100, "label": ""}]
@@ -124,3 +125,17 @@ def test_daily_mode_through_api_keeps_month_totals(client):
     grp = [r for r in built.rows if r["level"] == "группа"]
     assert grp and all(abs(r["diff"]) < 1.0 for r in grp)
     assert any("Суточное осреднение" in n for n in built.notes) or built.rows
+
+
+def test_daily_is_default_and_status(client):
+    c, xl, _ = client
+    st0 = c.get("/api/averaging/status", params={"kind": "закачка"}).json()
+    assert st0["problem"] == "files" and st0["params"]["mode"] == "day"
+    c.post("/api/sources/set", json={"flows": {"paths": [xl]}})
+    st = c.get("/api/averaging/status", params={"kind": "закачка"}).json()
+    assert st["problem"] == "" and st["seasons"] and st["wells"] >= 3 and set(st["methods"]) >= {"mean", "median", "recency", "trimmed"}
+    d = c.get("/api/averaging/daily", params={"kind": "закачка"}).json()
+    assert d["days"] > 0 and d["groups"] and d["seasons"]
+    g = next(iter(d["groups"].values()))
+    assert g["wells"] and all(len(v) == d["days"] for v in g["wells"].values())
+    assert all(f["how"] for f in g["filled"])
