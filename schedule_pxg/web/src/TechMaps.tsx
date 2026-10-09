@@ -33,7 +33,7 @@ export default function TechMaps({ st, setSt }: { st: AppState; setSt: (s: AppSt
   const tm = view?.techmap
 
   return (
-    <main className="work">
+    <main className="workspace">
       <section className="card">
         <h2>Библиотека тех.карт</h2>
         {st.techmaps.length === 0 ? <p className="muted">Пока пусто. Загрузите файл «Утверждённые объёмы» ниже и сохраните его в проект.</p> : (

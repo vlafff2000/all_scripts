@@ -28,7 +28,7 @@ export default function History({ st }: { st: AppState }) {
   const ready = mode === 'daily' || dates.trim().length > 0
 
   return (
-    <main className="work">
+    <main className="workspace">
       <section className="card">
         <h2>Режим «история»</h2>
         <p className="muted small">Schedule по фактическим расходам из файлов осреднения (вкладка «Осреднение»). Два варианта сетки шагов — как у прежних скриптов.</p>

@@ -93,7 +93,7 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
   const vecs = Array.from(new Set(chosen.flatMap(n => (infos[n]?.vectors || []).map(v => v.keyword))))
 
   return (
-    <main className="work">
+    <main className="workspace">
       <section className="card">
         <h2>Результаты расчёта по сценариям</h2>
         {st.scenarios.length === 0 ? <p className="muted">Сначала создайте сценарий (вкладка «Сценарии»).</p> : <>

@@ -119,7 +119,7 @@ export default function Charts({ st }: { st: AppState }) {
   const totals = data ? data.totals.filter(t => !multi || t.label === shown) : []
 
   return (
-    <main className="work">
+    <main className="workspace">
       <section className="card">
         <h2>Графики расходов и накопленных объёмов</h2>
         {st.scenarios.length === 0 ? <p className="muted">Сначала создайте сценарий с календарём сезонов (вкладка «Сценарии»).</p> : <>

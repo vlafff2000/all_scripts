@@ -1,9 +1,3 @@
-.shell { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
-.side { background: var(--side); color: var(--side-ink); padding: 16px; }
-.side h1 { margin: 0; font-size: 20px; }
-.side h2 { font-size: 13px; text-transform: uppercase; color: var(--side-muted); margin: 20px 0 8px; }
-.side .muted { color: var(--side-muted); }
-.work { padding: 16px 24px; display: flex; flex-direction: column; gap: 14px; background: var(--bg); color: var(--ink); }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
 .card h2 { margin: 0 0 10px; font-size: 16px; }
 .row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin: 8px 0; }
@@ -25,24 +19,17 @@ table.raw tbody tr { cursor: pointer; }
 table.raw tr.hdr { background: var(--accent-soft); font-weight: 700; }
 table.raw thead th { background: var(--head-bg); position: sticky; top: 0; }
 .tpl-item { display: flex; justify-content: space-between; align-items: center; }
-.link { background: none; border: 0; color: var(--side-ink); text-decoration: underline; padding: 3px 0; }
-.x { background: none; border: 0; color: var(--side-muted); }
+.link { background: none; border: 0; color: var(--accent-strong); text-decoration: underline; padding: 3px 0; }
+.x { background: none; border: 0; color: var(--muted); }
 .issues { padding-left: 18px; font-size: 13px; }
 .issues .ошибка { color: var(--bad); }
 .issues .предупреждение { color: var(--warn); }
-@media (max-width: 800px) { .shell { grid-template-columns: 1fr; } }
-.work { min-width: 0; }
-.shell { grid-template-columns: 280px minmax(0, 1fr); }
-.side { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .intro h1 { margin: 0 0 4px; font-size: 24px; }
 .intro p { max-width: 80ch; color: var(--muted); }
 .lead { color: var(--muted); max-width: 80ch; margin: 0 0 10px; }
 .step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .step-head h2 { margin: 0; }
 .step-n { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-strong); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
-.nav { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; margin-bottom: 6px; background: var(--side-raised); border: 1px solid transparent; border-left: 3px solid transparent; color: var(--side-ink); padding: 8px 10px; }
-.nav span { font-size: 12px; color: var(--side-muted); }
-.nav.on { border-left-color: var(--accent); color: #fff; }
 .slot { border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 12px 14px; background: var(--head-bg); }
 .slot.filled { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
 .slot-title { font-weight: 700; margin-bottom: 2px; }
@@ -55,7 +42,7 @@ table.raw thead th { background: var(--head-bg); position: sticky; top: 0; }
 .colrow.missing { border-color: var(--danger-line); background: var(--danger-soft); }
 .colinfo { display: flex; flex-direction: column; gap: 2px; }
 .req { color: var(--danger); }
-@media (max-width: 900px) { .colrow { grid-template-columns: 1fr; } .side { position: static; height: auto; } }
+@media (max-width: 900px) { .colrow { grid-template-columns: 1fr; } }
 textarea { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); font: inherit; background: var(--surface); color: var(--ink); }
 .chart { width: 100%; max-width: 640px; height: auto; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0; }
@@ -65,3 +52,11 @@ table.heat th { text-align: center; }
 
 td.ch input { background: #fff6d6; }
 tr.tot td { border-top: 2px solid #999; }
+
+
+/* Каркас «Скедула»: боковая панель и переключатели */
+.side-project { margin: 0; padding: 0 6px; word-break: break-all; color: var(--side-muted); }
+.wiz-switch { align-self: flex-start; }
+.tpl-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.tpl-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); }
+.tpl-chip .link { padding: 4px 0; }
