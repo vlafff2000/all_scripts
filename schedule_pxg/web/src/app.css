@@ -65,3 +65,26 @@ table.heat th { text-align: center; }
 
 td.ch input { background: #fff6d6; }
 tr.tot td { border-top: 2px solid #999; }
+
+/* Экран «Сценарии» */
+.sc-list { display: flex; flex-direction: column; gap: 6px; }
+.sc-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 40px; text-align: left; padding: 8px 12px; }
+.sc-item:hover { background: var(--row-hover); border-color: var(--accent); }
+.sc-item.on { background: var(--accent-soft); border-color: var(--accent); border-left: 4px solid var(--accent); font-weight: 700; }
+.sc-meta { color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
+.sc-new { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.sc-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: start; }
+.sc-fields input, .sc-fields select, .sc-wide { width: 100%; box-sizing: border-box; }
+.sc-check { flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0 8px; }
+.sc-check input { margin-top: 3px; }
+.sc-pattern { padding: 8px 10px; background: var(--head-bg); border-radius: var(--radius); }
+.sc-num { width: 80px; box-sizing: border-box; }
+.sc-cal table.raw td, .sc-cal table.raw th { padding: 4px 8px; }
+.sc-actions { margin-top: 12px; }
+.sc-end { margin-left: auto; }
+button.danger { color: var(--bad); border-color: var(--bad); background: var(--surface); }
+button.danger:hover:not(:disabled) { background: var(--danger-soft); }
+.sc-item:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+.x { min-width: 32px; min-height: 32px; font-size: 16px; }
+.x:hover { color: var(--bad); }
+.sc-pattern .x { border: 1px solid var(--line-strong); font-size: 13px; padding: 4px 10px; background: var(--surface); color: var(--ink); }
