@@ -158,7 +158,8 @@ def _scenario_list(p: Project) -> list:
             v = sc.resolve(n)
         except (KeyError, ValueError):
             continue
-        out.append({"name": n, "parent": s["parent"], "note": v["note"], "percent": v["percent"], "seasons": len(v["calendar"])})
+        out.append({"name": n, "parent": s["parent"], "note": v["note"], "percent": v["percent"], "seasons": len(v["calendar"]),
+                    "results": p.results.get(n, "")})
     return out
 
 
