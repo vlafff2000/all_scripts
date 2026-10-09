@@ -107,3 +107,7 @@ a.btn:hover { border-color: var(--accent); }
 .src-help a { color: var(--accent-strong); }
 .raw tr.dim { opacity: .55; }
 .raw td.bad { color: var(--bad); font-weight: 700; }
+
+.lk { border: 0; background: none; padding: 0 2px; cursor: pointer; font-size: 12px; opacity: .55; }
+.lk:hover { opacity: 1; }
+td.lkd input { border-color: var(--accent); }
