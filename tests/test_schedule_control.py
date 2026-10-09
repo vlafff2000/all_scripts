@@ -110,14 +110,14 @@ def test_weldraw_set_once_changed_by_date_never_one_star():
     t = fc.render_schedule(_steps(), control=c, project=_proj())
     assert t.count("WELDRAW") == 2 and "1*\t/  -- лимит" not in t and "лимит снят" not in t
     first, second = t.split("WELDRAW")[1], t.split("WELDRAW")[2]
-    assert "10\t15\t/" in first and "11\t15\t/" in first and "20\t8\t/" in first
-    assert "10\t12\t/" in second and "20" not in second.split("DATES")[0] and "11" not in second.split("DATES")[0]
+    assert "10\t15\tGAS\tYES\t/" in first and "11\t15\tGAS\tYES\t/" in first and "20\t8\tGAS\tYES\t/" in first
+    assert "10\t12\tGAS\tYES\t/" in second and "20" not in second.split("DATES")[0] and "11" not in second.split("DATES")[0]
     assert "WELDRAW" not in fc.render_schedule(_steps("закачка"), control=c, project=_proj())
     # скважина, закрытая на шаге, не переписывается, пока значение не менялось
     st = [fc.Step(date(2026, 1, 1), date(2026, 1, 5), 5, "отбор", {"10": 1.0}), fc.Step(date(2026, 1, 6), date(2026, 1, 10), 5, "отбор", {"11": 1.0}),
           fc.Step(date(2026, 1, 11), date(2026, 1, 15), 5, "отбор", {"10": 1.0})]
     t3 = fc.render_schedule(st, control=cm.Control("rate", limits=[cm.Limit("draw", 3)]), project=_proj())
-    assert t3.count("WELDRAW") == 2 and t3.count("10\t3\t/") == 1
+    assert t3.count("WELDRAW") == 2 and t3.count("10\t3\tGAS\tYES\t/") == 1
 
 
 def test_control_wconprod_then_weltarg_and_shut():
@@ -142,3 +142,10 @@ def test_hist_mode_and_forecast_conservation_with_group_targets():
     # сумма групповых целей за шаг равна сумме дебитов скважин (объём тех.карты сохраняется)
     t2 = fc.render_schedule(st[:1], control=cm.Control("rate", "both"), project=p)
     assert sum(float(x.split("\t")[3]) for x in t2.split("GCONPROD\n")[1].split("\n/\n")[0].splitlines()) == sum(st[0].rates.values())
+
+
+def test_weltarg_injection_uses_grat_not_rate():
+    """В WELTARG нет контроля RATE (ORAT/WRAT/GRAT/...): для закачки меняется GRAT, WCONINJE при этом не пишется заново."""
+    st = [fc.Step(date(2026, 1, 1), date(2026, 1, 5), 5, "закачка", {"10": 10.0}), fc.Step(date(2026, 1, 6), date(2026, 1, 10), 5, "закачка", {"10": 30.0})]
+    t = fc.render_schedule(st, control=cm.Control("rate"), project=_proj())
+    assert t.count("WCONINJE") == 1 and "WELTARG\n10\tGRAT\t30.00\t/\n/" in t and "\tRATE\t30" not in t

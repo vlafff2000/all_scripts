@@ -671,7 +671,7 @@ def _well_control(st: Step, wells: List[str], control: "cmod.Control", bhp, rate
     lines: List[str] = []
     for w in tar:
         if not grp_level and wstate[w]["rate"] != cur[w]["rate"]:
-            lines.append("%s\t%s\t%s\t/\n" % (w, "RATE" if inj else "GRAT", cur[w]["rate"]))
+            lines.append("%s\tGRAT\t%s\t/\n" % (w, cur[w]["rate"]))   # в WELTARG нет RATE: для закачки тоже GRAT
         if wstate[w]["bhp"] != cur[w]["bhp"] and cur[w]["bhp"] != "1*":
             lines.append("%s\tBHP\t%s\t/\n" % (w, cur[w]["bhp"]))
     if lines:
@@ -687,7 +687,7 @@ def _weldraw(st: Step, wells: List[str], gof, control: "cmod.Control", state: Di
     for w in wells:
         v = control.value("draw", w, gof(w), st.start, st.kind)
         if v is not None and state.get(w) != v:
-            lines.append("%s\t%g\t/\n" % (w, v))
+            lines.append("%s\t%g\tGAS\tYES\t/\n" % (w, v))   # по умолчанию LIQ и NO: без GAS YES депрессия газовой скважины не учитывается
             state[w] = v
     lines.sort(key=lambda l: _wkey(l.split("\t")[0]))
     return "\nWELDRAW\n" + "".join(lines) + "/\n" if lines else ""
