@@ -106,7 +106,7 @@ def preview(path: str, sheet=None, header_row: Optional[int] = None, rows: int =
             "format": history.detect_format(path)}
 
 
-def template_from(d: dict) -> Template:
+def template_from(d: dict, need_name: bool = True) -> Template:
     sheet = d.get("sheet")
     if sheet in ("", None):
         sheet = None
@@ -118,7 +118,9 @@ def template_from(d: dict) -> Template:
     if fields.get("layout", "table") not in LAYOUTS:
         raise ValueError("Неизвестный вид таблицы: %s" % fields["layout"])
     if not fields.get("name"):
-        raise ValueError("Укажите название шаблона")
+        if need_name:
+            raise ValueError("Укажите название шаблона")
+        fields["name"] = ""
     if fields.get("unit", "м3/сут") not in history.UNITS:
         raise ValueError("Неизвестная единица: %s" % fields["unit"])
     if fields.get("kind_default") and fields["kind_default"] not in history.KINDS:

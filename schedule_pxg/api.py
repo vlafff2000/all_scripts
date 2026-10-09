@@ -68,7 +68,7 @@ async def trial(request: Request):
     if not os.path.isfile(path):
         return _err("Не нашли файл «%s». Проверьте путь или нажмите «Выбрать файл»." % path, 404)
     try:
-        tpl = wizard.template_from(body.get("template") or {})
+        tpl = wizard.template_from(body.get("template") or {}, need_name=False)
         return JSONResponse(await run_in_threadpool(wizard.trial, path, tpl))
     except ValueError as e:
         return _err(str(e))
