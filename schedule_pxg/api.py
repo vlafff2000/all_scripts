@@ -639,6 +639,19 @@ async def averaging_get(request: Request):
     return await run_in_threadpool(_avg_call, lambda a: None, _avg_kind(request))
 
 
+async def averaging_status(request: Request):
+    p = _project()
+    return JSONResponse(await run_in_threadpool(avg_view.status, p, _avg_kind(request)))
+
+
+async def averaging_daily(request: Request):
+    p = _project()
+    try:
+        return JSONResponse(await run_in_threadpool(avg_view.daily_view, p, _avg_kind(request)))
+    except (ValueError, KeyError) as e:
+        return _err(str(e.args[0]))
+
+
 async def averaging_well(request: Request):
     p = _project()
     try:
@@ -907,6 +920,8 @@ def build_app() -> Starlette:
         Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),
+        Route("/api/averaging/status", averaging_status),
+        Route("/api/averaging/daily", averaging_daily),
         Route("/api/averaging/params", averaging_params, methods=["POST"]),
         Route("/api/averaging/choose", averaging_choose, methods=["POST"]),
         Route("/api/averaging/advice", averaging_advice, methods=["POST"]),

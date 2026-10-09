@@ -80,7 +80,7 @@ export interface AvgView {
   kind: string; months: string[]; years: number[]; skippedYears: number[]; combos: string[]; wells: AvgWell[]
   heat: { well: string; values: (number | null)[] }[]; groups: Record<string, Record<string, Record<string, { share: number | null; manual: boolean }>>>
   sums: Record<string, Record<string, number | null>>; exclusions: { well: string; year: number; reason: string; auto: boolean }[]
-  unknown: string[]; params: { max_years: number; last_k: number; metric: string }; sources: string[]
+  unknown: string[]; params: AvgParams; sources: string[]
 }
 export interface AvgWellView {
   well: string; group: string; months: string[]; years: number[]; byYear: Record<string, (number | null)[]>; mean: (number | null)[]
@@ -90,7 +90,20 @@ export interface AvgWellView {
 const avgBody = (kind: string, rest: object) => post({ kind, ...rest })
 export const getAveraging = (kind: string) => call<AvgView>('/api/averaging?kind=' + encodeURIComponent(kind))
 export const getAveragingWell = (kind: string, well: string) => call<AvgWellView>('/api/averaging/well?kind=' + encodeURIComponent(kind) + '&well=' + encodeURIComponent(well))
-export const setAvgSources = (kind: string, paths: string[], params: object) => call<AvgView>('/api/averaging/sources', avgBody(kind, { paths, params }))
+export interface AvgStatus {
+  kind: string; files: number; paths: string[]; template: string; wells: number; groups: number; withoutGroup: number; months: string[]
+  reference: boolean; seasons: number[]; problem: '' | 'files' | 'techmap' | 'columns' | 'wells' | 'seasons'; error?: string; rows?: number
+  params: AvgParams; methods: string[]
+}
+export interface AvgParams { max_years: number; last_k: number; metric: string; mode: 'day' | 'month'; seasons: number[]; method: string }
+export interface AvgDaily {
+  kind: string; seasons: number[]; days: number; method: string; dates?: string[]
+  groups: Record<string, { wells: Record<string, (number | null)[]>; filled: { day: number; date: string; how: string }[] }>
+  summary: { filled?: number; by?: Record<string, number> }; notes: string[]
+}
+export const getAvgStatus = (kind: string) => call<AvgStatus>('/api/averaging/status?kind=' + encodeURIComponent(kind))
+export const getAvgDaily = (kind: string) => call<AvgDaily>('/api/averaging/daily?kind=' + encodeURIComponent(kind))
+export const setAvgParams = (kind: string, params: Partial<AvgParams>) => call<unknown>('/api/averaging/params', avgBody(kind, { params }))
 export const avgChoose = (kind: string, well: string, combo: number[] | null) => call<AvgView>('/api/averaging/choose', avgBody(kind, { well, combo }))
 export const avgAdvice = (kind: string, wells?: string[]) => call<AvgView>('/api/averaging/advice', avgBody(kind, { wells }))
 export const avgExclude = (kind: string, well: string, year: number, on: boolean) => call<AvgView>('/api/averaging/exclude', avgBody(kind, { well, year, on }))

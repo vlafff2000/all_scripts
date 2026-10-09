@@ -69,7 +69,7 @@ export default function App() {
           ))}
         </div>
       </aside>
-      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'results' && st ? <Results st={st} setSt={setSt} /> : tab === 'averaging' && st ? <Averaging st={st} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'quality' && st ? <Quality /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : st ? <Import st={st} setSt={setSt} /> : <main className="workspace" />}
+      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'results' && st ? <Results st={st} setSt={setSt} /> : tab === 'averaging' && st ? <Averaging st={st} setSt={setSt} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'quality' && st ? <Quality /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : st ? <Import st={st} setSt={setSt} /> : <main className="workspace" />}
     </div>
   )
 }

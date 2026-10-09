@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+
 import PageHead from './PageHead'
+import ColumnWizard from './ColumnWizard'
 import {
-  AppState, AvgView, AvgWellView, avgAdvice, avgChoose, avgExclude, avgManual, getAveraging, getAveragingWell, pickFile, setAvgSources,
+  AppState, AvgDaily, AvgParams, AvgStatus, AvgView, AvgWellView, avgAdvice, avgChoose, avgExclude, avgManual, buildSources, getAvgDaily, getAvgStatus,
+  getAveraging, getAveragingWell, setAvgParams,
 } from './api'
 
 const COLORS = ['#2f6fb0', '#c4622d', '#3f9a6a', '#8a5bb0', '#b09a2f', '#2f9aa8', '#b0426b', '#6b7a8a']
 const pct = (x: number | null | undefined, d = 1) => (x == null ? '—' : (x * 100).toFixed(d) + ' %')
+const fillCounts = (f: { how: string }[]) => f.reduce((a: Record<string, number>, x) => { a[x.how] = (a[x.how] || 0) + 1; return a }, {})
 const num = (s: string) => Number(s.replace(',', '.'))
 
 /** Цвет ячейки тепловой карты: зелёный — малая ошибка, красный — большая (в долях от максимума строки не берём: шкала общая). */
@@ -66,13 +70,63 @@ function GroupBars({ v, group }: { v: AvgView; group: string }) {
   )
 }
 
-export default function Averaging({ st }: { st: AppState }) {
+const FILL_COLORS: Record<string, string> = { 'окно ±3 суток': '#e0b43a', 'окно ±7 суток': '#e08a3a', 'доля месяца': '#d4523a', 'поровну': '#8a5bb0' }
+const METHOD_LABELS: Record<string, string> = { mean: 'Среднее', median: 'Медиана', recency: 'Взвешенное по свежести', trimmed: 'Усечённое (без крайних)' }
+const METHOD_HELP: Record<string, string> = {
+  mean: 'простое среднее долей по выбранным сезонам', median: 'устойчива к выбросам одного сезона',
+  recency: 'последний сезон весит больше предыдущих', trimmed: 'отбрасывает самый большой и самый малый сезон (от 3 сезонов)',
+}
+
+/** Суточный профиль долей скважин группы: линия на каждую скважину, сутки, заполненные запасными правилами, подсвечены полосами. */
+function DailyChart({ d, group }: { d: AvgDaily; group: string }) {
+  const g = d.groups[group]
+  const [hover, setHover] = useState<number | null>(null)
+  if (!g) return null
+  const W = 760, H = 250, L = 46, B = 28, T = 10, R = 10
+  const names = Object.keys(g.wells)
+  const all = names.flatMap(w => g.wells[w]).filter((x): x is number => x != null)
+  const max = Math.max(0.05, ...all) * 1.1
+  const n = Math.max(2, d.days)
+  const X = (i: number) => L + (i * (W - L - R)) / (n - 1)
+  const Y = (v: number) => T + (H - T - B) * (1 - v / max)
+  const path = (vals: (number | null)[]) => vals.map((v, i) => (v == null ? '' : (i && vals[i - 1] != null ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1))).join('')
+  const ticks = (d.dates || []).map((x, i) => [x, i] as [string, number]).filter(([x]) => x.endsWith('-01'))
+  const bw = Math.max(1.5, (W - L - R) / n)
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    const x = ((e.clientX - r.left) / r.width) * W
+    setHover(Math.min(n - 1, Math.max(0, Math.round(((x - L) * (n - 1)) / (W - L - R)))))
+  }
+  const hv = hover != null ? names.map((w, k) => [w, g.wells[w][hover], k] as [string, number | null, number]).filter(x => x[1] != null) : []
+  const fill = hover != null ? g.filled.find(f => f.day === hover) : undefined
+  return (
+    <div>
+      <svg viewBox={'0 0 ' + W + ' ' + H} className="chart wide" role="img" aria-label="Суточные доли скважин группы" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        {g.filled.map(f => <rect key={f.day} x={X(f.day) - bw / 2} y={T} width={bw} height={H - T - B} fill={FILL_COLORS[f.how] || '#d4523a'} opacity=".28" />)}
+        {[0, .25, .5, .75, 1].map(t => <g key={t}><line x1={L} x2={W - R} y1={Y(max * t)} y2={Y(max * t)} stroke="var(--line)" />
+          <text x={L - 6} y={Y(max * t) + 4} textAnchor="end" fontSize="11" fill="var(--muted)">{(max * t * 100).toFixed(0)}%</text></g>)}
+        {ticks.map(([x, i]) => <g key={x}><line x1={X(i)} x2={X(i)} y1={H - B} y2={H - B + 4} stroke="var(--muted)" />
+          <text x={X(i)} y={H - 10} textAnchor="middle" fontSize="11" fill="var(--muted)">{MONTH_SHORT[Number(x.slice(5, 7)) - 1]}</text></g>)}
+        {names.map((w, k) => <path key={w} d={path(g.wells[w])} fill="none" stroke={COLORS[k % COLORS.length]} strokeWidth="1.6" />)}
+        {hover != null && <line x1={X(hover)} x2={X(hover)} y1={T} y2={H - B} stroke="var(--ink)" strokeDasharray="3 3" />}
+      </svg>
+      <div className="muted small" style={{ minHeight: 20 }}>
+        {hover != null ? <>Сутки {hover + 1}{d.dates ? ' (' + d.dates[hover].split('-').reverse().join('.') + ' в последнем выбранном сезоне)' : ''}: {hv.map(([w, v]) => w + ' ' + pct(v, 1)).join(' · ')}{fill ? ' · заполнено: ' + fill.how : ''}</> : 'Наведите курсор на график, чтобы увидеть доли скважин за сутки.'}
+      </div>
+      <div className="legend small">{names.map((w, k) => <span key={w}><i style={{ background: COLORS[k % COLORS.length] }} />{w}</span>)}</div>
+    </div>
+  )
+}
+const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+
+export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppState) => void }) {
   const [kind, setKind] = useState('закачка')
   const [v, setV] = useState<AvgView | null>(null)
   const [sel, setSel] = useState('')
   const [wv, setWv] = useState<AvgWellView | null>(null)
-  const [paths, setPaths] = useState('')
-  const [prm, setPrm] = useState({ max_years: 6, last_k: 3, metric: 'rmse' })
+  const [status, setStatus] = useState<AvgStatus | null>(null)
+  const [daily, setDaily] = useState<AvgDaily | null>(null)
+  const [wizard, setWizard] = useState('')
   const [edit, setEdit] = useState<{ month: string; text: string } | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -81,41 +135,103 @@ export default function Averaging({ st }: { st: AppState }) {
     setBusy(true); setMsg('')
     try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
   }
-  const apply = (x: AvgView) => { setV(x); setPaths(x.sources.join('\n')); setPrm(x.params) }
-  const reload = () => guard(async () => apply(await getAveraging(kind)))
-  useEffect(() => { setV(null); setSel(''); getAveraging(kind).then(apply).catch(e => setMsg(e.message)) }, [kind, st])
+  const apply = (x: AvgView) => setV(x)
+  const load = async (k: string) => {
+    const s = await getAvgStatus(k)
+    setStatus(s); setV(null); setDaily(null)
+    if (s.problem) return
+    await Promise.all([getAvgDaily(k).then(setDaily).catch(e => setMsg(e.message)), getAveraging(k).then(apply).catch(e => setMsg(e.message))])
+  }
+  const reload = () => guard(() => load(kind))
+  useEffect(() => { setSel(''); setMsg(''); load(kind).catch(e => setMsg(e.message)) }, [kind, st])
   useEffect(() => { if (v && sel && v.wells.some(w => w.well === sel)) getAveragingWell(kind, sel).then(setWv).catch(e => setMsg(e.message)); else setWv(null) }, [sel, v])
 
   const act = (f: () => Promise<AvgView>) => guard(async () => apply(await f()))
-  const sources = () => guard(async () => apply(await setAvgSources(kind, paths.split('\n').map(s => s.trim()).filter(Boolean), prm)))
-  const pick = () => guard(async () => { const r = await pickFile(paths.split('\n')[0] || ''); if (r.path) setPaths(p => (p.trim() ? p.trim() + '\n' : '') + r.path) })
+  const prm = status?.params
+  const setParams = (p: Partial<AvgParams>) => guard(async () => { await setAvgParams(kind, p); await load(kind) })
+  const buildWells = () => guard(async () => { await buildSources(); await load(kind) })
+  const chosenSeasons = prm && status ? (prm.seasons.length ? prm.seasons : status.seasons) : []
+  const toggleSeason = (y: number) => {
+    if (!status) return
+    const cur = new Set(chosenSeasons)
+    if (cur.has(y)) cur.delete(y); else cur.add(y)
+    if (!cur.size) return
+    setParams({ seasons: cur.size === status.seasons.length ? [] : Array.from(cur).sort() })
+  }
   const row = v?.wells.find(w => w.well === sel)
   const maxHeat = v ? Math.max(0, ...v.heat.flatMap(h => h.values.filter((x): x is number => x != null))) : 0
   const combo = (c: string) => c.split('+').map(Number)
   const groups = v ? Array.from(new Set(v.wells.map(w => w.group))) : []
   const [grp, setGrp] = useState('')
   const g = grp && groups.includes(grp) ? grp : groups[0] || ''
+  const [dgrp, setDgrp] = useState('')
+  const dg = daily && dgrp && daily.groups[dgrp] ? dgrp : daily ? Object.keys(daily.groups)[0] || '' : ''
 
   return (
     <main className="workspace">
-      <PageHead title="Осреднение" lede="Из истории работы скважин по годам получаем средний расход, на котором строится прогноз." />
+      <PageHead title="Осреднение" lede="Доли скважин в расходе группы считаются из базы расходов проекта по выбранным сезонам: для каждых суток сезона, от его старта." />
+      {msg && <div className="note warn">{msg}</div>}
       <div className="card">
-        <h2>Осреднение истории: источники</h2>
+        <h2>Источник и настройки</h2>
         <div className="row">
           <label>Вид<select value={kind} onChange={e => setKind(e.target.value)}><option>закачка</option><option>отбор</option></select></label>
-          <label>Последних сезонов<input type="number" min={2} max={10} value={prm.max_years} onChange={e => setPrm({ ...prm, max_years: Number(e.target.value) })} /></label>
-          <label>Близость к последним<input type="number" min={1} max={5} value={prm.last_k} onChange={e => setPrm({ ...prm, last_k: Number(e.target.value) })} /></label>
-          <label>Ошибка<select value={prm.metric} onChange={e => setPrm({ ...prm, metric: e.target.value })}><option value="rmse">RMSE, п.п.</option><option value="mape">MAPE, %</option></select></label>
+          {status && !status.problem && prm && <>
+            <div className="segmented" role="radiogroup" aria-label="Как считать доли" style={{ alignSelf: 'flex-end' }}>
+              <button type="button" role="radio" aria-checked={prm.mode === 'day'} disabled={busy} onClick={() => setParams({ mode: 'day' })}>По суткам</button>
+              <button type="button" role="radio" aria-checked={prm.mode === 'month'} disabled={busy} onClick={() => setParams({ mode: 'month' })}>По месяцам</button>
+            </div>
+            <label>Метод по сезонам<select value={prm.method} disabled={busy || prm.mode !== 'day'} onChange={e => setParams({ method: e.target.value })}>
+              {status.methods.map(m => <option key={m} value={m}>{METHOD_LABELS[m] || m}</option>)}</select></label>
+          </>}
         </div>
-        <label>Файлы истории (по одному в строке)<textarea rows={3} value={paths} onChange={e => setPaths(e.target.value)} /></label>
-        <div className="row"><button onClick={pick} disabled={busy}>Выбрать файл…</button>
-          <button className="primary" onClick={sources} disabled={busy || !paths.trim()}>Посчитать</button>
-          <button onClick={reload} disabled={busy}>Обновить</button></div>
-        <div className="muted small">Файлы, годы и правки сохраняются в проекте; сценарии берут доли отсюда. Без файлов доли в сценариях делятся поровну.</div>
-        {msg && <div className="note warn">{msg}</div>}
+        {status && <p className="src-status">
+          База расходов: <b>{status.files ? status.files + ' ' + (status.files === 1 ? 'файл' : 'файла(ов)') : 'нет'}</b>
+          {' · '}скважин: <b>{status.wells}</b>, групп: <b>{status.groups}</b>{status.withoutGroup > 0 && <span className="warn"> (без группы: {status.withoutGroup})</span>}
+          {' · '}сезоны: <b>{status.seasons.length ? status.seasons.join(', ') : '—'}</b>
+          {' · '}эталон суточного объёма: <b>{status.reference ? 'есть' : 'нет'}</b>
+          {' · '}<a href="#/import">Изменить в Импорте</a>
+        </p>}
+        {status?.problem === 'files' && <div className="note warn">В проекте нет базы расходов. Выберите её на экране <a href="#/import">Импорт</a>: осреднение берёт данные оттуда и ничего не загружает само.</div>}
+        {status?.problem === 'techmap' && <div className="note warn">В библиотеке нет тех.карты вида «{kind}», поэтому неизвестны месяцы сезона. Загрузите её на экране <a href="#/techmaps">Тех.карты</a>.</div>}
+        {status?.problem === 'columns' && <div className="note warn">
+          <p>{status.error ? status.error : 'Из файла расходов не прочитано ни одной строки.'}</p>
+          <p>Скорее всего, файл не распознан без шаблона столбцов: укажите, в каких столбцах скважина, дата и расход.</p>
+          <div className="row"><button className="primary" disabled={!status.paths.length} onClick={() => setWizard(status.paths[0])}>Настроить столбцы для «{(status.paths[0] || '').split(/[\\/]/).pop()}»</button>
+            <a className="btn" href="#/import">Открыть Импорт</a></div></div>}
+        {status?.problem === 'wells' && <div className="note warn">
+          <p>В проекте ещё нет скважин и групп. Они создаются по базе расходов и разбивке на группы.</p>
+          <div className="row"><button className="primary" disabled={busy} onClick={buildWells}>Создать скважины и группы</button>
+            <a className="btn" href="#/import">Открыть Импорт</a></div></div>}
+        {status?.problem === 'seasons' && <div className="note warn">В базе расходов нет данных за месяцы сезона ({status.months.join(', ')}). Проверьте файл и вид «{kind}» в <a href="#/import">Импорте</a>.</div>}
+        {status && !status.problem && prm && prm.mode === 'day' && <>
+          <h3>Сезоны для осреднения</h3>
+          <div className="row">{status.seasons.map(y => (
+            <label key={y} style={{ flexDirection: 'row', gap: 6 }}><input type="checkbox" checked={chosenSeasons.includes(y)} disabled={busy} onChange={() => toggleSeason(y)} />
+              {status.months[0].slice(0, 3)} {y}</label>))}</div>
+          <div className="muted small">{METHOD_LABELS[prm.method]}: {METHOD_HELP[prm.method]}. Сутки считаются от старта сезона, поэтому високосный год учитывается сам.</div>
+        </>}
+        {status && !status.problem && prm && prm.mode === 'month' && <div className="muted small">Режим «По месяцам»: одна доля на месяц, как в прежней версии. Для долей по суткам включите «По суткам».</div>}
       </div>
 
-      {v && <>
+      {daily && daily.days > 0 && <div className="card">
+        <h2>Суточный профиль долей <span className="muted small">{daily.days} суток, сезоны {daily.seasons.join(', ')}</span></h2>
+        <div className="row">
+          <label>Группа<select value={dg} onChange={e => setDgrp(e.target.value)}>{Object.keys(daily.groups).map(x => <option key={x}>{x}</option>)}</select></label>
+        </div>
+        <DailyChart d={daily} group={dg} />
+        {(daily.groups[dg]?.filled.length || 0) > 0
+          ? <div className="note"><b>Сутки без данных: {daily.groups[dg].filled.length} из {daily.days}.</b> На графике они закрашены полосами. Доли в них взяты по цепочке: окно ±3 суток, окно ±7 суток, доля месяца, поровну.
+            <div className="legend small">{Object.entries(fillCounts(daily.groups[dg].filled)).map(([how, c]) => <span key={how}><i style={{ background: FILL_COLORS[how] || '#d4523a' }} />{how}: {c}</span>)}</div>
+            <details><summary className="small">Показать сутки</summary>
+              <div className="small">{daily.groups[dg].filled.map(f => <span key={f.day} style={{ display: 'inline-block', margin: '2px 12px 2px 0' }}>
+                <i style={{ display: 'inline-block', width: 9, height: 9, marginRight: 4, background: FILL_COLORS[f.how] || '#d4523a', borderRadius: 2 }} />
+                {f.date.split('-').reverse().slice(0, 2).join('.')}</span>)}</div></details></div>
+          : <div className="muted small">В выбранных сезонах для этой группы есть данные за все сутки.</div>}
+      </div>}
+      {status && !status.problem && daily && daily.days === 0 && <div className="note">Суточный профиль не построен: {daily.notes.join(' ') || 'нет данных за выбранные сезоны'}. Сценарии будут использовать доли по месяцам.</div>}
+
+      {v && <details className="card" style={{ padding: 0 }}><summary style={{ padding: '10px 14px', cursor: 'pointer' }}><b>Подбор сезонов по месяцам</b> <span className="muted small">помощь в выборе: совет, тепловая карта, правки долей вручную</span></summary><div style={{ padding: '0 14px 14px' }}>
+      <>
         {v.unknown.length > 0 && <div className="note warn">Нет в проекте (пропущены): {v.unknown.join(', ')}</div>}
         {v.skippedYears.length > 0 && <div className="note">Не вошли старые сезоны: {v.skippedYears.join(', ')} (ограничение «последних сезонов»).</div>}
         <div className="card">
@@ -174,7 +290,9 @@ export default function Averaging({ st }: { st: AppState }) {
         </div>}
         {v.exclusions.length > 0 && <div className="card"><h2>Исключённые годы</h2>
           <div className="small">{v.exclusions.map(e => <div key={e.well + e.year}>{e.well}: {e.year} — {e.reason}</div>)}</div></div>}
-      </>}
+      </>
+      </div></details>}
+      {wizard && <ColumnWizard st={st} setSt={setSt} initialPath={wizard} onClose={() => { setWizard(''); reload() }} />}
     </main>
   )
 }
