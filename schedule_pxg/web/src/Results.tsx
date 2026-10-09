@@ -1,49 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
-import * as echarts from 'echarts/core'
-import { LineChart } from 'echarts/charts'
-import { DataZoomComponent, GridComponent, TitleComponent, ToolboxComponent, TooltipComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
 import { AppState, IndicatorRow, ResultsInfo, attachResults, getIndicators, getResultSeries, getResults, getState, pickFile } from './api'
-
-echarts.use([LineChart, DataZoomComponent, GridComponent, TitleComponent, ToolboxComponent, TooltipComponent, CanvasRenderer])
-
-const COLORS = ['#2f6fb0', '#c4622d', '#3f9a6a', '#8a5bb0', '#b09a2f', '#2f9aa8', '#b0426b', '#6b7a8a']
+import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
+import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 
-interface Line { label: string; color: string; pts: [string, number][] }
+interface Line { label: string; pts: [string, number][] }
 
-/** Линии по датам: зум, подсказка, PNG; общая линия наведения у графиков с одним `link`. */
-function Plot({ lines, unit, title, link }: { lines: Line[]; unit: string; title: string; link: string }) {
-  const el = useRef<HTMLDivElement>(null)
-  const chart = useRef<echarts.ECharts | null>(null)
-  useEffect(() => {
-    if (!el.current) return
-    const c = echarts.init(el.current)
-    c.group = link
-    chart.current = c
-    echarts.connect(link)
-    const ro = new ResizeObserver(() => c.resize())
-    ro.observe(el.current)
-    return () => { ro.disconnect(); c.dispose(); chart.current = null }
-  }, [link])
-  const has = lines.some(l => l.pts.length)
-  useEffect(() => {
-    const c = chart.current
-    if (!c || !has) return
-    c.setOption({
-      animation: false, color: lines.map(l => l.color),
-      title: { text: title + ', ' + unit, left: 56, top: 0, textStyle: { fontSize: 12, fontWeight: 'normal', color: '#6b7a8a' } },
-      grid: { left: 70, right: 16, top: 28, bottom: 62 },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: (v: number) => fmt(v, 3) },
-      toolbox: { right: 8, top: 0, feature: { saveAsImage: { title: 'PNG', name: title, pixelRatio: 2 }, dataZoom: { yAxisIndex: 'none', title: { zoom: 'Область', back: 'Назад' } }, restore: { title: 'Сброс' } } },
-      xAxis: { type: 'time', splitLine: { show: false } },
-      yAxis: { type: 'value', scale: true },
-      dataZoom: [{ type: 'inside', xAxisIndex: 0, filterMode: 'none' }, { type: 'slider', xAxisIndex: 0, height: 18, bottom: 8, filterMode: 'none' }],
-      series: lines.map(l => ({ name: l.label, type: 'line', showSymbol: l.pts.length < 40, data: l.pts, lineStyle: { width: 2 } })),
-    }, true)
-  }, [lines, unit, title, has])
-  return <div ref={el} style={{ width: '100%', maxWidth: 900, height: 280, display: has ? 'block' : 'none' }} role="img" aria-label={title} />
+/** Линии по датам на общем графике (как в Газовом Атласе): зум, подсказка, закрепление точек, PNG. */
+function Plot({ lines, unit, title }: { lines: Line[]; unit: string; title: string; link?: string }) {
+  const sig = lines.map(l => l.label + '|' + l.pts.length + '|' + (l.pts[0]?.join(',') ?? '') + '|' + (l.pts[l.pts.length - 1]?.join(',') ?? '')).join(';')
+  // график пересобирается только при смене данных, иначе набор в соседних полях сбрасывал бы масштаб
+  const chart = useMemo(() => mkChart('sched-res-' + title, title, mkAxis('Дата', '', 'time'), mkAxis(title, unit),
+    lines.map((l, i) => mkSeries({ name: l.label, slot: i, x: l.pts.map(p => p[0]), y: l.pts.map(p => p[1]) }))), [sig, title, unit]) // eslint-disable-line
+  if (!lines.some(l => l.pts.length)) return null
+  return <ChartView chart={chart} excludeMode={false} onExclude={() => {}} />
 }
 
 export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppState) => void }) {
@@ -83,13 +54,13 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
     const lines: Line[] = []
     for (const n of chosen) {
       const r = await getResultSeries(n, kw, wells.split(/[;,|]/).map(x => x.trim()).filter(Boolean))
-      Object.entries(r.series).forEach(([w, s]) => lines.push({ label: n + ' · ' + w, color: COLORS[lines.length % COLORS.length], pts: s.dates.map((d, i) => [d, s.values[i]] as [string, number]) }))
+      Object.entries(r.series).forEach(([w, s]) => lines.push({ label: n + ' · ' + w, pts: s.dates.map((d, i) => [d, s.values[i]] as [string, number]) }))
     }
     setPr(lines)
   })
 
   const shown = chosen.filter(n => ind[n])
-  const line = (f: (r: IndicatorRow) => number | null): Line[] => shown.map((n, i) => ({ label: n, color: COLORS[i % COLORS.length], pts: ind[n].filter(r => f(r) !== null).map(r => [r.date, f(r) as number] as [string, number]) }))
+  const line = (f: (r: IndicatorRow) => number | null): Line[] => shown.map(n => ({ label: n, pts: ind[n].filter(r => f(r) !== null).map(r => [r.date, f(r) as number] as [string, number]) }))
   const last = (n: string) => ind[n][ind[n].length - 1]
   const vecs = Array.from(new Set(chosen.flatMap(n => (infos[n]?.vectors || []).map(v => v.keyword))))
 

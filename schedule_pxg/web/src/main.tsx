@@ -7,6 +7,7 @@ import './prefs'
 import App from './App'
 import '../../../pxg_core/web-ui/base.css'
 import '../../../pxg_core/web-ui/filepicker.css'
+import '../../../pxg_core/web-ui/chart/chart-shell.css'
 import './styles.css'
 import './app.css'
 
