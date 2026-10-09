@@ -18,7 +18,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, charts, checks, control, forecast, history, historymode, results, scenarios, strategy, techmap, totals, wizard
+from . import avg_view, charts, checks, control, forecast, history, historymode, results, scenarios, strategy, strategy_ops, techmap, totals, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -254,13 +254,16 @@ def _season(p: Project, name: str, index: int):
     return cal, e, techmap.TechMap.from_dict(p.techmaps[e["techmap"]])
 
 
-def _strategy_view(cal: list, e: dict, tm: techmap.TechMap, table=None) -> dict:
+def _strategy_view(cal: list, e: dict, tm: techmap.TechMap, table=None, locks=None, target=None) -> dict:
     base = strategy.base_table(tm)
     cur = table if table is not None else (strategy.clean(e.get("volumes"), tm) or base)
+    lk = strategy_ops.clean_locks(e.get("locks") if locks is None else locks, cur)
+    tg = strategy_ops.default_target(base) if target in (None, "") else float(target)
     return {"index": cal.index(e), "year": e["year"], "techmap": tm.name, "kind": tm.kind, "months": tm.months, "days": tm.days,
             "groups": list(base), "base": base, "table": cur, "custom": bool(e.get("volumes")),
             "totals": strategy.totals(cur, tm.months), "base_totals": strategy.totals(base, tm.months),
-            "changes": strategy.changes(cur, base, tm.months), "percent": e.get("percent", 100.0)}
+            "changes": strategy.changes(cur, base, tm.months), "percent": e.get("percent", 100.0),
+            **strategy_ops.view(cur, lk, tg)}
 
 
 def _strategy_call(f):
@@ -289,8 +292,15 @@ async def strategy_op(request: Request):
         cal, e, tm = _season(_project(), str(b.get("name")), int(b.get("index") or 0))
         base = strategy.base_table(tm)
         cur = strategy.clean(b.get("table"), tm) or strategy.clean(e.get("volumes"), tm) or base
-        new = strategy.edit(cur, base, str(b.get("op")), group=b.get("group"), month=b.get("month"), value=b.get("value"))
-        return _strategy_view(cal, e, tm, new)
+        op = str(b.get("op"))
+        if op in strategy_ops.OPS:      # замки, проценты групп, размазывание, «разделить поровну»
+            target = strategy_ops.default_target(base) if b.get("target") in (None, "") else float(b["target"])
+            lk = strategy_ops.clean_locks(b["locks"] if "locks" in b else e.get("locks"), cur)
+            new, lk = strategy_ops.apply(op, cur, lk, target, group=b.get("group"), month=b.get("month"), value=b.get("value"),
+                                         groups=b.get("groups"), months=b.get("months"), mode=b.get("mode"))
+            return _strategy_view(cal, e, tm, new, lk, target)
+        new = strategy.edit(cur, base, op, group=b.get("group"), month=b.get("month"), value=b.get("value"))
+        return _strategy_view(cal, e, tm, new, b.get("locks"), b.get("target"))
     return _strategy_call(f)
 
 
@@ -305,14 +315,42 @@ async def strategy_save(request: Request):
         if table and table == strategy.base_table(tm):
             table = None
         cal = [dict(x) for x in cal]
+        i = int(b.get("index") or 0)
         if table:
-            cal[int(b.get("index") or 0)]["volumes"] = table
+            cal[i]["volumes"] = table
+            lk = strategy_ops.clean_locks(b.get("locks"), table)
+            if lk:
+                cal[i]["locks"] = strategy_ops.locks_list(lk)
+            else:
+                cal[i].pop("locks", None)
         else:
-            cal[int(b.get("index") or 0)].pop("volumes", None)
+            cal[i].pop("volumes", None)
+            cal[i].pop("locks", None)
         if b.get("all") and table:
             cal = strategy.apply_to_all(cal, int(b.get("index") or 0))
         sc.set_value(str(b.get("name")), "calendar", cal)
     return _scenarios_edit(p, edit)
+
+
+async def strategy_copy(request: Request):
+    """Копирует таблицу сезона (с замками) в выбранные сезоны календаря; в ответе отчёт «перенесено / не перенесено»."""
+    b = await request.json()
+    p = _project()
+    rep: list = []
+
+    def edit(sc):
+        cal, e, tm = _season(p, str(b.get("name")), int(b.get("index") or 0))
+        table = strategy.clean(b.get("table"), tm) if b.get("table") else None
+        lk = strategy_ops.clean_locks(b["locks"], table or {}) if table and "locks" in b else None
+        lib = {k: techmap.TechMap.from_dict(v) for k, v in p.techmaps.items()}
+        new, r = strategy_ops.copy_to_seasons(cal, int(b.get("index") or 0), [int(x) for x in b.get("targets") or []], lib, table, lk)
+        rep.extend(r)
+        sc.set_value(str(b.get("name")), "calendar", new)
+    res = _scenarios_edit(p, edit)
+    if getattr(res, "status_code", 200) != 200:
+        return res
+    import json
+    return JSONResponse(dict(json.loads(res.body), report=rep))
 
 
 async def strategy_xlsx(request: Request):
@@ -792,6 +830,7 @@ def build_app() -> Starlette:
         Route("/api/strategy", strategy_get),
         Route("/api/strategy/op", strategy_op, methods=["POST"]),
         Route("/api/strategy/save", strategy_save, methods=["POST"]),
+        Route("/api/strategy/copy", strategy_copy, methods=["POST"]),
         Route("/api/strategy/xlsx", strategy_xlsx, methods=["POST"]),
         Route("/api/strategy/load", strategy_load, methods=["POST"]),
         Route("/api/scenario/build", scenario_build),
