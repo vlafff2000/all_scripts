@@ -117,6 +117,29 @@ def test_expand_pattern_repeat_and_alternation():
         sc.expand_pattern(lib, ["нет"], 2026, 2027)
 
 
+def _season_map(name, kind, months):
+    t = tmod.TechMap(name, kind, list(months))
+    t.days = {m: (10 if m in (months[0], months[-1]) else 30) for m in months}  # крайние месяцы неполные
+    t.volumes = {"1": {m: 10.0 for m in months}}
+    return t.to_dict()
+
+
+@pytest.mark.parametrize("start", [2026, 2027])
+@pytest.mark.parametrize("inj_months", [
+    ("Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь"),   # общие пограничные месяцы: апрель и октябрь
+    ("Май", "Июнь", "Июль", "Август", "Сентябрь"),                          # без общих месяцев
+])
+def test_expand_pattern_years_do_not_skip(start, inj_months):
+    lib = {"О": _season_map("О", "отбор", ("Октябрь", "Ноябрь", "Декабрь", "Январь", "Февраль", "Март", "Апрель")),
+           "З": _season_map("З", "закачка", inj_months)}
+    cal = sc.expand_pattern(lib, ["О", "З"], start, start + 6)
+    assert [e["techmap"] for e in cal[:4]] == ["О", "З", "О", "З"]
+    # отбор начинается в октябре, закачка — в апреле/мае следующего года, дальше по одному году на пару сезонов
+    assert [(e["year"], e["techmap"]) for e in cal][:6] == [
+        (start, "О"), (start + 1, "З"), (start + 1, "О"), (start + 2, "З"), (start + 2, "О"), (start + 3, "З")]
+    assert sc.check_calendar(cal, lib) == []
+
+
 def test_calendar_overlap_and_missing_map_reported():
     lib = _lib()
     cal = [sc.season_entry(2026, "Закачка A"), sc.season_entry(2026, "Закачка B"), sc.season_entry(2026, "Нет такой")]

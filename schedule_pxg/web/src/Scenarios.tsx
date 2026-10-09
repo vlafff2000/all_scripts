@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+
 import PageHead from './PageHead'
 import {
   AppState, BuildView, ScenarioInfo, ScenarioView, Season, buildScenario, createScenario, deleteScenario, expandPattern, getScenario,
@@ -106,10 +107,6 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
               <select value={v.grid.step} onChange={e => put('grid', { ...v.grid, step: e.target.value })}>
                 {STEPS.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
           </div>
-          <label className="sc-check">
-            <input type="checkbox" checked={v.leap_shelf} onChange={e => put('leap_shelf', e.target.checked)} />
-            <span>29 февраля и полка: в високосном феврале добавить 29-е и растянуть последнюю полку (объём месяца прежний){tag('leap_shelf')}</span>
-          </label>
           <label>Примечание{tag('note')}<br />
             <input className="sc-wide" defaultValue={v.note} key={'n' + v.note} onBlur={e => e.target.value !== v.note && put('note', e.target.value)} /></label>
           <p className="muted small">Режим управления: {v.control.mode ? v.control.mode + ', ' + (v.control.level || 'wells') + ', лимитов: ' + (v.control.limits?.length || 0) : 'по умолчанию'}{tag('control')}

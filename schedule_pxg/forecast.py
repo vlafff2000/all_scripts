@@ -335,13 +335,13 @@ def forecast_season(tm: tmod.TechMap, project, shares: Shares, first_year: int, 
                     work_dates: Optional[Dict[str, Sequence[date]]] = None,
                     day_weights: Optional[Dict[date, float]] = None, decimals: int = 2,
                     tolerance: float = 0.005, spread: bool = True,
-                    outages: Optional[Sequence[omod.Outage]] = None, leap_shelf: bool = False) -> Forecast:
+                    outages: Optional[Sequence[omod.Outage]] = None, leap_shelf: bool = True) -> Forecast:
     """Прогноз одного сезона по тех.карте. `first_year` — год первого месяца сезона.
     `day_weights` — профиль объёма месяца по датам (по умолчанию равномерно по рабочим дням).
     `spread=False` — дебиты не округляются и остаток не размазывается (запись форматом `.2f`, как в старом скрипте).
     `outages` — отключения скважин: объём скважины в дни отключения уходит по её переключателю (`outages.FATES`);
     начало и конец отключения режут шаг.
-    `leap_shelf` — в високосном феврале, если рабочие дни кончаются 28-м, добавляется 29-е и растягивается последняя «полка»
+    `leap_shelf` (по умолчанию включён, в сценариях выключить нельзя) — в високосном феврале, если рабочие дни кончаются 28-м, добавляется 29-е и растягивается последняя «полка»
     (`shelf_feb29`); объём месяца не меняется. Если 29-е уже рабочее (по карте), ничего не делается."""
     outages = list(outages or [])
     fc = Forecast(tolerance=tolerance)
