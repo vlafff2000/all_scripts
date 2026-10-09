@@ -53,6 +53,7 @@ class Shares:
     def __init__(self) -> None:
         self.month: Dict[Tuple[str, str], Dict[str, float]] = {}        # (группа, месяц) -> {скважина: доля}
         self.day: Dict[Tuple[str, str, int], Dict[str, float]] = {}     # (группа, месяц, число) -> {скважина: доля}
+        self.offset: Dict[Tuple[str, int], Dict[str, float]] = {}       # (группа, сутки от начала сезона) -> {скважина: доля}
         self.manual: Dict[Tuple[str, str, str], float] = {}             # (группа, месяц, скважина) -> доля
         self.unknown_wells: Set[str] = set()                            # имена из истории, которых нет в проекте
 
@@ -89,9 +90,12 @@ class Shares:
                 acc[w] = acc.get(w, 0.0) + x
         return self._norm(acc)
 
-    def get(self, group: str, month: str, day: Optional[int] = None) -> Dict[str, float]:
-        """Доли на день (если есть шаблон дня) или на месяц, с учётом ручных правок; сумма = 1, пусто — долей нет."""
-        base = self.day.get((group, month, day)) if day is not None else None
+    def get(self, group: str, month: str, day: Optional[int] = None, offset: Optional[int] = None) -> Dict[str, float]:
+        """Доли на сутки сезона (`offset` — дни от 1-го числа первого месяца сезона), на число месяца (шаблон дня) или на месяц,
+        с учётом ручных правок; сумма = 1, пусто — долей нет."""
+        base = self.offset.get((group, offset)) if offset is not None else None
+        if not base and day is not None:
+            base = self.day.get((group, month, day))
         if not base:
             base = self.base_month(group, month)
         fixed = {w: x for (g, m, w), x in self.manual.items() if g == group and m == month}
@@ -347,6 +351,7 @@ def forecast_season(tm: tmod.TechMap, project, shares: Shares, first_year: int, 
     fc = Forecast(tolerance=tolerance)
     kind = tm.kind if tm.kind in tmod.KINDS else NEUTRAL
     wd = season_work_dates(tm, first_year, work_dates)
+    season_start = date(first_year, tmod.MONTHS.index(tm.months[0]) + 1, 1) if tm.months else None
     if leap_shelf:
         day_weights = _leap_february(wd, day_weights, fc)
     all_work = sorted(x for v in wd.values() for x in v)
@@ -400,7 +405,7 @@ def forecast_season(tm: tmod.TechMap, project, shares: Shares, first_year: int, 
                 fc.notes.append("%s, %s: профиль объёма нулевой — не распределён" % (pg, m))
                 continue
             for x, wt in zip(days, w):
-                sh = shares.get(pg, m, x.day)
+                sh = shares.get(pg, m, x.day, (x - season_start).days if season_start else None)
                 if not sh:
                     fc.notes.append("%s, %s, %s: нет долей скважин — объём дня потерян" % (pg, m, x.isoformat()))
                     continue

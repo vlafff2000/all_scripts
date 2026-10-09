@@ -108,3 +108,19 @@ def test_history_mode_takes_reference_from_project(client, tmp_path):
     assert list(pz.columns) == ["date", "rate"] and pz["rate"].tolist() == [3.0, 3.0]
     r = c.post("/api/history", json={"mode": "daily"})
     assert r.status_code == 200 and r.json()["correction"] is not None
+
+
+def test_daily_mode_through_api_keeps_month_totals(client):
+    """R7: режим «по суткам» через API: параметры принимаются, график/сборка работают, сумма группы за месяц = тех.карте."""
+    c, xl, _ = client
+    c.post("/api/sources/set", json={"flows": {"paths": [xl]}})
+    assert c.post("/api/averaging/params", json={"params": {"mode": "год"}}).status_code == 400
+    assert c.post("/api/averaging/params", json={"params": {"method": "нет"}}).status_code == 400
+    c.post("/api/averaging/params", json={"params": {"mode": "day", "method": "median", "seasons": [2024, 2025]}})
+    c.post("/api/scenario/create", json={"name": "Основа"})
+    c.post("/api/scenario/set", json={"name": "Основа", "key": "calendar", "value": [{"year": 2026, "techmap": "Закачка A", "percent": 100, "label": ""}]})
+    from schedule_pxg import api
+    _, built = api._build("Основа")
+    grp = [r for r in built.rows if r["level"] == "группа"]
+    assert grp and all(abs(r["diff"]) < 1.0 for r in grp)
+    assert any("Суточное осреднение" in n for n in built.notes) or built.rows

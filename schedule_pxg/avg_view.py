@@ -8,13 +8,18 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional, Tuple
 
+import pandas as pd
+
 from . import averaging as av
+from . import daily
 from . import forecast as fc
 from . import sources as src
 from . import techmap as tmod
 from .project import Project
 
-DEFAULTS = {"max_years": 6, "last_k": 3, "metric": "rmse"}
+# mode: "month" — доли по месяцам (как раньше), "day" — по суткам сезона (`daily.py`); seasons — выбранные сезоны (пусто — все);
+# method — способ сведения сезонов по суткам
+DEFAULTS = {"max_years": 6, "last_k": 3, "metric": "rmse", "mode": "month", "seasons": [], "method": "mean"}
 _cache: Dict[tuple, "av.Averaging"] = {}
 
 
@@ -36,6 +41,16 @@ def months_of(p: Project, kind: str) -> List[str]:
 def set_params(p: Project, prm: dict) -> None:
     """Параметры осреднения (глубина, показатель ошибки). Источник истории — только `Project.sources` (см. sources.py)."""
     cur = params(p)
+    if "mode" in prm:
+        if prm["mode"] not in ("month", "day"):
+            raise ValueError("Доли считаются по месяцам (month) или по суткам (day)")
+        cur["mode"] = prm["mode"]
+    if "method" in prm:
+        if prm["method"] not in daily.METHODS:
+            raise ValueError("Метод осреднения: %s" % ", ".join(daily.METHODS))
+        cur["method"] = prm["method"]
+    if "seasons" in prm:
+        cur["seasons"] = sorted({int(y) for y in prm["seasons"] or []})
     for k in ("max_years", "last_k"):
         if k in prm:
             cur[k] = int(prm[k])
@@ -99,8 +114,57 @@ def shares_for(p: Project):
                 if k[0] in tm.volumes and v:
                     sh.month[k] = v
             sh.manual.update({k: v for k, v in src.manual.items() if k[0] in tm.volumes})
+        prof = _profile(p, tm.kind, notes) if params(p)["mode"] == "day" else None
+        if prof is not None:
+            for (g, d), v in prof.offset.items():
+                if g in {tmod.match_group(p, x) for x in tm.volumes}:
+                    sh.offset[(g, d)] = v
         return sh
     return one, notes
+
+
+_pcache: Dict[tuple, "daily.Profile"] = {}
+
+
+def _profile(p: Project, kind: str, notes: Optional[List[str]] = None) -> Optional["daily.Profile"]:
+    """Суточный профиль долей вида `kind` по источникам проекта и параметрам; кэш — по файлам, параметрам и составу групп."""
+    prm = params(p)
+    months = months_of(p, kind)
+    try:
+        key = (kind, _stamp(sources(p)), prm["method"], tuple(prm["seasons"]), tuple(months),
+               tuple(sorted(p.well_group.items())), tuple((w, tuple(d.get("synonyms", ()))) for w, d in sorted(p.wells.items())))
+        prof = _pcache.get(key)
+        if prof is None:
+            prof = daily.build(src.load_project_history(p, kind), p, months, kind, prm["seasons"], prm["method"])
+            _pcache.clear()
+            _pcache[key] = prof
+        if not prof.seasons and notes is not None:
+            notes.append("Суточное осреднение (%s): в базе нет выбранных сезонов, доли по месяцам" % kind)
+        elif prof.filled and notes is not None:
+            notes.append("Суточное осреднение (%s): суток без данных %d — %s" % (
+                kind, len(prof.filled), ", ".join("%s: %d" % kv for kv in sorted(prof.summary()["by"].items()))))
+        return prof if prof.seasons else None
+    except Exception as e:
+        if notes is not None:
+            notes.append("Суточное осреднение (%s) не применено, доли по месяцам: %s" % (kind, e))
+        return None
+
+
+def day_weights_for(p: Project):
+    """`day_weights_for(tm, year)` для `scenarios.build`: форма суток внутри месяца по эталонному суточному объёму проекта
+    (среднее по выбранным сезонам, сутки от старта сезона); нет эталона или режим «по месяцам» — None (равномерно)."""
+    if params(p)["mode"] != "day" or not (p.sources.get("daily_total") or {}).get("path"):
+        return None
+    ref = src.load_daily_total(p)
+    if not len(ref):
+        return None
+
+    def one(tm: tmod.TechMap, year: int):
+        prm = params(p)
+        first = tmod.MONTHS.index(tm.months[0]) + 1
+        seasons = prm["seasons"] or sorted({av.season_year(d.month, d.year, first) for d in pd.to_datetime(ref["Дата"])})
+        return daily.reference_weights(ref, tm.months, seasons, year) or None
+    return one
 
 
 def _num(x) -> Optional[float]:

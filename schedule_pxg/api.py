@@ -429,7 +429,7 @@ def _build(name: str):
     p = _project()
     sc = scenarios.Scenarios.from_dict(p.scenarios)
     fn, notes = avg_view.shares_for(p)
-    b = scenarios.build(p, sc.resolve(name), p.techmaps, fn)
+    b = scenarios.build(p, sc.resolve(name), p.techmaps, fn, avg_view.day_weights_for(p))
     b.notes += list(dict.fromkeys(notes))
     return p, b
 
@@ -468,7 +468,7 @@ def _charts_data(names: list, by: str, target: str):
     p = _project()
     sc = scenarios.Scenarios.from_dict(p.scenarios)
     fn, _ = avg_view.shares_for(p)
-    builds = {n: scenarios.build(p, sc.resolve(n), p.techmaps, fn) for n in names}
+    builds = {n: scenarios.build(p, sc.resolve(n), p.techmaps, fn, avg_view.day_weights_for(p)) for n in names}
     return charts.compare(builds, p, by, target or None)
 
 
