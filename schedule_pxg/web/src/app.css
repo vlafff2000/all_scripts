@@ -69,8 +69,6 @@ tr.tot td { border-top: 2px solid #999; }
 .sc-new { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .sc-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: start; }
 .sc-fields input, .sc-fields select, .sc-wide { width: 100%; box-sizing: border-box; }
-.sc-check { flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0 8px; }
-.sc-check input { margin-top: 3px; }
 .sc-pattern { padding: 8px 10px; background: var(--head-bg); border-radius: var(--radius); }
 .sc-num { width: 80px; box-sizing: border-box; }
 .sc-cal table.raw td, .sc-cal table.raw th { padding: 4px 8px; }
