@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import io
 import os
 import subprocess
@@ -735,6 +736,21 @@ async def results_series(request: Request):
     return JSONResponse({"keyword": kw, "series": {o: {"dates": [str(d.date()) for d, _ in r], "values": [v for _, v in r]} for o, r in data.items()}})
 
 
+async def results_indicators(request: Request):
+    p = _project()
+    name = request.query_params.get("scenario") or ""
+    path = p.results.get(name)
+    if not path:
+        return _err("К сценарию «%s» не привязаны результаты расчёта" % name, 404)
+    try:
+        dates = [dt.datetime.strptime(d, "%Y-%m-%d") for d in (request.query_params.get("dates") or "").split("|") if d]
+        sg = request.query_params.get("sg")
+        rows, notes = await run_in_threadpool(results.indicators, path, dates, float(sg) if sg else None)
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось посчитать показатели: %s" % e)
+    return JSONResponse({"rows": rows, "notes": notes})
+
+
 async def pick(request: Request):
     try:
         path = await run_in_threadpool(_pick, request.query_params.get("start") or "")
@@ -784,6 +800,7 @@ def build_app() -> Starlette:
         Route("/api/results", results_get),
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
+        Route("/api/results/indicators", results_indicators),
         Route("/api/pick", pick),
         Route("/api/check", check_export, methods=["POST"]),
     ]
