@@ -122,36 +122,6 @@ async def job_list(request: Request):
     return JSONResponse({"jobs": [j.view(len(j.log)) for j in sorted(jobs.JOBS.values(), key=lambda j: -j.started)]})
 
 
-_PICK = (
-    "import sys, tkinter\nfrom tkinter import filedialog\n"
-    "kind, start = sys.argv[1], sys.argv[2]\n"
-    "root = tkinter.Tk(); root.withdraw(); root.attributes('-topmost', True)\n"
-    "opts = {'initialdir': start} if start else {}\n"
-    "if kind == 'folder':\n    path = filedialog.askdirectory(mustexist=True, **opts)\n"
-    "else:\n    path = filedialog.askopenfilename(filetypes=[('Таблицы', '*.xlsx *.xlsm *.xls *.ods'), ('Все файлы', '*.*')], **opts)\n"
-    "sys.stdout.buffer.write((path or '').encode('utf-8'))\n"
-)
-
-
-def _pick(kind: str, start: str) -> str:
-    start = start if start and os.path.isdir(start) else (os.path.dirname(start) if start and os.path.isdir(os.path.dirname(start)) else "")
-    done = subprocess.run([sys.executable, "-c", _PICK, kind, start], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=900)
-    if done.returncode != 0:
-        lines = done.stderr.decode("utf-8", "replace").strip().splitlines()
-        raise RuntimeError(lines[-1] if lines else "диалог недоступен")
-    return done.stdout.decode("utf-8", "replace").strip()
-
-
-async def pick(request: Request):
-    """Системный диалог выбора файла или папки (сервер локальный, поэтому окно появляется на экране пользователя)."""
-    kind = "folder" if request.query_params.get("kind") == "folder" else "file"
-    try:
-        path = await run_in_threadpool(_pick, kind, request.query_params.get("start") or "")
-    except Exception as e:
-        return _err("Окно выбора недоступно (%s). Введите путь вручную." % e, 501)
-    return JSONResponse({"path": os.path.normpath(path) if path else ""})
-
-
 async def open_folder(request: Request):
     job = jobs.JOBS.get(request.path_params["id"])
     if job is None:
@@ -172,7 +142,6 @@ def build_app() -> Starlette:
         Route("/api/modules", modules),
         Route("/api/jobs", start_job, methods=["POST"]),
         Route("/api/jobs", job_list, methods=["GET"]),
-        Route("/api/pick", pick),
         *fs_browse.routes(),
         Route("/api/check", run_check, methods=["POST"]),
         Route("/api/check/{id}.{fmt}", check_download),

@@ -1,3 +1,4 @@
+import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 export interface FileCheck { id: string; label: string; path: string; ok: boolean; info: string }
 export interface AppState { state: 'idle' | 'loading' | 'ready' | 'error'; log: string[]; paths: Record<string, string>; checks: FileCheck[]; resultsDir: string; gsps: string[]; gspMeta: Record<string, { grid: boolean; xy: boolean }> }
 export interface Pos { x: number; y: number; src: 'grid' | 'xy' | 'fit'; dir: string }
@@ -103,8 +104,8 @@ export const getSeason = async (gsp: string, kind: string, season: string): Prom
   return call<SeasonData>('/api/season?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season))
 }
 export const exportExcel = (gsp: string, mode: string) => call<{ name: string; path: string }>('/api/export', post({ gsp, mode }))
-export const pickPath = (kind: 'file' | 'folder' | 'files', start: string) =>
-  call<{ path: string }>('/api/pick?kind=' + kind + '&start=' + encodeURIComponent(start))
+// Свой проводник вместо окна Tk; пустой путь — отмена, несколько файлов — по пути на строку.
+export const pickPath = async (kind: 'file' | 'folder' | 'files', start: string) => ({ path: (await openFilePicker({ start, mode: kind })) || '' })
 export const openFolder = () => call<{ ok: boolean }>('/api/open-folder', post({}))
 export const saveImage = (name: string, blob: Blob) =>
   call<{ name: string; path: string }>('/api/image?name=' + encodeURIComponent(name), { method: 'POST', body: blob })
