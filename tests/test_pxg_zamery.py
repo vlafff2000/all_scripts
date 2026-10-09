@@ -95,3 +95,21 @@ def test_check_reports_text_dates_and_excess(tmp_path):
 def test_check_empty_folder_is_a_note(tmp_path):
     rep = check.check_zamery({"folder": str(tmp_path)})
     assert rep.counts()["ошибка"] == 0
+
+
+@pytest.mark.parametrize("value,category,is_excess", [
+    (19.99, "Наблюдательные", True),
+    (20.0, "Наблюдательные", False),    # ровно порог: уже Руст (сравнение строгое «<»)
+    (20.01, "Наблюдательные", False),
+    (0, "Наблюдательные", True),        # ноль — значение, а не пустая ячейка
+    (10, "Контрольные", True),
+    (5, "Эксплуатационные", False),     # эксплуатационные порогом не затрагиваются
+    (None, "Наблюдательные", False),
+])
+def test_excess_boundary(value, category, is_excess):
+    block = {"p_wh": 0}
+    row = замеры._row([value], block, 17, category, "f", "s", 1, замеры.EXCESS_LIMIT)
+    if is_excess:
+        assert row.p_wh is None and row.excess == value
+    else:
+        assert row.excess is None and row.p_wh == value
