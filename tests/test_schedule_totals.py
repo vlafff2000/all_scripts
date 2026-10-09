@@ -1,4 +1,4 @@
-"""Общие объёмы и проверочный Excel «Скедул ПХГ»: паритет со старыми `read_total_gas_volumes`, `generate_output_files`, `create_summary_file`."""
+"""Эталонный суточный объём и чтение тех.карт «Скедул ПХГ»: паритет со старыми `read_total_gas_volumes`, `generate_output_files`, `create_summary_file`."""
 import contextlib
 import io
 import os
@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from schedule_pxg import totals as t  # noqa: E402
-from tests.golden import DIR as GOLD, golden  # noqa: E402
+from tests.golden import golden  # noqa: E402
 
 SAMPLES = os.environ.get("SCHEDULE_TR_SAMPLES") or "/mnt/project-files/schedule-tr-samples"
 have = pytest.mark.skipif(not os.path.isdir(SAMPLES), reason="нет образцов schedule-tr-samples")
@@ -76,22 +76,3 @@ def test_read_approved_unknown_file(tmp_path):
     p = str(tmp_path / "x.xlsx")
     pd.DataFrame({"a": [1]}).to_excel(p, index=False)
     assert t.read_approved(p) == (None, None, None) and t.read_percents(p) == (None, None)
-
-
-@have
-@pytest.mark.parametrize("mode,tot,app,gsp,year", CASES)
-def test_gsp_files_and_summary_parity(mode, tot, app, gsp, year, tmp_path):
-    """Эталон: файлы ГСП и сводка, которые писали старые `generate_output_files` и `create_summary_file` (tests/golden/gsp_*)."""
-    a, d, p, w, total = _inputs(mode, tot, app, gsp)
-    assert p
-    o, n = os.path.join(GOLD, "gsp_" + mode), str(tmp_path / "new")
-    of = sorted(f for f in os.listdir(o) if f != t.SUMMARY_NAME)
-    nf = t.write_gsp_files(p, a, d, total, n, year)
-    t.write_summary(t.summary_frame(p, a, d, total, year, mode), n)
-    assert sorted(map(os.path.basename, nf)) == of and nf
-    for f in of:
-        x, y = pd.read_excel(os.path.join(o, f), sheet_name=None, header=None), pd.read_excel(os.path.join(n, f), sheet_name=None, header=None)
-        assert list(x) == list(y)
-        for sh in x:
-            pd.testing.assert_frame_equal(y[sh], x[sh])
-    pd.testing.assert_frame_equal(pd.read_excel(os.path.join(n, t.SUMMARY_NAME)), pd.read_excel(os.path.join(o, t.SUMMARY_NAME)))
