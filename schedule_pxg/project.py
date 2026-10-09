@@ -44,6 +44,7 @@ class Project:
         self.scenarios: dict = {}  # сценарии и ветви (scenarios.Scenarios.to_dict)
         self.results: Dict[str, str] = {}  # сценарий -> путь к модели с результатами расчёта (results.py)
         self.averaging: dict = {}  # выбор комбинаций лет, исключения, ручные доли (averaging.Averaging.to_dict)
+        self.sources: dict = {}  # источники проекта: flows (база расходов), groups (разбивка на группы), daily_total (эталон); см. sources.py
 
     # скважины
     def add_well(self, name: str, synonyms=(), well_type: str = "эксплуатационная", group: Optional[str] = None) -> None:
@@ -129,6 +130,7 @@ class Project:
         _write_json(os.path.join(folder, "scenarios.json"), self.scenarios)
         _write_json(os.path.join(folder, "averaging.json"), self.averaging)
         _write_json(os.path.join(folder, "results.json"), self.results)
+        _write_json(os.path.join(folder, "sources.json"), self.sources)
 
     @classmethod
     def load(cls, folder: str) -> "Project":
@@ -146,4 +148,8 @@ class Project:
         p.scenarios = _read_json(os.path.join(folder, "scenarios.json"), {})
         p.averaging = _read_json(os.path.join(folder, "averaging.json"), {})
         p.results = _read_json(os.path.join(folder, "results.json"), {})
+        p.sources = _read_json(os.path.join(folder, "sources.json"), {})
+        old = p.averaging.pop("sources", None)  # старые проекты: файлы истории лежали в осреднении
+        if old and not (p.sources.get("flows") or {}).get("paths"):
+            p.sources.setdefault("flows", {})["paths"] = [str(x) for x in old]
         return p

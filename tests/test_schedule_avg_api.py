@@ -55,8 +55,9 @@ def test_averaging_flow_and_persistence(client):
     assert c.get("/api/averaging/well", params={"kind": "закачка", "well": "нет"}).status_code == 404
     # настройки пережили перезагрузку проекта
     from schedule_pxg.project import Project
-    saved = Project.load(folder).averaging
-    assert saved["sources"] == [xl] and saved["kinds"]["закачка"]["manual"][0]["share"] == .6
+    proj = Project.load(folder)
+    saved = proj.averaging
+    assert proj.sources["flows"]["paths"] == [xl] and saved["kinds"]["закачка"]["manual"][0]["share"] == .6
 
 
 def test_stitch_uses_averaged_shares(client):

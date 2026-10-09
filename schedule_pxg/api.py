@@ -20,7 +20,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, charts, checks, control, forecast, history, historymode, results, scenarios, strategy, techmap, totals, wizard
+from . import avg_view, charts, checks, control, forecast, history, historymode, results, scenarios, sources, strategy, techmap, totals, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -461,7 +461,7 @@ def _history_run(body: dict):
     if miss:
         raise ValueError("Файл не найден: %s" % miss[0])
     tpls = [history.Template.from_dict(t) for t in p.templates.values()]
-    df = history.import_files(files, "", tpls)
+    df = history.import_files(files, "", tpls) if body.get("files") else sources.load_project_history(p)
     notes: list = []
     given = 0
     for f in files:
@@ -606,6 +606,48 @@ async def averaging_well(request: Request):
         return _err(str(e.args[0]), 404)
     except ValueError as e:
         return _err(str(e))
+
+
+def _sources_view(p: Project) -> dict:
+    return {"sources": p.sources, "wells": len(p.wells), "groups": len(p.groups),
+            "withoutGroup": len(p.wells_without_group())}
+
+
+async def sources_get(request: Request):
+    return JSONResponse(_sources_view(_project()))
+
+
+async def sources_set(request: Request):
+    """Задаёт источники проекта: flows {paths, template, kind_default}, groups {mode, path, template}, daily_total {path, unit}."""
+    b = await request.json()
+    p = _project()
+    try:
+        if "flows" in b:
+            f = b["flows"] or {}
+            sources.set_flows(p, [_clean(x) for x in f.get("paths") or [] if _clean(x)], f.get("template") or "",
+                              f.get("kind_default") or "")
+        if "groups" in b:
+            g = b["groups"] or {}
+            sources.set_groups(p, g.get("mode") or "file", _clean(g.get("path")), g.get("template"))
+        if "daily_total" in b:
+            d = b["daily_total"] or {}
+            sources.set_daily_total(p, _clean(d.get("path")), d.get("unit") or "м3/сут")
+    except ValueError as e:
+        return _err(str(e))
+    p.save(FOLDER)
+    return JSONResponse(_sources_view(p))
+
+
+async def sources_build(request: Request):
+    """Создаёт в проекте скважины и группы по источникам; отчёт QC в ответе."""
+    p = _project()
+    try:
+        rep = await run_in_threadpool(sources.build_project_wells, p)
+    except Exception as e:
+        return _err("Источники не обработаны: %s" % e)
+    p.save(FOLDER)
+    return JSONResponse(dict(_sources_view(p), summary=rep.summary(),
+                             issues=[{"level": i.level, "message": i.message, "well": getattr(i, "well", "")} for i in rep.issues[:200]]))
 
 
 async def averaging_sources(request: Request):
@@ -803,6 +845,9 @@ def build_app() -> Starlette:
         Route("/api/history", history_build, methods=["POST"]),
         Route("/api/history/schedule", history_schedule, methods=["POST"]),
         Route("/api/history/log", history_log, methods=["POST"]),
+        Route("/api/sources", sources_get),
+        Route("/api/sources/set", sources_set, methods=["POST"]),
+        Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),
         Route("/api/averaging/sources", averaging_sources, methods=["POST"]),
