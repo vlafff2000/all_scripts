@@ -12,6 +12,7 @@ import sys
 from urllib.parse import quote
 from pathlib import Path
 
+import pandas as pd
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
@@ -21,7 +22,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, charts, checks, control, forecast, history, historymode, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
+from . import avg_view, charts, checks, control, dataquality, forecast, history, historymode, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -685,6 +686,56 @@ async def sources_set(request: Request):
     return JSONResponse(_sources_view(p))
 
 
+def _scan(p: Project, jump: float) -> "pd.DataFrame":
+    flows = sources.load_project_history(p, raw=True) if sources.flow_paths(p) else None
+    daily = sources.load_daily_total(p, raw=True) if (p.sources.get("daily_total") or {}).get("path") else None
+    return dataquality.scan(flows, daily, dataquality.Limits(jump=jump))
+
+
+def _quality_view(p: Project, jump: float, limit: int = 3000) -> dict:
+    found = _scan(p, jump)
+    ex = sources.excluded(p)
+    brief = dataquality.summary(found)
+    rows = found.head(limit)
+    return {"jump": jump, "total": len(found), "errors": int(found["level"].eq(dataquality.ERR).sum()), "excluded": len(ex),
+            "summary": [{"dataset": r.dataset, "check": r.check, "level": r.level, "count": int(r.count)} for r in brief.itertuples()],
+            "rows": [{"id": r.id, "dataset": r.dataset, "well": r.well, "date": r.date.strftime("%Y-%m-%d") if pd.notna(r.date) else "",
+                      "kind": r.kind, "check": r.check, "level": r.level, "value": r.value, "details": r.details,
+                      "excluded": r.id in ex} for r in rows.itertuples()],
+            "shown": len(rows), "datasets": dataquality.LABELS,
+            "excludedRows": [dict(zip(("dataset", "well", "date", "kind"), i.split("|", 3)), id=i) for i in sorted(ex)]}
+
+
+async def quality_get(request: Request):
+    p = _project()
+    if not sources.flow_paths(p) and not (p.sources.get("daily_total") or {}).get("path"):
+        return _err("Нечего проверять: на экране «Импорт» выберите базу расходов или эталонный суточный объём.", 404)
+    try:
+        jump = max(1.5, min(20.0, float(request.query_params.get("jump") or 3.0)))
+        return JSONResponse(await run_in_threadpool(_quality_view, p, jump))
+    except ValueError as e:
+        return _err(str(e))
+
+
+async def quality_exclude(request: Request):
+    """Исключает или возвращает строки: `ids`, либо выбор по `level` / `check` / `dataset` среди текущих находок."""
+    b = await request.json()
+    p = _project()
+    on = bool(b.get("on", True))
+    ids = [str(x) for x in b.get("ids") or []]
+    if not ids and any(b.get(k) for k in ("level", "check", "dataset")):
+        found = await run_in_threadpool(_scan, p, max(1.5, min(20.0, float(b.get("jump") or 3.0))))
+        for col in ("level", "check", "dataset"):
+            if b.get(col):
+                found = found[found[col].eq(b[col])]
+        ids = found["id"].tolist()
+    if b.get("all_restore"):
+        ids, on = sorted(sources.excluded(p)), False
+    sources.set_excluded(p, ids, on)
+    p.save(FOLDER)
+    return JSONResponse({"changed": len(ids), "excluded": len(sources.excluded(p))})
+
+
 async def sources_sample(request: Request):
     """Образец файла разбивки скважин на группы: два столбца «Скважина» и «Группа»."""
     import io
@@ -867,6 +918,8 @@ def build_app() -> Starlette:
         Route("/api/results/indicators", results_indicators),
         *fs_browse.routes(),
         Route("/api/sources/sample", sources_sample),
+        Route("/api/quality", quality_get),
+        Route("/api/quality/exclude", quality_exclude, methods=["POST"]),
     ]
     if DIST.is_dir():
         routes.append(Mount("/", StaticFiles(directory=str(DIST), html=True)))

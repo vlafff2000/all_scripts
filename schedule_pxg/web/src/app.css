@@ -104,3 +104,5 @@ a.btn { display: inline-flex; align-items: center; padding: 6px 12px; border: 1p
 a.btn:hover { border-color: var(--accent); }
 .wizard { display: flex; flex-direction: column; gap: 10px; }
 .src-help a { color: var(--accent-strong); }
+.raw tr.dim { opacity: .55; }
+.raw td.bad { color: var(--bad); font-weight: 700; }

@@ -74,7 +74,7 @@ def get(p: Project, kind: str) -> "av.Averaging":
         raise ValueError("Не заданы файлы истории")
     if not months:
         raise ValueError("В библиотеке нет тех.карты вида «%s» — неизвестны месяцы сезона" % kind)
-    key = (kind, _stamp(paths), prm["max_years"], prm["last_k"], prm["metric"], tuple(months),
+    key = (kind, _stamp(paths), src.excluded_stamp(p), prm["max_years"], prm["last_k"], prm["metric"], tuple(months),
            tuple(sorted((w, g) for w, g in p.well_group.items())), tuple((w, tuple(d.get("synonyms", ()))) for w, d in sorted(p.wells.items())))
     base = _cache.get(key)
     if base is None:
@@ -131,7 +131,7 @@ def _profile(p: Project, kind: str, notes: Optional[List[str]] = None) -> Option
     prm = params(p)
     months = months_of(p, kind)
     try:
-        key = (kind, _stamp(sources(p)), prm["method"], tuple(prm["seasons"]), tuple(months),
+        key = (kind, _stamp(sources(p)), src.excluded_stamp(p), prm["method"], tuple(prm["seasons"]), tuple(months),
                tuple(sorted(p.well_group.items())), tuple((w, tuple(d.get("synonyms", ()))) for w, d in sorted(p.wells.items())))
         prof = _pcache.get(key)
         if prof is None:
