@@ -136,3 +136,27 @@ def test_trial_without_name_but_save_needs_it(flat, tmp_path, monkeypatch):
     assert c.post("/api/trial", json={"path": flat, "template": tpl}).json()["rows"] == 10
     r = c.post("/api/template", json={"template": tpl})
     assert r.status_code == 400 and "название" in r.json()["error"]
+
+
+def test_group_column_optional(tmp_path):
+    from schedule_pxg import history
+    from schedule_pxg.project import Project
+    rows = [["Скважина", "Дата", "Группа", "Суточный расход газа"],
+            ["101", "2024-05-01", "ГСП-4", 100], ["101", "2024-05-02", "ГСП-4", 110],
+            ["102", "2024-05-01", "", 90], ["999", "2024-05-01", "ГСП-9", 5]]
+    p = str(tmp_path / "g.xlsx")
+    pd.DataFrame(rows).to_excel(p, header=False, index=False)
+    pv = wizard.preview(p)
+    assert pv["suggest"]["group"] == "Группа" and pv["suggest"]["well"] == "Скважина"
+    tpl = wizard.template_from({"name": "", "sheet": pv["sheet"], "header_row": pv["headerRow"], "unit": pv["unit"],
+                                **pv["suggest"]}, need_name=False)
+    assert wizard.trial(p, tpl)["groups"] == {"wells": 2, "groups": 2}
+    plain = wizard.template_from({"name": "", "sheet": pv["sheet"], "header_row": pv["headerRow"], "date": "Дата",
+                                  "well": "Скважина", "rate": "Суточный расход газа"}, need_name=False)
+    assert wizard.trial(p, plain)["groups"] == {"wells": 0, "groups": 0}
+    pr = Project("o")
+    for w in ("101", "102"):
+        pr.add_well(w)
+    pr.add_group("Старая"); pr.assign("102", "Старая")
+    assert history.apply_well_groups(pr, history.read_well_groups(p, tpl)) == 1
+    assert pr.well_group == {"101": "ГСП-4", "102": "Старая"}

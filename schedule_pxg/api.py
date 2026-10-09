@@ -458,8 +458,18 @@ def _history_run(body: dict):
     miss = [f for f in files if not os.path.isfile(f)]
     if miss:
         raise ValueError("Файл не найден: %s" % miss[0])
-    df = history.import_files(files, "", [history.Template.from_dict(t) for t in p.templates.values()])
+    tpls = [history.Template.from_dict(t) for t in p.templates.values()]
+    df = history.import_files(files, "", tpls)
     notes: list = []
+    given = 0
+    for f in files:
+        if history.detect_format(f) is None:
+            for t in tpls:
+                if t.group:
+                    given += history.apply_well_groups(p, history.read_well_groups(f, t))
+    if given:
+        p.save(FOLDER)
+        notes.append("Из файла истории назначены группы %d скважинам, у которых их не было" % given)
     mode = body.get("mode") or "daily"
     dates: list = []
     if mode == "dates":

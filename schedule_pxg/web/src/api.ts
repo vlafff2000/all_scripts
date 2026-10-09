@@ -1,6 +1,6 @@
 export interface Template {
   name: string; sheet: string | number | null; header_row: number
-  well: string; date: string; rate: string; hourly: string; hours: string; kind: string; kind_default: string; unit: string; layout?: string
+  well: string; date: string; rate: string; hourly: string; hours: string; kind: string; group: string; kind_default: string; unit: string; layout?: string
 }
 export interface AppState { folder: string; project: string; templates: Template[]; units: string[]; kinds: string[]; techmaps: TechMapInfo[]; scenarios: ScenarioInfo[] }
 export interface ScenarioInfo { name: string; parent: string | null; note: string; percent: number; seasons: number; results?: string }
@@ -26,9 +26,10 @@ export interface TechMapData {
 export interface TechMapView { techmap: TechMapData; summary: string; issues: { level: string; message: string }[]; kinds: string[] }
 export interface Preview {
   sheets: string[]; sheet: string; rows: string[][]; headerRow: number; columns: string[]
-  suggest: Record<'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind', string>; unit: string; total: number; format: string | null
+  suggest: Record<'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind' | 'group', string>; unit: string; total: number; format: string | null
 }
 export interface Trial {
+  groups?: { wells: number; groups: number }
   rows: number; wells: number; from: string; to: string; kinds: Record<string, number>
   sample: [string, string, number | null, number | null, string][]; issues: { level: string; message: string }[]; summary: string
 }

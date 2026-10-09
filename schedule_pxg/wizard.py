@@ -21,6 +21,7 @@ LAYOUTS = ("table", "matrix", "matrix_t")
 
 # слова в заголовке → поле шаблона (порядок важен: «часовой расход» раньше «расход»)
 _HINTS = [
+    ("group", r"групп|гсп|gsp"),
     ("hours", r"врем\w* работ|часы работ|^часы|hours"),
     ("hourly", r"часов\w* расход|q\s*час|м3/ч|м³/ч"),
     ("rate", r"суточн\w* расход|расход|дебит|q\s*сут|rate"),
@@ -67,7 +68,7 @@ def guess_header_row(raw: pd.DataFrame) -> int:
 
 def suggest(columns: List[str]) -> Dict[str, str]:
     """Столбцы заголовка → поля шаблона. Ничего не нашлось — пустая строка (пользователь выберет сам)."""
-    out = {k: "" for k in ("well", "date", "rate", "hourly", "hours", "kind")}
+    out = {k: "" for k in ("well", "date", "rate", "hourly", "hours", "kind", "group")}
     used = set()
     for field_, pat in _HINTS:
         for c in columns:
@@ -113,7 +114,7 @@ def template_from(d: dict, need_name: bool = True) -> Template:
     elif isinstance(sheet, str) and sheet.isdigit():
         sheet = int(sheet)
     fields = {k: d[k] for k in ("name", "header_row", "well", "date", "rate", "hourly", "hours", "kind",
-                                "kind_default", "unit", "layout") if k in d}
+                                "kind_default", "unit", "layout", "group") if k in d}
     fields["header_row"] = int(fields.get("header_row") or 0)
     if fields.get("layout", "table") not in LAYOUTS:
         raise ValueError("Неизвестный вид таблицы: %s" % fields["layout"])
@@ -148,9 +149,11 @@ def trial(path: str, tpl: Template, sample: int = 12) -> dict:
                 "issues": [{"level": i.level, "message": i.message} for i in rep.issues[:20]],
                 "summary": "Строк не получилось: проверьте строку заголовка и столбцы"}
     chk = history.check_history(df, rep=qc.Report("Проверка"))
+    gr = history.read_well_groups(path, tpl)
     head = df.head(sample)
     return {"rows": int(len(df)), "wells": int(df["well"].replace("", pd.NA).nunique()),
             "from": df["date"].min().strftime("%d.%m.%Y"), "to": df["date"].max().strftime("%d.%m.%Y"),
+            "groups": {"wells": len(gr), "groups": len(set(gr.values()))},
             "kinds": {k: int(v) for k, v in df["kind"].value_counts().items()},
             "sample": [[r.well, r.date.strftime("%d.%m.%Y"), None if pd.isna(r.rate) else float(r.rate),
                         None if pd.isna(r.hours) else float(r.hours), r.kind] for r in head.itertuples()],
