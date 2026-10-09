@@ -74,6 +74,7 @@ class Template:
     kind: str = ""               # столбец вида; если пусто — берётся kind_default
     kind_default: str = ""
     unit: str = "м3/сут"         # единица столбца rate
+    group: str = ""              # столбец группы скважины (необязательный, только для вида «список»)
     layout: str = "table"        # table — одна строка = сутки (скважина пустая → итог по объекту);
     #                              matrix — даты в строках, скважины в столбцах; matrix_t — скважины в строках, даты в столбцах
     extra: dict = field(default_factory=dict)
@@ -170,6 +171,43 @@ def read_by_template(path: str, tpl: Template, rep: Optional[qc.Report] = None) 
         keep = d.notna() & wells.notna()
         out.append(_frame(wells[keep].map(_well), d[keep], r[keep], h[keep], kinds[keep]))
     return pd.concat(out, ignore_index=True) if out else _empty()
+
+
+def read_well_groups(path: str, tpl: Template) -> Dict[str, str]:
+    """Скважина -> группа по столбцу tpl.group (первое непустое значение). Пусто, если столбца нет или вид не «список»."""
+    out: Dict[str, str] = {}
+    if not tpl.group or not tpl.well or tpl.layout != "table":
+        return out
+    sheets = [tpl.sheet] if tpl.sheet is not None else pd.ExcelFile(path).sheet_names
+    for sh in sheets:
+        raw = read_excel_safe(path, sheet_name=sh, header=None)
+        if raw is None or raw.empty or tpl.header_row >= len(raw):
+            continue
+        head = [str(x).strip() for x in raw.iloc[tpl.header_row].tolist()]
+        if tpl.well not in head or tpl.group not in head:
+            continue
+        body = raw.iloc[tpl.header_row + 1:].reset_index(drop=True)
+        body.columns = head
+        for w, g in zip(body[tpl.well], body[tpl.group]):
+            if pd.isna(w) or pd.isna(g) or not str(g).strip():
+                continue
+            out.setdefault(_well(w), str(g).strip())
+    return out
+
+
+def apply_well_groups(project, mapping: Dict[str, str]) -> int:
+    """Назначает группы скважинам проекта, у которых группы ещё нет; нужных групп не было — создаёт (под объектом).
+    Скважины, которых нет в проекте, и уже распределённые не трогает. Возвращает число назначенных."""
+    n = 0
+    for w, g in mapping.items():
+        name = project.resolve(w)
+        if name is None or name in project.well_group:
+            continue
+        if g not in project.groups:
+            project.add_group(g)
+        project.assign(name, g)
+        n += 1
+    return n
 
 
 # ───────────────────────── месячные листы ГСП_*_a/b ─────────────────────────

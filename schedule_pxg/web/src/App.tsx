@@ -8,7 +8,7 @@ import Strategies from './Strategies'
 import TechMaps from './TechMaps'
 import { AppState, CheckResult, Preview, Template, Trial, deleteTemplate, getPreview, getState, pickFile, runCheck, runTrial, saveTemplate } from './api'
 
-type Field = 'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind'
+type Field = 'well' | 'date' | 'rate' | 'hourly' | 'hours' | 'kind' | 'group' | 'group'
 const FIELDS: { key: Field; label: string; help: string; need?: boolean }[] = [
   { key: 'well', label: 'Номер скважины', help: 'Столбец, где записан номер или название скважины. Если файл — один объект целиком (дата и объём), оставьте пустым.', need: true },
   { key: 'date', label: 'Дата', help: 'Столбец с датой работы скважины (одна строка = одни сутки).', need: true },
@@ -16,8 +16,9 @@ const FIELDS: { key: Field; label: string; help: string; need?: boolean }[] = [
   { key: 'hourly', label: 'Часовой расход', help: 'Нужен только если нет суточного расхода (м³/ч).' },
   { key: 'hours', label: 'Часы работы за сутки', help: 'Сколько часов скважина работала в эти сутки. Можно не указывать.' },
   { key: 'kind', label: 'Закачка или отбор', help: 'Столбец, где написано, что делала скважина. Если такого столбца нет, выберите вид ниже.' },
+  { key: 'group', label: 'Группа скважины (необязательно)', help: 'Столбец с группой, к которой относится скважина (например, ГСП). Скважинам проекта без группы группа назначится при загрузке истории. Можно не указывать.' },
 ]
-const empty = (): Template => ({ name: '', sheet: null, header_row: 0, well: '', date: '', rate: '', hourly: '', hours: '', kind: '', kind_default: '', unit: 'м3/сут', layout: 'table' })
+const empty = (): Template => ({ name: '', sheet: null, header_row: 0, well: '', date: '', rate: '', hourly: '', hours: '', kind: '', group: '', kind_default: '', unit: 'м3/сут', layout: 'table' })
 
 function Step({ n, title, lead, children }: { n: number; title: string; lead?: string; children: React.ReactNode }) {
   return (
@@ -224,6 +225,7 @@ export default function App() {
               <Step n={4} title="Что получилось" lead="Посмотрите на образец строк. Если всё верно, сохраните шаблон, и такие файлы будут открываться сразу.">
                 {trial.rows === 0 ? <p className="note warn">{trial.summary}</p> : <>
                   <p>Прочитано строк: <b>{trial.rows}</b>, скважин: <b>{trial.wells}</b>, период с {trial.from} по {trial.to}.
+                    {trial.groups && trial.groups.wells > 0 && <> Групп найдено: <b>{trial.groups.groups}</b> (у {trial.groups.wells} скважин).</>}
                     {' '}{Object.entries(trial.kinds).map(([k, n]) => k + ': ' + n).join(', ')}.</p>
                   <div className="scroll">
                     <table className="raw">
