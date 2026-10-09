@@ -38,13 +38,16 @@ def _d(x) -> Optional[date]:
 
 # ---------------------------------------------------------------- календарь
 
-def season_entry(year: int, techmap: str, percent: float = 100.0, label: str = "", volumes: Optional[dict] = None) -> dict:
+def season_entry(year: int, techmap: str, percent: float = 100.0, label: str = "", volumes: Optional[dict] = None,
+                 locks: Optional[list] = None) -> dict:
     """Сезон календаря. `volumes` — стратегия варьирования (группа → месяц → млн м³), заменяет объёмы тех.карты."""
     if float(percent) <= 0:
         raise ValueError("Процент сезона должен быть больше нуля")
     e = {"year": int(year), "techmap": techmap, "percent": float(percent), "label": label}
     if volumes:
         e["volumes"] = {str(g): {str(m): float(x) for m, x in r.items()} for g, r in volumes.items()}
+    if volumes and locks:       # замки ячеек стратегии хранятся отдельным полем и только пользовательские
+        e["locks"] = [[str(g), str(m)] for g, m in locks]
     return e
 
 
@@ -256,7 +259,7 @@ class Scenarios:
                 raise ValueError("Знаков в дебите — от 0 до 6")
             return int(value)
         if key == "calendar":
-            return [season_entry(e["year"], e["techmap"], e.get("percent", 100.0), e.get("label", ""), e.get("volumes")) for e in value]
+            return [season_entry(e["year"], e["techmap"], e.get("percent", 100.0), e.get("label", ""), e.get("volumes"), e.get("locks")) for e in value]
         if key == "grid":
             g = {"step": value.get("step", "day"), "periods": [[str(_d(a)), b] for a, b in value.get("periods", [])],
                  "cuts": [str(_d(c)) for c in value.get("cuts", [])]}
