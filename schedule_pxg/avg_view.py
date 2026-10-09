@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -17,9 +18,9 @@ from . import sources as src
 from . import techmap as tmod
 from .project import Project
 
-# mode: "month" — доли по месяцам (как раньше), "day" — по суткам сезона (`daily.py`); seasons — выбранные сезоны (пусто — все);
+# mode: "day" — по суткам сезона (`daily.py`, по умолчанию), "month" — доли по месяцам (как раньше); seasons — выбранные сезоны (пусто — все);
 # method — способ сведения сезонов по суткам
-DEFAULTS = {"max_years": 6, "last_k": 3, "metric": "rmse", "mode": "month", "seasons": [], "method": "mean"}
+DEFAULTS = {"max_years": 6, "last_k": 3, "metric": "rmse", "mode": "day", "seasons": [], "method": "mean"}
 _cache: Dict[tuple, "av.Averaging"] = {}
 
 
@@ -213,3 +214,63 @@ def well_view(p: Project, kind: str, well: str) -> dict:
             "autoMonths": {str(y): ms for y, ms in a.auto_months.get(well, {}).items()},
             "table": [{"years": r.years, "n": int(r.n_years), "holdout": _num(r.holdout), "closeness": _num(r.closeness),
                        "stability": _num(r.stability), "advice": bool(r.advice), "chosen": bool(r.chosen)} for r in t.itertuples()]}
+
+
+def status(p: Project, kind: str) -> dict:
+    """Состояние источника для экрана «Осреднение»: что есть в проекте, какие сезоны доступны, что мешает считать. Не падает."""
+    paths = sources(p)
+    months = months_of(p, kind)
+    out = {"kind": kind, "files": len(paths), "template": (p.sources.get("flows") or {}).get("template", ""), "wells": len(p.wells),
+           "groups": len(p.groups), "withoutGroup": len(p.wells_without_group()), "months": months, "paths": paths,
+           "reference": bool((p.sources.get("daily_total") or {}).get("path")), "seasons": [], "problem": "", "params": params(p),
+           "methods": list(daily.METHODS)}
+    if not paths:
+        out["problem"] = "files"
+    elif not months:
+        out["problem"] = "techmap"
+    else:
+        try:
+            hist = src.load_project_history(p, kind)
+            first = tmod.MONTHS.index(months[0]) + 1
+            dates = pd.to_datetime(hist["date"]) if len(hist) else []
+            out["seasons"] = sorted({av.season_year(d.month, d.year, first) for d in dates if tmod.MONTHS[d.month - 1] in months})
+            out["rows"] = int(len(hist))
+            if not len(hist):
+                out["problem"] = "columns"
+            elif not p.wells:
+                out["problem"] = "wells"
+            elif not out["seasons"]:
+                out["problem"] = "seasons"
+        except Exception as e:
+            out["problem"] = "columns"
+            out["error"] = str(e)
+    return out
+
+
+def daily_view(p: Project, kind: str) -> dict:
+    """Суточный профиль долей по группам для графика: доли скважин по суткам сезона и сутки, заполненные по цепочке запасных правил."""
+    notes: List[str] = []
+    prof = _profile(p, kind, notes)
+    if prof is None:
+        return {"kind": kind, "seasons": [], "days": 0, "method": params(p)["method"], "groups": {}, "summary": {}, "notes": notes}
+    first = tmod.MONTHS.index(prof.months[0]) + 1
+    base = date(prof.seasons[-1], first, 1)
+    days = max(daily.season_days(prof.months, y) for y in prof.seasons)  # запасные сутки високосного сезона в график не берём
+    flagged = {(f["group"], f["day"]): f for f in prof.flagged()}
+    groups: Dict[str, dict] = {}
+    for (g, d), shares in prof.offset.items():
+        if d >= days:
+            continue
+        e = groups.setdefault(g, {"wells": {}, "filled": []})
+        for w in shares:
+            e["wells"].setdefault(w, [None] * days)
+        for w, v in shares.items():
+            e["wells"][w][d] = round(v, 5)
+        if (g, d) in flagged:
+            e["filled"].append({"day": d, "date": flagged[(g, d)]["date"], "how": flagged[(g, d)]["how"]})
+    for e in groups.values():
+        e["filled"].sort(key=lambda f: f["day"])
+        e["wells"] = {w: e["wells"][w] for w in sorted(e["wells"], key=fc._wkey)}
+    dates = [(base + timedelta(days=d)).isoformat() for d in range(days)]
+    return {"kind": kind, "seasons": prof.seasons, "days": days, "method": prof.method, "dates": dates,
+            "groups": {g: groups[g] for g in sorted(groups)}, "summary": dict(prof.summary(), filled=sum(len(e["filled"]) for e in groups.values())), "notes": notes}
