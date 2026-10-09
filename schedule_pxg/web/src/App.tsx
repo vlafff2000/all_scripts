@@ -8,11 +8,12 @@ import Scenarios from './Scenarios'
 import Strategies from './Strategies'
 import TechMaps from './TechMaps'
 import Import from './Import'
+import Quality from './Quality'
 import { AppState, getState } from './api'
 
-type Tab = 'import' | 'techmaps' | 'averaging' | 'scenarios' | 'strategies' | 'charts' | 'results' | 'history'
+type Tab = 'import' | 'quality' | 'techmaps' | 'averaging' | 'scenarios' | 'strategies' | 'charts' | 'results' | 'history'
 const NAV: [string, [Tab, string, string][]][] = [
-  ['Данные', [['import', 'Импорт', 'M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11'], ['techmaps', 'Тех.карты', 'M2.5 3h11v10h-11zM2.5 7h11M6.5 3v10'], ['averaging', 'Осреднение', 'M2 8h2.5l1.5-4 2 8 1.5-4H14']]],
+  ['Данные', [['import', 'Импорт', 'M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11'], ['quality', 'Проверка данных', 'M8 2 2.5 4.5v3.5c0 3 2.3 5 5.5 6 3.2-1 5.5-3 5.5-6V4.5zM5.5 8l2 2 3-3.5'], ['techmaps', 'Тех.карты', 'M2.5 3h11v10h-11zM2.5 7h11M6.5 3v10'], ['averaging', 'Осреднение', 'M2 8h2.5l1.5-4 2 8 1.5-4H14']]],
   ['Расчёт', [['scenarios', 'Сценарии', 'M3 3v4a3 3 0 0 0 3 3h7M3 7v6'], ['strategies', 'Стратегии', 'M2.5 13V8M6.5 13V4M10.5 13V6.5M14 13H2']]],
   ['Результат', [['charts', 'Графики', 'M2 13h12M3.5 10 7 6.5l2.5 2.5L13 4.5'], ['results', 'Результаты расчёта', 'M3 2.5h10v11H3zM6 6h4M6 9h4'], ['history', 'История', 'M3 8a5 5 0 1 0 1.6-3.7M3 2.5v3h3M8 5v3.5l2 1.5']]],
 ]
@@ -68,7 +69,7 @@ export default function App() {
           ))}
         </div>
       </aside>
-      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'results' && st ? <Results st={st} setSt={setSt} /> : tab === 'averaging' && st ? <Averaging st={st} setSt={setSt} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : st ? <Import st={st} setSt={setSt} /> : <main className="workspace" />}
+      {tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'results' && st ? <Results st={st} setSt={setSt} /> : tab === 'averaging' && st ? <Averaging st={st} setSt={setSt} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'quality' && st ? <Quality /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : st ? <Import st={st} setSt={setSt} /> : <main className="workspace" />}
     </div>
   )
 }

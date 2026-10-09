@@ -20,7 +20,7 @@ import pandas as pd
 from pxg_core import qc
 from pxg_core.расходы_файлы import read_excel_safe
 
-from . import history, techmap, totals
+from . import dataquality, history, techmap, totals
 from .project import Project
 
 _cache: Dict[tuple, pd.DataFrame] = {}
@@ -66,6 +66,26 @@ def set_daily_total(p: Project, path: str, unit: str = "м3/сут") -> None:
     p.sources["daily_total"] = {"path": path, "unit": unit}
 
 
+# ───────────────────────── исключённые строки ─────────────────────────
+
+def excluded(p: Project) -> set:
+    return set(p.sources.get("excluded_rows") or [])
+
+
+def excluded_stamp(p: Project) -> tuple:
+    """Для ключей кэша: что исключено сейчас."""
+    ids = p.sources.get("excluded_rows") or []
+    return (len(ids), hash(tuple(sorted(ids))))
+
+
+def set_excluded(p: Project, ids: List[str], on: bool) -> int:
+    """Исключает (`on`) или возвращает строки; возвращает, сколько исключено теперь."""
+    cur = excluded(p)
+    cur = cur | set(ids) if on else cur - set(ids)
+    p.sources["excluded_rows"] = sorted(cur)
+    return len(cur)
+
+
 # ───────────────────────── история ─────────────────────────
 
 def _templates(p: Project) -> List[history.Template]:
@@ -78,9 +98,10 @@ def _stamp(paths: List[str]) -> tuple:
     return tuple((s, os.path.getsize(s), os.path.getmtime(s)) for s in paths if os.path.isfile(s))
 
 
-def load_project_history(p: Project, kind: str = "", rep: Optional[qc.Report] = None) -> pd.DataFrame:
+def load_project_history(p: Project, kind: str = "", rep: Optional[qc.Report] = None, raw: bool = False) -> pd.DataFrame:
     """Единая таблица истории (`history.COLUMNS`) по базе расходов проекта; `kind` — только этот вид.
-    Кэш — по размеру и дате файлов, шаблонам и виду; нет файлов — понятная ошибка."""
+    Кэш — по размеру и дате файлов, шаблонам и виду; нет файлов — понятная ошибка.
+    Исключённые строки («Проверка данных») убираются, если не `raw`."""
     paths = flow_paths(p)
     if not paths:
         raise ValueError("Не заданы файлы истории")
@@ -97,16 +118,21 @@ def load_project_history(p: Project, kind: str = "", rep: Optional[qc.Report] = 
         if rep is None:
             _cache.clear()
             _cache[key] = df
-    return df.copy()
+    df = df.copy()
+    return df if raw else dataquality.drop_excluded(df, dataquality.FLOWS, excluded(p))
 
 
-def load_daily_total(p: Project, rep: Optional[qc.Report] = None) -> pd.DataFrame:
+def load_daily_total(p: Project, rep: Optional[qc.Report] = None, raw: bool = False) -> pd.DataFrame:
     """Эталонный суточный объём («Дата», «Объем», м³/сут с учётом единицы) или пустая таблица, если не задан."""
     d = p.sources.get("daily_total") or {}
     if not d.get("path"):
         return pd.DataFrame(columns=["Дата", "Объем"])
     df = totals.read_total_volumes(d["path"], rep)
     df["Объем"] = df["Объем"] * history.UNITS[d.get("unit") or "м3/сут"]
+    ids = excluded(p)
+    if ids and not raw and len(df):
+        keep = ~dataquality.row_ids(dataquality.daily_frame(df), dataquality.DAILY).isin(ids).to_numpy()
+        df = df[keep].reset_index(drop=True)
     return df
 
 

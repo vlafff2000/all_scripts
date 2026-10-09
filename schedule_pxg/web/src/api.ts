@@ -176,3 +176,13 @@ export const getResultSeries = (scenario: string, keyword: string, objects: stri
   call<{ keyword: string; series: Record<string, { dates: string[]; values: number[] }> }>('/api/results/series?' + new URLSearchParams({ scenario, keyword, objects: objects.join('|') }))
 export const getIndicators = (scenario: string, sg: string, dates: string[]) =>
   call<{ rows: IndicatorRow[]; notes: string[] }>('/api/results/indicators?' + new URLSearchParams({ scenario, sg, dates: dates.join('|') }))
+
+export interface QualityRow { id: string; dataset: string; well: string; date: string; kind: string; check: string; level: string; value: string; details: string; excluded: boolean }
+export interface QualityView {
+  jump: number; total: number; errors: number; excluded: number; shown: number; datasets: Record<string, string>
+  summary: { dataset: string; check: string; level: string; count: number }[]; rows: QualityRow[]
+  excludedRows: { id: string; dataset: string; well: string; date: string; kind: string }[]
+}
+export const getQuality = (jump: number) => call<QualityView>('/api/quality?jump=' + jump)
+export const excludeRows = (b: { ids?: string[]; level?: string; check?: string; dataset?: string; jump?: number; on?: boolean; all_restore?: boolean }) =>
+  call<{ changed: number; excluded: number }>('/api/quality/exclude', post(b))
