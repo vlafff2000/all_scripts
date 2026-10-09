@@ -692,7 +692,7 @@ def _weldraw(st: Step, wells: List[str], gof, control: "cmod.Control", state: Di
     for w in wells:
         v = control.value("draw", w, gof(w), st.start, st.kind)
         if v is not None and state.get(w) != v:
-            lines.append("%s\t%g\tGAS\tYES\t/\n" % (w, v))   # по умолчанию LIQ и NO: без GAS YES депрессия газовой скважины не учитывается
+            lines.append("%s\t%g\tGAS\t/\n" % (w, v))   # три колонки: скважина, максимальная депрессия, фаза (решение Егора 2026-10-09)
             state[w] = v
     lines.sort(key=lambda l: _wkey(l.split("\t")[0]))
     return "\nWELDRAW\n" + "".join(lines) + "/\n" if lines else ""

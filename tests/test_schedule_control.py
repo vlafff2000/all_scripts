@@ -110,14 +110,14 @@ def test_weldraw_set_once_changed_by_date_never_one_star():
     t = fc.render_schedule(_steps(), control=c, project=_proj())
     assert t.count("WELDRAW") == 2 and "1*\t/  -- лимит" not in t and "лимит снят" not in t
     first, second = t.split("WELDRAW")[1], t.split("WELDRAW")[2]
-    assert "10\t15\tGAS\tYES\t/" in first and "11\t15\tGAS\tYES\t/" in first and "20\t8\tGAS\tYES\t/" in first
-    assert "10\t12\tGAS\tYES\t/" in second and "20" not in second.split("DATES")[0] and "11" not in second.split("DATES")[0]
+    assert "10\t15\tGAS\t/" in first and "11\t15\tGAS\t/" in first and "20\t8\tGAS\t/" in first
+    assert "10\t12\tGAS\t/" in second and "20" not in second.split("DATES")[0] and "11" not in second.split("DATES")[0]
     assert "WELDRAW" not in fc.render_schedule(_steps("закачка"), control=c, project=_proj())
     # скважина, закрытая на шаге, не переписывается, пока значение не менялось
     st = [fc.Step(date(2026, 1, 1), date(2026, 1, 5), 5, "отбор", {"10": 1.0}), fc.Step(date(2026, 1, 6), date(2026, 1, 10), 5, "отбор", {"11": 1.0}),
           fc.Step(date(2026, 1, 11), date(2026, 1, 15), 5, "отбор", {"10": 1.0})]
     t3 = fc.render_schedule(st, control=cm.Control("rate", limits=[cm.Limit("draw", 3)]), project=_proj())
-    assert t3.count("WELDRAW") == 2 and t3.count("10\t3\tGAS\tYES\t/") == 1
+    assert t3.count("WELDRAW") == 2 and t3.count("10\t3\tGAS\t/") == 1
 
 
 def test_control_wconprod_then_weltarg_and_shut():
