@@ -17,7 +17,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, charts, checks, control, forecast, history, historymode, scenarios, strategy, techmap, totals, wizard
+from . import avg_view, charts, checks, control, forecast, history, historymode, results, scenarios, strategy, techmap, totals, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -685,6 +685,56 @@ def _pick(start: str) -> str:
     return done.stdout.decode("utf-8", "replace").strip()
 
 
+async def results_get(request: Request):
+    p = _project()
+    name = request.query_params.get("scenario") or ""
+    if name not in p.scenarios:
+        return _err("Нет сценария «%s»" % name, 404)
+    path = p.results.get(name, "")
+    if not path:
+        return JSONResponse({"scenario": name, "path": "", "files": {}, "missing": [], "vectors": []})
+    try:
+        info = await run_in_threadpool(results.describe, path)
+        vec = await run_in_threadpool(lambda: results.vectors(results.load_summary(path))) if "SMSPEC" in info["files"] and "UNSMRY" in info["files"] else []
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать результаты: %s" % e)
+    return JSONResponse(dict(info, scenario=name, path=path, vectors=vec))
+
+
+async def results_attach(request: Request):
+    b = await request.json()
+    p = _project()
+    name = str(b.get("scenario") or "")
+    if name not in p.scenarios:
+        return _err("Нет сценария «%s»" % name, 404)
+    path = _clean(b.get("path"))
+    if path and not results.find_files(path):
+        return _err("Не нашёл файлов модели (EGRID, INIT, SMSPEC, UNSMRY, UNRST) по пути «%s»" % path)
+    if path:
+        p.results[name] = path
+    else:
+        p.results.pop(name, None)
+    p.save(FOLDER)
+    return JSONResponse({"scenario": name, "path": path})
+
+
+async def results_series(request: Request):
+    p = _project()
+    name = request.query_params.get("scenario") or ""
+    path = p.results.get(name)
+    if not path:
+        return _err("К сценарию «%s» не привязаны результаты расчёта" % name, 404)
+    kw = (request.query_params.get("keyword") or "").upper()
+    objs = [o for o in (request.query_params.get("objects") or "").split("|") if o]
+    try:
+        data = await run_in_threadpool(lambda: results.series(results.load_summary(path), kw, objs))
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать результаты: %s" % e)
+    if not data:
+        return _err("В сводке нет вектора %s" % kw, 404)
+    return JSONResponse({"keyword": kw, "series": {o: {"dates": [str(d.date()) for d, _ in r], "values": [v for _, v in r]} for o, r in data.items()}})
+
+
 async def pick(request: Request):
     try:
         path = await run_in_threadpool(_pick, request.query_params.get("start") or "")
@@ -731,6 +781,9 @@ def build_app() -> Starlette:
         Route("/api/averaging/advice", averaging_advice, methods=["POST"]),
         Route("/api/averaging/exclude", averaging_exclude, methods=["POST"]),
         Route("/api/averaging/manual", averaging_manual, methods=["POST"]),
+        Route("/api/results", results_get),
+        Route("/api/results/attach", results_attach, methods=["POST"]),
+        Route("/api/results/series", results_series),
         Route("/api/pick", pick),
         Route("/api/check", check_export, methods=["POST"]),
     ]
