@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import PageHead from './PageHead'
 import {
   AppState, AvgView, AvgWellView, avgAdvice, avgChoose, avgExclude, avgManual, getAveraging, getAveragingWell, pickFile, setAvgSources,
 } from './api'
@@ -97,6 +98,7 @@ export default function Averaging({ st }: { st: AppState }) {
 
   return (
     <main className="workspace">
+      <PageHead title="Осреднение" lede="Из истории работы скважин по годам получаем средний расход, на котором строится прогноз." />
       <div className="card">
         <h2>Осреднение истории: источники</h2>
         <div className="row">

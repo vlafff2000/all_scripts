@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import PageHead from './PageHead'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { DataZoomComponent, GridComponent, TitleComponent, ToolboxComponent, TooltipComponent } from 'echarts/components'
@@ -94,6 +95,7 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
 
   return (
     <main className="workspace">
+      <PageHead title="Результаты расчёта" lede="Привяжите результаты модели к сценариям и сравните их по показателям." />
       <section className="card">
         <h2>Результаты расчёта по сценариям</h2>
         {st.scenarios.length === 0 ? <p className="muted">Сначала создайте сценарий (вкладка «Сценарии»).</p> : <>

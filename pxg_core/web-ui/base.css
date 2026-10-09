@@ -137,3 +137,12 @@ kbd { font-family: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; b
 .shell.collapsed .brand-name, .shell.collapsed .side-label, .shell.collapsed .sidebar nav { display: none; }
 .shell.collapsed .side-search { margin: 0; padding: 8px; justify-content: center; }
 .shell.collapsed .theme-switch { flex-direction: column; align-self: center; }
+
+/* переключатель-сегмент (вид, тема) */
+.segmented { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 2px; gap: 2px; }
+.segmented button { background: none; border: 0; border-radius: 4px; padding: 4px 11px; cursor: pointer; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.segmented button[aria-checked='true'] { background: var(--surface); color: var(--ink); font-weight: 700; box-shadow: 0 1px 2px var(--shadow); }
+.theme-switch.segmented { background: var(--side-raised); border-color: #34474f; }
+.theme-switch.segmented { display: flex; }
+.theme-switch.segmented button { box-shadow: none; padding: 4px; flex: 1; color: var(--side-muted); }
+.theme-switch.segmented button[aria-checked='true'] { background: var(--side); color: var(--side-ink); }

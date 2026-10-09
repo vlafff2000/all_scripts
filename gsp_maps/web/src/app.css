@@ -8,13 +8,6 @@
 .linkbtn { display: inline-block; text-decoration: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ok { color: var(--good); } .bad { color: var(--danger); }
-.segmented { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 2px; gap: 2px; }
-.segmented button { background: none; border: 0; border-radius: 4px; padding: 4px 11px; cursor: pointer; font-size: 14px; color: var(--muted); white-space: nowrap; }
-.segmented button[aria-checked='true'] { background: var(--surface); color: var(--ink); font-weight: 700; box-shadow: 0 1px 2px var(--shadow); }
-.theme-switch.segmented { background: var(--side-raised); border-color: #34474f; }
-.theme-switch.segmented { display: flex; }
-.theme-switch.segmented button { box-shadow: none; padding: 4px; flex: 1; color: var(--side-muted); }
-.theme-switch.segmented button[aria-checked='true'] { background: var(--side); color: var(--side-ink); }
 .wide-seg { margin-top: 10px; }
 
 .topbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }

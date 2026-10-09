@@ -82,3 +82,20 @@ button.danger:hover:not(:disabled) { background: var(--danger-soft); }
 .x { min-width: 32px; min-height: 32px; font-size: 16px; }
 .x:hover { color: var(--bad); }
 .sc-pattern .x { border: 1px solid var(--line-strong); font-size: 13px; padding: 4px 10px; background: var(--surface); color: var(--ink); }
+
+/* пункты меню со значком: подпись слева от значка, как в «Картах ГСП» */
+.sidebar nav a { align-items: center; justify-content: flex-start; gap: 10px; }
+.shell.collapsed .sidebar nav { display: block; }
+.shell.collapsed .sidebar nav a { justify-content: center; padding: 9px; }
+.shell.collapsed .sidebar nav a .side-label { display: none; }
+
+/* заголовок экрана */
+.page-head h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+.page-head .lede { margin: 4px 0 0; }
+.workspace h1 { font-size: 24px; }
+.side-project { overflow-wrap: anywhere; word-break: normal; }
+.intro h2 { margin: 0 0 4px; font-size: 18px; }
+
+/* флажки и переключатели стоят в строке с подписью, а не над ней */
+label:has(> input[type='checkbox']), label:has(> input[type='radio']) { flex-direction: row; align-items: center; gap: 8px; }
+input[type='checkbox'], input[type='radio'] { width: 16px; height: 16px; accent-color: var(--accent-strong); }
