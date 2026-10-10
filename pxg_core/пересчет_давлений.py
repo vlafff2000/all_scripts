@@ -134,6 +134,10 @@ def recalc_row(well: int, d, f, g, e, refs: Refs, excluded: Iterable[int] = DEFA
     z, mark = refs.altitude.get(well), refs.perf_mark.get(well)
     if z is None:
         return None, None, M_NO_ALT
+    if mark is not None:
+        # Абсолютная отметка ниже уровня моря записывается со знаком минус (−600); в формуле нужна глубина ниже
+        # уровня моря: знак убирается, как у уровня жидкости. Положительное число — та же глубина (как раньше).
+        mark = abs(mark)
     if e is not None:
         den = e + depth + z
         rho = 10 * d / den if den else None
