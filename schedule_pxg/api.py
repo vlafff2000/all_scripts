@@ -143,6 +143,21 @@ async def techmap_save(request: Request):
     return JSONResponse(await run_in_threadpool(_state))
 
 
+async def groupmap_get(request: Request):
+    return JSONResponse(await run_in_threadpool(lambda: techmap.group_rows(_project())))
+
+
+async def groupmap_set(request: Request):
+    body = await request.json()
+    p = _project()
+    try:
+        techmap.set_group_override(p, str(body.get("key") or ""), body.get("group") or None)
+    except ValueError as e:
+        return _err(str(e))
+    p.save(FOLDER)
+    return JSONResponse(await run_in_threadpool(lambda: techmap.group_rows(_project())))
+
+
 async def techmap_delete(request: Request):
     body = await request.json()
     p = _project()
@@ -894,6 +909,8 @@ def build_app() -> Starlette:
         Route("/api/techmap", techmap_get),
         Route("/api/techmap/save", techmap_save, methods=["POST"]),
         Route("/api/techmap/delete", techmap_delete, methods=["POST"]),
+        Route("/api/groupmap", groupmap_get),
+        Route("/api/groupmap/set", groupmap_set, methods=["POST"]),
         Route("/api/scenario", scenario_get),
         Route("/api/scenario/create", scenario_create, methods=["POST"]),
         Route("/api/scenario/set", scenario_set, methods=["POST"]),
