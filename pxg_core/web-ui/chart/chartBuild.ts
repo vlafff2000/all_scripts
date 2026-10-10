@@ -16,7 +16,9 @@ export interface LineSpec {
 
 export function mkSeries(s: LineSpec): Series {
   return {
-    name: s.name, kind: s.kind ?? 'line', group: s.group ?? '', dashed: !!s.dashed, dash: s.dashed ? 'dash' : 'solid',
+    name: s.name, kind: s.kind ?? 'line', group: s.group ?? '', dashed: !!s.dashed,
+    // после восьмого ряда цвета повторяются: ряды различаются ещё и штрихом
+    dash: s.dashed ? 'dash' : (s.slot ?? 0) >= COLORS.length ? (['dash', 'dot', 'dashdot'] as const)[(Math.floor((s.slot ?? 0) / COLORS.length) - 1) % 3] : 'solid',
     width: s.width ?? 2, legend: true, tooltip: '', color: s.color ?? COLORS[(s.slot ?? 0) % COLORS.length],
     symbol: 'circle', hollow: false, opacity: s.opacity ?? 1, x: s.x, y: s.y, ids: null, labels: null, dataset: null,
     markers: false, axis: 'y', stack: s.stack, total: s.x.length, facets: s.facets ?? null,

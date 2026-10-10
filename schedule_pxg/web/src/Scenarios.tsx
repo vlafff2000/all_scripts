@@ -99,7 +99,7 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
           <div className="row sc-fields">
             <label>Процент от тех.карты{tag('percent')}<br />
               <input defaultValue={v.percent} key={'p' + v.percent} onBlur={e => num(e.target.value) !== v.percent && put('percent', num(e.target.value))} /></label>
-            <label>Допуск сверки{tag('tolerance')}<br />
+            <label>Допуск сверки, доля (0,01 = 1 %){tag('tolerance')}<br />
               <input defaultValue={v.tolerance} key={'t' + v.tolerance} onBlur={e => num(e.target.value) !== v.tolerance && put('tolerance', num(e.target.value))} /></label>
             <label>Знаков в дебите{tag('decimals')}<br />
               <input defaultValue={v.decimals} key={'d' + v.decimals} onBlur={e => num(e.target.value) !== v.decimals && put('decimals', num(e.target.value))} /></label>
