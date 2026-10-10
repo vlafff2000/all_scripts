@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from typing import Dict, List, Optional
 
 WELL_TYPES = ("эксплуатационная", "наблюдательная")
+_SAVE_LOCK = threading.RLock()      # две записи проекта из потоков не перемешиваются
 
 
 def _write_json(path: str, data) -> None:
@@ -118,19 +120,32 @@ class Project:
 
     # хранение
     def save(self, folder: str) -> None:
+        """Все файлы проекта сначала пишутся во временные и только потом заменяют прежние: сбой посреди записи
+        не оставляет проект наполовину новым (скважины новые, шаблоны старые)."""
         os.makedirs(folder, exist_ok=True)
-        _write_json(os.path.join(folder, "project.json"), {"name": self.name, "group_level": self.group_level})
-        _write_json(os.path.join(folder, "wells.json"), self.wells)
-        _write_json(os.path.join(folder, "groups.json"), {"groups": self.groups, "well_group": self.well_group})
-        _write_json(os.path.join(folder, "sets.json"), self.sets)
-        _write_json(os.path.join(folder, "templates.json"), self.templates)
-        _write_json(os.path.join(folder, "techmaps.json"), self.techmaps)
-        _write_json(os.path.join(folder, "outages.json"), self.outages)
-        _write_json(os.path.join(folder, "control.json"), self.control)
-        _write_json(os.path.join(folder, "scenarios.json"), self.scenarios)
-        _write_json(os.path.join(folder, "averaging.json"), self.averaging)
-        _write_json(os.path.join(folder, "results.json"), self.results)
-        _write_json(os.path.join(folder, "sources.json"), self.sources)
+        parts = {
+            "project.json": {"name": self.name, "group_level": self.group_level}, "wells.json": self.wells,
+            "groups.json": {"groups": self.groups, "well_group": self.well_group}, "sets.json": self.sets,
+            "templates.json": self.templates, "techmaps.json": self.techmaps, "outages.json": self.outages,
+            "control.json": self.control, "scenarios.json": self.scenarios, "averaging.json": self.averaging,
+            "results.json": self.results, "sources.json": self.sources}
+        with _SAVE_LOCK:
+            written = []
+            try:
+                for name, data in parts.items():
+                    tmp = os.path.join(folder, name) + ".tmp"
+                    written.append((tmp, os.path.join(folder, name)))
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+            except Exception:
+                for tmp, _ in written:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                raise
+            for tmp, dst in written:
+                os.replace(tmp, dst)
 
     @classmethod
     def load(cls, folder: str) -> "Project":

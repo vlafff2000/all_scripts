@@ -425,6 +425,19 @@ async def strategy_load(request: Request):
             for k, s in enumerate(loaded):
                 if s["kind"] == tm.kind and s["year"] == int(e["year"]):
                     t = strategy.clean({g: r for g, r in s["table"].items()}, tm)
+                    unit = (s.get("unit") or "").lower().replace("³", "3").replace(" ", "")
+                    if t and unit.startswith("тыс"):
+                        t = {g: {m: x / 1000.0 for m, x in r.items()} for g, r in t.items()}
+                        report.append("%s %d: единица листа «тыс. м³», объёмы переведены в млн м³" % (s["kind"], s["year"]))
+                    elif t and not unit:
+                        base_sum = sum(sum(r.values()) for r in strategy.base_table(tm).values())
+                        got = sum(sum(r.values()) for r in t.values())
+                        if base_sum > 0 and got > 10 * base_sum:
+                            report.append("%s %d: единица в файле не указана, а сумма в %.0f раз больше тех.карты — похоже, "
+                                          "тыс. м³; лист пропущен (допишите в «Метаданные» столбец «Единица»: млн м³ или тыс. м³)"
+                                          % (s["kind"], s["year"], got / base_sum))
+                            used.add(k)
+                            continue
                     if t:
                         if t == strategy.base_table(tm):
                             cal[i].pop("volumes", None)
@@ -781,7 +794,10 @@ async def sources_build(request: Request):
         rep = await run_in_threadpool(sources.build_project_wells, p)
     except Exception as e:
         return _err("Источники не обработаны: %s" % e)
-    p.save(FOLDER)
+    fresh = _project()      # за время сборки на экране «Проверка данных» могли исключить строки: пересохраняем только скважины и группы
+    fresh.wells, fresh.groups, fresh.well_group = p.wells, p.groups, p.well_group
+    fresh.save(FOLDER)
+    p = fresh
     return JSONResponse(dict(_sources_view(p), summary=rep.summary(),
                              issues=[{"level": i.level, "message": i.message, "well": getattr(i, "well", "")} for i in rep.issues[:200]]))
 

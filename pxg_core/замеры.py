@@ -153,6 +153,10 @@ def parse_file(path: str, excess_limit: float = EXCESS_LIMIT) -> Parsed:
                         out.problems.append(("WELL", "Строка таблицы без номера скважины: «%s»" % "; ".join(texts)[:80],
                                              "%s, лист %s, строка %d" % (src, sheet, i + 1)))
                     continue
+                raw_well = values[i][block["well"]] if block["well"] < len(values[i]) else None
+                if isinstance(raw_well, str) and re.search(r"\d+\s*[/;]\s*\d+", raw_well):
+                    out.problems.append(("WELL", "Объединённая скважина «%s»: замер записан на %d, а не на обе" % (raw_well.strip(), well),
+                                         "%s, лист %s, строка %d" % (src, sheet, i + 1)))
                 out.rows.append(_row(values[i], block, well, sections[b], src, sheet, i + 1, excess_limit))
     if not out.rows:
         out.problems.append(("HEADER", "Таблицы замеров не найдены: нет шапки с «Дата замера» и «Руст/Нст/Рпл»", src))
@@ -203,8 +207,11 @@ def merge(old: Optional[pd.DataFrame], new: pd.DataFrame) -> pd.DataFrame:
     out["Дата"] = pd.to_datetime(out["Дата"], errors="coerce")
     key = out["Дата"].dt.strftime("%Y-%m-%d").fillna("без даты:" + out["Источник"].astype(str))
     out["_k"] = out["Скважина"].astype(str) + "|" + key + "|" + out["Горизонт"].astype(str)
+    before = len(out)
     out = out.drop_duplicates("_k", keep="last").drop(columns="_k")
-    return out.sort_values(["Скважина", "Дата"], na_position="last").reset_index(drop=True)
+    out = out.sort_values(["Скважина", "Дата"], na_position="last").reset_index(drop=True)
+    out.attrs["replaced"] = before - len(out)      # сколько строк с тем же ключом заменено новыми (или совпало)
+    return out
 
 
 def by_month(df: pd.DataFrame, column: str) -> pd.DataFrame:
