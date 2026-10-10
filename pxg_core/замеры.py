@@ -103,6 +103,14 @@ def _well_number(v) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _combined_wells(v) -> List[int]:
+    """«54/80», «54;80» → [54, 80]; одиночный номер и не строка → пусто (обрабатывается как обычно)."""
+    if not isinstance(v, str):
+        return []
+    m = re.match(r"^\s*(\d+)\s*[/;]\s*(\d+)\s*$", v)
+    return [int(m.group(1)), int(m.group(2))] if m else []
+
+
 def _read(path: str) -> Dict[str, pd.DataFrame]:
     from .расходы_файлы import excel_engines
     last: Optional[Exception] = None
@@ -154,10 +162,13 @@ def parse_file(path: str, excess_limit: float = EXCESS_LIMIT) -> Parsed:
                                              "%s, лист %s, строка %d" % (src, sheet, i + 1)))
                     continue
                 raw_well = values[i][block["well"]] if block["well"] < len(values[i]) else None
-                if isinstance(raw_well, str) and re.search(r"\d+\s*[/;]\s*\d+", raw_well):
-                    out.problems.append(("WELL", "Объединённая скважина «%s»: замер записан на %d, а не на обе" % (raw_well.strip(), well),
+                parts = _combined_wells(raw_well)
+                if len(parts) > 1:      # «54/80»: один замер на двух скважинах — запись на каждую
+                    out.problems.append(("WELL", "Объединённая скважина «%s»: замер записан на каждую (%s)"
+                                         % (str(raw_well).strip(), ", ".join(map(str, parts))),
                                          "%s, лист %s, строка %d" % (src, sheet, i + 1)))
-                out.rows.append(_row(values[i], block, well, sections[b], src, sheet, i + 1, excess_limit))
+                for w in parts if len(parts) > 1 else [well]:
+                    out.rows.append(_row(values[i], block, w, sections[b], src, sheet, i + 1, excess_limit))
     if not out.rows:
         out.problems.append(("HEADER", "Таблицы замеров не найдены: нет шапки с «Дата замера» и «Руст/Нст/Рпл»", src))
     return out

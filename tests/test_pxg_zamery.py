@@ -113,3 +113,21 @@ def test_excess_boundary(value, category, is_excess):
         assert row.p_wh is None and row.excess == value
     else:
         assert row.excess is None and row.p_wh == value
+
+
+def test_combined_well_measurement_is_written_to_both_wells(tmp_path):
+    """«54/80»: один замер на двух скважинах записывается на 54 и на 80, в отчёте об этом сказано."""
+    f = tmp_path / "Результат замеров сентябрь.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "Результаты замеров по скважинам за сентябрь 2026 года."
+    ws.append(HEAD)
+    ws.append(["Эксплуатационные", None, None, None, None, None, None])
+    ws.append([1, "54/80", "Щигровский", dt.datetime(2026, 9, 25), 96.6, None, 102.6])
+    ws.append([2, 56, "Щигровский", dt.datetime(2026, 9, 25), 97.0, None, 103.0])
+    wb.save(f)
+    parsed = замеры.parse_file(str(f))
+    got = {r.well: (r.p_wh, r.p_res) for r in parsed.rows}
+    assert got == {54: (96.6, 102.6), 80: (96.6, 102.6), 56: (97.0, 103.0)}
+    assert any("54/80" in text and "54, 80" in text for _, text, _ in parsed.problems)
+    assert замеры._combined_wells("54 / 80") == [54, 80] and замеры._combined_wells(54) == [] and замеры._combined_wells("54") == []
