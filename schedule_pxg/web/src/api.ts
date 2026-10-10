@@ -192,3 +192,8 @@ export interface QualityView {
 export const getQuality = (jump: number) => call<QualityView>('/api/quality?jump=' + jump)
 export const excludeRows = (b: { ids?: string[]; level?: string; check?: string; dataset?: string; jump?: number; on?: boolean; all_restore?: boolean }) =>
   call<{ changed: number; excluded: number }>('/api/quality/exclude', post(b))
+
+export interface GroupMapRow { key: string; techmaps: string[]; volume: number; group: string | null; source: 'auto' | 'manual' | 'none'; wells: number }
+export interface GroupMap { rows: GroupMapRow[]; groups: { group: string; wells: number }[]; unused: string[] }
+export const getGroupMap = () => call<GroupMap>('/api/groupmap')
+export const setGroupMap = (key: string, group: string) => call<GroupMap>('/api/groupmap/set', post({ key, group }))
