@@ -133,11 +133,25 @@ def test_correct_set_branches():
 DATES = [date(2026, 5, 3), date(2026, 5, 5), date(2026, 10, 2)]
 
 
-def test_dates_text_parity_with_old_script():
-    """Эталон: schedule старого скрипта «по датам замеров» (`get_model_dates_and_periods` + `create_include_file`)."""
-    res = hm.build_history(sample(), mode="dates", model_dates=DATES, periods=PERIODS)
-    assert blocks(hm.render(res)) == golden("hm_dates_blocks")
+def test_dates_steps_use_their_own_interval():
+    """«По датам замеров»: каждый шаг получает средний расход своего интервала истории, интервалы подряд и без перекрытия.
+
+    Старый скрипт писал расход прошлого интервала на следующий (сдвиг на период) и входил в границу дважды; это
+    сознательно исправлено, поэтому текст schedule не совпадает с эталоном старого скрипта."""
+    h = sample()
+    res = hm.build_history(h, mode="dates", model_dates=DATES, periods=PERIODS)
     assert [i["from_file"] for i in res.info][:3] == [True, True, True] and not res.info[-1]["from_file"]
+    h = hm.split_wells(h)      # «54/80» делится на две скважины до расчёта шагов
+    day = pd.to_datetime(h["date"]).dt.date
+    first, last_day = day.min(), day.max()
+    prev_end = None
+    for st in res.steps:
+        assert prev_end is None or st.start == prev_end + timedelta(days=1)      # подряд, без перекрытия и пропусков
+        prev_end = st.end
+        own = h[(h["kind"] == st.kind) & (day >= st.start) & (day <= st.end) & (h["well"].astype(str).str.strip() != "")]
+        want = {str(w): v for w, v in own.groupby("well")["rate"].mean().items() if v == v and v != 0}
+        assert st.rates == pytest.approx(want), (st.start, st.end)
+    assert res.steps[0].start == first and res.steps[-1].end <= last_day + timedelta(days=1)
 
 
 def test_dates_pzrg_single_period_matches_old_function():

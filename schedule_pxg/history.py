@@ -94,9 +94,25 @@ DB_TEMPLATE = Template(
 _KIND_WORDS = {"отбор": PROD, "закачка": INJ, "нейтральный период": NEUTRAL, "нейтральный": NEUTRAL}
 
 
-def _kinds(body: pd.DataFrame, tpl: Template, sh) -> pd.Series:
+def _kinds(body: pd.DataFrame, tpl: Template, sh, rep: Optional[qc.Report] = None, path: str = "") -> pd.Series:
     if tpl.kind and tpl.kind in body.columns:
-        return body[tpl.kind].astype(str).str.strip().str.lower().map(lambda x: _KIND_WORDS.get(x, NEUTRAL))
+        raw = body[tpl.kind].astype(str).str.strip().str.lower()
+        unknown = set()
+
+        def one(x: str) -> str:
+            if x in _KIND_WORDS:
+                return _KIND_WORDS[x]
+            k = _kind_from_text(x)      # «Закачка газа», «отбор газа (суточный)»
+            if k:
+                return k
+            if x not in ("", "nan"):
+                unknown.add(x)
+            return NEUTRAL
+        out = raw.map(one)
+        if unknown and rep is not None:
+            rep.warn("KIND", "Тип данных не распознан (учтён как нейтральный): %s" % ", ".join(sorted(unknown)[:5]),
+                     file=path, sheet=sh)
+        return out
     return pd.Series(tpl.kind_default or _kind_from_text(str(sh)) or NEUTRAL, index=body.index)
 
 
@@ -160,14 +176,25 @@ def read_by_template(path: str, tpl: Template, rep: Optional[qc.Report] = None) 
             continue
         rate, hourly, hours = col(tpl.rate), col(tpl.hourly), col(tpl.hours)
         h = pd.to_numeric(hours, errors="coerce") if hours is not None else pd.Series(np.nan, index=body.index)
+        per_hour = {"м3/ч": 1.0, "тыс.м3/ч": 1000.0}.get(tpl.unit)      # множитель к м³/ч, если единица часовая
         if rate is not None:
-            r = pd.to_numeric(rate, errors="coerce") * UNITS[tpl.unit]
+            v = pd.to_numeric(rate, errors="coerce")
+            if per_hour is not None and hours is not None:
+                r = v * per_hour * h      # часовой расход × часы работы = объём за сутки
+            else:
+                r = v * UNITS[tpl.unit]      # без часов часовой расход считается круглосуточным (×24)
         elif hourly is not None:
-            r = pd.to_numeric(hourly, errors="coerce") * h
+            r = pd.to_numeric(hourly, errors="coerce") * (per_hour or 1.0) * h
+            if hours is None and rep is not None:
+                rep.error("HOURS", "Выбран часовой расход, но не указан столбец «Время работы»: расход за сутки не определить",
+                          file=path, sheet=sh)
         else:
             r = pd.Series(np.nan, index=body.index)
-        kinds = _kinds(body, tpl, sh)
+        kinds = _kinds(body, tpl, sh, rep, path)
         d = pd.to_datetime(dates, dayfirst=True, errors="coerce")
+        lost = int((dates.notna() & d.isna()).sum())
+        if lost and rep is not None:
+            rep.warn("DATE", "Не прочитано дат: %d (строки пропущены)" % lost, file=path, sheet=sh)
         keep = d.notna() & wells.notna()
         out.append(_frame(wells[keep].map(_well), d[keep], r[keep], h[keep], kinds[keep]))
     return pd.concat(out, ignore_index=True) if out else _empty()
@@ -237,6 +264,8 @@ def _block(raw: pd.DataFrame, title_row: int):
         v = raw.iat[i, wcol]
         if v is None or (isinstance(v, float) and np.isnan(v)) or str(v).strip() == "":
             break
+        if re.match(r"^\s*(итого|всего|total|сумма)\b", str(v), re.I):
+            break      # строка итога — не скважина
         rows[_well(v)] = i
     return date_cols, rows
 
@@ -262,6 +291,7 @@ def read_monthly_sheet(raw: pd.DataFrame, kind: str, rep: Optional[qc.Report] = 
                  file=where, sheet=sheet)
     t_by_date = {d: j for j, d in tcols.items()}
     wells, dates, rates, hours = [], [], [], []
+    no_hours = 0
     for w, i in qrows.items():
         ti = trows.get(w)
         for j, d in qcols.items():
@@ -272,11 +302,14 @@ def read_monthly_sheet(raw: pd.DataFrame, kind: str, rep: Optional[qc.Report] = 
             if ti is not None and d in t_by_date:
                 hv = pd.to_numeric(raw.iat[ti, t_by_date[d]], errors="coerce")
             if t_title is not None and pd.isna(hv):
+                no_hours += 1
                 continue  # часов нет — суток работы в таблице нет
             wells.append(w)
             dates.append(d)
             hours.append(hv)
             rates.append(qv * hv if t_title is not None else qv)
+    if no_hours and rep is not None:
+        rep.warn("HOURS", "Есть Qчас, а времени работы нет: значений пропущено %d" % no_hours, file=where, sheet=sheet)
     return _frame(wells, dates, rates, hours, kind)
 
 
@@ -319,7 +352,7 @@ def read_daily_totals(path: str, kind: str = "", unit: str = "м3/сут") -> pd
     if raw is None or raw.empty:
         return _empty()
     kind = kind or _kind_from_text(os.path.basename(path)) or NEUTRAL
-    d = pd.to_datetime(raw.iloc[1:, 0], errors="coerce")
+    d = pd.to_datetime(raw.iloc[1:, 0], dayfirst=True, errors="coerce")
     v = pd.to_numeric(raw.iloc[1:, 1], errors="coerce") * UNITS[unit]
     keep = d.notna() & v.notna()
     return _frame([""] * int(keep.sum()), d[keep], v[keep], [np.nan] * int(keep.sum()), kind)
@@ -440,9 +473,12 @@ def import_files(paths: Sequence[str], kind: str = "", templates: Sequence[Templ
     """Несколько файлов в одну таблицу; повтор (скважина, дата, вид) из разных файлов — последняя запись побеждает,
     повтор внутри одного файла остаётся и попадает в отчёт проверки."""
     frames = []
-    for p in paths:
+    unique = list(dict.fromkeys(os.path.abspath(p) for p in paths))
+    if len(unique) < len(paths) and rep is not None:
+        rep.warn("DUP", "Один и тот же файл указан несколько раз и учтён один раз: %d" % (len(paths) - len(unique)))
+    for p in unique:
         df = import_history(p, kind, templates, rep)
-        df = df.assign(source=os.path.basename(p))
+        df = df.assign(source=p)      # полный путь: одинаковые имена в разных папках — разные файлы
         frames.append(df)
     if not frames:
         return _empty()
@@ -450,6 +486,10 @@ def import_files(paths: Sequence[str], kind: str = "", templates: Sequence[Templ
     dup = all_.duplicated(["well", "date", "kind"], keep=False)
     multi = all_[dup].groupby(["well", "date", "kind"])["source"].nunique()
     cross = set(multi[multi > 1].index)
+    if cross and rep is not None:
+        files = sorted({all_["source"].iat[i] for i, k in enumerate(zip(all_["well"], all_["date"], all_["kind"])) if k in cross})
+        rep.warn("DUP", "Сутки в нескольких файлах (%d записей): взято значение из последнего файла в списке. Файлы: %s"
+                 % (len(cross), "; ".join(os.path.basename(f) for f in files[:5])))
     if cross:
         key = list(zip(all_["well"], all_["date"], all_["kind"]))
         last = {}
