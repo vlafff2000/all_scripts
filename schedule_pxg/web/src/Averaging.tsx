@@ -33,7 +33,7 @@ function Lines({ w }: { w: AvgWellView }) {
     series.push(mkSeries({ name: 'выбранное среднее', color: '#4a5a64', width: 3.5, x: w.months, y: pc(w.mean) }))
     const man = w.months.filter(m => w.manual[m] != null)
     if (man.length) series.push(mkSeries({ name: 'правка вручную', kind: 'points', color: '#d9480f', x: man, y: man.map(m => w.manual[m] * 100) }))
-    return mkChart('sched-avg-' + w.well, 'Доли скважины ' + w.well + ' по годам', mkAxis('Месяц', '', 'category', { categories: w.months }), mkAxis('Доля в группе', '%'), series)
+    return mkChart('sched-avg-' + w.well, 'Доли скважины ' + w.well + ' по годам', mkAxis('Месяц', '', 'category', { categories: w.months }), mkAxis('Доля в группе', '%', 'value', { from_zero: true }), series)
   }, [w])
   return <ChartView chart={chart} excludeMode={false} onExclude={() => {}} />
 }
@@ -65,7 +65,7 @@ function DailyChart({ d, group }: { d: AvgDaily; group: string }) {
     if (!g) return null
     const names = Object.keys(g.wells)
     const x = Array.from({ length: Math.max(2, d.days) }, (_, i) => i + 1)
-    const c = mkChart('sched-daily-' + group, 'Суточные доли скважин группы ' + group, mkAxis('Сутки сезона', 'сут'), mkAxis('Доля в группе', '%'),
+    const c = mkChart('sched-daily-' + group, 'Суточные доли скважин группы ' + group, mkAxis('Сутки сезона', 'сут'), mkAxis('Доля в группе', '%', 'value', { from_zero: true }),
       names.map((w, k) => mkSeries({ name: w, slot: k, x, y: pc(g.wells[w]) })))
     c.events = g.filled.map(f => ({ x: f.day + 1, label: 'заполнено: ' + f.how, kind: 'other' as const, well: '' }))
     return c

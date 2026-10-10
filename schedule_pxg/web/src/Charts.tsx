@@ -16,7 +16,11 @@ function toPoints(s: ChartSeries, cum: boolean, seasonAxis: boolean): [number, n
     const a = seasonAxis ? st[5] ?? 0 : dayNum(st[0])
     const b = a + (dayNum(st[1]) - dayNum(st[0])) + 1
     if (end !== null && !cum && a > end) out.push([end, 0], [a - 1, 0])   // между сезонами расход нулевой, а не плавный спуск
-    if (cum) { if (!out.length) out.push([a, 0]); out.push([b, st[4] / 1e6]) } else { out.push([a, st[2] / 1e3]); if (b - 1 > a) out.push([b - 1, st[2] / 1e3]) }
+    if (cum) {
+      if (!out.length) out.push([a, 0])
+      else if (end !== null && a > end) out.push([a, out[out.length - 1][1]])   // пауза без закачки/отбора: накопленный объём стоит ровно
+      out.push([b, st[4] / 1e6])
+    } else { out.push([a, st[2] / 1e3]); if (b - 1 > a) out.push([b - 1, st[2] / 1e3]) }
     end = b
   })
   return out
@@ -37,7 +41,7 @@ function build(data: ChartsView, by: string, cum: boolean, shown: string, multi:
   }))
   const title = cum ? 'Накопленный объём' : 'Расход'
   return mkChart(cum ? 'sched-cum' : 'sched-rate', title + (multi ? ' · ' + shown : ''),
-    season ? mkAxis('Сутки сезона', 'сут') : mkAxis('Дата', '', 'time'), mkAxis(cum ? 'Накопленный объём' : 'Расход', cum ? 'млн м³' : 'тыс. м³/сут'), series)
+    season ? mkAxis('Сутки сезона', 'сут') : mkAxis('Дата', '', 'time'), mkAxis(cum ? 'Накопленный объём' : 'Расход', cum ? 'млн м³' : 'тыс. м³/сут', 'value', { from_zero: true }), series)
 }
 
 export default function Charts({ st }: { st: AppState }) {

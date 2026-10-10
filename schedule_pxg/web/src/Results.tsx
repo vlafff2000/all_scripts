@@ -63,6 +63,9 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
   const line = (f: (r: IndicatorRow) => number | null): Line[] => shown.map(n => ({ label: n, pts: ind[n].filter(r => f(r) !== null).map(r => [r.date, f(r) as number] as [string, number]) }))
   const last = (n: string) => ind[n][ind[n].length - 1]
   const vecs = Array.from(new Set(chosen.flatMap(n => (infos[n]?.vectors || []).map(v => v.keyword))))
+  const vec = chosen.flatMap(n => infos[n]?.vectors || []).find(v => v.keyword === kw)
+  // единица из сводки модели; давление в BARSA/BARSG — абсолютное/избыточное
+  const unit = ({ BARSA: 'бар (абс.)', BARSG: 'бар (изб.)', PSIA: 'psi (абс.)', PSIG: 'psi (изб.)' } as Record<string, string>)[(vec?.unit || '').toUpperCase()] ?? (vec?.unit || '')
 
   return (
     <main className="workspace">
@@ -105,7 +108,7 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
           <input style={{ width: 260 }} placeholder="скважины через запятую (пусто — все)" value={wells} onChange={e => setWells(e.target.value)} />
           <button disabled={busy} onClick={press}>Построить</button>
         </div>
-        <Plot lines={pr} unit={kw} title={kw} link="sched-results-p" />
+        <Plot lines={pr} unit={unit} title={kw + (vec?.label ? ' — ' + vec.label : '')} link="sched-results-p" />
       </section>}
     </main>
   )
