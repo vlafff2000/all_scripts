@@ -164,6 +164,20 @@ def apply_to_all(calendar: List[dict], index: int) -> List[dict]:
 
 # ---------------------------------------------------------------- Excel (формат листов старого редактора)
 
+UNIT = "млн м³"      # единица объёмов в листах стратегии, как у тех.карты
+
+
+def file_unit(path: str) -> str:
+    """Единица из листа «Метаданные» («млн м³», «тыс. м³»); пусто — файл старого редактора, единица не записана."""
+    try:
+        meta = pd.read_excel(path, sheet_name="Метаданные")
+    except Exception:
+        return ""
+    if "Единица" in meta.columns and len(meta):
+        return str(meta["Единица"].iloc[0]).strip()
+    return ""
+
+
 def sheet_name(kind: str, year: int) -> str:
     return "%s%d" % (SHEET_PREFIX.get(kind, "Закачка_"), int(year))
 
@@ -174,7 +188,7 @@ def save_xlsx(path: str, seasons: Sequence[dict], first_year: int, years: int, m
     with pd.ExcelWriter(path, engine="openpyxl") as w:
         for s in seasons:
             pd.DataFrame(s["table"]).T.to_excel(w, sheet_name=sheet_name(s["kind"], s["year"]))
-        pd.DataFrame({"Год_начала": [first_year], "Количество_лет": [years], "Режим": [mode]}).to_excel(
+        pd.DataFrame({"Год_начала": [first_year], "Количество_лет": [years], "Режим": [mode], "Единица": [UNIT]}).to_excel(
             w, sheet_name="Метаданные", index=False)
 
 
@@ -199,4 +213,7 @@ def load_xlsx(path: str) -> List[dict]:
                 out.append({"kind": kind, "year": year, "table": table})
     if not out:
         raise ValueError("В файле нет листов «Закачка_<год>» или «Отбор_<год>»")
+    unit = file_unit(path)
+    for s in out:
+        s["unit"] = unit
     return out

@@ -54,6 +54,8 @@ def main(argv=None):
         old = pd.read_excel(db_path, sheet_name="Данные")
         print("📚 Прежняя база: %d строк" % len(old))
     data = замеры.merge(old, new)
+    if data.attrs.get("replaced"):
+        print("⚠️ Строк с тем же ключом (скважина, дата, горизонт) заменено новыми: %d" % data.attrs["replaced"])
     out = (args.output or "").strip() or "БД_давлений_по_замерам.xlsx"
     if not out.lower().endswith(".xlsx"):
         out += ".xlsx"

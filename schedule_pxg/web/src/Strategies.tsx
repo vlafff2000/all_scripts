@@ -7,7 +7,8 @@ import {
 
 const fmt = (x: number) => x.toLocaleString('ru-RU', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
 const sgn = (x: number) => (x > 0 ? '+' : '') + fmt(x)
-const num = (s: string) => Number(s.replace(',', '.'))
+// число из ячейки: пробелы (в том числе неразрывные из «2 345,678») убираются; пусто — не число, а не 0
+const num = (s: string) => { const t = s.replace(/[\s  ]/g, '').replace(',', '.'); return t === '' ? NaN : Number(t) }
 const pc = (x: number) => x.toLocaleString('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 2 })
 
 // окно с флажками: группы и месяцы для деления / сезоны для копирования
@@ -94,6 +95,7 @@ export default function Strategies({ st, setSt }: { st: AppState; setSt: (s: App
   const cell = (g: string, m: string, raw: string) => {
     const x = num(raw)
     if (Number.isNaN(x) || x === view!.table[g][m]) return
+    if (x < 0) { setMsg('Объём не может быть отрицательным: введите 0 или больше'); return }
     op('cell', { group: g, month: m, value: x })
   }
 
