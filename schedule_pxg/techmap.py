@@ -161,13 +161,75 @@ def group_candidates(key: str) -> List[str]:
     return [key, "ГСП " + key, "ГСП-" + key, "ГСП" + key, "гсп " + key]
 
 
+def _norm_group(v) -> str:
+    """«ГСП-9», «гсп 9», «9.0» → «9»: сравнение групп без регистра, пробелов, дефисов и приставки «ГСП»."""
+    s = str(v).strip().lower().replace(",", ".")
+    try:
+        f = float(s)
+        if f.is_integer():
+            return str(int(f))
+    except ValueError:
+        pass
+    s = re.sub(r"[\s\-_]+", "", s)
+    return re.sub(r"^гсп", "", s) or s
+
+
+def group_overrides(project) -> Dict[str, str]:
+    """Ручное сопоставление «группа тех.карты → группа базы данных» (хранится в источниках проекта)."""
+    return dict((getattr(project, "sources", None) or {}).get("group_map") or {})
+
+
 def match_group(project, key: str) -> Optional[str]:
-    """Группа проекта для строки тех.карты: имя совпало или «ГСП N» для номера N."""
+    """Группа проекта (из базы данных) для строки тех.карты: ручное сопоставление, затем имя, «ГСП N», затем
+    сравнение без регистра, пробелов и дефисов; неоднозначное совпадение — None."""
+    manual = group_overrides(project).get(str(key))
+    if manual and manual in project.groups:
+        return manual
     low = {g.lower(): g for g in project.groups}
     for c in group_candidates(key):
         if c.lower() in low:
             return low[c.lower()]
-    return None
+    norm: Dict[str, List[str]] = {}
+    for g in project.groups:
+        norm.setdefault(_norm_group(g), []).append(g)
+    found = norm.get(_norm_group(key)) or []
+    return found[0] if len(found) == 1 else None
+
+
+def set_group_override(project, key: str, group: Optional[str]) -> None:
+    """Задать (или сбросить, если group пусто) группу базы для группы тех.карты."""
+    key = str(key)
+    if group and group not in project.groups:
+        raise ValueError("В проекте нет группы «%s»" % group)
+    mapping = group_overrides(project)
+    if group:
+        mapping[key] = group
+    else:
+        mapping.pop(key, None)
+    project.sources["group_map"] = mapping
+
+
+def group_rows(project) -> dict:
+    """Окно сопоставления: группы всех тех.карт библиотеки → группа базы (авто, вручную или нет), и группы базы без тех.карты."""
+    manual = group_overrides(project)
+    rows: Dict[str, dict] = {}
+    for name, d in project.techmaps.items():
+        tm = TechMap.from_dict(d)
+        for key, vols in tm.volumes.items():
+            r = rows.setdefault(key, {"key": key, "techmaps": [], "volume": 0.0})
+            r["techmaps"].append(name)
+            r["volume"] += sum(vols.values())
+    out = []
+    used = set()
+    for key, r in rows.items():
+        g = match_group(project, key)
+        used.add(g)
+        wells = len(project.wells_of(g)) if g else 0
+        out.append({**r, "group": g, "source": ("manual" if key in manual and manual[key] == g else "auto") if g else "none",
+                    "wells": wells})
+    out.sort(key=lambda r: (r["source"] != "none", str(r["key"])))
+    groups = [{"group": g, "wells": len(project.wells_of(g))} for g in project.groups]
+    return {"rows": out, "groups": groups, "unused": [g["group"] for g in groups if g["group"] not in used and g["wells"]]}
 
 
 def check_techmap(tm: TechMap, project=None, rep: Optional[qc.Report] = None, year: Optional[int] = None) -> qc.Report:

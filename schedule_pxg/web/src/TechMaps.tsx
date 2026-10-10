@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import PageHead from './PageHead'
-import { AppState, TechMapView, deleteTechMap, getTechMap, pickFile, readTechMap, saveTechMap } from './api'
+import { AppState, GroupMap, TechMapView, deleteTechMap, getGroupMap, getTechMap, pickFile, readTechMap, saveTechMap, setGroupMap } from './api'
 
 const fmt = (x: number | undefined) => (x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: 3 }))
 
@@ -32,6 +32,9 @@ export default function TechMaps({ st, setSt }: { st: AppState; setSt: (s: AppSt
   })
   const remove = (n: string) => guard(async () => { setSt(await deleteTechMap(n)); if (view?.techmap.name === n) setView(null) })
   const tm = view?.techmap
+  const [gm, setGm] = useState<GroupMap | null>(null)
+  useEffect(() => { getGroupMap().then(setGm).catch(() => undefined) }, [st.techmaps.length])
+  const mapGroup = (key: string, group: string) => guard(async () => { setGm(await setGroupMap(key, group)) })
 
   return (
     <main className="workspace">
@@ -49,6 +52,26 @@ export default function TechMaps({ st, setSt }: { st: AppState; setSt: (s: AppSt
               </tr>))}</tbody></table>
         )}
       </section>
+
+      {gm && gm.rows.length > 0 && (
+        <section className="card">
+          <h2>Сопоставление групп</h2>
+          <p className="muted">Название группы в тех.карте и в базе данных (импортированный Excel) может отличаться, например «9» и «ГСП 9».
+            Доли осреднения и ручные правки хранятся под группой базы. Совпавшие автоматически можно поправить вручную.</p>
+          <table className="raw"><thead><tr><th>Группа тех.карты</th><th>Тех.карты</th><th>Объём, млн м³</th><th>Группа базы данных</th><th>Скв.</th><th /></tr></thead>
+            <tbody>{gm.rows.map(r => (
+              <tr key={r.key}>
+                <th>{r.key}</th><td>{r.techmaps.join(', ')}</td><td className="num">{fmt(r.volume)}</td>
+                <td><select value={r.group ?? ''} disabled={busy} onChange={e => mapGroup(r.key, e.target.value)}>
+                  <option value="">— не сопоставлена —</option>
+                  {gm.groups.map(g => <option key={g.group} value={g.group}>{g.group}</option>)}
+                </select></td>
+                <td className="num">{r.group ? r.wells : ''}</td>
+                <td>{r.source === 'manual' ? 'вручную' : r.source === 'auto' ? 'по названию' : <span className="bad">нет группы в базе</span>}</td>
+              </tr>))}</tbody></table>
+          {gm.unused.length > 0 && <p className="note warn">Группы базы со скважинами без группы в тех.картах: {gm.unused.join(', ')}.</p>}
+        </section>
+      )}
 
       <section className="card">
         <h2>Импорт из Excel</h2>

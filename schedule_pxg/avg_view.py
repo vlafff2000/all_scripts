@@ -110,15 +110,17 @@ def shares_for(p: Project):
                 cache[tm.kind] = None
                 notes.append("Осреднение (%s) не применено, доли поровну: %s" % (tm.kind, e))
         src = cache[tm.kind]
+        # Доли и ручные правки хранятся под группой базы данных, а в тех.карте группа может называться иначе («9» и «ГСП 9»).
+        mine = {tmod.match_group(p, x) for x in tm.volumes} - {None}
         if src is not None:
             for k, v in src.month.items():
-                if k[0] in tm.volumes and v:
+                if k[0] in mine and v:
                     sh.month[k] = v
-            sh.manual.update({k: v for k, v in src.manual.items() if k[0] in tm.volumes})
+            sh.manual.update({k: v for k, v in src.manual.items() if k[0] in mine})
         prof = _profile(p, tm.kind, notes) if params(p)["mode"] == "day" else None
         if prof is not None:
             for (g, d), v in prof.offset.items():
-                if g in {tmod.match_group(p, x) for x in tm.volumes}:
+                if g in mine:
                     sh.offset[(g, d)] = v
         return sh
     return one, notes
