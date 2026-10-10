@@ -24,7 +24,9 @@ INJ, PROD = "закачка", "отбор"
 def read_total_volumes(path: str, rep: Optional[qc.Report] = None) -> pd.DataFrame:
     """Две первые колонки: дата и объём, м³/сут. Нечитаемые строки отбрасываются, объём берётся по модулю, порядок по дате."""
     out = pd.DataFrame(columns=["Дата", "Объем"])
-    df = read_excel_safe(path)
+    df = read_excel_safe(path, header=None)
+    if df is not None and len(df) and len(df.columns) >= 2 and pd.isna(pd.to_datetime(df.iloc[0, 0], dayfirst=True, errors="coerce")):
+        df = df.iloc[1:].reset_index(drop=True)      # первая строка — заголовок; без заголовка она остаётся данными
     if df is None or len(df.columns) < 2:
         if rep is not None:
             rep.add(qc.ERROR, "FILE", "Файл общих объёмов не прочитан или в нём меньше двух столбцов: %s" % os.path.basename(path))

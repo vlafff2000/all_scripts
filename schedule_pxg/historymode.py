@@ -54,7 +54,7 @@ def read_pzrg(path: str) -> pd.DataFrame:
     """ПЗРГ: столбец A — даты, столбец C — суточный расход газа (м³/сут), по модулю. Таблица (date, rate), по возрастанию дат."""
     df = pd.read_excel(path, header=None, usecols=[0, 2])
     df.columns = ["date", "rate"]
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
     df = df.dropna(subset=["date"])
     df["rate"] = pd.to_numeric(df["rate"], errors="coerce").abs()
     return df.sort_values("date").reset_index(drop=True)
@@ -347,10 +347,11 @@ def dates_steps(df: pd.DataFrame, model_dates: Sequence[date], periods: Sequence
     ms = model_steps(model_dates, all_dates, periods)
     steps, info = [], []
     for i, m in enumerate(ms):
-        start = m["model_date"] + timedelta(days=1)
-        end = ms[i + 1]["model_date"] if i + 1 < len(ms) else start
-        rates = _rates(d, m["kind"], m["from"], m["to"], col)
-        last = max(end, start)
+        # Каждый шаг — свой интервал истории, интервалы не пересекаются: [первая дата; дата замера 1], [замер 1 + сутки;
+        # дата замера 2], …, затем сутки после последнего замера по одной. Расход шага — средний за его же интервал.
+        start = m["from"] if i == 0 or not m["from_file"] else m["from"] + timedelta(days=1)
+        last = max(m["to"], start)
+        rates = _rates(d, m["kind"], start, last, col)
         # work_days = все сутки шага: расход — средний за сутки периода, объём шага (графики, проверки) = расход × сутки
         steps.append(fmod.Step(start, last, (last - start).days + 1, m["kind"], rates))
         info.append({"model_date": m["model_date"].isoformat(), "from": m["from"].isoformat(), "to": m["to"].isoformat(),
