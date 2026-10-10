@@ -120,3 +120,12 @@ def test_average_taken_from_file_as_is(tmp_path):
     run_module("Пересчёт_давлений", dict(base, output="r2.xlsx"), tmp_path / "o2")
     calc = pd.read_excel(tmp_path / "o2" / "r2.xlsx", sheet_name="include_среднее_пластовое")
     assert "расчёт" in calc.columns[1] and calc.iloc[0, 1] == pytest.approx(91.8 * 0.980665)
+
+
+def test_perforation_mark_below_sea_level_with_minus_sign():
+    """Абсолютная отметка ниже уровня моря со знаком минус даёт то же давление, что та же глубина положительным числом."""
+    positive = pc.Refs(altitude={117: 123.0}, perf_mark={117: 686.0})
+    negative = pc.Refs(altitude={117: 123.0}, perf_mark={117: -686.0})
+    a = pc.recalc_row(117, 80.0, None, None, -300.0, positive)
+    b = pc.recalc_row(117, 80.0, None, None, -300.0, negative)
+    assert b == pytest.approx(a) and b[1] > 0
