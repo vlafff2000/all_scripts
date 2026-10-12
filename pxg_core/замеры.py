@@ -26,7 +26,7 @@ FIELDS = (("well", ("скв",)), ("layer", ("пласт", "горизонт")), 
           ("level", ("нст", "уровень")), ("p_res", ("рпл", "пластов")))
 
 COLUMNS = ["Скважина", "Дата", "Горизонт", "Категория", "Руст", "Избыточное давление", "Рпл", "Уровень жидкости",
-           "Примечание", "Источник"]
+           "Примечание", "Источник", "L", "ES", "Плотность воды"]
 
 
 @dataclass
@@ -41,6 +41,9 @@ class Row:
     level: Optional[float]
     note: str
     source: str
+    length: Optional[float] = None      # «L» в старых шаблонах (глубина замера, м)
+    es: Optional[float] = None          # «ES» в старых шаблонах
+    density: Optional[float] = None     # «плотность» воды, г/см³: считается и сравнивается с кодом пересчёта
     sheet: str = ""
     row: int = 0
     raw: Dict[str, object] = field(default_factory=dict)
@@ -66,8 +69,18 @@ def _category(text: str) -> str:
     return ""
 
 
+_LATIN = str.maketrans("PpHhCcTtXxAaBbEeKkMmOo", "РрНнСсТтХхАаВвЕеКкМмОо")   # в старых файлах «Pуст», «Hст», «Pпл» набраны латиницей
+
+
 def _field_of(header: str) -> str:
-    low = header.lower().replace("\n", " ")
+    plain = " ".join(header.split()).lower().rstrip(",.")
+    if plain == "l":
+        return "length"
+    if plain == "es":
+        return "es"
+    if plain.replace(" ", "").startswith("плот"):
+        return "density"
+    low = header.translate(_LATIN).lower().replace("\n", " ")
     if "п/п" in low:
         return "num"
     for name, keys in FIELDS:
@@ -148,13 +161,15 @@ def parse_file(path: str, excess_limit: float = EXCESS_LIMIT) -> Parsed:
                 continue
             for b, block in enumerate(blocks):
                 cols = sorted(block.values())
-                span = range(block.get("num", cols[0]), cols[-1] + 1)
+                # первая таблица захватывает и столбцы левее своей шапки: подпись раздела в старых файлах стоит в столбце A
+                start = 0 if b == 0 else block.get("num", cols[0])
+                span = range(start, cols[-1] + 1)
                 texts = [row[c] for c in span if c < len(row) and row[c]]
                 well = _well_number(values[i][block["well"]]) if block["well"] < len(values[i]) else None
                 title = _category(" ".join(texts)) if texts else ""
                 if title and (well is None or not any(_well_number(values[i][c]) for c in cols if c < len(values[i]))):
-                    sections[b] = title
-                    continue
+                    sections = [title] * len(blocks)     # подпись раздела относится ко всем таблицам листа
+                    break
                 if well is None:
                     num = values[i][block["num"]] if "num" in block and block["num"] < len(values[i]) else None
                     if texts and isinstance(num, (int, float)) and not pd.isna(num):
@@ -195,14 +210,15 @@ def _row(vals, block, well, category, src, sheet, rownum, excess_limit) -> Row:
     p_wh, excess = nums["p_wh"], None
     if p_wh is not None and category in NON_EXPLOIT and p_wh < excess_limit:
         p_wh, excess = None, nums["p_wh"]
+    extra = {name: qc.to_number(cell(name))[0] for name in ("length", "es", "density")}
     return Row(well, category, _text(cell("layer")), date, p_wh, excess, nums["p_res"], nums["level"], "; ".join(notes),
-               src, sheet, rownum,
+               src, extra["length"], extra["es"], extra["density"], sheet, rownum,
                {"p_wh": cell("p_wh"), "p_res": cell("p_res"), "level": cell("level"), "date": raw_date})
 
 
 def to_frame(rows: List[Row]) -> pd.DataFrame:
-    return pd.DataFrame([[r.well, r.date, r.layer, r.category, r.p_wh, r.excess, r.p_res, r.level, r.note, r.source]
-                         for r in rows], columns=COLUMNS)
+    return pd.DataFrame([[r.well, r.date, r.layer, r.category, r.p_wh, r.excess, r.p_res, r.level, r.note, r.source,
+                          r.length, r.es, r.density] for r in rows], columns=COLUMNS)
 
 
 def merge(old: Optional[pd.DataFrame], new: pd.DataFrame) -> pd.DataFrame:

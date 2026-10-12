@@ -100,7 +100,7 @@ def test_build_wells_keeps_exclusions_made_meanwhile(client, tmp_path):
 def test_pressure_measurements_merge_reports_replaced_rows():
     from pxg_core import замеры as zm
     cols = zm.COLUMNS
-    row = lambda p: ["54", pd.Timestamp("2026-05-01"), "A", "Эксплуатационные", None, None, p, None, "", "ф.xlsx"]
+    row = lambda p: ["54", pd.Timestamp("2026-05-01"), "A", "Эксплуатационные", None, None, p, None, "", "ф.xlsx", None, None, None]
     old, new = pd.DataFrame([row(100.0)], columns=cols), pd.DataFrame([row(120.0)], columns=cols)
     out = zm.merge(old, new)
     assert len(out) == 1 and out["Рпл"].iloc[0] == 120.0 and out.attrs["replaced"] == 1

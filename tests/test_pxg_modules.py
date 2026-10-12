@@ -271,3 +271,20 @@ def test_date_issues_api_and_fixes_file(tmp_path):
                                                       "date_fixes": saved["path"]}, tmp_path / "db2")
     rep = pd.read_excel(tmp_path / "db2" / "Даты_к_проверке.xlsx", sheet_name="Замечания")
     assert "исключено" in set(rep["Что сделано"])
+
+
+def test_zamery_old_template_latin_headers_and_section_in_column_a(tmp_path):
+    """Старые шаблоны (2016–2017): «Pуст», «Hст», «Pпл» латиницей, подпись раздела в столбце A, раздел действует на обе таблицы."""
+    from pxg_core import замеры
+    head = ["№№ п/п", "№№ скв.", "L", "Дата замера", "Pуст., кг/см2", "Hст., м", "ES", "A", "плот   ность", "Pпл., кг/см2"]
+    rows = [[None] * 17, ["Результаты замеров за апрель 2017г"] + [None] * 16, head + head,
+            ["Эксплуатационные скважины"] + [None] * 16,
+            [1, 56, 769, datetime(2017, 4, 28), 52.0, None, None, None, None, 55.0, 5, 237, 765, datetime(2017, 4, 28), 52.5, None, None, None, None, 55.6, None],
+            ["Наблюдательные скважины"] + [None] * 20,
+            [1, 116, 7, datetime(2017, 4, 19), None, 47.0, 1.06, None, 1.11, 82.3, 2, 2, 7, datetime(2017, 4, 18), None, 136.4, None, None, None, 73.5, None]]
+    path = tmp_path / "old.xlsx"
+    pd.DataFrame(rows).to_excel(path, header=False, index=False)
+    df = замеры.to_frame(замеры.parse_file(str(path)).rows).set_index("Скважина")
+    assert df.loc[237, "Категория"] == "Эксплуатационные" and df.loc[237, "Руст"] == 52.5
+    assert df.loc[2, "Категория"] == "Наблюдательные" and df.loc[116, "Уровень жидкости"] == 47.0
+    assert df.loc[237, "L"] == 765 and df.loc[116, "ES"] == 1.06 and df.loc[116, "Плотность воды"] == 1.11
