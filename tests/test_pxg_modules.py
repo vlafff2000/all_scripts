@@ -204,3 +204,14 @@ def test_interannular_analysis_console_args(tmp_path):
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout
     assert (tmp_path / "анализ_МКД_МКП_2024-2025.xlsx").exists()
+
+
+def test_trim_unfilled_days_future_templates():
+    from pxg_core.расходы_файлы import trim_unfilled_days
+    days = pd.to_datetime(["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"])
+    df = pd.DataFrame({"Скважина": ["1"] * 5, "Дата": days, "Часовой расход газа": [5.0, 0.0, 7.0, 0.0, 0.0],
+                       "Время работы": [24.0, 0.0, 24.0, 0.0, 0.0]})
+    out = trim_unfilled_days(df)
+    assert list(out["Дата"].dt.day) == [1, 2, 3]            # хвост-шаблон убран, простой внутри остался
+    assert list(trim_unfilled_days(df, "02.10.2026")["Дата"].dt.day) == [1]   # граница 02.10, дальше данных нет
+    assert len(trim_unfilled_days(df.assign(**{"Часовой расход газа": 0.0, "Время работы": 0.0}))) == 5
