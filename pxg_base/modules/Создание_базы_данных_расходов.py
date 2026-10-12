@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 import xlsxwriter
-from pxg_core.расходы_файлы import trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent
+from pxg_core.расходы_файлы import validate_header_dates, write_date_issues, reset_date_issues, trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent
 
 
 def find_matching_sheets(file_path, expected_sheets):
@@ -32,7 +32,7 @@ def find_matching_sheets(file_path, expected_sheets):
         return []
 
 
-def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count, table_type, date_mapping=None):
+def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count, table_type, date_mapping=None, ctx=None):
     """
     Извлекает данные из таблицы (газа или времени) - ИСПРАВЛЕННАЯ ВЕРСИЯ с правильными датами
     """
@@ -85,6 +85,8 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
                 else:
                     date_obj = date_val
                 date_mapping[f'col_{i}'] = date_obj
+            if ctx is not None:
+                date_mapping = validate_header_dates(date_mapping, ctx, start_row, start_col, ctx.get('df_full'))
         elif table_type == "time" and date_mapping is None:
             raise ValueError("Для таблицы времени требуется date_mapping")
 
@@ -107,6 +109,7 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
         # Восстанавливаем даты
         df_long['Дата'] = df_long['Дата_кол'].map(date_mapping)
         df_long = df_long.drop('Дата_кол', axis=1)
+        df_long = df_long[df_long['Дата'].notna()]
 
         # Переименовываем столбец значения в зависимости от типа таблица
         if table_type == "gas":
@@ -278,8 +281,10 @@ def process_excel_file_intelligent(file_path, year=None, season=None, data_type=
                 continue
 
             # Извлекаем данные газа
+            ctx = {'file_path': file_path, 'sheet': original_sheet, 'month': normalized_sheet, 'year': year,
+                   'season': season, 'df_full': df_full}
             df_gas, date_mapping = extract_table_data(file_path, original_sheet, found_row, found_col, wells_count,
-                                                      "gas")
+                                                      "gas", ctx=ctx)
 
             if df_gas is None or len(df_gas) == 0:
                 continue
@@ -612,6 +617,7 @@ def process_all_data(main_root_folder, periods_file_path, output_path='Свод�
     """
     Обрабатывает все данные (отборы и закачку) и сохраняет в один файл на разных листах
     """
+    reset_date_issues()
     # Загружаем данные о периодах
     periods = load_periods_file(periods_file_path)
     if periods:
@@ -645,6 +651,11 @@ def process_all_data(main_root_folder, periods_file_path, output_path='Свод�
         print(f"\n🔄 ОБРАБОТКА ДАННЫХ ЗАКАЧКИ")
         print("-" * 40)
         injection_data = process_all_seasons_injection(injection_folder, periods)
+
+    issues_path = write_date_issues(os.path.join(os.path.dirname(os.path.abspath(output_path)), 'Даты_к_проверке.xlsx'))
+    if issues_path:
+        print(f"⚠️  Подозрительные даты в заголовках таблиц: см. {issues_path} (в базу они не попали или исправлены, "
+              f"решение можно указать в столбце «Решение» и передать файл при следующем запуске)")
 
     # Сохраняем результаты в один файл на разных листах с правильным форматированием
     print(f"\n💾 СОХРАНЕНИЕ РЕЗУЛЬТАТОВ")
