@@ -75,13 +75,14 @@ def _cut(rows, max_row: int, max_col: int):
     return out
 
 
-def _values(path: str, max_row: int, max_col: int):
-    """Значения первого листа: calamine (быстро, и .xls, и .xlsx), иначе openpyxl в режиме чтения / xlrd."""
-    if _use_calamine():
-        from python_calamine import CalamineWorkbook
-        wb = CalamineWorkbook.from_path(path)
-        name = wb.sheet_names[0]
-        return _cut(wb.get_sheet_by_name(name).to_python(skip_empty_area=False), max_row, max_col), name
+def _values_calamine(path: str, max_row: int, max_col: int):
+    from python_calamine import CalamineWorkbook
+    wb = CalamineWorkbook.from_path(path)
+    name = wb.sheet_names[0]
+    return _cut(wb.get_sheet_by_name(name).to_python(skip_empty_area=False), max_row, max_col), name
+
+
+def _values_plain(path: str, max_row: int, max_col: int):
     if path.lower().endswith((".xlsx", ".xlsm")):
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         ws = wb.worksheets[0]
@@ -89,6 +90,20 @@ def _values(path: str, max_row: int, max_col: int):
     import xlrd
     sh = xlrd.open_workbook(path).sheet_by_index(0)
     return _cut(([sh.cell_value(r, c) for c in range(min(sh.ncols, max_col))] for r in range(min(sh.nrows, max_row))), max_row, max_col), sh.name
+
+
+def _values(path: str, max_row: int, max_col: int):
+    """Значения первого листа: calamine (быстро, и .xls, и .xlsx), иначе openpyxl в режиме чтения / xlrd.
+
+    calamine на некоторых .xls падает паникой Rust (PanicException - не Exception): ловим и читаем запасным движком."""
+    if _use_calamine():
+        try:
+            return _values_calamine(path, max_row, max_col)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException:  # noqa: B036  включая pyo3_runtime.PanicException
+            pass
+    return _values_plain(path, max_row, max_col)
 
 
 def _formulas(path: str, max_row: int, max_col: int):

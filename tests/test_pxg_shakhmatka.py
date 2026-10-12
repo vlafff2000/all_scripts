@@ -82,3 +82,29 @@ def test_run_module_two_seasons_in_one_window(tmp_path):
 def test_check_without_files():
     rep = check.check_shakhmatka({})
     assert any(i.level == qc.ERROR for i in rep.issues)
+
+
+def test_calamine_panic_falls_back(tmp_path, monkeypatch):
+    """Паника calamine (BaseException) не должна ронять чтение: берём openpyxl/xlrd."""
+    import types
+    from pxg_core import шахматка as sh
+
+    class Panic(BaseException):
+        pass
+
+    class Boom:
+        @staticmethod
+        def from_path(_p):
+            raise Panic("range start index 7 out of range")
+
+    mod = types.ModuleType("python_calamine")
+    mod.CalamineWorkbook = Boom
+    monkeypatch.setitem(__import__("sys").modules, "python_calamine", mod)
+    monkeypatch.delenv("PXG_EXCEL_ENGINE", raising=False)
+    import openpyxl
+    p = tmp_path / "a.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active["A1"] = 5
+    wb.save(str(p))
+    V, name = sh._values(str(p), 10, 10)
+    assert V[0][0] == 5
