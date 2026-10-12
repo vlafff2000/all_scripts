@@ -580,6 +580,13 @@ def write_date_issues(path):
         rows.append(['%s / %s / %s: «%s»' % (i['Файл'], i['Лист'], i['Ячейка'], i['Значение'])])
         rows.extend([list(r) for r in i['fragment']])
         rows.append([])
+    try:
+        import json
+        with open(os.path.splitext(path)[0] + '.json', 'w', encoding='utf-8') as fh:
+            json.dump([{k: v for k, v in i.items() if k != 'Путь'} for i in DATE_ISSUES], fh, ensure_ascii=False,
+                      default=str)
+    except OSError:
+        pass
     width = max([len(r) for r in rows] + [1])
     try:
         with pd.ExcelWriter(path, engine='openpyxl') as xw:

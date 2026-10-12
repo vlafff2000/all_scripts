@@ -118,6 +118,36 @@ async def job_file(request: Request):
     return FileResponse(str(path), filename=path.name)
 
 
+async def date_issues(request: Request):
+    """Подозрительные даты, найденные при сборке базы расходов (Даты_к_проверке.json рядом с результатом)."""
+    job = jobs.JOBS.get(request.path_params["id"])
+    if job is None:
+        return _err("Запуск не найден.", 404)
+    path = job.out_dir / "Даты_к_проверке.json"
+    if not path.is_file():
+        return JSONResponse({"issues": []})
+    import json
+    return JSONResponse({"issues": json.loads(path.read_text(encoding="utf-8"))})
+
+
+async def date_fixes(request: Request):
+    """Сохраняет выбранные решения в «Решения_по_датам.xlsx» в папке результата; путь передаётся в новый запуск."""
+    job = jobs.JOBS.get(request.path_params["id"])
+    if job is None:
+        return _err("Запуск не найден.", 404)
+    try:
+        body = await request.json()
+        rows = [{"Файл": str(r["file"]), "Лист": str(r["sheet"]), "Ячейка": str(r["cell"]),
+                 "Решение": str(r["decision"])} for r in body.get("fixes", [])]
+    except Exception:
+        return _err("Ожидался JSON со списком решений.")
+    import pandas as pd
+    out = job.out_dir / "Решения_по_датам.xlsx"
+    with pd.ExcelWriter(str(out), engine="openpyxl") as xw:
+        pd.DataFrame(rows, columns=["Файл", "Лист", "Ячейка", "Решение"]).to_excel(xw, sheet_name="Замечания", index=False)
+    return JSONResponse({"path": str(out), "count": len(rows)})
+
+
 async def job_list(request: Request):
     return JSONResponse({"jobs": [j.view(len(j.log)) for j in sorted(jobs.JOBS.values(), key=lambda j: -j.started)]})
 
@@ -147,6 +177,8 @@ def build_app() -> Starlette:
         Route("/api/check/{id}.{fmt}", check_download),
         Route("/api/jobs/{id}", job_status),
         Route("/api/jobs/{id}/open", open_folder, methods=["POST"]),
+        Route("/api/jobs/{id}/date-issues", date_issues),
+        Route("/api/jobs/{id}/date-fixes", date_fixes, methods=["POST"]),
         Route("/api/jobs/{id}/files/{name:path}", job_file),
     ]
     if DIST.is_dir():

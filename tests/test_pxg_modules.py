@@ -254,3 +254,20 @@ def test_bad_header_dates_are_fixed_or_excluded_and_reported(tmp_path):
                                              "date_fixes": str(fixes)}, tmp_path / "db2")
     rep2 = pd.read_excel(tmp_path / "db2" / "Даты_к_проверке.xlsx", sheet_name="Замечания")
     assert "исправлено вручную" in set(rep2["Что сделано"])
+
+
+def test_date_issues_api_and_fixes_file(tmp_path):
+    tree = make_flow_tree(tmp_path / "data")
+    _plant_bad_dates(tree)
+    job = run_module("Создание_базы_данных_расходов", {"root": str(tree.root), "periods": str(tree.periods_file)}, tmp_path / "db")
+    client = TestClient(app)
+    issues = client.get("/api/jobs/%s/date-issues" % job["id"]).json()["issues"]
+    assert len(issues) == 2 and issues[0]["fragment"]
+    i = issues[0]
+    saved = client.post("/api/jobs/%s/date-fixes" % job["id"], json={"fixes": [
+        {"file": i["Файл"], "sheet": i["Лист"], "cell": i["Ячейка"], "decision": "исключить"}]}).json()
+    assert saved["count"] == 1 and os.path.isfile(saved["path"])
+    job2 = run_module("Создание_базы_данных_расходов", {"root": str(tree.root), "periods": str(tree.periods_file),
+                                                      "date_fixes": saved["path"]}, tmp_path / "db2")
+    rep = pd.read_excel(tmp_path / "db2" / "Даты_к_проверке.xlsx", sheet_name="Замечания")
+    assert "исключено" in set(rep["Что сделано"])
