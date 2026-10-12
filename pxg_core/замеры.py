@@ -26,7 +26,10 @@ FIELDS = (("well", ("скв",)), ("layer", ("пласт", "горизонт")), 
           ("level", ("нст", "уровень")), ("p_res", ("рпл", "пластов")))
 
 COLUMNS = ["Скважина", "Дата", "Горизонт", "Категория", "Руст", "Избыточное давление", "Рпл", "Уровень жидкости",
-           "Примечание", "Источник", "L", "ES", "Плотность воды"]
+           "Примечание", "Источник", "L", "ES", "Плотность воды", "Шаблон"]
+
+# Шаблоны файлов замеров: определяются по столбцам шапки, год в пути файла — подсказка и проверка
+TEMPLATES = {1: "Шаблон 1 (2016)", 2: "Шаблон 2 (2017–2023)", 3: "Шаблон 3 (2024 и позже)"}
 
 
 @dataclass
@@ -47,6 +50,7 @@ class Row:
     sheet: str = ""
     row: int = 0
     raw: Dict[str, object] = field(default_factory=dict)
+    template: str = ""
 
 
 @dataclass
@@ -55,6 +59,7 @@ class Parsed:
     problems: List[Tuple[str, str, str]] = field(default_factory=list)   # (код, текст, где)
     title: str = ""
     tables: int = 0
+    template: int = 0
 
 
 def _text(v) -> str:
@@ -107,6 +112,24 @@ def _blocks(header_cells: List[str]) -> List[Dict[str, int]]:
     return [b for b in blocks if "well" in b and ("p_wh" in b or "level" in b or "p_res" in b)]
 
 
+def template_of(blocks: List[Dict[str, int]]) -> int:
+    """Номер шаблона по столбцам шапки: «ES» или «плотность» — 2 (2017–2023), только «L» — 1 (2016), иначе 3 (2024 и позже)."""
+    names = {k for b in blocks for k in b}
+    if "es" in names or "density" in names:
+        return 2
+    return 1 if "length" in names else 3
+
+
+def template_by_year(path: str) -> int:
+    """Шаблон по году в имени файла или папок (как в скрипте копирования): 2016 — 1, 2017–2023 — 2, с 2024 — 3, нет года — 0."""
+    for part in reversed(re.split(r"[\\/]", path)):
+        m = re.search(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)", part)
+        if m:
+            y = int(m.group(1))
+            return 1 if y == 2016 else 2 if 2017 <= y <= 2023 else 3 if y >= 2024 else 0
+    return 0
+
+
 def _well_number(v) -> Optional[int]:
     if isinstance(v, bool):
         return None
@@ -156,6 +179,12 @@ def parse_file(path: str, excess_limit: float = EXCESS_LIMIT) -> Parsed:
             if found and any("дат" in c.lower() for c in row):
                 blocks, sections = found, [""] * len(found)
                 out.tables += len(found)
+                if not out.template:
+                    out.template = template_of(found)
+                    by_year = template_by_year(path)
+                    if by_year and by_year != out.template:
+                        out.problems.append(("TEMPLATE", "Шапка похожа на «%s», а год в пути файла — на «%s»; разбор идёт по шапке"
+                                             % (TEMPLATES[out.template], TEMPLATES[by_year]), src))
                 continue
             if not blocks:
                 continue
@@ -183,13 +212,13 @@ def parse_file(path: str, excess_limit: float = EXCESS_LIMIT) -> Parsed:
                                          % (str(raw_well).strip(), ", ".join(map(str, parts))),
                                          "%s, лист %s, строка %d" % (src, sheet, i + 1)))
                 for w in parts if len(parts) > 1 else [well]:
-                    out.rows.append(_row(values[i], block, w, sections[b], src, sheet, i + 1, excess_limit))
+                    out.rows.append(_row(values[i], block, w, sections[b], src, sheet, i + 1, excess_limit, TEMPLATES.get(out.template, "")))
     if not out.rows:
         out.problems.append(("HEADER", "Таблицы замеров не найдены: нет шапки с «Дата замера» и «Руст/Нст/Рпл»", src))
     return out
 
 
-def _row(vals, block, well, category, src, sheet, rownum, excess_limit) -> Row:
+def _row(vals, block, well, category, src, sheet, rownum, excess_limit, template="") -> Row:
     def cell(name):
         c = block.get(name)
         return vals[c] if c is not None and c < len(vals) else None
@@ -213,12 +242,12 @@ def _row(vals, block, well, category, src, sheet, rownum, excess_limit) -> Row:
     extra = {name: qc.to_number(cell(name))[0] for name in ("length", "es", "density")}
     return Row(well, category, _text(cell("layer")), date, p_wh, excess, nums["p_res"], nums["level"], "; ".join(notes),
                src, extra["length"], extra["es"], extra["density"], sheet, rownum,
-               {"p_wh": cell("p_wh"), "p_res": cell("p_res"), "level": cell("level"), "date": raw_date})
+               {"p_wh": cell("p_wh"), "p_res": cell("p_res"), "level": cell("level"), "date": raw_date}, template)
 
 
 def to_frame(rows: List[Row]) -> pd.DataFrame:
     return pd.DataFrame([[r.well, r.date, r.layer, r.category, r.p_wh, r.excess, r.p_res, r.level, r.note, r.source,
-                          r.length, r.es, r.density] for r in rows], columns=COLUMNS)
+                          r.length, r.es, r.density, r.template] for r in rows], columns=COLUMNS)
 
 
 def merge(old: Optional[pd.DataFrame], new: pd.DataFrame) -> pd.DataFrame:
@@ -249,3 +278,36 @@ def by_month(df: pd.DataFrame, column: str) -> pd.DataFrame:
     d["Месяц"] = d["Дата"].dt.strftime("%Y-%m")
     d = d.sort_values("Дата").drop_duplicates(["Скважина", "Месяц"], keep="last")
     return d.pivot(index="Скважина", columns="Месяц", values=column).sort_index(axis=1)
+
+
+# Файлы замеров в папке с подпапками: критерии из скрипта «копирование файлов замеров давлений по шаблонам»
+_EXCLUDE = ("ведомость", "мк", "акт", "смета", "договор", "отчет_", "_отчет")
+_MONTHS = ("янв", "фев", "март", "апр", "май", "июн", "июль", "авг", "сен", "окт", "ноя", "дек")
+
+
+def is_measurement_file(name: str) -> bool:
+    low = name.lower()
+    if not low.endswith((".xls", ".xlsx", ".xlsm")) or low.startswith("~$"):
+        return False
+    if any(x in low for x in _EXCLUDE):
+        return False
+    month = any(m in low for m in _MONTHS)
+    return ("набл" in low or "замер" in low or ("скважин" in low or "отчет" in low) and month)
+
+
+def find_files(root: str) -> List[str]:
+    """Файлы замеров во всех подпапках: имя с «набл», «замер» или «скважин»/«отчёт» и месяцем, без ведомостей, актов, смет."""
+    found = []
+    for base, dirs, names in os.walk(root):
+        dirs.sort()
+        found += [os.path.join(base, n) for n in sorted(names) if is_measurement_file(n.replace("ё", "е"))]
+    return found
+
+
+def write_txt(frame: pd.DataFrame, column: str, path: str) -> int:
+    """Include-файл столбцами «скважина, дата ДД.ММ.ГГГГ, давление» через табуляцию без шапки, как в других выгрузках для tNavigator."""
+    t = frame.dropna(subset=["Дата", column])[["Скважина", "Дата", column]].sort_values(["Дата", "Скважина"])
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        for w, d, v in t.itertuples(index=False):
+            f.write("%s\t%s\t%.6f\n" % (w, pd.Timestamp(d).strftime("%d.%m.%Y"), float(v)))
+    return len(t)
