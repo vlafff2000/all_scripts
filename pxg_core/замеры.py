@@ -26,7 +26,7 @@ FIELDS = (("well", ("скв",)), ("layer", ("пласт", "горизонт")), 
           ("level", ("нст", "уровень")), ("p_res", ("рпл", "пластов")))
 
 COLUMNS = ["Скважина", "Дата", "Горизонт", "Категория", "Руст", "Избыточное давление", "Рпл", "Уровень жидкости",
-           "Примечание", "Источник"]
+           "Примечание", "Источник", "L", "ES", "Плотность воды"]
 
 
 @dataclass
@@ -41,6 +41,9 @@ class Row:
     level: Optional[float]
     note: str
     source: str
+    length: Optional[float] = None      # «L» в старых шаблонах (глубина замера, м)
+    es: Optional[float] = None          # «ES» в старых шаблонах
+    density: Optional[float] = None     # «плотность» воды, г/см³: считается и сравнивается с кодом пересчёта
     sheet: str = ""
     row: int = 0
     raw: Dict[str, object] = field(default_factory=dict)
@@ -70,6 +73,13 @@ _LATIN = str.maketrans("PpHhCcTtXxAaBbEeKkMmOo", "РрНнСсТтХхАаВвЕ
 
 
 def _field_of(header: str) -> str:
+    plain = " ".join(header.split()).lower().rstrip(",.")
+    if plain == "l":
+        return "length"
+    if plain == "es":
+        return "es"
+    if plain.replace(" ", "").startswith("плот"):
+        return "density"
     low = header.translate(_LATIN).lower().replace("\n", " ")
     if "п/п" in low:
         return "num"
@@ -200,14 +210,15 @@ def _row(vals, block, well, category, src, sheet, rownum, excess_limit) -> Row:
     p_wh, excess = nums["p_wh"], None
     if p_wh is not None and category in NON_EXPLOIT and p_wh < excess_limit:
         p_wh, excess = None, nums["p_wh"]
+    extra = {name: qc.to_number(cell(name))[0] for name in ("length", "es", "density")}
     return Row(well, category, _text(cell("layer")), date, p_wh, excess, nums["p_res"], nums["level"], "; ".join(notes),
-               src, sheet, rownum,
+               src, extra["length"], extra["es"], extra["density"], sheet, rownum,
                {"p_wh": cell("p_wh"), "p_res": cell("p_res"), "level": cell("level"), "date": raw_date})
 
 
 def to_frame(rows: List[Row]) -> pd.DataFrame:
-    return pd.DataFrame([[r.well, r.date, r.layer, r.category, r.p_wh, r.excess, r.p_res, r.level, r.note, r.source]
-                         for r in rows], columns=COLUMNS)
+    return pd.DataFrame([[r.well, r.date, r.layer, r.category, r.p_wh, r.excess, r.p_res, r.level, r.note, r.source,
+                          r.length, r.es, r.density] for r in rows], columns=COLUMNS)
 
 
 def merge(old: Optional[pd.DataFrame], new: pd.DataFrame) -> pd.DataFrame:
