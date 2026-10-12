@@ -122,8 +122,11 @@ def level_value(raw, sign: str) -> Optional[float]:
     return -abs(v) if sign == "auto" else v
 
 
-def recalc_row(well: int, d, f, g, e, refs: Refs, excluded: Iterable[int] = DEFAULT_EXCLUDED, depth: float = DEPTH):
-    """Одна строка: (ρ, J, способ). d — Рпл приведённое, f — Руст, g — избыточное, e — уровень (м, обычно отрицательный)."""
+def recalc_row(well: int, d, f, g, e, refs: Refs, excluded: Iterable[int] = DEFAULT_EXCLUDED, depth: float = DEPTH,
+               target: Optional[float] = None):
+    """Одна строка: (ρ, J, способ). d — Рпл приведённое, f — Руст, g — избыточное, e — уровень (м, обычно отрицательный).
+
+    target — одна глубина для всех скважин (абсолютная отметка, м; знак как у отметки перфорации); без неё берётся верх перфораций скважины."""
     d, f, g, e = _num(d), _num(f), _num(g), _num(e)
     if well in set(excluded):
         return None, d, M_EXCLUDED if d is not None else M_NO_DATA
@@ -131,7 +134,7 @@ def recalc_row(well: int, d, f, g, e, refs: Refs, excluded: Iterable[int] = DEFA
         return None, None, M_NO_DATA
     if f is not None and f != 0 and d != 0:
         return None, d, M_GAS
-    z, mark = refs.altitude.get(well), refs.perf_mark.get(well)
+    z, mark = refs.altitude.get(well), (refs.perf_mark.get(well) if target is None else target)
     if z is None:
         return None, None, M_NO_ALT
     if mark is not None:
@@ -154,28 +157,67 @@ def recalc_row(well: int, d, f, g, e, refs: Refs, excluded: Iterable[int] = DEFA
     return rho, (z + mark) * rho / 10 + g, M_EXCESS
 
 
+RHO_TOLERANCE = 0.005    # г/см3: расхождение плотности воды из файла и расчётной
+ES_TOLERANCE = 0.003     # расхождение ES из файла и Рпл/Руст
+
+
+def target_label(target: Optional[float]) -> str:
+    return "верх перфораций" if target is None else "%g м" % abs(target)
+
+
 def recalc(db: pd.DataFrame, refs: Refs, excluded: Iterable[int] = DEFAULT_EXCLUDED, level_sign: str = "auto",
-           add_atm: bool = False, depth: float = DEPTH) -> pd.DataFrame:
-    """Таблица замеров (столбцы «База давлений по замерам») -> таблица пересчёта."""
+           add_atm: bool = False, depth: float = DEPTH, target: Optional[float] = None) -> pd.DataFrame:
+    """Таблица замеров (столбцы «База давлений по замерам») -> таблица пересчёта.
+
+    target — одна глубина пересчёта для всех скважин (абсолютная отметка, м), иначе верх перфораций каждой скважины.
+    Если в базе есть столбцы «L», «ES», «Плотность воды», рядом с расчётом добавляются эти значения из файла и отметка расхождения.
+    """
     excluded = tuple(excluded)
     out: List[list] = []
+    has_file = any(c in db.columns for c in ("L", "ES", "Плотность воды"))
+    if has_file:
+        db = db.rename(columns={"Плотность воды": "Плотность_воды"})
+        for c in ("L", "ES", "Плотность_воды"):
+            if c not in db.columns:
+                db[c] = None
     for r in db.itertuples(index=False):
         row = r._asdict() if hasattr(r, "_asdict") else {}
         well = int(row["Скважина"])
         level = level_value(row.get("Уровень_жидкости"), level_sign)
-        rho, j, how = recalc_row(well, row.get("Рпл"), row.get("Руст"), row.get("Избыточное_давление"), level, refs, excluded, depth)
+        rho, j, how = recalc_row(well, row.get("Рпл"), row.get("Руст"), row.get("Избыточное_давление"), level, refs, excluded, depth, target)
         k = None if j is None else j * KGF_TO_BAR + (ATM if add_atm else 0.0)
-        out.append([well, row.get("Дата"), row.get("Горизонт"), row.get("Категория"), _num(row.get("Руст")),
-                    _num(row.get("Избыточное_давление")), level, _num(row.get("Рпл")), rho, j, k, how, row.get("Источник")])
+        rec = [well, row.get("Дата"), row.get("Горизонт"), row.get("Категория"), _num(row.get("Руст")),
+               _num(row.get("Избыточное_давление")), level, _num(row.get("Рпл")), rho, j, k, how, row.get("Источник")]
+        if has_file:
+            rec += compare_row(rho, _num(row.get("Руст")), _num(row.get("Рпл")), _num(row.get("L")), _num(row.get("ES")),
+                               _num(row.get("Плотность_воды")))
+        out.append(rec)
+    label = target_label(target)
     cols = ["Скважина", "Дата", "Горизонт", "Категория", "Руст, кгс/см2", "Избыточное давление, кгс/см2",
             "Уровень жидкости, м", "Рпл приведённое (на 670 м), кгс/см2", "Плотность воды, г/см3",
-            "Рпл на верх перфораций, кгс/см2", "Рпл на верх перфораций, бар", "Способ расчёта", "Источник"]
-    return pd.DataFrame(out, columns=cols)
+            "Рпл на %s, кгс/см2" % label, "Рпл на %s, бар" % label, "Способ расчёта", "Источник"]
+    if has_file:
+        cols += ["L из файла, м", "ES из файла", "ES расчёт (Рпл/Руст)", "Плотность из файла, г/см3", "Сверка с файлом"]
+    res = pd.DataFrame(out, columns=cols)
+    res.attrs["bar_col"] = "Рпл на %s, бар" % label
+    return res
 
 
-def read_measurements(path: str) -> pd.DataFrame:
-    """Лист «Данные» базы «База давлений по замерам» с именами столбцов без пробелов."""
-    df = pd.read_excel(path, sheet_name="Данные")
+def compare_row(rho, p_wh, p_res, l, es, rho_file):
+    """Значения L, ES, плотности из файла рядом с расчётом и пометка расхождений: [L, ES файла, ES расчёт, ρ файла, пометка]."""
+    es_calc = p_res / p_wh if p_res is not None and p_wh not in (None, 0) else None
+    marks = []
+    if es is not None and es_calc is not None and abs(es - es_calc) > ES_TOLERANCE:
+        marks.append("ES: в файле %.3f, по Рпл/Руст %.3f" % (es, es_calc))
+    if rho_file is not None and rho is not None and abs(rho_file - rho) > RHO_TOLERANCE:
+        marks.append("плотность: в файле %.3f, расчёт %.3f" % (rho_file, rho))
+    if rho_file is not None and rho is None:
+        marks.append("плотность есть в файле, расчёт её не даёт")
+    return [l, es, es_calc, rho_file, "; ".join(marks)]
+
+
+def normalize_db(df: pd.DataFrame) -> pd.DataFrame:
+    """Таблица «Данные» базы замеров -> имена столбцов без пробелов, недостающие столбцы пустые."""
     df = df.rename(columns={"Избыточное давление": "Избыточное_давление", "Уровень жидкости": "Уровень_жидкости"})
     for col in ("Руст", "Избыточное_давление", "Рпл", "Уровень_жидкости"):
         if col not in df.columns:
@@ -183,8 +225,16 @@ def read_measurements(path: str) -> pd.DataFrame:
     for col in ("Горизонт", "Категория", "Источник"):
         if col not in df.columns:
             df[col] = None
+    for col in ("L", "ES", "Плотность воды"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     df["Дата"] = pd.to_datetime(df["Дата"], errors="coerce")
     return df.dropna(subset=["Скважина"])
+
+
+def read_measurements(path: str) -> pd.DataFrame:
+    """Лист «Данные» базы «База давлений по замерам» с именами столбцов без пробелов."""
+    return normalize_db(pd.read_excel(path, sheet_name="Данные"))
 
 
 def include_frames(res: pd.DataFrame, add_atm: bool = False, average: Optional[pd.DataFrame] = None) -> Dict[str, pd.DataFrame]:
@@ -193,7 +243,7 @@ def include_frames(res: pd.DataFrame, add_atm: bool = False, average: Optional[p
     Среднее пластовое берётся готовым столбцом из `average` (как в Excel, без пересчёта единиц); без него считается как среднее Рпл
     эксплуатационных скважин по дате, в барах.
     """
-    bar = "Рпл на верх перфораций, бар"
+    bar = res.attrs.get("bar_col", "Рпл на верх перфораций, бар")
 
     def triple(df, col):
         t = df.dropna(subset=["Дата", col])[["Скважина", "Дата", col]].sort_values(["Дата", "Скважина"])

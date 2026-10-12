@@ -51,6 +51,39 @@ def check_zamery(values: Dict[str, str]) -> Report:
     return rep
 
 
+def check_measurements(values: Dict[str, str]) -> Report:
+    """Проверка исходников «Замеры давлений»: файлы во всей папке с подпапками, шаблоны, справочники."""
+    rep = Report(title="Замеры давлений")
+    folder = (values.get("folder") or "").strip()
+    if not qc.check_path(rep, folder, "Папка с файлами замеров", "folder"):
+        if not folder:
+            rep.error("FILE", "Не указана папка с файлами замеров")
+        return rep
+    try:
+        limit = float((values.get("excess_limit") or "").replace(",", ".") or замеры.EXCESS_LIMIT)
+    except ValueError:
+        rep.error("NUM", "Порог избыточного давления не число", value=values.get("excess_limit"))
+        limit = замеры.EXCESS_LIMIT
+    for key, label in (("db", "Прежняя база"), ("refs", "Справочники")):
+        if (values.get(key) or "").strip():
+            qc.check_path(rep, values[key].strip(), label)
+    files = замеры.find_files(folder)
+    if not files:
+        rep.note("FILE", "В папке и подпапках нет файлов замеров (имя с «набл», «замер» или «скважин»/«отчёт» и месяцем)", file=folder)
+        return rep
+    total, by_template = 0, {}
+    for path in files:
+        parsed = замеры.parse_file(path, limit)
+        total += len(parsed.rows)
+        by_template[parsed.template] = by_template.get(parsed.template, 0) + 1
+        for code, text, where in parsed.problems:
+            (rep.error if code in ("FILE", "HEADER") else rep.warn)(code, text, file=path, hint=where if "лист" in where else "")
+        _check_rows(rep, path, parsed)
+    shown = ", ".join("%s: %d" % (замеры.TEMPLATES.get(t, "не определён"), n) for t, n in sorted(by_template.items()))
+    rep.saw("%d файл(ов) (%s), %d замеров" % (len(files), shown, total))
+    return rep
+
+
 def _check_rows(rep: Report, path: str, parsed) -> None:
     month = _month_of(parsed.title)
     seen: Dict[tuple, int] = {}
