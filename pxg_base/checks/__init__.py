@@ -35,6 +35,7 @@ REGISTRY: Dict[str, str] = {
     "Итоговая_таблица_давлений_2006_2025": "pressures:check_total_table",
     "База_давлений_по_замерам": "zamery:check_zamery",
     "Пересчёт_давлений": "pereschet:check_recalc",
+    "База_шахматка_Лена": "shakhmatka:check_shakhmatka",
 }
 
 
