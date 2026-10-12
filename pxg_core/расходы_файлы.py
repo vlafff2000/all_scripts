@@ -303,7 +303,9 @@ def _read_raw(file_path, engines, **kwargs):
     for engine in engines:
         try:
             return pd.read_excel(file_path, engine=engine, **kwargs)
-        except Exception as e:
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as e:  # noqa: B036  calamine паникует (PanicException) на некоторых .xls
             last = e
     try:
         return pd.read_excel(file_path, **kwargs)
