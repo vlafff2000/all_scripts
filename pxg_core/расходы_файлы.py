@@ -4,7 +4,7 @@ from __future__ import annotations
 import glob
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -425,3 +425,169 @@ def trim_unfilled_days(df, end_date=None):
 def env_end_date():
     """Необязательная граница «собирать по дату» (ДД.ММ.ГГГГ) из PXG_END_DATE; пусто — авто."""
     return os.environ.get("PXG_END_DATE", "").strip() or None
+
+
+# ── проверка дат в заголовках таблиц при сборке базы ──────────────────────────
+MONTH_NUMBERS = {'Январь': 1, 'Февраль': 2, 'Март': 3, 'Апрель': 4, 'Май': 5, 'Июнь': 6, 'Июль': 7, 'Август': 8,
+                 'Сентябрь': 9, 'Октябрь': 10, 'Ноябрь': 11, 'Декабрь': 12}
+_TOTAL_WORDS = ('итог', 'всего', 'сред', 'сумм', 'total')
+_EMPTY_HEADER = datetime(1899, 12, 30)       # пустая ячейка заголовка после fillna(0) и перевода «серийного номера»
+DATE_ISSUES = []                             # собранные замечания по датам за запуск (сбрасывает reset_date_issues)
+_decisions_cache = {}
+
+
+def reset_date_issues():
+    del DATE_ISSUES[:]
+
+
+def expected_year(month_name, year=None, season=None):
+    """Календарный год листа: из папки сезона «2023-2024» (октябрь–декабрь — первый год) или из папки года."""
+    m = MONTH_NUMBERS.get(month_name)
+    try:
+        if season and '-' in str(season):
+            first = int(str(season).split('-')[0])
+            return first if m and m >= 7 else first + 1
+        if year is not None:
+            return int(year)
+    except ValueError:
+        pass
+    return None
+
+
+def _col_letter(n):
+    s = ''
+    n += 1
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def _fmt(v):
+    return v.strftime('%d.%m.%Y') if isinstance(v, (datetime, pd.Timestamp)) else str(v)
+
+
+def _load_decisions():
+    """Решения пользователя из файла «Даты_к_проверке.xlsx» (PXG_DATE_FIXES): (файл, лист, ячейка) → решение."""
+    path = os.environ.get('PXG_DATE_FIXES', '').strip()
+    if not path:
+        return {}
+    if path in _decisions_cache:
+        return _decisions_cache[path]
+    out = {}
+    try:
+        df = pd.read_excel(path, sheet_name='Замечания', dtype=str).fillna('')
+        for _, r in df.iterrows():
+            if str(r.get('Решение', '')).strip():
+                out[(r['Файл'], normalize_sheet_name(r['Лист']), r['Ячейка'])] = str(r['Решение']).strip().lower()
+    except Exception as e:
+        print('⚠️  Не удалось прочитать файл решений по датам %s: %s' % (path, e))
+    _decisions_cache[path] = out
+    return out
+
+
+def validate_header_dates(date_mapping, ctx, start_row, start_col, sheet_df=None):
+    """Проверяет даты заголовка таблицы газа. Возвращает mapping, где неверные даты исправлены или заменены на None.
+
+    ctx: file_path, sheet (оригинальное имя), month (нормализованное), year, season.
+    Исправляется автоматически только однозначный случай: даты слева и справа идут подряд, а между ними «дыра».
+    Всё остальное неверное исключается из базы и попадает в DATE_ISSUES; решение можно задать в файле PXG_DATE_FIXES.
+    """
+    keys = list(date_mapping.keys())
+    vals = [date_mapping[k] for k in keys]
+    month = MONTH_NUMBERS.get(ctx.get('month'))
+    ey = expected_year(ctx.get('month'), ctx.get('year'), ctx.get('season'))
+
+    def is_dt(v):
+        return isinstance(v, (datetime, pd.Timestamp)) and not pd.isna(v)
+
+    def ok(v):
+        if not is_dt(v) or v == _EMPTY_HEADER:
+            return False
+        if ey is not None and month is not None:
+            return v.year == ey and v.month == month
+        return 1990 <= v.year <= 2100
+
+    good = [ok(v) for v in vals]
+    out = list(vals)
+    fname = os.path.basename(ctx['file_path'])
+    decisions = _load_decisions()
+    for i, v in enumerate(vals):
+        if good[i]:
+            continue
+        if v == _EMPTY_HEADER or v is None or (isinstance(v, float) and pd.isna(v)):
+            out[i] = None                                    # пустой хвост заголовка (28 дней в феврале и т. п.)
+            continue
+        if isinstance(v, str) and any(w in v.lower() for w in _TOTAL_WORDS):
+            out[i] = None                                    # столбец «Итого» и подобные
+            continue
+        prev_ok = i > 0 and good[i - 1]
+        next_ok = i + 1 < len(vals) and good[i + 1]
+        proposal = None
+        if prev_ok and next_ok and (vals[i + 1] - vals[i - 1]).days == 2:
+            proposal = vals[i - 1] + timedelta(days=1)
+        cell = '%s%d' % (_col_letter(start_col + 1 + i), start_row + 1)
+        decision = decisions.get((fname, ctx.get('month') or normalize_sheet_name(ctx['sheet']), cell)) \
+            or decisions.get((fname, normalize_sheet_name(ctx['sheet']), cell))
+        action, final = 'исключено', None
+        if decision:
+            if decision.startswith('искл'):
+                action, final = 'исключено', None
+            elif decision.startswith('принят') and is_dt(v):
+                action, final = 'принято как есть', v
+            else:
+                d = None
+                for fmt in ('%d.%m.%Y', '%d.%m.%y', '%Y-%m-%d'):
+                    try:
+                        d = datetime.strptime(decision, fmt)
+                        break
+                    except ValueError:
+                        continue
+                if d is not None:
+                    action, final = 'исправлено вручную', d
+                else:
+                    print('⚠️  Непонятное решение «%s» для %s %s — ячейка исключена' % (decision, fname, cell))
+        elif proposal is not None:
+            action, final = 'исправлено автоматически', proposal
+        out[i] = final
+        fragment = []
+        if sheet_df is not None:
+            r0, r1 = start_row, min(len(sheet_df), start_row + 6)
+            c0, c1 = max(0, start_col), min(len(sheet_df.columns), start_col + 1 + i + 4)
+            c0 = max(c0, start_col + 1 + i - 4) if start_col + 1 + i - 4 > c0 else c0
+            fragment = [['' if pd.isna(x) else (_fmt(x) if isinstance(x, (datetime, pd.Timestamp)) else x)
+                         for x in sheet_df.iloc[r, c0:c1].tolist()] for r in range(r0, r1)]
+        DATE_ISSUES.append({
+            'Файл': fname, 'Лист': ctx.get('month') or ctx['sheet'], 'Ячейка': cell, 'Значение': _fmt(v),
+            'Ожидалось': ('%02d.%d' % (month, ey)) if month and ey else '', 'Что сделано': action,
+            'Предложение': _fmt(proposal) if proposal is not None else 'исключить',
+            'Решение': '', 'fragment': fragment, 'Путь': ctx['file_path']})
+    return {k: o for k, o in zip(keys, out)}
+
+
+def write_date_issues(path):
+    """Сохраняет «Даты_к_проверке.xlsx»: замечания, сводка по повторяющимся ошибкам и фрагменты листов."""
+    if not DATE_ISSUES:
+        return None
+    cols = ['Файл', 'Лист', 'Ячейка', 'Значение', 'Ожидалось', 'Что сделано', 'Предложение', 'Решение']
+    main = pd.DataFrame([{c: i[c] for c in cols} for i in DATE_ISSUES], columns=cols)
+    rep = main.copy()
+    rep['Год'] = rep['Значение'].str[-4:]
+    summary = rep.groupby(['Файл', 'Год']).size().reset_index(name='Ячеек').sort_values('Ячеек', ascending=False)
+    summary = summary.rename(columns={'Год': 'Год в значении'})
+    rows = []
+    for i in DATE_ISSUES:
+        rows.append(['%s / %s / %s: «%s»' % (i['Файл'], i['Лист'], i['Ячейка'], i['Значение'])])
+        rows.extend([list(r) for r in i['fragment']])
+        rows.append([])
+    width = max([len(r) for r in rows] + [1])
+    try:
+        with pd.ExcelWriter(path, engine='openpyxl') as xw:
+            main.to_excel(xw, sheet_name='Замечания', index=False)
+            summary.to_excel(xw, sheet_name='Сводка', index=False)
+            pd.DataFrame([r + [''] * (width - len(r)) for r in rows]).to_excel(
+                xw, sheet_name='Фрагменты листов', index=False, header=False)
+    except Exception as e:
+        print('⚠️  Не удалось сохранить %s: %s' % (path, e))
+        return None
+    return path

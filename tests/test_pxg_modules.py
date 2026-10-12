@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+from datetime import datetime
 
 import pytest
 
@@ -215,3 +216,41 @@ def test_trim_unfilled_days_future_templates():
     assert list(out["Дата"].dt.day) == [1, 2, 3]            # хвост-шаблон убран, простой внутри остался
     assert list(trim_unfilled_days(df, "02.10.2026")["Дата"].dt.day) == [1]   # граница 02.10, дальше данных нет
     assert len(trim_unfilled_days(df.assign(**{"Часовой расход газа": 0.0, "Время работы": 0.0}))) == 5
+
+
+def _plant_bad_dates(tree):
+    """В первой книге: в заголовке листа «Январь» одна дата → 1970 (между соседними), другая → 2203 (с краю соседей нет)."""
+    import openpyxl
+    book = next(p for p in sorted((tree.root / "Отбор").rglob("*.xlsx")))
+    wb = openpyxl.load_workbook(str(book))
+    ws = wb["Январь"]
+    hdr = next(r for r in range(1, 20) if "скв" in str(ws.cell(r, 1).value or ws.cell(r, 2).value or "").lower())
+    col0 = 1 if "скв" in str(ws.cell(hdr, 1).value or "").lower() else 2
+    ws.cell(hdr, col0 + 5).value = datetime(1970, 1, 1)
+    ws.cell(hdr, col0 + 20).value = datetime(2203, 1, 21)
+    wb.save(str(book))
+    return book, hdr, col0
+
+
+def test_bad_header_dates_are_fixed_or_excluded_and_reported(tmp_path):
+    tree = make_flow_tree(tmp_path / "data")
+    book, hdr, col0 = _plant_bad_dates(tree)
+    job = run_module("Создание_базы_данных_расходов", {"root": str(tree.root), "periods": str(tree.periods_file)}, tmp_path / "db")
+    assert "Даты_к_проверке.xlsx" in job["files"], job["log"][-10:]
+    db = pd.read_excel(tmp_path / "db" / "Сводка_закачка_отбор_обновленный_скрипт.xlsx", sheet_name="Отборы")
+    years = pd.to_datetime(db["Дата"], errors="coerce").dt.year
+    assert years.notna().all() and years.min() >= 2023 and years.max() <= 2024
+    rep = pd.read_excel(tmp_path / "db" / "Даты_к_проверке.xlsx", sheet_name="Замечания")
+    assert set(rep["Что сделано"]) <= {"исправлено автоматически", "исключено"} and len(rep) == 2
+    assert book.stem in set(rep["Файл"].str.replace(".xlsx", "", regex=False))
+    # решение пользователя: вторую дату задать вручную
+    row = rep[rep["Значение"].str.endswith("2203")].index[0]
+    rep["Решение"] = rep["Решение"].astype(object)
+    rep.loc[row, "Решение"] = "21.01.2024"
+    fixes = tmp_path / "fixes.xlsx"
+    with pd.ExcelWriter(fixes) as xw:
+        rep.to_excel(xw, sheet_name="Замечания", index=False)
+    run_module("Создание_базы_данных_расходов", {"root": str(tree.root), "periods": str(tree.periods_file),
+                                             "date_fixes": str(fixes)}, tmp_path / "db2")
+    rep2 = pd.read_excel(tmp_path / "db2" / "Даты_к_проверке.xlsx", sheet_name="Замечания")
+    assert "исправлено вручную" in set(rep2["Что сделано"])
