@@ -28,6 +28,7 @@ REGISTRY: Dict[str, str] = {
     "Выделение_Рмг_по_названиям_столбцов": "misc:check_rmg_names",
     "Выделение_Рмг_по_номерам_столбцов": "misc:check_rmg_numbers",
     "Сопоставление_таблиц_ВПР": "misc:check_vlookup",
+    "Конвертер_форматов_Office": "misc:check_office_convert",
     "Извлечение_ключевых_слов_из_schedule": "misc:check_schedule",
     "Перераспределение_отборов_в_процентах": "misc:check_redistribution_pct",
     "Перераспределение_отборов_по_сезонам_или_режиму_EI": "misc:check_redistribution_ei",

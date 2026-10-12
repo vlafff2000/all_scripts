@@ -303,6 +303,18 @@ SPECS: List[WebSpec] = [
         stdin=_vlookup_stdin,
     ),
     WebSpec(
+        module="Конвертер_форматов_Office",
+        params=(
+            Param("paths", "Файлы и папки", "paths", required=True,
+                  hint="Excel, Word, презентации, PDF; папка берётся целиком вместе с подпапками"),
+            Param("target", "Целевой формат", "choice", default="xlsx", options=tuple((e, "." + e) for e in (
+                "xlsx", "xls", "ods", "csv", "docx", "doc", "odt", "rtf", "pptx", "ppt", "odp", "pdf"))),
+            Param("dest", "Папка для результатов", "folder", hint="Пусто — рядом с исходными файлами; исходные не меняются"),
+        ),
+        answers=("paths", "target", "dest"),
+        note="Нужен LibreOffice. Без него работает только .xls → .xlsx (формулы заменяются значениями).",
+    ),
+    WebSpec(
         module="Сбор_данных_по_межколонным_давлениям",
         params=(Param("root", "Корневая папка с данными", "folder", required=True),),
         args=(("root", "root"),),

@@ -288,3 +288,35 @@ def test_zamery_old_template_latin_headers_and_section_in_column_a(tmp_path):
     assert df.loc[237, "Категория"] == "Эксплуатационные" and df.loc[237, "Руст"] == 52.5
     assert df.loc[2, "Категория"] == "Наблюдательные" and df.loc[116, "Уровень жидкости"] == 47.0
     assert df.loc[237, "L"] == 765 and df.loc[116, "ES"] == 1.06 and df.loc[116, "Плотность воды"] == 1.11
+
+
+def test_office_converter_batch_and_fallback(tmp_path):
+    import pytest
+    from pxg_core import office_convert as oc
+    assert oc.pair_supported("xls", "xlsx")[0] and not oc.pair_supported("xlsx", "docx")[0] and oc.pair_supported("docx", "pdf")[0]
+    assert not oc.pair_supported("pdf", "xlsx")[0]
+    soffice = oc.find_soffice()
+    if not soffice:
+        pytest.skip("нет LibreOffice: для подготовки .xls")
+    src = tmp_path / "in" / "sub"
+    src.mkdir(parents=True)
+    pd.DataFrame({"Скв": ["1", "2"], "P": [1.5, 2.5]}).to_excel(tmp_path / "a.xlsx", index=False)
+    xls = src / "a.xls"
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    import shutil
+    shutil.move(oc._soffice_convert(soffice, str(tmp_path / "a.xlsx"), "xls", str(tmp)), xls)
+    # без LibreOffice: запасной путь на Python, подпапки и «~$»-файлы
+    (src / "~$a.xls").write_bytes(b"x")
+    files = oc.collect([str(tmp_path / "in")])
+    assert [os.path.basename(f) for f, _ in files] == ["a.xls"]
+    f, base = files[0]
+    dst = oc.dest_path(f, base, "xlsx", str(tmp_path / "out"))
+    res = oc.convert_file(f, "xlsx", dst, None)
+    assert res["status"] == "ok" and res["engine"] == "xlrd+openpyxl" and dst.endswith(os.path.join("sub", "a.xlsx"))
+    assert pd.read_excel(dst)["P"].tolist() == [1.5, 2.5]
+    assert oc.convert_file(f, "xlsx", dst, None)["status"] == "skip"
+    assert oc.convert_file(f, "docx", dst + "x", None)["status"] == "error"
+    # LibreOffice: Excel → pdf, лист → csv
+    res = oc.convert_file(f, "pdf", str(tmp_path / "a.pdf"), soffice)
+    assert res["status"] == "ok" and (tmp_path / "a.pdf").stat().st_size > 0
