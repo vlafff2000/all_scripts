@@ -66,8 +66,11 @@ def _category(text: str) -> str:
     return ""
 
 
+_LATIN = str.maketrans("PpHhCcTtXxAaBbEeKkMmOo", "РрНнСсТтХхАаВвЕеКкМмОо")   # в старых файлах «Pуст», «Hст», «Pпл» набраны латиницей
+
+
 def _field_of(header: str) -> str:
-    low = header.lower().replace("\n", " ")
+    low = header.translate(_LATIN).lower().replace("\n", " ")
     if "п/п" in low:
         return "num"
     for name, keys in FIELDS:
@@ -148,13 +151,15 @@ def parse_file(path: str, excess_limit: float = EXCESS_LIMIT) -> Parsed:
                 continue
             for b, block in enumerate(blocks):
                 cols = sorted(block.values())
-                span = range(block.get("num", cols[0]), cols[-1] + 1)
+                # первая таблица захватывает и столбцы левее своей шапки: подпись раздела в старых файлах стоит в столбце A
+                start = 0 if b == 0 else block.get("num", cols[0])
+                span = range(start, cols[-1] + 1)
                 texts = [row[c] for c in span if c < len(row) and row[c]]
                 well = _well_number(values[i][block["well"]]) if block["well"] < len(values[i]) else None
                 title = _category(" ".join(texts)) if texts else ""
                 if title and (well is None or not any(_well_number(values[i][c]) for c in cols if c < len(values[i]))):
-                    sections[b] = title
-                    continue
+                    sections = [title] * len(blocks)     # подпись раздела относится ко всем таблицам листа
+                    break
                 if well is None:
                     num = values[i][block["num"]] if "num" in block and block["num"] < len(values[i]) else None
                     if texts and isinstance(num, (int, float)) and not pd.isna(num):
