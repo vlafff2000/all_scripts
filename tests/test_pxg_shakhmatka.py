@@ -108,3 +108,35 @@ def test_calamine_panic_falls_back(tmp_path, monkeypatch):
     wb.save(str(p))
     V, name = sh._values(str(p), 10, 10)
     assert V[0][0] == 5
+
+
+def test_broken_autofilter_does_not_crash(tmp_path):
+    """После LibreOffice у листа бывает автофильтр с битым ref: openpyxl падает, мы читаем копию без него."""
+    import shutil
+    import zipfile
+    import openpyxl
+    from pxg_core import шахматка as sh
+
+    src = tmp_path / "ok.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active["A1"] = 7
+    wb.active["B1"] = "=A1*2"
+    wb.save(str(src))
+    bad = tmp_path / "bad.xlsx"
+    with zipfile.ZipFile(str(src)) as zi, zipfile.ZipFile(str(bad), "w") as zo:
+        for it in zi.infolist():
+            data = zi.read(it.filename)
+            if it.filename == "xl/worksheets/sheet1.xml":
+                data = data.replace(b"</sheetData>", b'</sheetData><autoFilter ref="!!bad!!"/>')
+            zo.writestr(it, data)
+    # убеждаемся, что без обхода openpyxl действительно падает
+    try:
+        list(openpyxl.load_workbook(str(bad), read_only=True)["Sheet"].iter_rows(values_only=True))
+        failed = False
+    except ValueError:
+        failed = True
+    assert failed
+    F = sh._formulas(str(bad), 10, 10)
+    assert F[0][1] == "=A1*2"
+    V, _ = sh._values_plain(str(bad), 10, 10)
+    assert V[0][0] == 7

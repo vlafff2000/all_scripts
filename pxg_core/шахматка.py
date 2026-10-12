@@ -75,6 +75,39 @@ def _cut(rows, max_row: int, max_col: int):
     return out
 
 
+def _without_autofilter(path: str) -> str:
+    """Копия книги без автофильтров листов (у файлов после LibreOffice ref фильтра бывает битый, openpyxl падает)."""
+    import re
+    import tempfile
+    import zipfile
+    fd, tmp = tempfile.mkstemp(suffix=".xlsx", prefix="pxg_nofilter_")
+    os.close(fd)
+    pat = re.compile(rb"<(?:\w+:)?autoFilter\b[^>]*?/>|<(?:\w+:)?autoFilter\b.*?</(?:\w+:)?autoFilter>", re.S)
+    with zipfile.ZipFile(path) as zi, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zo:
+        for it in zi.infolist():
+            data = zi.read(it.filename)
+            if it.filename.startswith("xl/worksheets/") and it.filename.endswith(".xml"):
+                data = pat.sub(b"", data)
+            zo.writestr(it, data)
+    return tmp
+
+
+def _read_sheet(path: str, fn, **kw):
+    """fn(workbook) -> результат; при ValueError из-за битого автофильтра повторяет на копии без автофильтра."""
+    try:
+        return fn(openpyxl.load_workbook(path, **kw))
+    except ValueError:
+        tmp = _without_autofilter(path)
+        try:
+            wb2 = openpyxl.load_workbook(tmp, **kw)
+            return fn(wb2)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
 def _values_calamine(path: str, max_row: int, max_col: int):
     from python_calamine import CalamineWorkbook
     wb = CalamineWorkbook.from_path(path)
@@ -84,9 +117,8 @@ def _values_calamine(path: str, max_row: int, max_col: int):
 
 def _values_plain(path: str, max_row: int, max_col: int):
     if path.lower().endswith((".xlsx", ".xlsm")):
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb.worksheets[0]
-        return _cut(ws.iter_rows(min_row=1, max_row=max_row, max_col=max_col, values_only=True), max_row, max_col), ws.title
+        return _read_sheet(path, lambda wb: (_cut(wb.worksheets[0].iter_rows(min_row=1, max_row=max_row, max_col=max_col, values_only=True), max_row, max_col), wb.worksheets[0].title),
+                           read_only=True, data_only=True)
     import xlrd
     sh = xlrd.open_workbook(path).sheet_by_index(0)
     return _cut(([sh.cell_value(r, c) for c in range(min(sh.ncols, max_col))] for r in range(min(sh.nrows, max_row))), max_row, max_col), sh.name
@@ -107,9 +139,8 @@ def _values(path: str, max_row: int, max_col: int):
 
 
 def _formulas(path: str, max_row: int, max_col: int):
-    wb = openpyxl.load_workbook(path, read_only=True)
-    ws = wb.worksheets[0]
-    return _cut(ws.iter_rows(min_row=1, max_row=max_row, max_col=max_col, values_only=True), max_row, max_col)
+    return _read_sheet(path, lambda wb: _cut(wb.worksheets[0].iter_rows(min_row=1, max_row=max_row, max_col=max_col, values_only=True), max_row, max_col),
+                       read_only=True)
 
 
 class Shakh:
@@ -532,7 +563,10 @@ def recompute(sh: Shakh, df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------- вода
 
 def read_water(path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    wb = openpyxl.load_workbook(path, data_only=True)
+    return _read_sheet(path, _read_water_wb, data_only=True)
+
+
+def _read_water_wb(wb) -> Tuple[pd.DataFrame, pd.DataFrame]:
     ws = wb["Данные"]
     ncol = ws.max_column
     heads = [(c, _text(ws.cell(1, c).value)) for c in range(1, ncol + 1) if _text(ws.cell(1, c).value)]
@@ -572,9 +606,8 @@ def _norm_group(x) -> str:
 def _label_cells(path: str, limit: int = 80) -> List[str]:
     """Подписи показателей (столбец B) первых строк первого листа — для опознания вида файла."""
     if path.lower().endswith((".xlsx", ".xlsm")):
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb.worksheets[0]
-        return [_text(r[1]) if len(r) > 1 else "" for r in ws.iter_rows(min_row=1, max_row=limit, max_col=2, values_only=True)]
+        return _read_sheet(path, lambda wb: [_text(r[1]) if len(r) > 1 else "" for r in wb.worksheets[0].iter_rows(min_row=1, max_row=limit, max_col=2, values_only=True)],
+                           read_only=True, data_only=True)
     import xlrd
     sh = xlrd.open_workbook(path).sheet_by_index(0)
     return [_text(sh.cell_value(r, 1)) if sh.ncols > 1 else "" for r in range(min(sh.nrows, limit))]
@@ -585,7 +618,7 @@ def classify(path: str) -> str:
     low = os.path.basename(path).lower()
     try:
         if path.lower().endswith((".xlsx", ".xlsm")):
-            names = openpyxl.load_workbook(path, read_only=True).sheetnames
+            names = _read_sheet(path, lambda wb: list(wb.sheetnames), read_only=True)
             if "Water per day" in names or ("Данные" in names and "вода" in low):
                 return "вода"
         labels = " | ".join(_label_cells(path, 150)).lower()
