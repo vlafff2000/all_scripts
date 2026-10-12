@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import DateIssues from './DateIssues'
 import { checkUrl, fileUrl, getJob, getJobs, openFolder, pickPath, runCheck, startJob, type Job, type ModuleInfo, type Param, type QcReport } from './api'
 import { loadForm, saveForm } from './prefs'
 
@@ -235,6 +236,13 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
             </table>
           )}
         </section>
+      )}
+
+      {job && job.status === 'done' && job.files.includes('Даты_к_проверке.xlsx') && (
+        <DateIssues key={job.id} jobId={job.id} onRerun={async fixes => {
+          setLog([]); setError('')
+          setJob(await startJob(module.id, { ...job.values, date_fixes: fixes }))
+        }} />
       )}
 
       {history.length > 0 && (

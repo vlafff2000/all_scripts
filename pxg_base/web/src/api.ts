@@ -48,3 +48,13 @@ export const runCheck = (module: string, params: Record<string, string>) =>
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module, params }),
   })
 export const checkUrl = (id: string, fmt: 'xlsx' | 'txt') => `/api/check/${id}.${fmt}`
+
+export interface DateIssue {
+  Файл: string; Лист: string; Ячейка: string; Значение: string; Ожидалось: string; 'Что сделано': string
+  Предложение: string; fragment: (string | number)[][]
+}
+export const getDateIssues = (id: string) => call<{ issues: DateIssue[] }>(`/api/jobs/${id}/date-issues`).then(r => r.issues)
+export const saveDateFixes = (id: string, fixes: { file: string; sheet: string; cell: string; decision: string }[]) =>
+  call<{ path: string; count: number }>(`/api/jobs/${id}/date-fixes`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fixes }),
+  })
