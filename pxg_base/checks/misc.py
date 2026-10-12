@@ -650,3 +650,33 @@ def check_gdi(v: Dict[str, str]) -> Report:
             _check_gdi_relations(rep, raw, hdr, cols, where)
     rep.saw("файлов: %d, листов: %d" % (len(files), n_sheets))
     return rep
+
+
+# Конвертер форматов Office
+# ---------------------------------------------------------------------------------------------------------------------
+def check_office_convert(v: Dict[str, str]) -> Report:
+    from pxg_core import office_convert as oc
+    rep = Report("Конвертер форматов Office")
+    target = (v.get("target") or "xlsx").lower().lstrip(".")
+    files = oc.collect(lines_of(v.get("paths", "")))
+    if not files:
+        rep.error("FILE", "Не найдено ни одного подходящего файла (Excel, Word, презентации, PDF)")
+        return rep
+    soffice = oc.find_soffice()
+    dest = (v.get("dest") or "").strip()
+    n_ok = n_exist = 0
+    for f, base in files:
+        ext = os.path.splitext(f)[1].lower().lstrip(".")
+        ok, why = oc.pair_supported(ext, target)
+        if not ok:
+            rep.note("PAIR", "Пропущен: " + why, file=f)
+        elif not soffice and not (ext == "xls" and target == "xlsx"):
+            rep.error("ENGINE", "Для .%s → .%s нужен LibreOffice (libreoffice.org), на этом компьютере его нет" % (ext, target), file=f)
+        elif os.path.exists(oc.dest_path(f, base, target, dest or None)):
+            n_exist += 1
+        else:
+            n_ok += 1
+            if not soffice:
+                rep.warn("LOSS", "Без LibreOffice формулы .xls будут заменены значениями, рисунки и диаграммы не перенесутся", file=f)
+    rep.note("SUMMARY", "К конвертации: %d, уже готовых будет пропущено: %d. Движок: %s" % (n_ok, n_exist, soffice or "запасной (Python)"))
+    return rep
