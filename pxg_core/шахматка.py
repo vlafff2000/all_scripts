@@ -24,11 +24,11 @@ REF = re.compile(r"(\$?)([A-Z]{1,3})(\$?)(\d+)")
 Issue = Dict[str, object]
 
 
-def to_xlsx(path: str, workdir: str) -> Optional[str]:
+def to_xlsx(path: str, workdir: str, use_soffice: bool = True) -> Optional[str]:
     """Путь к .xlsx для чтения формул; для .xls — через LibreOffice, если он есть (иначе None)."""
     if path.lower().endswith((".xlsx", ".xlsm")):
         return path
-    exe = shutil.which("soffice") or shutil.which("libreoffice")
+    exe = (shutil.which("soffice") or shutil.which("libreoffice")) if use_soffice else None
     if not exe:
         return None
     src = os.path.join(workdir, "src" + os.path.splitext(path)[1])
@@ -57,38 +57,64 @@ def _num(v) -> Optional[float]:
         return None
 
 
-def _load_xls(path: str, max_row: int, max_col: int):
+def _use_calamine() -> bool:
+    if os.environ.get("PXG_EXCEL_ENGINE", "").lower() == "openpyxl":
+        return False
+    try:
+        import python_calamine  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _cut(rows, max_row: int, max_col: int):
+    out = []
+    for r in list(rows)[:max_row]:
+        r = list(r)[:max_col]
+        out.append([None if (v == "" or v is None) else v for v in r])
+    return out
+
+
+def _values(path: str, max_row: int, max_col: int):
+    """Значения первого листа: calamine (быстро, и .xls, и .xlsx), иначе openpyxl в режиме чтения / xlrd."""
+    if _use_calamine():
+        from python_calamine import CalamineWorkbook
+        wb = CalamineWorkbook.from_path(path)
+        name = wb.sheet_names[0]
+        return _cut(wb.get_sheet_by_name(name).to_python(skip_empty_area=False), max_row, max_col), name
+    if path.lower().endswith((".xlsx", ".xlsm")):
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        ws = wb.worksheets[0]
+        return _cut(ws.iter_rows(min_row=1, max_row=max_row, max_col=max_col, values_only=True), max_row, max_col), ws.title
     import xlrd
-    book = xlrd.open_workbook(path)
-    sh = book.sheet_by_index(0)
-    rows = [[(None if sh.cell_value(r, c) == "" else sh.cell_value(r, c)) for c in range(min(sh.ncols, max_col))]
-            for r in range(min(sh.nrows, max_row))]
-    return rows, rows, sh.name
+    sh = xlrd.open_workbook(path).sheet_by_index(0)
+    return _cut(([sh.cell_value(r, c) for c in range(min(sh.ncols, max_col))] for r in range(min(sh.nrows, max_row))), max_row, max_col), sh.name
 
 
-def _load(path: str, sheet: int, max_row: int, max_col: int):
-    fwb = openpyxl.load_workbook(path)
-    vwb = openpyxl.load_workbook(path, data_only=True)
-    f, v = fwb.worksheets[sheet], vwb.worksheets[sheet]
-    rows_f = list(f.iter_rows(min_row=1, max_row=min(f.max_row, max_row), max_col=max_col, values_only=True))
-    rows_v = list(v.iter_rows(min_row=1, max_row=min(v.max_row, max_row), max_col=max_col, values_only=True))
-    return rows_f, rows_v, f.title
+def _formulas(path: str, max_row: int, max_col: int):
+    wb = openpyxl.load_workbook(path, read_only=True)
+    ws = wb.worksheets[0]
+    return _cut(ws.iter_rows(min_row=1, max_row=max_row, max_col=max_col, values_only=True), max_row, max_col)
 
 
 class Shakh:
     """Шахматка «показатели × сутки» с блоками по скважинам (одинаковый шаблон у отбора и закачки)."""
 
-    def __init__(self, path: str, kind: str, start_year: int, workdir: str, max_row: int = 2600, max_col: int = 260):
+    def __init__(self, path: str, kind: str, start_year: int, workdir: str, max_row: int = 2600, max_col: int = 260,
+                 xls_formulas: bool = False):
         self.kind, self.start_year = kind, start_year
+        self.label = os.path.basename(path)
         self.issues: List[Issue] = []
-        self.src = to_xlsx(path, workdir)
+        self.src = to_xlsx(path, workdir, xls_formulas)
         self.has_formulas = self.src is not None
         if self.has_formulas:
-            self.F, self.V, self.sheet = _load(self.src, 0, max_row, max_col)
+            self.V, self.sheet = _values(self.src if not _use_calamine() else path, max_row, max_col)
+            self.F = _formulas(self.src, max_row, max_col)
         else:
-            self.F, self.V, self.sheet = _load_xls(path, max_row, max_col)
+            self.V, self.sheet = _values(path, max_row, max_col)
+            self.F = self.V
             self.issue("предупреждение", "Формулы недоступны", os.path.basename(path),
-                       "Файл .xls прочитан по значениям: проверка формул пропущена (сохраните его как .xlsx, чтобы проверить формулы)")
+                       "Файл .xls прочитан по значениям: формулы не проверялись (сохраните его как .xlsx или включите «Проверять формулы в .xls» – нужен LibreOffice, дольше минуты)")
         self._find_layout()
 
     def f(self, r, c):  # 1-based
@@ -448,7 +474,7 @@ def recompute(sh: Shakh, df: pd.DataFrame) -> pd.DataFrame:
     day_const = df[df["_own"].isin(["в расчётном дебите число, а не формула", "расчётный дебит в файле не сходится с диаметром/давлением/часами"])] \
         .groupby("Дата")["Скважина"].agg(lambda x: ", ".join(map(str, x)))
     day_t = df[df["_own"] == "в ячейке число, а не формула"].groupby("Дата")["Скважина"].agg(lambda x: ", ".join(map(str, x)))
-    qpos = df[df["q расч (пересчёт)"] > 0]
+    qpos = df[df["q расч (пересчёт)"] > 0].groupby("Дата")["Скважина"].agg(set).to_dict()
     reasons = []
     for is_b, o_r, d in zip(bad, df["_own"], df["Дата"]):
         if not is_b:
@@ -462,7 +488,7 @@ def recompute(sh: Shakh, df: pd.DataFrame) -> pd.DataFrame:
             parts.append("в расчётных дебитах дня числа/ошибки у скв. " + day_const[d][:80])
         if d in day_t.index:
             parts.append("в Qгаз.пром дня числа вместо формул у скв. " + day_t[d][:80])
-        miss = sorted(w for w in getattr(sh, "k_missing", {}).get(d, set()) if w in set(qpos.loc[qpos["Дата"] == d, "Скважина"]))
+        miss = sorted(w for w in getattr(sh, "k_missing", {}).get(d, set()) if w in qpos.get(d, set()))
         if miss:
             parts.append("в сумме K не учтены скв. " + ", ".join(miss))
         reasons.append("К дня искажён: " + "; ".join(parts) if parts else "К в файле отличается от K по полному списку скважин")
@@ -528,70 +554,163 @@ def _norm_group(x) -> str:
     return str(x).replace(" ", "").upper()
 
 
-def build(otbor: str = "", zakachka: str = "", voda: str = "", out: str = "База_шахматка.xlsx",
-          otbor_year: Optional[int] = None, zak_year: Optional[int] = None, log=print) -> Dict[str, object]:
-    """Сводит файлы в книгу Excel и базу SQLite рядом (то же имя, расширение .sqlite). Любой из трёх файлов необязателен."""
+def _label_cells(path: str, limit: int = 80) -> List[str]:
+    """Подписи показателей (столбец B) первых строк первого листа — для опознания вида файла."""
+    if path.lower().endswith((".xlsx", ".xlsm")):
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        ws = wb.worksheets[0]
+        return [_text(r[1]) if len(r) > 1 else "" for r in ws.iter_rows(min_row=1, max_row=limit, max_col=2, values_only=True)]
+    import xlrd
+    sh = xlrd.open_workbook(path).sheet_by_index(0)
+    return [_text(sh.cell_value(r, 1)) if sh.ncols > 1 else "" for r in range(min(sh.nrows, limit))]
+
+
+def classify(path: str) -> str:
+    """'отбор' | 'закачка' | 'вода' | '' по содержимому файла (имя файла - только запасной признак)."""
+    low = os.path.basename(path).lower()
+    try:
+        if path.lower().endswith((".xlsx", ".xlsm")):
+            names = openpyxl.load_workbook(path, read_only=True).sheetnames
+            if "Water per day" in names or ("Данные" in names and "вода" in low):
+                return "вода"
+        labels = " | ".join(_label_cells(path, 150)).lower()
+    except Exception:
+        return ""
+    if "состояние" in labels and "t работы" in labels:
+        if "диам. штуцера" in labels or "qгаза (расч)" in labels:
+            return "отбор"
+        if "q (шум)" in labels or "шабл" in labels:
+            return "закачка"
+        return "закачка" if "зак" in low and "отбор" not in low else "отбор"
+    return ""
+
+
+def expand_paths(items: List[str]) -> List[str]:
+    """Файлы Excel из списка путей: файл, папка (все книги внутри) или маска."""
+    import glob
+    out: List[str] = []
+    for it in items:
+        it = (it or "").strip().strip('"')
+        if not it:
+            continue
+        found = glob.glob(it) if any(ch in it for ch in "*?[") else [it]
+        for f in found:
+            if os.path.isdir(f):
+                out += [os.path.join(f, n) for n in sorted(os.listdir(f))]
+            else:
+                out.append(f)
+    seen, res = set(), []
+    for f in out:
+        if f.lower().endswith((".xlsx", ".xlsm", ".xls")) and not os.path.basename(f).startswith("~$") and f not in seen:
+            seen.add(f)
+            res.append(f)
+    return res
+
+
+def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_year: Optional[int] = None, zak_year: Optional[int] = None,
+          xls_formulas: bool = False, log=print) -> Dict[str, object]:
+    """Сводит файлы (шахматки отбора и закачки по сезонам, книги воды) в книгу Excel и базу SQLite рядом (расширение .sqlite).
+
+    Вид каждого файла определяется по содержимому. Год первых суток шахматки берётся из имени файла (иначе из otbor_year / zak_year).
+    """
     import sqlite3
     tmp = tempfile.mkdtemp()
-    shs: Dict[str, Shakh] = {}
-    res: Dict[str, pd.DataFrame] = {}
-    for kind, path, year in (("отбор", otbor, otbor_year), ("закачка", zakachka, zak_year)):
-        if not path:
+    files = expand_paths(paths)
+    parts: Dict[str, List[Tuple[Shakh, pd.DataFrame]]] = {"отбор": [], "закачка": []}
+    water: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
+    unknown: List[str] = []
+    for n, path in enumerate(files):
+        kind = classify(path)
+        name = os.path.basename(path)
+        if not kind:
+            unknown.append(name)
+            log("⚠️ %s: вид файла не опознан (ни шахматка, ни книга воды), пропущен" % name)
             continue
-        wd = os.path.join(tmp, kind)
+        if kind == "вода":
+            water.append(read_water(path))
+            log("💧 %s: вода" % name)
+            continue
+        wd = os.path.join(tmp, str(n))
         os.makedirs(wd)
-        sh = Shakh(path, kind, year or _infer_year(path, dt.date.today().year), wd)
+        year = (otbor_year if kind == "отбор" else zak_year) or _infer_year(path, dt.date.today().year)
+        sh = Shakh(path, kind, year, wd, xls_formulas=xls_formulas)
+        sh.label = name
         df = recompute(sh, sh.wells_table())
         if sh.has_formulas:
             sh.check_formula_patterns(["qгаза (расч)", "q газа пром"] if kind == "отбор" else ["q газа пром", "Qгаза пром.", "Qгаза отч."])
-        shs[kind], res[kind] = sh, df
-        log("📄 %s: %d скважин, %d суток (%s…%s)" % (os.path.basename(path), len(sh.blocks), len(sh.day_cols),
-                                                  sh.day_cols[0][1] if sh.day_cols else "", sh.day_cols[-1][1] if sh.day_cols else ""))
-    # группы
-    zn2 = pd.DataFrame(columns=["Скважина", "Группа", "Группа (по формуле)", "Группа итог", "Источник группы"])
-    src = shs.get("отбор") or shs.get("закачка")
-    if src is not None and src.zone_hdr:
-        zn = src.zones()
-        zf = src.zones_from_formulas(zn) if src.has_formulas else pd.DataFrame(columns=["Скважина", "Группа (по формуле)"])
-        zn2 = zn.merge(zf.groupby("Скважина")["Группа (по формуле)"].agg(lambda x: ", ".join(sorted(set(x)))).reset_index(),
-                       on="Скважина", how="left") if len(zf) else zn.assign(**{"Группа (по формуле)": None})
+        df.insert(0, "Файл", name)
+        parts[kind].append((sh, df))
+        log("📄 %s (%s): %d скважин, %d суток (%s…%s)" % (name, kind, len(sh.blocks), len(sh.day_cols),
+                                                       sh.day_cols[0][1] if sh.day_cols else "", sh.day_cols[-1][1] if sh.day_cols else ""))
+    all_sh = [sh for lst in parts.values() for sh, _d in lst]
+    # группы: таблица зон последнего файла, где скважина встречается
+    zrows = []
+    for sh, _d in parts["отбор"] + parts["закачка"]:
+        if not sh.zone_hdr:
+            continue
+        zn = sh.zones()
+        zf = sh.zones_from_formulas(zn) if sh.has_formulas and len(zn) else pd.DataFrame(columns=["Скважина", "Группа (по формуле)"])
+        zn = zn.merge(zf.groupby("Скважина")["Группа (по формуле)"].agg(lambda x: ", ".join(sorted(set(x)))).reset_index(),
+                      on="Скважина", how="left") if len(zf) else zn.assign(**{"Группа (по формуле)": None})
+        zrows.append(zn.assign(Файл=sh.label))
+    zn2 = pd.concat(zrows).drop_duplicates("Скважина", keep="last").reset_index(drop=True) if zrows else \
+        pd.DataFrame(columns=["Скважина", "Группа", "Группа (по формуле)", "Группа итог", "Источник группы"])
+    if len(zn2):
         canon = {_norm_group(part): part for g in zn2["Группа (по формуле)"].dropna() for part in str(g).split(", ")}
 
         def final(row):
             if isinstance(row["Группа (по формуле)"], str) and row["Группа (по формуле)"]:
                 return row["Группа (по формуле)"], "формулы в таблице зон"
             return canon.get(_norm_group(row["Группа"]), row["Группа"]), "подпись в столбце зон"
-        if len(zn2):
-            zn2[["Группа итог", "Источник группы"]] = zn2.apply(lambda r: pd.Series(final(r)), axis=1)
-    gmap = dict(zip(zn2["Скважина"], zn2["Группа итог"]))
-    for kind, df in res.items():
-        df.insert(1, "Группа", [gmap.get(str(w).split(" ")[0], "") for w in df["Скважина"]])
+        zn2[["Группа итог", "Источник группы"]] = zn2.apply(lambda r: pd.Series(final(r)), axis=1)
+    gmap = dict(zip(zn2["Скважина"], zn2["Группа итог"])) if len(zn2) else {}
+    res: Dict[str, pd.DataFrame] = {}
+    for kind, lst in parts.items():
+        if not lst:
+            continue
+        df = pd.concat([d for _s, d in lst], ignore_index=True)
+        df.insert(2, "Группа", [gmap.get(str(w).split(" ")[0], "") for w in df["Скважина"]])
         df.rename(columns={"Строка блока": "Строка в исходнике"}, inplace=True)
+        dup = df.duplicated(["Скважина", "Дата"], keep=False)
+        if dup.any():
+            lst[0][0].issue("предупреждение", "Одни и те же сутки в нескольких файлах", ", ".join(sorted(set(df.loc[dup, "Файл"]))),
+                            "Строк с повтором «скважина + дата»: %d; оставлена запись из последнего файла" % int(dup.sum()))
+            df = df.drop_duplicates(["Скважина", "Дата"], keep="last").reset_index(drop=True)
         miss = sorted(set(df.loc[df["Группа"] == "", "Скважина"]), key=str)
         if miss and gmap:
-            shs[kind].issue("предупреждение", "Нет группы", ", ".join(map(str, miss)), "Скважин без группы в таблице зон: %d" % len(miss))
-    main_cols = ["Скважина", "Группа", "Дата", "Состояние", "t работы", "Qгаз.пром (пересчёт)", "Qгаз.пром (в файле)",
+            lst[0][0].issue("предупреждение", "Нет группы", ", ".join(map(str, miss)), "Скважин без группы в таблице зон: %d" % len(miss))
+        res[kind] = df
+    main_cols = ["Файл", "Скважина", "Группа", "Дата", "Состояние", "t работы", "Qгаз.пром (пересчёт)", "Qгаз.пром (в файле)",
                  "Расхождение", "Причина расхождения"]
 
     def lead(df):
         cols = [c for c in main_cols if c in df.columns]
         return df[cols + [c for c in df.columns if c not in cols]].drop(columns=["Расхождение > допуска"])
 
-    def objt(sh, df):
-        t = sh.object_table()
-        spec = {"Σ расчётных дебитов": ("q расч (пересчёт)", "sum"), "Σ Qгаз.пром (пересчёт)": ("Qгаз.пром (пересчёт)", "sum"),
-                "Σ Qгаз.пром (в файле)": ("Qгаз.пром (в файле)", "sum"), "K (пересчёт)": ("K (пересчёт)", "first")}
-        if "K (в файле)" in df.columns:
-            spec["K (в файле)"] = ("K (в файле)", "first")
-        return t.merge(df.groupby("Дата").agg(**spec).reset_index(), on="Дата", how="left")
+    def objt(lst):
+        frames = []
+        for sh, df in lst:
+            t = sh.object_table()
+            spec = {"Σ расчётных дебитов": ("q расч (пересчёт)", "sum"), "Σ Qгаз.пром (пересчёт)": ("Qгаз.пром (пересчёт)", "sum"),
+                    "Σ Qгаз.пром (в файле)": ("Qгаз.пром (в файле)", "sum"), "K (пересчёт)": ("K (пересчёт)", "first")}
+            if "K (в файле)" in df.columns:
+                spec["K (в файле)"] = ("K (в файле)", "first")
+            frames.append(t.merge(df.groupby("Дата").agg(**spec).reset_index(), on="Дата", how="left").assign(Файл=sh.label))
+        o = pd.concat(frames, ignore_index=True)
+        return o[["Файл"] + [c for c in o.columns if c != "Файл"]]
 
     sheets: Dict[str, pd.DataFrame] = {}
     for kind, title in (("отбор", "Отбор"), ("закачка", "Закачка")):
         if kind in res:
             sheets[title + "_по_скважинам"] = lead(res[kind])
-            sheets[title + "_ПХГ_по_суткам"] = objt(shs[kind], res[kind])
-    tot = [x.assign(Файл=n) for n, x in ((k, s_.totals_table()) for k, s_ in shs.items()) if len(x)]
-    totals = pd.concat(tot)[["Файл", "Скважина", "Итог", "Показатель", "Значение"]] if tot else pd.DataFrame()
+            sheets[title + "_ПХГ_по_суткам"] = objt(parts[kind])
+    tot = []
+    for kind, lst in parts.items():
+        for sh, _d in lst:
+            t = sh.totals_table()
+            if len(t):
+                tot.append(t.assign(Режим=kind, Файл=sh.label))
+    totals = pd.concat(tot)[["Файл", "Режим", "Скважина", "Итог", "Показатель", "Значение"]] if tot else pd.DataFrame()
     wells = []
     all_w = sorted({w for df in res.values() for w in df["Скважина"]}, key=lambda x: (len(str(x).split(" ")[0]), str(x)))
     for w in all_w:
@@ -603,42 +722,47 @@ def build(otbor: str = "", zakachka: str = "", voda: str = "", out: str = "Ба�
         wells.append(rec)
     wells = pd.DataFrame(wells)
     season = daily = None
-    if voda:
-        season, daily = read_water(voda)
-        log("💧 вода: %d строк по сезонам, %d суток" % (len(season), len(daily)))
-    issues = pd.DataFrame([i for s_ in shs.values() for i in s_.issues])
+    if water:
+        season = pd.concat([w[0] for w in water], ignore_index=True).drop_duplicates(["Сезон", "Дата"], keep="last")
+        daily = pd.concat([w[1] for w in water], ignore_index=True).drop_duplicates("Дата", keep="last").sort_values("Дата")
+    issues = pd.DataFrame([dict(i, Файл=getattr(sh, "label", i["Файл"])) for sh in all_sh for i in sh.issues])
+    if unknown:
+        issues = pd.concat([issues, pd.DataFrame([{"Файл": n, "Уровень": "предупреждение", "Вид": "Файл не опознан", "Где": "",
+                                                    "Описание": "Не шахматка отбора/закачки и не книга воды: пропущен"} for n in unknown])], ignore_index=True)
     if len(issues):
         issues = issues.sort_values(["Файл", "Уровень", "Вид"]).reset_index(drop=True)
     stat = []
     for kind, df in res.items():
         d = df.groupby("Дата").agg(p=("Qгаз.пром (пересчёт)", "sum"), f=("Qгаз.пром (в файле)", "sum"))
-        stat.append([kind, str(df["Дата"].min()), str(df["Дата"].max()), len(d), round(float(d.p.sum())), round(float(d.f.sum())),
-                     int(df["Причина расхождения"].ne("").sum()), int(df.loc[df["Причина расхождения"] != "", "Скважина"].nunique())])
-    summary = pd.DataFrame(stat, columns=["Режим", "Первая дата", "Последняя дата", "Суток", "Σ Qгаз.пром пересчёт, тыс.м3",
+        stat.append([kind, len(parts[kind]), str(df["Дата"].min()), str(df["Дата"].max()), len(d), round(float(d.p.sum())),
+                     round(float(d.f.sum())), int(df["Причина расхождения"].ne("").sum()),
+                     int(df.loc[df["Причина расхождения"] != "", "Скважина"].nunique())])
+    summary = pd.DataFrame(stat, columns=["Режим", "Файлов", "Первая дата", "Последняя дата", "Суток", "Σ Qгаз.пром пересчёт, тыс.м3",
                                           "Σ Qгаз.пром в файле, тыс.м3", "Ячеек с расхождением", "Скважин затронуто"])
-    files = pd.DataFrame([[k, os.path.basename(p_), len(shs[k].blocks), len(shs[k].day_cols), shs[k].k_row] for k, p_ in
-                          (("отбор", otbor), ("закачка", zakachka)) if k in shs],
-                         columns=["Данные", "Файл", "Блоков скважин", "Суточных столбцов", "Строка К"])
+    flist = [[k, sh.label, len(sh.blocks), len(sh.day_cols), sh.k_row] for k, lst in parts.items() for sh, _d in lst]
+    flist += [["вода", os.path.basename(p_), "", "", ""] for p_ in files if classify(p_) == "вода"] if water else []
+    files_df = pd.DataFrame(flist, columns=["Данные", "Файл", "Блоков скважин", "Суточных столбцов", "Строка К"])
     rules = pd.DataFrame({"Правило": [
         "Берём только Qгаз.пром. (основной показатель); остальные показатели шахматок сохранены рядом, ничего не отброшено.",
         "Отбор: q расч = 0,0141·d²·P·√(1+0,002253·P)/24·t (d – диаметр штуцера, мм; P – Ршт блока; t – часы). Закачка: q = q(шум)/24·t.",
-        "K = Qотч по ПХГ (за сутки) / сумма расчётных дебитов ВСЕХ скважин. Qгаз.пром скважины = q расч × K.",
+        "K = Qотч по ПХГ (за сутки) / сумма расчётных дебитов ВСЕХ скважин. Qгаз.пром скважины = q расч × K. Каждый файл (сезон) считается отдельно.",
         "Дата столбца определяется рядом номеров суток, а не подписью месяца (подписи в файлах бывают неверными). Столбцы «Итого» читаются в отдельный лист.",
-        "Группы берутся из формул в таблице зон; если скважины в формулах нет, берётся подпись зоны.",
+        "Группы берутся из формул в таблице зон; если скважины в формулах нет, берётся подпись зоны. Если таблицы зон в нескольких файлах разные, берётся из последнего.",
         "Вода: каждому сезону свой набор столбцов (подпись сезона в первой строке); значения формул берутся из сохранённых результатов."]})
     if os.path.dirname(out):
         os.makedirs(os.path.dirname(out), exist_ok=True)
     with pd.ExcelWriter(out, engine="openpyxl") as xw:
         summary.to_excel(xw, sheet_name="Сводка", index=False)
         rules.to_excel(xw, sheet_name="Сводка", index=False, startrow=len(summary) + 3)
-        files.to_excel(xw, sheet_name="Файлы", index=False)
+        files_df.to_excel(xw, sheet_name="Файлы", index=False)
         for name, df in sheets.items():
             df.to_excel(xw, sheet_name=name, index=False)
         if len(totals):
             totals.to_excel(xw, sheet_name="Итоги_месяцев", index=False)
         if len(zn2):
-            zn2[["Скважина", "Группа итог", "Источник группы", "Группа (по формуле)", "Группа"]].rename(
-                columns={"Группа итог": "Группа", "Группа": "Подпись зоны в таблице"}).to_excel(xw, sheet_name="Группы", index=False)
+            zn2[["Скважина", "Группа итог", "Источник группы", "Группа (по формуле)", "Группа", "Файл"]].rename(
+                columns={"Группа итог": "Группа", "Группа": "Подпись зоны в таблице", "Файл": "Файл таблицы зон"}).to_excel(
+                xw, sheet_name="Группы", index=False)
         wells.to_excel(xw, sheet_name="Скважины", index=False)
         if season is not None:
             season.to_excel(xw, sheet_name="Вода_по_сезонам", index=False)
@@ -674,4 +798,4 @@ def build(otbor: str = "", zakachka: str = "", voda: str = "", out: str = "Ба�
                                 (x if x is None or isinstance(x, (int, float)) else str(x)))
         d.to_sql(name, con, index=False, if_exists="replace")
     con.close()
-    return {"out": out, "sqlite": dbp, "summary": summary, "issues": issues, "wells": len(wells)}
+    return {"out": out, "sqlite": dbp, "summary": summary, "issues": issues, "wells": len(wells), "files": len(files) - len(unknown)}

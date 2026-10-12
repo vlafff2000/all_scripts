@@ -59,18 +59,24 @@ def test_month_label_does_not_move_dates(tmp_path):
     assert any(i["Вид"] == "Подпись месяца" for i in sh.issues)
 
 
-def test_run_module_and_check(tmp_path):
+def test_run_module_two_seasons_in_one_window(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     make_otbor(src / "Шахматка отбор 2025.xlsx")
+    make_otbor(src / "Шахматка отбор 2026.xlsx")
+    (src / "посторонний.txt").write_text("не Excel")
+    files = "\n".join([str(src / "Шахматка отбор 2025.xlsx"), str(src / "Шахматка отбор 2026.xlsx"), str(src / "посторонний.txt")])
+    assert шахматка.classify(str(src / "Шахматка отбор 2025.xlsx")) == "отбор"
     out = tmp_path / "out"
-    run_module("База_шахматка_Лена", {"otbor": str(src / "Шахматка отбор 2025.xlsx"), "output": "db.xlsx"}, out)
+    run_module("База_шахматка_Лена", {"files": files, "output": "db.xlsx"}, out)
     book = pd.read_excel(out / "db.xlsx", sheet_name=None)
     assert {"Сводка", "Отбор_по_скважинам", "Отбор_ПХГ_по_суткам", "Скважины", "Контроль_формул"} <= set(book)
-    assert len(book["Отбор_по_скважинам"]) == 6
+    wells = book["Отбор_по_скважинам"]
+    assert len(wells) == 12                 # по 6 строк (2 скважины × 3 суток) из каждого сезона
+    assert set(wells["Файл"]) >= {"Шахматка отбор 2026.xlsx"}
     assert (out / "db.sqlite").exists()
-    rep = check.check_shakhmatka({"otbor": str(src / "Шахматка отбор 2025.xlsx")})
-    assert not [i for i in rep.issues if i.level == qc.ERROR]
+    rep = check.check_shakhmatka({"files": files})
+    assert not [i for i in rep.issues if i.level == qc.ERROR and i.code != "FILE"]
 
 
 def test_check_without_files():
