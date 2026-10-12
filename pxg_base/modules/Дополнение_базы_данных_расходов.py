@@ -9,7 +9,7 @@ import time
 import gc
 import warnings
 from pxg_core import параметры
-from pxg_core.расходы_файлы import normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, read_excel_safe, find_time_table_intelligent
+from pxg_core.расходы_файлы import trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, read_excel_safe, find_time_table_intelligent
 
 warnings.filterwarnings('ignore')
 
@@ -322,8 +322,8 @@ def process_excel_file_intelligent(file_path, year=None, season=None, data_type=
             continue
 
     if all_data:
-        final_df = pd.concat(all_data, ignore_index=True)
-        return final_df
+        final_df = trim_unfilled_days(pd.concat(all_data, ignore_index=True), env_end_date())
+        return final_df if len(final_df) else None
     else:
         return None
 

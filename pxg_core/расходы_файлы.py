@@ -397,3 +397,31 @@ def find_time_table_intelligent(file_path, sheet_name, gas_start_row, gas_start_
         return best_row if best_score > 0.6 else None
     except Exception:
         return None
+
+
+def trim_unfilled_days(df, end_date=None):
+    """Убирает хвост незаполненных суток: заготовленные в исходнике шаблоны на ещё не наступившие даты.
+
+    Конец данных — последняя дата, где у какой-либо скважины часовой расход или время работы не нулевые.
+    Нулевые сутки внутри этого диапазона (простой) остаются. `end_date` (datetime/строка ДД.ММ.ГГГГ) — жёсткая
+    граница «по дату включительно»; пусто — определяется автоматически.
+    """
+    if df is None or len(df) == 0:
+        return df
+    dates = pd.to_datetime(df["Дата"], errors="coerce")
+    out = df
+    if end_date is not None and str(end_date).strip():
+        limit = pd.to_datetime(end_date, dayfirst=True, errors="coerce")
+        if pd.notna(limit):
+            out = out[~(dates > limit)]
+            dates = dates.loc[out.index]
+    filled = (out["Часовой расход газа"] != 0) | (out["Время работы"] != 0)
+    last = dates[filled].max()
+    if pd.isna(last):
+        return out
+    return out[~(dates > last)]
+
+
+def env_end_date():
+    """Необязательная граница «собирать по дату» (ДД.ММ.ГГГГ) из PXG_END_DATE; пусто — авто."""
+    return os.environ.get("PXG_END_DATE", "").strip() or None
