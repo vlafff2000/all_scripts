@@ -140,3 +140,31 @@ def test_broken_autofilter_does_not_crash(tmp_path):
     assert F[0][1] == "=A1*2"
     V, _ = sh._values_plain(str(bad), 10, 10)
     assert V[0][0] == 7
+
+
+@pytest.mark.parametrize("name,year", [
+    ("Шахм-газ 11 - 12.xlsx", 2011), ("Шахм-газ 13-14.xlsx", 2013), ("Шахм-газ копия 16-17.xlsx", 2016),
+    ("Шахматка отбор 23-24 копия.xlsx", 2023), ("Шахматка газ 2017-18.xlsx", 2017), ("Шахматка газ 2019-2020 копия.xlsx", 2019),
+    ("Шахматка отбор 2025-2026_06042026.xlsx", 2025), ("Шахматка закачка 2018г копия.xlsx", 2018), ("Шахматка закачка  2013.xlsx", 2013),
+    ("Шахматка_отбор_2024-2025.xlsx", 2024), ("Шахматка 10-15.xlsx", None), ("отбор.xlsx", None)])
+def test_infer_year(name, year):
+    assert шахматка._infer_year(name) == year
+
+
+def test_year_from_header_manual_and_unknown(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    make_otbor(src / "отбор без года.xlsx")                       # года нет ни в имени, ни в шапке
+    wb = openpyxl.load_workbook(str(src / "отбор без года.xlsx"))
+    wb.active["A1"] = "Журнал за сезон 2019"                      # год в шапке листа
+    wb.save(str(src / "отбор в шапке.xlsx"))
+    sh = шахматка.Shakh(str(src / "отбор в шапке.xlsx"), "отбор", None, str(tmp_path))
+    assert sh.day_cols[0][1].year == 2019
+    log = []
+    res = шахматка.build([str(src / "отбор без года.xlsx")], str(tmp_path / "a.xlsx"), log=log.append)
+    assert any("Год не определён" == v for v in res["issues"]["Вид"])
+    assert any("год первых суток не определён" in m for m in log)
+    res = шахматка.build([str(src / "отбор без года.xlsx")], str(tmp_path / "b.xlsx"), years="без года = 2014")
+    assert not len(res["issues"][res["issues"]["Вид"] == "Год не определён"])
+    book = pd.read_excel(str(tmp_path / "b.xlsx"), sheet_name="Отбор_по_скважинам")
+    assert str(book["Дата"].min())[:4] == "2014"

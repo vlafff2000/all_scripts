@@ -146,7 +146,7 @@ def _formulas(path: str, max_row: int, max_col: int):
 class Shakh:
     """Шахматка «показатели × сутки» с блоками по скважинам (одинаковый шаблон у отбора и закачки)."""
 
-    def __init__(self, path: str, kind: str, start_year: int, workdir: str, max_row: int = 2600, max_col: int = 260,
+    def __init__(self, path: str, kind: str, start_year: Optional[int], workdir: str, max_row: int = 2600, max_col: int = 260,
                  xls_formulas: bool = False):
         self.kind, self.start_year = kind, start_year
         self.label = os.path.basename(path)
@@ -161,6 +161,10 @@ class Shakh:
             self.F = self.V
             self.issue("предупреждение", "Формулы недоступны", os.path.basename(path),
                        "Файл .xls прочитан по значениям: формулы не проверялись (сохраните его как .xlsx или включите «Проверять формулы в .xls» – нужен LibreOffice, дольше минуты)")
+        if self.start_year is None:
+            self.start_year = _year_from_cells(self.V)
+            if self.start_year is None:
+                raise YearUnknown(self.label)
         self._find_layout()
 
     def f(self, r, c):  # 1-based
@@ -594,9 +598,45 @@ def _read_water_wb(wb) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 # ---------------------------------------------------------------- сборка базы
 
-def _infer_year(path: str, default: int) -> int:
-    m = re.search(r"(20\d\d)", os.path.basename(path))
-    return int(m.group(1)) if m else default
+def _infer_year(path: str, default: Optional[int] = None) -> Optional[int]:
+    """Год первых суток по имени файла: «2017-18», «2025-2026», «2018г» и короткие пары «11 - 12», «23-24»."""
+    name = os.path.splitext(os.path.basename(path))[0]
+    m = re.search(r"(?<!\d)(20\d\d)(?!\d)", name)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(?<!\d)(\d\d)\s*[-–—/]\s*(\d\d)(?!\d)", name)
+    if m and (int(m.group(2)) - int(m.group(1))) % 100 == 1:
+        return 2000 + int(m.group(1))
+    return default
+
+
+def _year_from_cells(V) -> Optional[int]:
+    """Запасной способ: год в ячейках шапки листа (над строкой «№№»)."""
+    for row in V[:12]:
+        for v in row[:30]:
+            if isinstance(v, (dt.datetime, dt.date)):
+                return v.year
+            m = re.search(r"(?<!\d)(20\d\d)(?!\d)", _text(v)) if v not in (None, "") else None
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def _manual_year(name: str, rules: str) -> Optional[int]:
+    """Ручной ввод: строки «часть имени файла = год»."""
+    low = name.lower()
+    for line in (rules or "").splitlines():
+        if "=" not in line:
+            continue
+        key, val = line.rsplit("=", 1)
+        key = key.strip().strip('"').lower()
+        if key and key in low and val.strip().isdigit():
+            return int(val.strip())
+    return None
+
+
+class YearUnknown(ValueError):
+    pass
 
 
 def _norm_group(x) -> str:
@@ -656,10 +696,10 @@ def expand_paths(items: List[str]) -> List[str]:
 
 
 def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_year: Optional[int] = None, zak_year: Optional[int] = None,
-          xls_formulas: bool = False, log=print) -> Dict[str, object]:
+          xls_formulas: bool = False, log=print, years: str = "") -> Dict[str, object]:
     """Сводит файлы (шахматки отбора и закачки по сезонам, книги воды) в книгу Excel и базу SQLite рядом (расширение .sqlite).
 
-    Вид каждого файла определяется по содержимому. Год первых суток шахматки берётся из имени файла (иначе из otbor_year / zak_year).
+    Вид каждого файла определяется по содержимому. Год первых суток: ручной ввод (years) → otbor_year / zak_year → имя файла → шапка листа; иначе файл пропускается с ошибкой «Год не определён».
     """
     import sqlite3
     tmp = tempfile.mkdtemp()
@@ -667,6 +707,7 @@ def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_y
     parts: Dict[str, List[Tuple[Shakh, pd.DataFrame]]] = {"отбор": [], "закачка": []}
     water: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
     unknown: List[str] = []
+    noyear: List[str] = []
     for n, path in enumerate(files):
         kind = classify(path)
         name = os.path.basename(path)
@@ -680,8 +721,13 @@ def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_y
             continue
         wd = os.path.join(tmp, str(n))
         os.makedirs(wd)
-        year = (otbor_year if kind == "отбор" else zak_year) or _infer_year(path, dt.date.today().year)
-        sh = Shakh(path, kind, year, wd, xls_formulas=xls_formulas)
+        year = _manual_year(name, years) or (otbor_year if kind == "отбор" else zak_year) or _infer_year(path)
+        try:
+            sh = Shakh(path, kind, year, wd, xls_formulas=xls_formulas)
+        except YearUnknown:
+            noyear.append(name)
+            log("❌ %s: год первых суток не определён (нет ни в имени файла, ни в шапке листа), файл пропущен. Укажите год в поле «Годы по файлам»" % name)
+            continue
         sh.label = name
         df = recompute(sh, sh.wells_table())
         if sh.has_formulas:
@@ -777,6 +823,9 @@ def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_y
     if unknown:
         issues = pd.concat([issues, pd.DataFrame([{"Файл": n, "Уровень": "предупреждение", "Вид": "Файл не опознан", "Где": "",
                                                     "Описание": "Не шахматка отбора/закачки и не книга воды: пропущен"} for n in unknown])], ignore_index=True)
+    if noyear:
+        issues = pd.concat([issues, pd.DataFrame([{"Файл": n, "Уровень": "ошибка", "Вид": "Год не определён", "Где": "",
+                                                    "Описание": "Год первых суток не найден ни в имени файла, ни в шапке листа: файл пропущен. Впишите в поле «Годы по файлам» строку «часть имени = год»"} for n in noyear])], ignore_index=True)
     if len(issues):
         issues = issues.sort_values(["Файл", "Уровень", "Вид"]).reset_index(drop=True)
     stat = []

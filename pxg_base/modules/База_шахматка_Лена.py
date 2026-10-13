@@ -7,8 +7,13 @@
 from __future__ import annotations
 
 import os
+import warnings
 
 from pxg_core import параметры, шахматка
+
+
+warnings.filterwarnings("ignore", message="Print area cannot be set", category=UserWarning)
+warnings.filterwarnings("ignore", message="The behavior of DataFrame concatenation", category=FutureWarning)
 
 
 def _year(text):
@@ -23,6 +28,7 @@ def main(argv=None):
         "База шахматка (Лена)", argv,
         files="файлы, папки или маски (по одному в строке, через перевод строки)", output="имя файла результата",
         otbor_year="год первых суток отбора (по умолчанию из имени файла)", zak_year="год первых суток закачки (по умолчанию из имени файла)",
+        years="годы по файлам: строки «часть имени = год», для файлов, где год не определился сам",
         xls_formulas="1 — проверять формулы в .xls через LibreOffice (медленно)")
     raw = args.files if args.files is not None else параметры.ask("Файлы шахматок и воды (через ;)").replace(";", "\n")
     files = шахматка.expand_paths([x for x in (raw or "").splitlines()])
@@ -33,6 +39,7 @@ def main(argv=None):
     if not out.lower().endswith(".xlsx"):
         out += ".xlsx"
     res = шахматка.build(files, out, _year(args.otbor_year), _year(args.zak_year),
+                          years=args.years or "",
                           xls_formulas=str(args.xls_formulas or "").strip().lower() in ("1", "y", "yes", "true", "да"))
     issues = res["issues"]
     if len(issues):
