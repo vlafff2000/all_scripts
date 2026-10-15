@@ -225,11 +225,35 @@ def load_water(paths: List[str]) -> Tuple[pd.DataFrame, List[str]]:
 
 
 # ---------------- давление ----------------
+KGF_TO_BAR = 0.980665   # Base пишет давления в кгс/см², Карты считают в барах
+
+
+def load_base_pressure(path: str, is_gsp: bool) -> Tuple[pd.DataFrame, List[str]]:
+    """База давлений по замерам (xlsx, лист «Данные»): давление — Рпл, кгс/см², переводится в бары."""
+    cols = ["Дата", "Давление_бар", "Скважина"]
+    data = pd.read_excel(path, sheet_name="Данные", dtype={"Скважина": str})
+    need = {"Скважина", "Дата", "Рпл"}
+    if not need <= set(data.columns):
+        return pd.DataFrame(columns=cols), ["в базе давлений нет колонок: " + ", ".join(sorted(need - set(data.columns)))]
+    dt = pd.to_datetime(data["Дата"], dayfirst=True, errors="coerce")
+    p = pd.to_numeric(data["Рпл"], errors="coerce")
+    ok = dt.notna() & p.notna()
+    well = pd.to_numeric(data["Скважина"], errors="coerce").fillna(0).astype(int) if is_gsp else 0
+    df = pd.DataFrame({"Дата": dt[ok], "Давление_бар": (p[ok] * KGF_TO_BAR).round(2),
+                       "Скважина": well[ok] if is_gsp else 0}, columns=cols)
+    df = df.sort_values("Дата", kind="stable").reset_index(drop=True)
+    skipped = int((~ok).sum())
+    warn = ["пропущено строк без даты или Рпл — %d" % skipped] if skipped else []
+    return df, warn
+
+
 def load_pressure(path: str, is_gsp: bool) -> Tuple[pd.DataFrame, List[str]]:
-    """Файл ГСП: «520<TAB>22.11.2024<TAB>95,42», файл объекта: «02.08.2006<TAB>94,7»."""
+    """Файл ГСП: «520<TAB>22.11.2024<TAB>95,42», файл объекта: «02.08.2006<TAB>94,7». Или xlsx Базы давлений."""
     cols = ["Дата", "Давление_бар", "Скважина"]
     if not path or not os.path.isfile(path):
         return pd.DataFrame(columns=cols), []
+    if path.lower().endswith((".xlsx", ".xlsm", ".xls")):
+        return load_base_pressure(path, is_gsp)
     rows, bad = [], 0
     for line in _read_text(path):
         line = line.strip()
