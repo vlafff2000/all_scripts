@@ -95,6 +95,10 @@ function mergeSeason(list: SeasonData[]): SeasonData {
   return { wells, days, flow }
 }
 
+export interface Locate { well: number; gsp: string; groups: string[] }
+/** Адрес карты: настоящее имя группы (с учётом «-»/«_»/пробелов) и все группы, где есть скважина. */
+export const locateWell = (gsp: string, well: number) => call<Locate>('/api/locate?' + new URLSearchParams({ gsp, well: String(well) }))
+
 export const getGsp = async (name: string, mode: string): Promise<GspData> => {
   if (!isMulti(name)) return call<GspData>('/api/gsp?name=' + encodeURIComponent(name) + '&mode=' + mode)
   return mergeGsp(await Promise.all(groupsOf(name).map(n => getGsp(n, mode))), name)

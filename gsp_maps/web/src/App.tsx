@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { exportExcel, getGsp, getSeason, getState, groupsOf, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getSeason, getState, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
@@ -24,7 +24,15 @@ const PAGES = [
   { id: 'data', title: 'Данные', icon: 'M3 3h10v3H3zM3 8h10v3H3zM5 4.5h.01M5 9.5h.01M3 13h10' },
 ] as const
 type PageId = (typeof PAGES)[number]['id']
-const routeOf = (): PageId => { const r = location.hash.replace(/^#\/?/, ''); return (PAGES.find(p => p.id === r)?.id || 'map') }
+const routeOf = (): PageId => { const r = location.hash.replace(/^#\/?/, '').split('?')[0]; return (PAGES.find(p => p.id === r)?.id || 'map') }
+/** Адрес карты: #/map?gsp=ГСП-1&well=123&kind=Отбор&season=2022-2023 — выбирает группу, скважину, вид и сезон. */
+const addressOf = (): { gsp: string; well: number; kind: string; season: string } | null => {
+  if (!/^#\/?map\?/.test(location.hash)) return null
+  const q = new URLSearchParams(location.hash.split('?')[1] || '')
+  const well = Number(q.get('well'))
+  if (!Number.isInteger(well) || well <= 0) return null
+  return { gsp: q.get('gsp') || '', well, kind: q.get('kind') || '', season: q.get('season') || '' }
+}
 
 function Issues({ notes, warnings }: { notes: string[]; warnings: string[] }) {
   const [open, setOpen] = useState(false)
@@ -42,6 +50,8 @@ export default function App() {
   const [app, setApp] = useState<AppState | null>(null)
   const [error, setError] = useState('')
   const [page, setPage] = useState<PageId>(routeOf())
+  const [addr, setAddr] = useState(addressOf)
+  const [want, setWant] = useState<{ gsp: string; well: number } | null>(null)
   const collapsed = usePref(sidebarCollapsed), currentTheme = usePref(theme)
   const mode = usePref(posMode), kind = usePref(lastKind), gspPref = usePref(lastGsp)
   const sec = usePref(sectors), water = usePref(showWater), share = usePref(showShare), fixed = usePref(fixedScale), paint = usePref(paintMode), bscale = usePref(bubbleScale), labels = usePref(labelMode), idleOff = usePref(hideIdle), minV = usePref(minValue), insp = usePref(inspectorOpen), tmode = usePref(tipMode)
@@ -69,7 +79,7 @@ export default function App() {
     return () => clearInterval(t)
   }, [app?.state, refresh])
   useEffect(() => {
-    const onHash = () => setPage(routeOf())
+    const onHash = () => { setPage(routeOf()); setAddr(addressOf()) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -99,6 +109,26 @@ export default function App() {
     getGsp(gsp, mode).then(d => { if (live) { setG(d); setSelected(null) } }).catch(e => live && setGErr(String(e.message || e)))
     return () => { live = false }
   }, [ready, gsp, mode])
+
+  // адрес из ссылки: сначала группа и вид/сезон, выбор скважины — когда загрузится нужная группа
+  useEffect(() => {
+    if (!ready || !addr) return
+    const a = addr
+    setAddr(null)
+    locateWell(a.gsp, a.well).then(r => {
+      if (!r.groups.length) return flash(`Скважины ${a.well} нет в базе расходов`)
+      const target = r.groups.includes(r.gsp) ? r.gsp : r.groups[0]
+      if (a.kind === 'Отбор' || a.kind === 'Закачка') lastKind.set(a.kind)
+      if (a.season) setSeasonKey(a.season)
+      lastGsp.set(target)
+      setWant({ gsp: target, well: a.well })
+    }).catch(e => flash(String(e.message || e)))
+  }, [ready, addr])
+  useEffect(() => {
+    if (!want || !g || g.gsp !== want.gsp) return
+    setSelected(g.wells.includes(want.well) ? want.well : null)
+    setWant(null)
+  }, [want, g])
 
   const seasons = g ? g.seasons[kind as 'Отбор' | 'Закачка'] || [] : []
   const season = seasons.find(s => s.key === seasonKey) ? seasonKey : seasons.length ? seasons[seasons.length - 1].key : ''

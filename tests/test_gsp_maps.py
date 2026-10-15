@@ -291,6 +291,13 @@ def test_api_flow(db, tmp_path, monkeypatch):
     s = c.get("/api/season", params={"gsp": "ГСП 1", "kind": "Отбор", "season": "2022-2023"}).json()
     assert s["wells"] == [11, 12, 13, 14] and len(s["days"]) == 212 and len(s["flow"][0]) == 212
     assert c.get("/api/gsp", params={"name": "нет"}).status_code == 404
+    # адрес карты: «ГСП-1» и «ГСП 1» — одна группа; скважина 99 не в базе
+    loc = c.get("/api/locate", params={"gsp": "ГСП-1", "well": 12}).json()
+    assert loc == {"well": 12, "gsp": "ГСП 1", "groups": ["ГСП 1", "ГСП 2"]}
+    assert c.get("/api/locate", params={"gsp": "гсп_2", "well": 12}).json()["gsp"] == "ГСП 2"
+    assert c.get("/api/locate", params={"gsp": "нет", "well": 12}).json()["gsp"] == ""
+    assert c.get("/api/locate", params={"gsp": "ГСП 2", "well": 99}).json()["groups"] == []
+    assert c.get("/api/locate", params={"well": "x"}).status_code == 400
     ex = c.post("/api/export", json={"gsp": "ГСП 1", "mode": "auto"}).json()
     book = pd.ExcelFile(ex["path"])
     assert {"Отбор по сезонам", "Закачка по сезонам", "Скважины", "Работа по сезонам", "Работа по месяцам", "Очерёдность ввода"} <= set(book.sheet_names)
@@ -399,3 +406,9 @@ def test_summary_tables_and_summary_payload(old, db, tmp_path, monkeypatch):
     json.dumps(sp), json.dumps(allp)
     gp = pr.gsp_payload("ГСП 1", "grid")
     assert len(gp["gspFlow"]["days"]) == len(gp["gspFlow"]["bar"]) > 0
+
+
+def test_gsp_key_scheme():
+    from gsp_maps.store import gsp_key
+    assert gsp_key("ГСП-1") == gsp_key("ГСП 1") == gsp_key(" гсп_1 ") == gsp_key("ГСП  1")
+    assert gsp_key("ГСП 1") != gsp_key("ГСП 10")

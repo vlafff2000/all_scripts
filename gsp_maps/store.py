@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -105,6 +106,11 @@ def _build(path: str, progress: Progress) -> Dict[str, np.ndarray]:
     return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
 
 
+def gsp_key(name: str) -> str:
+    """Единая схема имён групп: регистр, пробелы, «_» и «-» не различаются («ГСП-1» = «ГСП 1»)."""
+    return re.sub(r"[\s_\-]+", " ", str(name)).strip().casefold()
+
+
 class Store:
     """Массивы расходов, отсортированные по (ГСП, вид, сезон, скважина, день)."""
 
@@ -173,6 +179,15 @@ class Store:
             digits = "".join(c for c in s if c.isdigit())
             return (0, int(digits), s) if digits else (1, 0, s)
         return sorted(self.gsp_names, key=num)
+
+    def resolve_gsp(self, name: str) -> str:
+        """Имя группы из базы по записи в адресе («ГСП-1» = «ГСП 1»); пусто, если такой нет."""
+        key = gsp_key(name)
+        return next((g for g in self.gsp_names if gsp_key(g) == key), "")
+
+    def groups_of_well(self, well: int) -> List[str]:
+        """Группы, где есть скважина, в порядке списка ГСП."""
+        return [g for g in self.gsp_list() if well in self.wells(g)]
 
     def seasons(self, gsp: str, kind: int) -> List[str]:
         def start(s: str) -> int:
