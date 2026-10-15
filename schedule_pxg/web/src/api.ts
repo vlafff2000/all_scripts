@@ -175,7 +175,10 @@ export const getSources = () => call<SourcesView>('/api/sources')
 export const setSources = (body: { flows?: { paths: string[]; template?: string; kind_default?: string }; groups?: { mode: string; path: string }; daily_total?: { path: string; unit: string } }) =>
   call<SourcesView>('/api/sources/set', post(body))
 export const buildSources = () => call<SourcesCheck>('/api/sources/build', post({}))
+/** Папка выгрузок Базы ПХГ: сервер находит базу расходов по имени и ставит её источником. */
+export const sourcesFromFolder = (folder: string) => call<SourcesView & { found: string[] }>('/api/sources/folder', post({ folder }))
 export const pickFiles = async (start: string) => ((await openFilePicker({ start, mode: 'files' })) || '').split('\n').filter(Boolean)
+export const pickFolder = async (start: string) => (await openFilePicker({ start, mode: 'folder' })) || ''
 
 export interface ResultsInfo {
   scenario: string; path: string; files: Record<string, string>; missing: string[]; start: string | null; end: string | null; steps: number
