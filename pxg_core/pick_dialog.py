@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import socket
 import threading
+import time
 import webbrowser
 from typing import Any, List, Optional, Sequence, Tuple
 
@@ -175,6 +176,9 @@ def _pick(mode: str, title: str, filetypes, start: str) -> List[str]:
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
+    started_at = time.monotonic()
+    while not server.started and thread.is_alive() and time.monotonic() - started_at < 10:
+        time.sleep(0.05)  # браузер открываем, когда сервер уже слушает порт
     try:
         webbrowser.open("http://127.0.0.1:%d/" % port)
         done.wait(TIMEOUT)

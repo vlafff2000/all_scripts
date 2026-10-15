@@ -42,6 +42,9 @@ def select_directory(title="Выберите папку для сохранен�
 # --- Функция для выбора режима работы ---
 def select_mode():
     """Открывает диалоговое окно для выбора режима работы программы."""
+    root = Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
 
     modes = {
         1: "Создание общей БД из Excel",

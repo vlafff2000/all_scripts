@@ -3839,6 +3839,7 @@ def main():
     all_gsp = sorted([str(g).strip() for g in all_gsp if pd.notna(g)])
     print(f"\nДоступные ГСП: {all_gsp}")
 
+    root = tk.Tk()
     root.title("Выбор ГСП")
     root.geometry("350x250")
     tk.Label(root, text="Выберите ГСП:", font=('Arial', 14)).pack(pady=15)
@@ -3849,6 +3850,7 @@ def main():
     dropdown.pack(pady=10)
     tk.Button(root, text="OK", command=root.quit, font=('Arial', 12)).pack(pady=10)
     root.mainloop()
+    root.destroy()
 
     gsp_filter = selected_gsp.get()
     if not gsp_filter:

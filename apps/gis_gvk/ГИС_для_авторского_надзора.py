@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import pandas as pd
+import tkinter as tk
 from tkinter import simpledialog
 import json
 from datetime import datetime
@@ -480,8 +481,11 @@ def select_folder_dialog(title="Выберите папку"):
 
 def input_season_name():
     """Ввод названия сезона"""
+    root = tk.Tk()
+    root.withdraw()
     season_name = simpledialog.askstring("Название сезона", 
                                         "Введите название сезона (например: 'конец отбора 2024/25 гг.'):")
+    root.destroy()
     return season_name
 
 
