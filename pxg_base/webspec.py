@@ -347,6 +347,17 @@ SPECS: List[WebSpec] = [
         args=(("folder", "folder"), ("db", "db")),
     ),
     WebSpec(
+        module="Учёт_газа_по_месяцам",
+        params=(
+            Param("withdrawal", "Файл учёта газа по отбору", "file", required=True,
+                  hint="«Учет газа … 2025-2026»: листы по месяцам, сутки по строкам; вынос воды — столбец «Пластовая жидкость»"),
+            Param("injection", "Файл учёта газа по закачке", "file",
+                  hint="Необязательно: «Учет газа- Закачка …», листы по месяцам"),
+        ),
+        args=(("withdrawal", "withdrawal"), ("injection", "injection")),
+        note="Книга «Учёт_газа_отбор_вынос_воды.xlsx» сохраняется в папку результатов.",
+    ),
+    WebSpec(
         module="Создание_schedule_по_поскважинной_истории",
         params=(
             Param("history", "Файл истории (база расходов или месячные/дневные файлы)", "file", required=True,
