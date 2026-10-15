@@ -111,6 +111,10 @@ def test_routes(home):
     assert c.get("/api/fs/places").json()["places"]
     assert c.get("/api/fs/last").json()["dir"] == str(home)
     assert c.post("/api/fs/last", data="junk").json()["dir"] == str(home)
+    f = home / "t.xlsx"
+    assert c.get("/api/fs/file", params={"path": str(f)}).content == b"12345"
+    assert c.get("/api/fs/file", params={"path": str(home / "no")}).status_code == 404
+    assert c.get("/api/fs/file").status_code == 404
 
 
 @pytest.mark.parametrize("mod", ["schedule_pxg.api", "pxg_base.api", "gsp_maps.api"])

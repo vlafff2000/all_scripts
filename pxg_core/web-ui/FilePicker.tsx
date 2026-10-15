@@ -216,3 +216,16 @@ export function openFilePicker(opts: PickerOptions = {}): Promise<string | null>
     root.render(<Picker opts={opts} done={done} />)
   })
 }
+
+/** Выбрать файлы проводником и получить их как обычные File (содержимое читает локальный сервер). null — отмена. */
+export async function pickLocalFiles(multiple: boolean, filter?: string): Promise<File[] | null> {
+  const picked = await openFilePicker({ mode: multiple ? 'files' : 'file', filter })
+  if (!picked) return null
+  const out: File[] = []
+  for (const path of picked.split('\n').filter(Boolean)) {
+    const r = await fetch('/api/fs/file?path=' + encodeURIComponent(path))
+    if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error || 'Не удалось прочитать файл')
+    out.push(new File([await r.blob()], baseName(path)))
+  }
+  return out
+}
