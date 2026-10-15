@@ -53,6 +53,8 @@ def detect_files(folder: str) -> Dict[str, str]:
             out.setdefault("press_gsp", path)
         elif ext == ".txt" and "давление" in name and "объект" in name:
             out.setdefault("press_obj", path)
+        elif ext in (".xlsx", ".xlsm", ".xls") and "бд" in name and "замеров" in name and "вод" in name:
+            out.setdefault("water", path)     # «БД замеров воды» Базы ПХГ — одна таблица на все месяцы
         elif ext in (".xlsx", ".xlsm", ".xls") and "бд" in name and "давлен" in name:
             # База давлений по замерам: одна таблица и для ГСП, и для объекта (Рпл по скважинам)
             out.setdefault("press_gsp", path)
