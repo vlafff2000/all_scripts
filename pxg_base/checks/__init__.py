@@ -37,6 +37,7 @@ REGISTRY: Dict[str, str] = {
     "Копирование_замеров_давлений_по_шаблонам": "reports:check_pressure_copy",
     "Сбор_БД_замеров_воды": "water:check_water",
     "Импорт_данных_ЭЛПРО": "elpro:check_elpro",
+    "Учёт_газа_по_месяцам": "gas_accounting:check_gas_accounting",
 }
 
 
