@@ -349,3 +349,16 @@ def test_api_history_window_residual_and_csv(client):
     assert t.status_code == 200 and "Невязка_3_суток_%" in t.text
     assert c.post("/api/history/residual", json={"files": [xl]}).status_code == 400    # эталона нет
     assert "Не_распределено" in c.post("/api/history/log", json={"files": [xl], "pzrg_file": pz}).text
+
+
+def test_other_kind_day_is_not_logged_and_mixed_skip():
+    d = date(2026, 5, 1)
+    h = frame([("1", d, 100000, INJ), ("2", d, 0, PROD), ("1", d + timedelta(days=1), 100000, INJ), ("2", d + timedelta(days=1), 90000, PROD)])
+    pz = pd.DataFrame({"date": pd.to_datetime(["2026-05-01", "2026-05-02"]), "rate": [120000.0, 150000.0]})
+    got, log, _ = hm.correct_pzrg(h, pz)
+    assert [r["kind"] for r in log if r["start"] == "2026-05-01"] == [INJ]      # у отбора в этот день нет расхода: записи нет, NO_WELLS не сыплется
+    assert hm.log_summary(log)["unallocated"] == 0
+    got, log, _ = hm.correct_pzrg(h, pz, mixed="skip")
+    day2 = [r for r in log if r["start"] == "2026-05-02"]
+    assert {r["kind"] for r in day2} == {INJ, PROD} and all(r["method"] == "SKIP" and "отбор, и закачка" in r["comment"] for r in day2)
+    assert list(got["rate_corr"])[2:] == [100000.0, 90000.0]

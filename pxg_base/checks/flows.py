@@ -10,6 +10,7 @@ import pandas as pd
 
 from pxg_core import qc
 from pxg_core.qc import Report
+from schedule_pxg.history import RAW_RATE_COLUMN
 from pxg_core.расходы_файлы import (find_injection_subfolder, find_results_subfolder, find_season_folders,
                                     find_time_table_intelligent, find_wells_count, find_year_folders, get_sheet_names,
                                     normalize_sheet_name, read_excel_safe)
@@ -335,7 +336,7 @@ def _check_db_sheet(rep: Report, path: str, sheet: str) -> Optional[pd.DataFrame
     if (hrs > qc.SETTINGS["max_hours"]).any():
         rep.error("RANGE", "Время работы больше 24 ч в %d строках" % int((hrs > 24).sum()), **where)
     calc = pd.to_numeric(df["Часовой расход газа"], errors="coerce") * hrs
-    daily = pd.to_numeric(df["Суточный расход газа"], errors="coerce")
+    daily = pd.to_numeric(df[RAW_RATE_COLUMN] if RAW_RATE_COLUMN in df.columns else df["Суточный расход газа"], errors="coerce")
     diff = ((calc - daily).abs() > 0.01 * calc.abs().clip(lower=1)) & calc.notna() & daily.notna()
     if diff.any():
         rep.warn("CROSS", "Суточный расход не равен «часовой × время» в %d строках" % int(diff.sum()),
@@ -352,6 +353,40 @@ def _check_db_sheet(rep: Report, path: str, sheet: str) -> Optional[pd.DataFrame
             flagged += 1
     rep.saw("лист «%s»: %d строк" % (sheet, len(df)))
     return df
+
+
+def check_normalize(v: Dict[str, str]) -> Report:
+    from schedule_pxg import history, historymode
+    rep = Report("Нормировка базы расходов на ПЗРГ")
+    db = (v.get("db") or "").strip()
+    pz = (v.get("pzrg") or "").strip()
+    if db and qc.check_path(rep, db, "База расходов"):
+        if history.is_normalized_db(db):
+            rep.error("FILE", "База уже нормирована на ПЗРГ (есть столбец «%s»)" % RAW_RATE_COLUMN, file=db,
+                      hint="Нормировать нужно исходную базу, иначе поправка применится дважды")
+        else:
+            have = [sh for sh in pd.ExcelFile(db).sheet_names if sh in ("Отборы", "Закачка")]
+            if not have:
+                rep.error("FILE", "В книге нет листов «Отборы» и «Закачка»", file=db, hint="Нужна база из «Создания базы расходов» или «Дополнения»")
+            for sh in have:
+                _check_db_sheet(rep, db, sh)
+    elif not db:
+        rep.error("FILE", "Не выбран файл базы расходов")
+    if pz and qc.check_path(rep, pz, "ПЗРГ"):
+        try:
+            tab = historymode.read_pzrg(pz)
+            rep.saw("ПЗРГ: %d суток" % len(tab))
+            if not len(tab):
+                rep.error("FILE", "В ПЗРГ нет дат с расходом", file=pz, hint="Даты в столбце A, расход в столбце C")
+        except Exception as e:
+            rep.error("FILE", "ПЗРГ не прочитан: %s" % e, file=pz, hint="Даты в столбце A, расход в столбце C")
+    elif not pz:
+        rep.error("FILE", "Не выбран файл ПЗРГ")
+    try:
+        historymode.parse_window(v.get("window_lo"), v.get("window_hi"))
+    except ValueError as e:
+        rep.error("FILE", str(e), hint="Границы окна — числа в тыс. м³/сут, нижняя меньше верхней (по умолчанию 80 и 600)")
+    return rep
 
 
 def check_append(v: Dict[str, str]) -> Report:

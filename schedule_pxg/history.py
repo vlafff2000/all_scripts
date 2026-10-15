@@ -91,6 +91,25 @@ DB_TEMPLATE = Template(
     name="База расходов", sheet=None, header_row=0, well="Скважина", date="Дата", rate="Суточный расход газа",
     hourly="Часовой расход газа", hours="Время работы", kind="Тип данных")
 
+RAW_RATE_COLUMN = "Суточный расход газа (исходный)"      # столбец базы, нормированной на ПЗРГ: в основном столбце уже нормированный расход
+K_COLUMN = "Коэффициент нормировки ПЗРГ"
+STATUS_COLUMN = "Статус нормировки ПЗРГ"
+
+
+def is_normalized_db(path: str) -> bool:
+    """База расходов уже нормирована на ПЗРГ (`Нормировка_базы_расходов_на_ПЗРГ`): есть столбец с исходным расходом.
+    Повторная поправка по ПЗРГ (`historymode`) такой базе не нужна."""
+    if os.path.splitext(str(path))[1].lower() not in (".xlsx", ".xlsm", ".xls") or not os.path.isfile(path):
+        return False
+    try:
+        for sh in pd.ExcelFile(path).sheet_names[:4]:
+            if RAW_RATE_COLUMN in [str(c).strip() for c in pd.read_excel(path, sheet_name=sh, nrows=0).columns]:
+                return True
+    except Exception:
+        return False
+    return False
+
+
 _KIND_WORDS = {"отбор": PROD, "закачка": INJ, "нейтральный период": NEUTRAL, "нейтральный": NEUTRAL}
 
 
