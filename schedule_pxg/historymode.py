@@ -31,9 +31,9 @@ SPLIT_54_80 = {"54/80": ["54", "80"]}
 _KIND_WORDS = {"prod": PROD, "inj": INJ, "none": NEUTRAL, "отбор": PROD, "закачка": INJ, "нейтральный": NEUTRAL, "нейтр": NEUTRAL}
 LOG_HEAD_RU = ["Начало_периода", "Конец_периода", "Метод_коррекции", "ПЗРГ_сумма", "Скважин_в_диапазоне", "Скважин_вне_диапазона",
                "Сумма_в_диапазоне", "Сумма_вне_диапазона", "Коэффициент", "Итоговая_сумма", "Расхождение_%", "Категория", "Комментарий",
-               "Не_распределено", "Окно_от", "Окно_до"]
+               "Не_распределено", "Окно_от", "Окно_до", "Вид"]
 LOG_COLUMNS = ["start", "end", "method", "pzrg", "n_in", "n_out", "sum_in", "sum_out", "coef", "total_after", "discrepancy", "category", "comment",
-               "unallocated", "lo", "hi"]
+               "unallocated", "lo", "hi", "kind"]
 NOT_DONE = ("SKIP", "NO_WELLS")                   # методы журнала, при которых расходы скважин не менялись
 RESIDUAL_HEAD_RU = ["Дата", "Вид", "ПЗРГ", "Сумма_по_скважинам", "Невязка", "Невязка_%", "Невязка_3_суток_%", "Подсказка"]
 RESIDUAL_COLUMNS = ["date", "kind", "pzrg", "wells", "residual", "pct", "pct3", "hint"]
@@ -210,28 +210,32 @@ def _category(disc: float) -> int:
 
 
 def _log(start: date, end: date, target: float, info: dict, total_after: float, lo: float = RANGE_LO, hi: float = RANGE_HI,
-         comment: str = "") -> dict:
+         comment: str = "", kind: str = "") -> dict:
     disc = abs(total_after - target) / target * 100 if target > 0 else (0.0 if total_after == 0 else 100.0)
     return dict(start=start.isoformat(), end=end.isoformat(), method=info["method"], pzrg=target, n_in=info["n_in"], n_out=info["n_out"],
                 sum_in=info["sum_in"], sum_out=info["sum_out"], coef=info["coef"], total_after=total_after, discrepancy=disc,
-                category=_category(disc), comment=comment, unallocated=max(target - total_after, 0.0) if target - total_after > 1e-6 * max(target, 1.0) else 0.0, lo=lo, hi=hi)
+                category=_category(disc), comment=comment, unallocated=max(target - total_after, 0.0) if target - total_after > 1e-6 * max(target, 1.0) else 0.0, lo=lo, hi=hi, kind=kind)
 
 
-def _skip(day: date, end: date, comment: str, target: float = 0.0, method: str = "SKIP", lo: float = RANGE_LO, hi: float = RANGE_HI) -> dict:
+def _skip(day: date, end: date, comment: str, target: float = 0.0, method: str = "SKIP", lo: float = RANGE_LO, hi: float = RANGE_HI,
+          kind: str = "") -> dict:
     return dict(start=day.isoformat(), end=end.isoformat(), method=method, pzrg=target, n_in=0, n_out=0, sum_in=0.0, sum_out=0.0,
-                coef=0.0, total_after=0.0, discrepancy=100.0, category=3, comment=comment, unallocated=target, lo=lo, hi=hi)
+                coef=0.0, total_after=0.0, discrepancy=100.0, category=3, comment=comment, unallocated=target, lo=lo, hi=hi, kind=kind)
 
 
 Pzrg = Union[pd.DataFrame, Dict[str, pd.DataFrame], None]
 
 
 def correct_pzrg(df: pd.DataFrame, pzrg: Pzrg, windows: Optional[Dict[str, List[Tuple[date, date]]]] = None,
-                 lo: float = RANGE_LO, hi: float = RANGE_HI) -> Tuple[pd.DataFrame, List[dict], List[str]]:
+                 lo: float = RANGE_LO, hi: float = RANGE_HI, mixed: str = "each") -> Tuple[pd.DataFrame, List[dict], List[str]]:
     """Столбец `rate_corr` в таблице и журнал поправок. `pzrg` — одна таблица (date, rate) или {вид: таблица}.
     `windows` — {вид: [(с, по), …]}: период = одна поправка по сумме суточных за период (режим `dates`); без него —
     поправка по каждым суткам (режим `daily`). Нет ПЗРГ за сутки/период — строки не меняются, в журнале SKIP.
     ПЗРГ = 0 — расходы скважин обнуляются (ZERO). Есть ПЗРГ, но у скважин нет расхода — распределять нечего (NO_WELLS,
-    «не распределено» = ПЗРГ). `lo`/`hi` — окно «рабочего» дебита, м³/сут: скважины вне окна не меняются."""
+    «не распределено» = ПЗРГ). `lo`/`hi` — окно «рабочего» дебита, м³/сут: скважины вне окна не меняются.
+    `mixed` — сутки, когда расход есть и у отбора, и у закачки: `each` — каждый вид приводится к полному ПЗРГ (как в старых
+    скриптах), `skip` — такие сутки не меняются (узел не делится между видами, в журнале SKIP).
+    Вид, у которого в эти сутки нет расхода, а у другого вида есть, в журнал не попадает: его суток здесь нет."""
     out = df.copy()
     out["rate_corr"] = out["rate"].astype(float)
     log: List[dict] = []
@@ -240,7 +244,10 @@ def correct_pzrg(df: pd.DataFrame, pzrg: Pzrg, windows: Optional[Dict[str, List[
         return out, log, notes
     out["_day"] = pd.to_datetime(out["date"]).dt.normalize().dt.date
     named = out["well"].astype(str).str.strip() != ""
+    positive = out["rate"].astype(float) > 0
+    pos_days = {k: set(out.loc[named & positive & (out["kind"] == k), "_day"]) for k in (PROD, INJ)}
     for kind in [k for k in (PROD, INJ) if (out["kind"] == k).any()]:
+        other = INJ if kind == PROD else PROD
         src = pzrg.get(kind) if isinstance(pzrg, dict) else pzrg
         if src is None or not len(src):
             notes.append("ПЗРГ для вида «%s» не задан — поправка не делалась" % kind)
@@ -258,25 +265,32 @@ def correct_pzrg(df: pd.DataFrame, pzrg: Pzrg, windows: Optional[Dict[str, List[
         for a, b, idx in groups:
             days = [a + timedelta(days=i) for i in range((b - a).days + 1)]
             have = [target_by_day[d] for d in days if d in target_by_day]
-            if not have:
-                log.append(_skip(a, b, "Нет данных ПЗРГ", lo=lo, hi=hi))
-                continue
-            target = float(sum(have))
             rates = out.loc[idx, "rate"].astype(float).tolist()
             total = sum(0.0 if np.isnan(r) else r for r in rates)
+            other_active = bool(pos_days[other] & set(days))
+            if total == 0 and other_active:
+                continue          # сутки другого вида: у этого вида их нет
+            if not have:
+                log.append(_skip(a, b, "Нет данных ПЗРГ", lo=lo, hi=hi, kind=kind))
+                continue
+            target = float(sum(have))
+            if mixed == "skip" and other_active and total > 0:
+                log.append(_skip(a, b, "В эти сутки есть и отбор, и закачка: ПЗРГ между видами не делится, расходы не менялись",
+                                 target, lo=lo, hi=hi, kind=kind))
+                continue
             if target == 0:
                 if total == 0:
                     continue
                 out.loc[idx, "rate_corr"] = 0.0
                 info = dict(method="ZERO", coef=0.0, n_in=0, n_out=len(rates), sum_in=0.0, sum_out=total)
-                log.append(_log(a, b, 0.0, info, 0.0, lo, hi, "ПЗРГ = 0: расходы скважин обнулены"))
+                log.append(_log(a, b, 0.0, info, 0.0, lo, hi, "ПЗРГ = 0: расходы скважин обнулены", kind))
                 continue
             if total == 0:
-                log.append(_skip(a, b, "Есть ПЗРГ, но у скважин нет расхода: распределять нечего", target, "NO_WELLS", lo, hi))
+                log.append(_skip(a, b, "Есть ПЗРГ, но у скважин нет расхода: распределять нечего", target, "NO_WELLS", lo, hi, kind))
                 continue
             new, info = _correct_set(rates, target, lo, hi)
             out.loc[idx, "rate_corr"] = new
-            log.append(_log(a, b, target, info, float(sum(new)), lo, hi))
+            log.append(_log(a, b, target, info, float(sum(new)), lo, hi, kind=kind))
     return out.drop(columns="_day"), log, notes
 
 

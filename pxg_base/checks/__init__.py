@@ -14,6 +14,7 @@ from pxg_core.qc import Report
 REGISTRY: Dict[str, str] = {
     "Создание_базы_данных_расходов": "flows:check_create",
     "Нулевые_расходы_и_несоответствия_часов": "flows:check_zero",
+    "Нормировка_базы_расходов_на_ПЗРГ": "flows:check_normalize",
     "Дополнение_базы_данных_расходов": "flows:check_append",
     "Сбор_данных_по_межколонным_давлениям": "interkolonka:check_collect",
     "Анализ_межколонных_давлений_для_авторского_надзора": "interkolonka:check_analysis",

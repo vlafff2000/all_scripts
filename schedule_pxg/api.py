@@ -553,6 +553,13 @@ def _history_run(body: dict):
         notes += n
     # эталон: файл запроса, иначе «Эталонный суточный объём» проекта
     pz = historymode.read_pzrg(_clean(body["pzrg_file"])) if body.get("pzrg_file") else sources.pzrg_from_project(p)
+    done = [os.path.basename(f) for f in files if history.is_normalized_db(f)]
+    if pz is not None and done:      # база уже нормирована на ПЗРГ: второй раз не правим
+        pz = None
+        notes.append("База расходов уже нормирована на ПЗРГ (%s): поправка по ПЗРГ повторно не делается" % ", ".join(done))
+        rest = [os.path.basename(f) for f in files if f not in done and history.detect_format(f) == history.FORMAT_DB]
+        if rest:
+            notes.append("Не нормированы на ПЗРГ и поправки не получат: %s. Нормируйте их в «Базе ПХГ» или не смешивайте с нормированной" % ", ".join(rest))
     split = body.get("split")
     # окно рабочего дебита — настройка объекта: пришло в запросе — запоминаем в проекте, иначе берём из проекта
     if "window_lo" in body or "window_hi" in body:

@@ -65,6 +65,9 @@ def create(history_file: str, out_dir: str, pzrg_file: str = "", by_pressure_dat
         notes += n
     pzrg_file = _clean(pzrg_file)
     pzrg = historymode.read_pzrg(pzrg_file) if pzrg_file else None
+    if pzrg is not None and history.is_normalized_db(history_file):
+        notes.append("База расходов уже нормирована на ПЗРГ: поправка по ПЗРГ повторно не делается")
+        pzrg = None
 
     lo, hi = historymode.parse_window(window_lo, window_hi)
     res = historymode.build_history(df, None, mode, dates, periods, pzrg, lo=lo, hi=hi)
