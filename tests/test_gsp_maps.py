@@ -412,3 +412,26 @@ def test_gsp_key_scheme():
     from gsp_maps.store import gsp_key
     assert gsp_key("ГСП-1") == gsp_key("ГСП 1") == gsp_key(" гсп_1 ") == gsp_key("ГСП  1")
     assert gsp_key("ГСП 1") != gsp_key("ГСП 10")
+
+
+def test_base_pressure_xlsx_is_read_as_rpl_in_bar(tmp_path):
+    """База давлений по замерам (xlsx): Рпл переводится из кгс/см² в бары, пустые и битые строки пропускаются."""
+    import pandas as pd
+    from gsp_maps.project import detect_files
+
+    path = tmp_path / "БД_давлений_по_замерам.xlsx"
+    pd.DataFrame({
+        "Скважина": ["11", "12", "11", "13"],
+        "Дата": ["01.03.2024", "01.03.2024", "01.04.2024", "xx"],
+        "Рпл": [100.0, None, 90.0, 80.0],
+    }).to_excel(path, sheet_name="Данные", index=False)
+
+    df, warn = inputs.load_pressure(str(path), True)
+    assert list(df.columns) == ["Дата", "Давление_бар", "Скважина"]
+    assert len(df) == 2                              # строка без Рпл и строка с битой датой отброшены
+    assert df["Давление_бар"].tolist() == [round(100.0 * 0.980665, 2), round(90.0 * 0.980665, 2)]
+    assert df["Скважина"].tolist() == [11, 11]
+    assert warn
+
+    found = detect_files(str(tmp_path))
+    assert found["press_gsp"] == str(path) and found["press_obj"] == str(path)
