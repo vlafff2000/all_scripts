@@ -327,6 +327,16 @@ SPECS: List[WebSpec] = [
         args=(("db", "db"), ("seasons", "seasons")), fixed_args=("--save=да",),
     ),
     WebSpec(
+        module="Импорт_данных_ЭЛПРО",
+        params=(
+            Param("folder", "Папка с файлами ЭЛПРО", "folder", required=True,
+                  hint="Месячные файлы «Параметры работы ГСП»: XML-таблицы (ГСП-1,2,3,8) и xlsx Month_* (ГСП-4,5,7,9)"),
+            Param("db", "Прежняя база для дозаписи", "file",
+                  hint="Необязательно: строки с тем же ключом (день, ГСП, скважина, режим, № п/п) заменяются новыми"),
+        ),
+        args=(("folder", "folder"), ("db", "db")),
+    ),
+    WebSpec(
         module="Сбор_БД_замеров_воды",
         params=(
             Param("folder", "Папка с файлами замеров воды", "folder", required=True,
