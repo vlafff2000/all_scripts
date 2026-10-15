@@ -241,6 +241,32 @@ def merge(old: Optional[pd.DataFrame], new: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _blank(s: pd.Series) -> pd.Series:
+    return s.isna() | s.astype(str).str.strip().eq("")
+
+
+def fill_layers(data: pd.DataFrame) -> pd.DataFrame:
+    """Горизонт в строках, где он не проставлен, — по скважине из самых поздних замеров (шаблон последнего года).
+
+    Горизонт — свойство скважины, поэтому соответствие «скважина → горизонт» из файла последнего года распространяется
+    на пустые строки остальных лет. Уже проставленный горизонт не переписывается: расхождения считаются в attrs.
+    """
+    out = data.copy()
+    blank = _blank(out["Горизонт"])
+    known = out[~blank].assign(_d=pd.to_datetime(out.loc[~blank, "Дата"], errors="coerce"))
+    known = known.sort_values("_d", ascending=False, na_position="last", kind="stable")
+    ref = known.drop_duplicates("Скважина").set_index("Скважина")["Горизонт"]
+    mapped = out["Скважина"].map(ref)
+    if blank.any():
+        out.loc[blank, "Горизонт"] = mapped[blank].fillna("")
+    still = _blank(out["Горизонт"])
+    conflict = ~blank & mapped.notna() & (out["Горизонт"].astype(str).str.strip() != mapped.astype(str).str.strip())
+    out.attrs["layer_filled"] = int(blank.sum() - still.sum())
+    out.attrs["layer_unresolved"] = int(still.sum())
+    out.attrs["layer_conflicts"] = int(conflict.sum())
+    return out
+
+
 def by_month(df: pd.DataFrame, column: str) -> pd.DataFrame:
     """Скважины по строкам, месяцы по столбцам (последний замер месяца)."""
     d = df.dropna(subset=["Дата", column]).copy()

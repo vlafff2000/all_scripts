@@ -56,6 +56,13 @@ def main(argv=None):
     data = замеры.merge(old, new)
     if data.attrs.get("replaced"):
         print("⚠️ Строк с тем же ключом (скважина, дата, горизонт) заменено новыми: %d" % data.attrs["replaced"])
+    data = замеры.fill_layers(data)
+    if data.attrs.get("layer_filled"):
+        print("ℹ️ Горизонт не был проставлен, взят по скважине из последнего года: %d строк" % data.attrs["layer_filled"])
+    if data.attrs.get("layer_conflicts"):
+        print("⚠️ Горизонт в строках отличается от последнего года (оставлен из файла): %d" % data.attrs["layer_conflicts"])
+    if data.attrs.get("layer_unresolved"):
+        print("⚠️ Горизонт не определён ни в одном файле: %d строк" % data.attrs["layer_unresolved"])
     out = (args.output or "").strip() or "БД_давлений_по_замерам.xlsx"
     if not out.lower().endswith(".xlsx"):
         out += ".xlsx"
