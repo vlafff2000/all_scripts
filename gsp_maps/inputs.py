@@ -235,7 +235,7 @@ def load_base_pressure(path: str, is_gsp: bool) -> Tuple[pd.DataFrame, List[str]
     need = {"Скважина", "Дата", "Рпл"}
     if not need <= set(data.columns):
         return pd.DataFrame(columns=cols), ["в базе давлений нет колонок: " + ", ".join(sorted(need - set(data.columns)))]
-    dt = pd.to_datetime(data["Дата"], dayfirst=True, errors="coerce")
+    dt = pd.to_datetime(data["Дата"], dayfirst=True, errors="coerce").dt.normalize()   # время суток не нужно: замеры группируются по дню
     p = pd.to_numeric(data["Рпл"], errors="coerce")
     ok = dt.notna() & p.notna()
     well = pd.to_numeric(data["Скважина"], errors="coerce").fillna(0).astype(int) if is_gsp else 0
