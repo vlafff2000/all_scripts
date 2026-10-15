@@ -327,6 +327,16 @@ SPECS: List[WebSpec] = [
         args=(("db", "db"), ("seasons", "seasons")), fixed_args=("--save=да",),
     ),
     WebSpec(
+        module="Сбор_БД_замеров_воды",
+        params=(
+            Param("folder", "Папка с файлами замеров воды", "folder", required=True,
+                  hint="Месячные файлы выноса воды по скважинам (колонки «№скв», «литров за час» или «ВФ»)"),
+            Param("db", "Прежняя база для дозаписи", "file",
+                  hint="Необязательно: строки с тем же ключом (скважина, дата) заменяются новыми"),
+        ),
+        args=(("folder", "folder"), ("db", "db")),
+    ),
+    WebSpec(
         module="Создание_schedule_по_поскважинной_истории",
         params=(
             Param("history", "Файл истории (база расходов или месячные/дневные файлы)", "file", required=True,
