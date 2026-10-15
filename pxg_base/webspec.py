@@ -331,32 +331,6 @@ SPECS: List[WebSpec] = [
         args=(("db", "db"), ("seasons", "seasons")), fixed_args=("--save=да",),
     ),
     WebSpec(
-        module="Include_давлений_наблюдательных_скважин_горизонт_1002",
-        params=(Param("file", "Файл с данными из новой базы", "file", required=True,
-                      hint="Excel или CSV: скважина, дата, давление Рпл на верх перфораций (бар)"),),
-        answers=("file",),
-        note="Результат — папка «output_new_database» с include-файлами для tNavigator.",
-    ),
-    WebSpec(
-        module="Include_давлений_наблюдательных_скважин_с_пересчётом_по_MD",
-        params=(
-            Param("file", "Основной файл с данными", "file", required=True),
-            Param("md", "Файл с MD (глубинами)", "file", required=True),
-            Param("convert", "Перевести давление из кгс/см² в бар", "bool", default="1"),
-        ),
-        answers=("file", "md", "convert"),
-        note="Результат — папка «output_shirovsky_new_logic».",
-    ),
-    WebSpec(
-        module="Include_давлений_эксплуатационных_скважин",
-        params=(
-            Param("file", "Файл с давлениями", "file", required=True, hint="Excel, CSV или текст: скважина, дата, давления"),
-            Param("convert", "Перевести давление из кгс/см² в бар", "bool", default="1"),
-        ),
-        stdin=lambda v: v.get("file", "").strip() + "\n" + ("y" if v.get("convert") in ("1", "true", "y") else "n") + "\n\n",
-        note="Результат — папка «output» с тремя файлами для tNavigator.",
-    ),
-    WebSpec(
         module="Include_факта_из_модели_как_исторических_данных",
         params=(
             Param("file", "Excel-файл с данными из модели", "file", required=True,
@@ -365,39 +339,6 @@ SPECS: List[WebSpec] = [
         ),
         dialogs=("file", "folder"),
         note="Результат — «<имя файла>_schedule.inc» в выбранной папке.",
-    ),
-    WebSpec(
-        module="Перераспределение_отборов_в_процентах",
-        params=(
-            Param("file", "Excel-файл с данными", "file", required=True, hint="Листы: даты в первом столбце, столбцы «номер:Дебит газа (И), ст.м3/сут» и «номер:Приёмистость газа (И), ст.м3/сут»"),
-            Param("seasons", "Файл с сезонами", "file", required=True, hint="Строки «ДД.ММ.ГГГГ prod|inj|none»"),
-            Param("add_sheet", "Лист, КУДА добавляем отборы", required=True, hint=_SHEET_HINT),
-            Param("sub_sheet", "Лист, ОТКУДА отнимаем отборы", required=True, hint=_SHEET_HINT),
-            Param("pct_mode", "Проценты", "choice", default="1", options=(("1", "Один процент для всех сезонов отбора"), ("2", "Свой процент для каждого сезона отбора"))),
-            Param("percent", "Процент перераспределения, %", default="10", when="pct_mode=1"),
-            Param("percents", "Проценты по сезонам отбора", "lines", when="pct_mode=2", hint="По строке на сезон отбора в порядке сезонов в файле"),
-            Param("debug", "Создать отладочный файл", "bool", default="0"),
-        ),
-        stdin=_redistribute_stdin,
-        note="Результат «<имя файла>_перераспределено.xlsx» создаётся рядом с исходным файлом.",
-    ),
-    WebSpec(
-        module="Перераспределение_отборов_по_сезонам_или_режиму_EI",
-        params=(
-            Param("file", "Excel-файл с данными", "file", required=True),
-            Param("work_mode", "Режим", "choice", default="1", options=(
-                ("1", "Столбцы дебит/приёмистость и лист сезонов"),
-                ("2", "Готовые данные с режимом EI и списки скважин"))),
-            Param("seasons_sheet", "Лист с сезонами", hint=_SHEET_HINT, when="work_mode=1"),
-            Param("data_sheet", "Лист с данными (последний столбец — режим EI)", hint=_SHEET_HINT, when="work_mode=2"),
-            Param("add_sheet", "Лист, КУДА добавляем (в режиме 2 — южные скважины)", required=True, hint=_SHEET_HINT),
-            Param("sub_sheet", "Лист, ОТКУДА отнимаем (в режиме 2 — северные скважины)", required=True, hint=_SHEET_HINT),
-            Param("pct_mode", "Проценты", "choice", default="1", when="work_mode=1", options=(("1", "Один процент для всех сезонов отбора"), ("2", "Свой процент для каждого сезона отбора"))),
-            Param("percent", "Процент перераспределения, %", default="10"),
-            Param("percents", "Проценты по сезонам отбора", "lines", when="pct_mode=2", hint="По строке на сезон отбора в порядке сезонов"),
-        ),
-        stdin=_redistribute400_stdin,
-        note="Результат «<имя файла>_перераспределено….xlsx» создаётся рядом с исходным файлом.",
     ),
     WebSpec(
         module="Извлечение_ключевых_слов_из_schedule",
