@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -21,6 +22,12 @@ MODULES_DIR = Path(__file__).resolve().parent / "modules"
 def runs_dir() -> Path:
     """Куда складываются результаты запусков (по умолчанию ./pxg_runs, меняется PXG_RUNS_DIR)."""
     return Path(os.environ.get("PXG_RUNS_DIR") or "pxg_runs").resolve()
+
+
+def export_dir() -> Path:
+    """Общая папка «выгрузки»: последние файлы всех модулей в одном месте (по умолчанию ./выгрузки, меняется PXG_EXPORT_DIR).
+    Историю запусков по-прежнему хранит runs_dir()."""
+    return Path(os.environ.get("PXG_EXPORT_DIR") or "выгрузки").resolve()
 
 
 class Job:
@@ -87,6 +94,18 @@ def _run(job: Job, spec: WebSpec) -> None:
         job.sizes = {f: (job.out_dir / f).stat().st_size for f in job.files}
         job.status = "done" if code == 0 else "failed"
         job.finished = time.time()
+    if code == 0 and job.files:
+        # последние файлы — в общую папку «выгрузки»; сбой копирования не должен ронять запуск
+        try:
+            target = export_dir()
+            target.mkdir(parents=True, exist_ok=True)
+            for f in job.files:
+                shutil.copy2(job.out_dir / f, target / Path(f).name)
+            with job.lock:
+                job.log.append("Копия в общей папке выгрузок: %s" % target)
+        except OSError as e:
+            with job.lock:
+                job.log.append("Не удалось скопировать в папку выгрузок: %s" % e)
 
 
 def start(module: str, values: Dict[str, str]) -> Job:
