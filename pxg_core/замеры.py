@@ -254,7 +254,7 @@ def fill_layers(data: pd.DataFrame) -> pd.DataFrame:
     out = data.copy()
     blank = _blank(out["Горизонт"])
     known = out[~blank].assign(_d=pd.to_datetime(out.loc[~blank, "Дата"], errors="coerce"))
-    known = known.sort_values("_d", ascending=False, na_position="last")
+    known = known.sort_values("_d", ascending=False, na_position="last", kind="stable")
     ref = known.drop_duplicates("Скважина").set_index("Скважина")["Горизонт"]
     mapped = out["Скважина"].map(ref)
     if blank.any():
