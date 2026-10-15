@@ -6,7 +6,9 @@
   * `dates` — «по датам замеров»: шаги в заданные даты, дебит = средний расход за период между соседними датами, после
     последней даты — шаги по суткам (`Schedule_по_датам_замеров_давлений.py`).
 Поправка по ПЗРГ (`correct_pzrg`): расход скважин за сутки/период приводится к суточному расходу ПЗРГ; скважины 80–600 тыс. м³/сут
-правятся первыми, остальные остаются, пока хватает остатка (как в старых скриптах). Скважина «54/80» делится пополам (`split`).
+правятся первыми, остальные остаются, пока хватает остатка (как в старых скриптах); окно настраивается (`lo`, `hi`).
+Нулевой ПЗРГ обнуляет расходы суток. Невязка эталон − скважины по суткам до поправки — `residual_by_day`.
+Скважина «54/80» делится пополам (`split`).
 Таблица истории — из `history.py` (well, date, rate м³/сут, hours, kind). Шаги — `forecast.Step`, запись — `forecast.render_schedule`,
 поэтому режимы управления и сшивка с сезонами сценария работают так же, как у прогноза. Python 3.8+.
 """
@@ -28,8 +30,14 @@ RANGE_LO, RANGE_HI = 80000.0, 600000.0           # «рабочий» дебит
 SPLIT_54_80 = {"54/80": ["54", "80"]}
 _KIND_WORDS = {"prod": PROD, "inj": INJ, "none": NEUTRAL, "отбор": PROD, "закачка": INJ, "нейтральный": NEUTRAL, "нейтр": NEUTRAL}
 LOG_HEAD_RU = ["Начало_периода", "Конец_периода", "Метод_коррекции", "ПЗРГ_сумма", "Скважин_в_диапазоне", "Скважин_вне_диапазона",
-               "Сумма_в_диапазоне", "Сумма_вне_диапазона", "Коэффициент", "Итоговая_сумма", "Расхождение_%", "Категория", "Комментарий"]
-LOG_COLUMNS = ["start", "end", "method", "pzrg", "n_in", "n_out", "sum_in", "sum_out", "coef", "total_after", "discrepancy", "category", "comment"]
+               "Сумма_в_диапазоне", "Сумма_вне_диапазона", "Коэффициент", "Итоговая_сумма", "Расхождение_%", "Категория", "Комментарий",
+               "Не_распределено", "Окно_от", "Окно_до"]
+LOG_COLUMNS = ["start", "end", "method", "pzrg", "n_in", "n_out", "sum_in", "sum_out", "coef", "total_after", "discrepancy", "category", "comment",
+               "unallocated", "lo", "hi"]
+NOT_DONE = ("SKIP", "NO_WELLS")                   # методы журнала, при которых расходы скважин не менялись
+RESIDUAL_HEAD_RU = ["Дата", "Вид", "ПЗРГ", "Сумма_по_скважинам", "Невязка", "Невязка_%", "Невязка_3_суток_%", "Подсказка"]
+RESIDUAL_COLUMNS = ["date", "kind", "pzrg", "wells", "residual", "pct", "pct3", "hint"]
+SHIFT_DAY_PCT, SHIFT_ROLL_PCT = 2.0, 1.0          # сутки с невязкой от 2 %, а за 3 суток меньше 1 % — возможный сдвиг учётных суток
 
 
 def _day(x) -> date:
@@ -201,16 +209,17 @@ def _category(disc: float) -> int:
     return 0 if disc < 0.1 else 1 if disc < 1 else 2 if disc < 5 else 3
 
 
-def _log(start: date, end: date, target: float, info: dict, total_after: float) -> dict:
-    disc = abs(total_after - target) / target * 100 if target > 0 else 0.0
+def _log(start: date, end: date, target: float, info: dict, total_after: float, lo: float = RANGE_LO, hi: float = RANGE_HI,
+         comment: str = "") -> dict:
+    disc = abs(total_after - target) / target * 100 if target > 0 else (0.0 if total_after == 0 else 100.0)
     return dict(start=start.isoformat(), end=end.isoformat(), method=info["method"], pzrg=target, n_in=info["n_in"], n_out=info["n_out"],
                 sum_in=info["sum_in"], sum_out=info["sum_out"], coef=info["coef"], total_after=total_after, discrepancy=disc,
-                category=_category(disc), comment="")
+                category=_category(disc), comment=comment, unallocated=max(target - total_after, 0.0) if target - total_after > 1e-6 * max(target, 1.0) else 0.0, lo=lo, hi=hi)
 
 
-def _skip(day: date, end: date, comment: str, target: float = 0.0) -> dict:
-    return dict(start=day.isoformat(), end=end.isoformat(), method="SKIP", pzrg=target, n_in=0, n_out=0, sum_in=0.0, sum_out=0.0,
-                coef=0.0, total_after=0.0, discrepancy=100.0, category=3, comment=comment)
+def _skip(day: date, end: date, comment: str, target: float = 0.0, method: str = "SKIP", lo: float = RANGE_LO, hi: float = RANGE_HI) -> dict:
+    return dict(start=day.isoformat(), end=end.isoformat(), method=method, pzrg=target, n_in=0, n_out=0, sum_in=0.0, sum_out=0.0,
+                coef=0.0, total_after=0.0, discrepancy=100.0, category=3, comment=comment, unallocated=target, lo=lo, hi=hi)
 
 
 Pzrg = Union[pd.DataFrame, Dict[str, pd.DataFrame], None]
@@ -220,7 +229,9 @@ def correct_pzrg(df: pd.DataFrame, pzrg: Pzrg, windows: Optional[Dict[str, List[
                  lo: float = RANGE_LO, hi: float = RANGE_HI) -> Tuple[pd.DataFrame, List[dict], List[str]]:
     """Столбец `rate_corr` в таблице и журнал поправок. `pzrg` — одна таблица (date, rate) или {вид: таблица}.
     `windows` — {вид: [(с, по), …]}: период = одна поправка по сумме суточных за период (режим `dates`); без него —
-    поправка по каждым суткам (режим `daily`). Нет ПЗРГ за сутки/период или ПЗРГ = 0 — строки не меняются, в журнале SKIP."""
+    поправка по каждым суткам (режим `daily`). Нет ПЗРГ за сутки/период — строки не меняются, в журнале SKIP.
+    ПЗРГ = 0 — расходы скважин обнуляются (ZERO). Есть ПЗРГ, но у скважин нет расхода — распределять нечего (NO_WELLS,
+    «не распределено» = ПЗРГ). `lo`/`hi` — окно «рабочего» дебита, м³/сут: скважины вне окна не меняются."""
     out = df.copy()
     out["rate_corr"] = out["rate"].astype(float)
     log: List[dict] = []
@@ -248,18 +259,24 @@ def correct_pzrg(df: pd.DataFrame, pzrg: Pzrg, windows: Optional[Dict[str, List[
             days = [a + timedelta(days=i) for i in range((b - a).days + 1)]
             have = [target_by_day[d] for d in days if d in target_by_day]
             if not have:
-                log.append(_skip(a, b, "Нет данных ПЗРГ"))
+                log.append(_skip(a, b, "Нет данных ПЗРГ", lo=lo, hi=hi))
                 continue
             target = float(sum(have))
-            if target == 0:
-                log.append(_skip(a, b, "ПЗРГ = 0"))
-                continue
             rates = out.loc[idx, "rate"].astype(float).tolist()
-            if sum(0.0 if np.isnan(r) else r for r in rates) == 0:
+            total = sum(0.0 if np.isnan(r) else r for r in rates)
+            if target == 0:
+                if total == 0:
+                    continue
+                out.loc[idx, "rate_corr"] = 0.0
+                info = dict(method="ZERO", coef=0.0, n_in=0, n_out=len(rates), sum_in=0.0, sum_out=total)
+                log.append(_log(a, b, 0.0, info, 0.0, lo, hi, "ПЗРГ = 0: расходы скважин обнулены"))
+                continue
+            if total == 0:
+                log.append(_skip(a, b, "Есть ПЗРГ, но у скважин нет расхода: распределять нечего", target, "NO_WELLS", lo, hi))
                 continue
             new, info = _correct_set(rates, target, lo, hi)
             out.loc[idx, "rate_corr"] = new
-            log.append(_log(a, b, target, info, float(sum(new))))
+            log.append(_log(a, b, target, info, float(sum(new)), lo, hi))
     return out.drop(columns="_day"), log, notes
 
 
@@ -269,10 +286,100 @@ def log_rows(log: Sequence[dict]) -> List[List]:
 
 
 def log_summary(log: Sequence[dict]) -> dict:
-    ok = [r for r in log if r["method"] != "SKIP"]
+    ok = [r for r in log if r["method"] not in NOT_DONE]
     return {"periods": len(log), "corrected": len(ok), "skipped": len(log) - len(ok),
             "worst": max((r["discrepancy"] for r in ok), default=0.0),
+            "unallocated": sum(r["unallocated"] for r in log),
             "by_method": {m: sum(1 for r in ok if r["method"] == m) for m in sorted({r["method"] for r in ok})}}
+
+
+# ---------------------------------------------------------------- окно и невязка по суткам
+
+def parse_window(lo_k, hi_k) -> Tuple[float, float]:
+    """Окно «рабочего» дебита из тыс. м³/сут (число или текст, пусто — по умолчанию 80 и 600) в м³/сут."""
+    def one(v, default):
+        t = str(v if v is not None else "").strip().replace(",", ".").replace(" ", "")
+        if not t:
+            return default
+        try:
+            x = float(t) * 1000.0
+        except ValueError:
+            raise ValueError("Окно дебита: «%s» не число (тыс. м³/сут)" % v)
+        if x < 0:
+            raise ValueError("Окно дебита не может быть отрицательным")
+        return x
+    lo, hi = one(lo_k, RANGE_LO), one(hi_k, RANGE_HI)
+    if lo >= hi:
+        raise ValueError("Окно дебита: нижняя граница (%g тыс.) должна быть меньше верхней (%g тыс.)" % (lo / 1000, hi / 1000))
+    return lo, hi
+
+
+def residual_by_day(df: pd.DataFrame, pzrg: Pzrg) -> List[dict]:
+    """Невязка эталон − сумма скважин по суткам и видам ДО поправки, с процентом за сутки и за скользящие 3 суток.
+    Строка: date, kind, pzrg, wells, residual (м³/сут), pct (% от ПЗРГ), pct3 (то же по сумме трёх соседних суток), hint.
+    Подсказка «возможный сдвиг учётных суток» — сутки с невязкой от 2 %, а за 3 суток меньше 1 %: ПЗРГ и скважины считают
+    сутки с разным началом или газ накапливается в системе; тогда лучше смотреть сумму за несколько суток, а не каждые сутки."""
+    rows: List[dict] = []
+    if pzrg is None or df is None or not len(df):
+        return rows
+    d = df.copy()
+    d["_day"] = pd.to_datetime(d["date"]).dt.normalize().dt.date
+    d = d[d["well"].astype(str).str.strip() != ""]
+    for kind in (PROD, INJ):
+        src = pzrg.get(kind) if isinstance(pzrg, dict) else pzrg
+        sub = d[d["kind"] == kind]
+        if src is None or not len(src) or not len(sub):
+            continue
+        target = _by_day(src)
+        wells = sub.groupby("_day")["rate"].apply(lambda x: float(np.nansum(x.astype(float)))).to_dict()
+        days = sorted(x for x in wells if x in target)
+        one = []
+        for i, day in enumerate(days):
+            t, w = target[day], wells[day]
+            near = [x for x in days if abs((x - day).days) <= 1]
+            t3, w3 = sum(target[x] for x in near), sum(wells[x] for x in near)
+            pct = (t - w) / t * 100 if t else (0.0 if w == 0 else -100.0)
+            pct3 = (t3 - w3) / t3 * 100 if t3 else (0.0 if w3 == 0 else -100.0)
+            hint = "возможный сдвиг учётных суток" if abs(pct) >= SHIFT_DAY_PCT and abs(pct3) < SHIFT_ROLL_PCT and len(near) == 3 else ""
+            one.append(dict(date=day.isoformat(), kind=kind, pzrg=t, wells=w, residual=t - w, pct=pct, pct3=pct3, hint=hint))
+        rows += one
+    return rows
+
+
+def residual_summary(rows: Sequence[dict]) -> dict:
+    """Сводка по невязке: сколько суток, медиана и разброс невязки, доля суток с невязкой от 2 %, сколько суток с подсказкой о сдвиге
+    и вывод (`verdict`): общий сдвиг (медиана от 1 %, разброс небольшой), сдвиг суток, разброс по сутками или в норме."""
+    if not rows:
+        return {"days": 0, "median": 0.0, "spread": 0.0, "over": 0, "shift": 0, "verdict": ""}
+    pct = np.array([r["pct"] for r in rows], dtype=float)
+    med = float(np.median(pct))
+    q1, q3 = np.percentile(pct, [25, 75])
+    spread = float(q3 - q1)
+    over = int((np.abs(pct) >= SHIFT_DAY_PCT).sum())
+    shift = sum(1 for r in rows if r["hint"])
+    if over == 0:
+        verdict = "Невязка небольшая: сумма скважин сходится с ПЗРГ (меньше 2 % в каждые сутки)."
+    elif shift >= 0.2 * over:
+        verdict = "Похоже на сдвиг учётных суток: за сутки невязка заметная, а за 3 суток почти исчезает."
+    elif abs(med) >= 1.0 and spread <= max(1.0, 0.5 * abs(med)):
+        verdict = "Похоже на общий сдвиг: невязка одного знака и примерно одной величины (медиана %.1f %%)." % med
+    else:
+        verdict = "Невязка разбросана по суткам и знакам: вероятнее причина в отдельных скважинах или пропусках записей."
+    return {"days": len(rows), "median": med, "spread": spread, "over": over, "shift": shift, "verdict": verdict}
+
+
+def residual_rows(rows: Sequence[dict]) -> List[List]:
+    return [[r[c] for c in RESIDUAL_COLUMNS] for r in rows]
+
+
+def write_residual_csv(path: str, rows: Sequence[dict]) -> str:
+    """Невязка по суткам — CSV с «;» (рядом с журналом поправки)."""
+    import csv
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(RESIDUAL_HEAD_RU)
+        w.writerows(residual_rows(rows))
+    return os.path.abspath(path)
 
 
 # ---------------------------------------------------------------- шаги
@@ -283,6 +390,7 @@ class HistoryResult:
     info: List[dict] = field(default_factory=list)       # по шагу: model_date, from, to, kind, wells, from_file
     notes: List[str] = field(default_factory=list)
     log: List[dict] = field(default_factory=list)        # журнал поправки по ПЗРГ
+    residual: List[dict] = field(default_factory=list)   # невязка по суткам до поправки (`residual_by_day`)
     mode: str = "daily"
 
     def counts(self) -> dict:
@@ -400,13 +508,14 @@ def build_history(df: pd.DataFrame, project=None, mode: str = "daily", model_dat
         win = None
     col = "rate"
     if pzrg is not None:
+        res.residual = residual_by_day(d, pzrg)
         d, res.log, cn = correct_pzrg(d, pzrg, win, lo, hi)
         res.notes += cn
         col = "rate_corr"
-        bad = [r for r in res.log if r["method"] == "SKIP"]
+        bad = [r for r in res.log if r["method"] in NOT_DONE]
         if bad:
-            res.notes.append("Поправка по ПЗРГ пропущена для %d из %d периодов (нет данных ПЗРГ или ПЗРГ = 0)" % (len(bad), len(res.log)))
-        far = [r for r in res.log if r["method"] != "SKIP" and r["category"] >= 2]
+            res.notes.append("Поправка по ПЗРГ пропущена для %d из %d периодов (нет данных ПЗРГ или у скважин нет расхода)" % (len(bad), len(res.log)))
+        far = [r for r in res.log if r["method"] not in NOT_DONE and r["category"] >= 2]
         if far:
             res.notes.append("После поправки расхождение с ПЗРГ больше 1 %% в %d периодах (наибольшее %.1f %%)" % (len(far), max(r["discrepancy"] for r in far)))
     res.steps, res.info = (dates_steps(d, model_dates, per, col) if mode == "dates" else daily_steps(d, per, col))

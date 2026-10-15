@@ -126,7 +126,11 @@ _LEVEL_ENV = (("input_dir", "PXG_INPUT_DIR"), ("recursive", "PXG_RECURSIVE"), ("
 def _history_stdin(v: Dict[str, str]) -> str:
     """Ответы модулю «Создание schedule по поскважинной истории» в порядке его вопросов: файл дат — только при включённом чекбоксе."""
     by_dates = (v.get("by_dates") or "").strip().lower() in ("1", "true", "y")
-    parts = [(v.get("history") or "").strip(), (v.get("pzrg") or "").strip(), "y" if by_dates else "n"]
+    pzrg = (v.get("pzrg") or "").strip()
+    parts = [(v.get("history") or "").strip(), pzrg]
+    if pzrg:     # окно рабочего дебита спрашивается, только если задан ПЗРГ
+        parts += [(v.get("window_lo") or "").strip(), (v.get("window_hi") or "").strip()]
+    parts.append("y" if by_dates else "n")
     if by_dates:
         parts.append((v.get("dates") or "").strip())
     parts += [(v.get("periods") or "").strip(), (v.get("out") or "").strip()]
@@ -314,6 +318,10 @@ SPECS: List[WebSpec] = [
                   hint="Формат узнаётся сам; скважины, которых нет в проекте, сохраняются как есть"),
             Param("pzrg", "Эталонный суточный объём ПЗРГ", "file",
                   hint="Excel: даты в столбце A, суточный расход газа в столбце C (м³/сут). Пусто — без поправки"),
+            Param("window_lo", "Окно рабочего дебита: от, тыс. м³/сут", default="80",
+                  hint="Работает, если задан ПЗРГ: скважины вне окна не меняются, невязка уходит скважинам в окне. Пусто — 80"),
+            Param("window_hi", "Окно рабочего дебита: до, тыс. м³/сут", default="600",
+                  hint="Пусто — 600"),
             Param("by_dates", "Шаги по датам замеров давлений", "bool", default="",
                   hint="Выключено — шаг сутки: на каждую дату истории; включено — шаги в даты замеров давлений"),
             Param("dates", "Файл дат замеров давлений", "file", when="by_dates=1",
@@ -323,7 +331,7 @@ SPECS: List[WebSpec] = [
             Param("out", "Папка для результата", "folder", required=True),
         ),
         stdin=lambda v: _history_stdin(v),
-        note="Schedule и журнал поправки по ПЗРГ (если задан ПЗРГ) сохраняются в выбранную папку.",
+        note="Schedule, журнал поправки по ПЗРГ и невязка по суткам (если задан ПЗРГ) сохраняются в выбранную папку.",
     ),
     WebSpec(
         module="Извлечение_ключевых_слов_из_schedule",

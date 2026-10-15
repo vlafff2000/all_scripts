@@ -552,6 +552,10 @@ def check_gdm_history(v: Dict[str, str]) -> Report:
                 rep.error("FILE", "В ПЗРГ нет дат с расходом", file=ppath, hint="Даты в столбце A, расход в столбце C")
         except Exception as e:
             rep.error("FILE", "ПЗРГ не прочитан: %s" % e, file=ppath, hint="Даты в столбце A, расход в столбце C")
+        try:
+            historymode.parse_window(v.get("window_lo"), v.get("window_hi"))
+        except ValueError as e:
+            rep.error("FILE", str(e), hint="Границы окна дебита — числа в тыс. м³/сут, нижняя меньше верхней (по умолчанию 80 и 600)")
     qpath = (v.get("periods") or "").strip()
     if qpath and qc.check_path(rep, qpath, "Файл периодов"):
         qc.check_periods_file(rep, qpath)

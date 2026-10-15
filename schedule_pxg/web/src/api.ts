@@ -3,7 +3,7 @@ export interface Template {
   name: string; sheet: string | number | null; header_row: number
   well: string; date: string; rate: string; hourly: string; hours: string; kind: string; group: string; kind_default: string; unit: string; layout?: string
 }
-export interface AppState { folder: string; project: string; templates: Template[]; units: string[]; kinds: string[]; techmaps: TechMapInfo[]; scenarios: ScenarioInfo[] }
+export interface AppState { folder: string; project: string; templates: Template[]; units: string[]; kinds: string[]; techmaps: TechMapInfo[]; scenarios: ScenarioInfo[]; pzrg_window?: { lo: number; hi: number } }
 export interface ScenarioInfo { name: string; parent: string | null; note: string; percent: number; seasons: number; results?: string }
 export type StrategyTable = Record<string, Record<string, number>>
 export interface Season { year: number; techmap: string; percent: number; label: string; volumes?: StrategyTable }
@@ -118,14 +118,19 @@ export const getCharts = (names: string[], by: string, target: string) =>
   call<ChartsView>('/api/charts?' + new URLSearchParams({ names: names.join('|'), by, target }))
 
 export interface HistoryBody {
-  mode: 'daily' | 'dates'; files?: string[]; dates?: string; periods?: string; pzrg_file?: string; split?: Record<string, string[]>; stitch?: string
+  mode: 'daily' | 'dates'; files?: string[]; dates?: string; periods?: string; pzrg_file?: string; split?: Record<string, string[]>; stitch?: string; window_lo?: string; window_hi?: string
 }
 export interface HistoryLogRow {
-  start: string; end: string; method: string; pzrg: number; coef: number; total_after: number; discrepancy: number; category: number; comment: string
+  start: string; end: string; method: string; pzrg: number; coef: number; total_after: number; discrepancy: number; category: number; comment: string; unallocated: number; lo: number; hi: number
+}
+export interface ResidualRow { date: string; kind: string; pzrg: number; wells: number; residual: number; pct: number; pct3: number; hint: string }
+export interface ResidualView {
+  summary: { days: number; median: number; spread: number; over: number; shift: number; verdict: string }; rows: ResidualRow[]; shown: number; total: number
 }
 export interface HistoryView {
   mode: string; steps: number; kinds: Record<string, number>; notes: string[]; from: string; to: string; sources: string[]
-  correction: { periods: number; corrected: number; skipped: number; worst: number; by_method: Record<string, number> } | null
+  correction: { periods: number; corrected: number; skipped: number; worst: number; unallocated: number; by_method: Record<string, number> } | null
+  window: { lo: number; hi: number } | null; residual: ResidualView | null
   log: HistoryLogRow[]; stitch: string[]; table: [string, string, string, number, number, number][]; volumes: Record<string, number>
 }
 export const runHistory = (b: HistoryBody) => call<HistoryView>('/api/history', post(b))
@@ -137,6 +142,7 @@ async function download(url: string, b: object, fallback: string) {
   URL.revokeObjectURL(a.href)
 }
 export const downloadHistorySchedule = (b: HistoryBody) => download('/api/history/schedule', b, 'schedule_history.inc')
+export const downloadHistoryResidual = (b: HistoryBody) => download('/api/history/residual', b, 'residual_by_day.csv')
 export const downloadHistoryLog = (b: HistoryBody) => download('/api/history/log', b, 'correction_log_periods.csv')
 
 export interface StrategyView {
