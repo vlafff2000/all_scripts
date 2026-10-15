@@ -290,7 +290,7 @@ def to_frame(rows: List[Row]) -> pd.DataFrame:
                           r.length, r.es, r.density, r.group] for r in rows], columns=COLUMNS)
 
 
-def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True) -> pd.DataFrame:
+def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True, whole_rows: bool = False) -> pd.DataFrame:
     """Объединение источников в одну базу без дублей.
 
     Порядок `frames` — приоритет: при одном ключе (скважина, день, горизонт) берётся значение из более раннего источника,
@@ -324,7 +324,11 @@ def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True) -> pd.DataF
     key = out["Дата"].dt.strftime("%Y-%m-%d").fillna("без даты:" + out["Источник"].astype(str))
     out["_k"] = out["Скважина"].astype(str) + "|" + key + "|" + out["Горизонт"].fillna("").astype(str).str.strip()
     before = len(out)
-    out = out.sort_values("_rank", kind="stable").groupby("_k", sort=False).first().reset_index()
+    out = out.sort_values("_rank", kind="stable")
+    if whole_rows:      # прежнее поведение: побеждает вся строка приоритетного источника
+        out = out.drop_duplicates("_k", keep="first")
+    else:               # пустые поля дополняются из следующих источников
+        out = out.groupby("_k", sort=False).first().reset_index()
     out = out[COLUMNS]
     out = out.sort_values(["Скважина", "Дата"], na_position="last").reset_index(drop=True)
     out.attrs["replaced"] = before - len(out)
@@ -333,8 +337,8 @@ def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True) -> pd.DataF
 
 
 def merge(old: Optional[pd.DataFrame], new: pd.DataFrame) -> pd.DataFrame:
-    """Новые строки заменяют старые с тем же ключом (скважина + дата + горизонт); пустые поля дополняются из старых."""
-    return combine([new, old], fill=False)
+    """Новые строки целиком заменяют старые с тем же ключом (скважина + дата + горизонт), как и раньше."""
+    return combine([new, old], fill=False, whole_rows=True)
 
 
 def _blank(s: pd.Series) -> pd.Series:

@@ -243,3 +243,13 @@ def test_run_module_weekly_and_recalc(tmp_path):
     assert list(inc.columns) == ["Скважина", "Дата", "Давление, бар", "ГСП"]
     assert inc.loc[inc["Скважина"] == 56, "ГСП"].eq("ГСП-1").all()
     assert inc.loc[inc["Скважина"] != 56, "ГСП"].isna().all()     # 127 и 82 в справочнике нет: пусто, а не ноль
+
+
+def test_merge_replaces_whole_row_not_fields():
+    old = pd.DataFrame([[56, dt.datetime(2026, 9, 25), "Щигровский", "Эксплуатационные", 96.6, None, 102.6, None, "",
+                         "старый.xlsx", None, None, None, "ГСП-1"]], columns=замеры.COLUMNS)
+    new = pd.DataFrame([[56, dt.datetime(2026, 9, 25), "Щигровский", "Эксплуатационные", None, None, 102.0, None,
+                         "Руст: г-в", "новый.xlsx", None, None, None, "ГСП-1"]], columns=замеры.COLUMNS)
+    data = замеры.merge(old, new)
+    assert len(data) == 1 and pd.isna(data.loc[0, "Руст"])   # старое Руст не воскресает
+    assert data.loc[0, "Источник"] == "новый.xlsx"
