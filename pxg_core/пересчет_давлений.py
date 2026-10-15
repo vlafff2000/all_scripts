@@ -21,6 +21,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
+from .замеры import WELL_GROUPS, group_name
+
 DEFAULT_EXCLUDED = (8, 11, 110, 122, 447)
 DEPTH = 670.0
 KGF_TO_BAR = 0.980665
@@ -165,11 +167,14 @@ def recalc(db: pd.DataFrame, refs: Refs, excluded: Iterable[int] = DEFAULT_EXCLU
         level = level_value(row.get("Уровень_жидкости"), level_sign)
         rho, j, how = recalc_row(well, row.get("Рпл"), row.get("Руст"), row.get("Избыточное_давление"), level, refs, excluded, depth)
         k = None if j is None else j * KGF_TO_BAR + (ATM if add_atm else 0.0)
-        out.append([well, row.get("Дата"), row.get("Горизонт"), row.get("Категория"), _num(row.get("Руст")),
-                    _num(row.get("Избыточное_давление")), level, _num(row.get("Рпл")), rho, j, k, how, row.get("Источник")])
+        cat = row.get("Категория")
+        group = group_name(row.get("ГСП")) or (WELL_GROUPS.get(well, "") if cat == "Эксплуатационные" else "")
+        out.append([well, row.get("Дата"), row.get("Горизонт"), cat, _num(row.get("Руст")),
+                    _num(row.get("Избыточное_давление")), level, _num(row.get("Рпл")), rho, j, k, how, row.get("Источник"),
+                    group])
     cols = ["Скважина", "Дата", "Горизонт", "Категория", "Руст, кгс/см2", "Избыточное давление, кгс/см2",
             "Уровень жидкости, м", "Рпл приведённое (на 670 м), кгс/см2", "Плотность воды, г/см3",
-            "Рпл на верх перфораций, кгс/см2", "Рпл на верх перфораций, бар", "Способ расчёта", "Источник"]
+            "Рпл на верх перфораций, кгс/см2", "Рпл на верх перфораций, бар", "Способ расчёта", "Источник", "ГСП"]
     return pd.DataFrame(out, columns=cols)
 
 
@@ -180,7 +185,7 @@ def read_measurements(path: str) -> pd.DataFrame:
     for col in ("Руст", "Избыточное_давление", "Рпл", "Уровень_жидкости"):
         if col not in df.columns:
             df[col] = None
-    for col in ("Горизонт", "Категория", "Источник"):
+    for col in ("Горизонт", "Категория", "Источник", "ГСП"):
         if col not in df.columns:
             df[col] = None
     df["Дата"] = pd.to_datetime(df["Дата"], errors="coerce")
@@ -195,9 +200,13 @@ def include_frames(res: pd.DataFrame, add_atm: bool = False, average: Optional[p
     """
     bar = "Рпл на верх перфораций, бар"
 
-    def triple(df, col):
-        t = df.dropna(subset=["Дата", col])[["Скважина", "Дата", col]].sort_values(["Дата", "Скважина"])
-        t.columns = ["Скважина", "Дата", "Давление, бар"]
+    def triple(df, col, group=False):
+        """«скважина, дата, давление» (+ ГСП последним столбцом, если group)."""
+        cols = ["Скважина", "Дата", col] + (["ГСП"] if group else [])
+        t = df.dropna(subset=["Дата", col])[cols].sort_values(["Дата", "Скважина"])
+        t.columns = ["Скважина", "Дата", "Давление, бар"] + (["ГСП"] if group else [])
+        if group:
+            t["ГСП"] = t["ГСП"].fillna("")
         return t
 
     raw_bar = (res["Рпл приведённое (на 670 м), кгс/см2"] * KGF_TO_BAR + (ATM if add_atm else 0.0))
@@ -211,7 +220,7 @@ def include_frames(res: pd.DataFrame, add_atm: bool = False, average: Optional[p
         mean.columns = ["Дата", "Среднее пластовое, бар (расчёт по эксплуатационным)"]
     return {
         "include_среднее_пластовое": mean,
-        "include_эксплуатационные": triple(exploit, "_raw"),
+        "include_эксплуатационные": triple(exploit, "_raw", group=True),
         "include_набл_с_пересчётом": triple(obs, bar),
         "include_набл_без_пересчёта": triple(obs, "_raw"),
     }
