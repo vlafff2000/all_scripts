@@ -435,3 +435,30 @@ def test_base_pressure_xlsx_is_read_as_rpl_in_bar(tmp_path):
 
     found = detect_files(str(tmp_path))
     assert found["press_gsp"] == str(path) and found["press_obj"] == str(path)
+
+
+def test_base_water_xlsx_is_read_as_monthly_flow_in_lh(tmp_path):
+    """«БД замеров воды» Базы ПХГ: расход м³/сут переходит в л/ч; «Неизвестно» без примечания — без нуля."""
+    import pandas as pd
+    from gsp_maps.project import detect_files
+
+    path = tmp_path / "БД_замеров_воды.xlsx"
+    pd.DataFrame({
+        "Скважина": [11, 12, 13],
+        "Дата": ["01.03.2024", "01.03.2024", "01.04.2024"],
+        "Водопроявление": ["Да", "Неизвестно", "Нет"],
+        "Расход воды": [2.4, None, 0.0],
+        "Объем воды": [1.0, None, 0.0],
+        "Водный фактор": [0.5, None, 0.0],
+        "Примечание": ["Ок", "песок", "Ок"],
+    }).to_excel(path, sheet_name="Данные", index=False)
+
+    df, warn = inputs.load_water([str(path)])
+    assert len(df) == 3
+    first = df.iloc[0]
+    assert first["Скважина"] == 11 and first["Дата_замера"] == "2024-03-01"
+    assert abs(first["Расход_воды_лч"] - 100.0) < 1e-6          # 2,4 м³/сут = 100 л/ч
+    assert first["Водный_фактор"] == 0.5
+    unknown = df.iloc[1]
+    assert unknown["Примечание"] == "песок" and pd.isna(unknown["Расход_воды_лч"])
+    assert detect_files(str(tmp_path))["water"] == str(path)

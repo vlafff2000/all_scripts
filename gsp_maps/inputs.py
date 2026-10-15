@@ -163,13 +163,49 @@ def _month_year(fname: str, head: List[str]) -> Optional[Tuple[int, int]]:
     return None
 
 
+def _is_base_water(fp: str) -> bool:
+    try:
+        return "Расход воды" in pd.read_excel(fp, sheet_name="Данные", nrows=0).columns
+    except Exception:
+        return False
+
+
+def _load_base_water(fp: str) -> Tuple[List[dict], List[str]]:
+    """«БД замеров воды» Базы ПХГ (лист «Данные»): расход в м³/сут переводится обратно в л/ч, как ждут Карты."""
+    data = pd.read_excel(fp, sheet_name="Данные", dtype={"Скважина": str})
+    records: List[dict] = []
+    for r in data.to_dict("records"):     # itertuples переименовал бы колонки с пробелом
+        dt = pd.to_datetime(r.get("Дата"), dayfirst=True, errors="coerce")
+        well = pd.to_numeric(r.get("Скважина"), errors="coerce")
+        if pd.isna(dt) or pd.isna(well):
+            continue
+        flag = str(r.get("Водопроявление", "")).strip()
+        rate = pd.to_numeric(r.get("Расход воды"), errors="coerce")
+        wf = pd.to_numeric(r.get("Водный фактор"), errors="coerce")
+        note = str(r.get("Примечание", "") or "").strip()
+        note = "" if note in ("", "Ок", "nan") else note
+        unknown = flag == "Неизвестно" or pd.isna(rate)
+        records.append({"Скважина": int(well), "Месяц": dt.month, "Год": dt.year,
+                        "Дата_замера": "%d-%02d-01" % (dt.year, dt.month), "Метка_замера": "%02d.%d" % (dt.month, dt.year),
+                        "Водный_фактор": None if unknown and note else (0.0 if pd.isna(wf) else float(wf)),
+                        "Расход_воды_лч": None if unknown and note else (0.0 if pd.isna(rate) else float(rate) * 1000 / 24),
+                        "Примечание": note or "Ок"})
+    return records, []
+
+
 def load_water(paths: List[str]) -> Tuple[pd.DataFrame, List[str]]:
-    """Замеры выноса пластовой жидкости по файлам «… <месяц> <год>»: одна запись на скважину и месяц."""
+    """Замеры выноса пластовой жидкости по файлам «… <месяц> <год>»: одна запись на скважину и месяц.
+    Или одна xlsx «БД замеров воды» Базы ПХГ."""
     cols = ["Скважина", "Месяц", "Год", "Дата_замера", "Метка_замера", "Водный_фактор", "Расход_воды_лч", "Примечание"]
     records: List[dict] = []
     warn: List[str] = []
     for fp in paths:
         fname = os.path.basename(fp)
+        if fp.lower().endswith((".xlsx", ".xlsm")) and _is_base_water(fp):
+            recs, w = _load_base_water(fp)
+            records += recs
+            warn += w
+            continue
         try:
             xl = pd.ExcelFile(fp, engine="calamine")
         except Exception:
