@@ -1,7 +1,6 @@
 import os
 import re
 import tempfile
-import tkinter as tk
 from io import BytesIO
 import pandas as pd
 import numpy as np
@@ -42,7 +41,7 @@ html_path = generate_html_from_excel(
 # 1. ИНТЕРФЕЙС: ВЫБОР ФАЙЛОВ
 # ============================================================
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-from pxg_core.pick_dialog import pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
+from pxg_core.pick_dialog import ask_choice, pick_file, pick_files, pick_folder, show_error  # веб-проводник вместо Tk
 
 def select_file(title="Выберите файл", filetypes=None):
     if filetypes is None:
@@ -3819,7 +3818,7 @@ def main():
     # Проверка существования
     if not os.path.exists(main_file):
         print(f"❌ Файл не найден: {main_file}")
-        messagebox.showerror("Ошибка", f"Не найден файл:\n{main_file}")
+        show_error("Ошибка", f"Не найден файл:\n{main_file}")
         return
 
     print(f"📁 Папка данных: {data_dir}")
@@ -3839,20 +3838,7 @@ def main():
     all_gsp = sorted([str(g).strip() for g in all_gsp if pd.notna(g)])
     print(f"\nДоступные ГСП: {all_gsp}")
 
-    root = tk.Tk()
-    root.title("Выбор ГСП")
-    root.geometry("350x250")
-    tk.Label(root, text="Выберите ГСП:", font=('Arial', 14)).pack(pady=15)
-    selected_gsp = tk.StringVar(root)
-    selected_gsp.set(all_gsp[0] if all_gsp else "")
-    dropdown = tk.OptionMenu(root, selected_gsp, *all_gsp)
-    dropdown.config(font=('Arial', 12))
-    dropdown.pack(pady=10)
-    tk.Button(root, text="OK", command=root.quit, font=('Arial', 12)).pack(pady=10)
-    root.mainloop()
-    root.destroy()
-
-    gsp_filter = selected_gsp.get()
+    gsp_filter = ask_choice("Выбор ГСП", "Выберите ГСП:", [(g, g) for g in all_gsp]) if all_gsp else None
     if not gsp_filter:
         return
     print(f"ГСП: {gsp_filter}")

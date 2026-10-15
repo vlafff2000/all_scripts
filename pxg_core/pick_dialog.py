@@ -124,6 +124,134 @@ $('ok').onclick = () => {
 </script></body></html>
 """
 
+DIALOG_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Окно</title>
+<style>
+body{font:15px system-ui,sans-serif;margin:0;background:#f5f6f8;color:#1d2330}
+header{padding:12px 16px;background:#fff;border-bottom:1px solid #dde1e8;font-weight:600}
+#msg{white-space:pre-line;padding:16px 16px 8px}
+#opts{display:flex;flex-direction:column;gap:6px;padding:0 16px}
+#opts button{text-align:left;padding:8px 12px}
+input{margin:0 16px;padding:6px 8px;border:1px solid #c9ced8;border-radius:6px;width:calc(100% - 32px);box-sizing:border-box}
+footer{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px}
+button{padding:6px 14px;border:1px solid #c9ced8;border-radius:6px;background:#fff;cursor:pointer}
+button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8}
+</style></head>
+<body>
+<header id="title"></header>
+<div id="msg"></div>
+<div id="body"></div>
+<footer id="foot"></footer>
+<script>
+const cfg = __CONFIG__;
+const $ = id => document.getElementById(id);
+function send(value) {
+  fetch('/api/pick/done', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({value})});
+  document.body.innerHTML = '<p style="padding:24px">Готово, можно закрыть вкладку.</p>';
+}
+function btn(text, cls, fn) { const b = document.createElement('button'); b.textContent = text; if (cls) b.className = cls; b.onclick = fn; return b; }
+$('title').textContent = cfg.title;
+$('msg').textContent = cfg.message;
+const body = $('body'), foot = $('foot');
+if (cfg.kind === 'choice') {
+  const box = document.createElement('div'); box.id = 'opts';
+  cfg.options.forEach(([value, label]) => box.appendChild(btn(label, '', () => send(value))));
+  body.appendChild(box);
+  foot.appendChild(btn('Отмена', '', () => send(null)));
+} else if (cfg.kind === 'text') {
+  const input = document.createElement('input'); input.value = cfg.default || '';
+  input.onkeydown = e => { if (e.key === 'Enter') send(input.value); };
+  body.appendChild(input);
+  foot.appendChild(btn('Отмена', '', () => send(null)));
+  foot.appendChild(btn('OK', 'primary', () => send(input.value)));
+  setTimeout(() => input.focus(), 0);
+} else {
+  foot.appendChild(btn('OK', 'primary', () => send(null)));
+}
+</script></body></html>
+"""
+
+
+def make_dialog_app(config: dict, result: dict, done: threading.Event) -> Starlette:
+    """Приложение диалога: сообщение, выбор из списка или ввод текста. Ответ — в result['value']."""
+
+    async def page(request: Request) -> HTMLResponse:
+        html = DIALOG_PAGE.replace("__CONFIG__", _config_json(config))
+        return HTMLResponse(html)
+
+    return Starlette(routes=[Route("/", page), *_answer_routes(result, done), *fs_browse.routes()])
+
+
+def _config_json(config: dict) -> str:
+    # «</» экранируем, чтобы текст сообщения не закрыл тег <script>
+    return json.dumps(config, ensure_ascii=False).replace("</", "<\\/")
+
+
+def _answer_routes(result: dict, done: threading.Event) -> List[Route]:
+    async def finish(request: Request) -> JSONResponse:
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        paths = body.get("paths")
+        result["paths"] = [str(p) for p in paths] if isinstance(paths, list) and paths else []
+        result["value"] = body.get("value")
+        done.set()
+        return JSONResponse({"ok": True})
+
+    return [Route("/api/pick/done", finish, methods=["POST"])]
+
+
+def _serve_and_wait(app: Starlette) -> None:
+    import uvicorn
+
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    started_at = time.monotonic()
+    while not server.started and thread.is_alive() and time.monotonic() - started_at < 10:
+        time.sleep(0.05)
+    try:
+        webbrowser.open("http://127.0.0.1:%d/" % port)
+        app.state.done.wait(TIMEOUT)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def ask_choice(title: str, message: str, options: Sequence[Tuple[Any, str]]) -> Any:
+    """Выбор одного варианта из списка [(значение, подпись), ...]. None — отмена."""
+    result: dict = {"value": None}
+    done = threading.Event()
+    app = make_dialog_app({"kind": "choice", "title": title, "message": message, "options": [list(o) for o in options]},
+                          result, done)
+    app.state.done = done
+    _serve_and_wait(app)
+    return result["value"]
+
+
+def ask_text(title: str, message: str, default: str = "") -> Optional[str]:
+    """Ввод строки. None — отмена (как у Tk simpledialog)."""
+    result: dict = {"value": None}
+    done = threading.Event()
+    app = make_dialog_app({"kind": "text", "title": title, "message": message, "default": default}, result, done)
+    app.state.done = done
+    _serve_and_wait(app)
+    return result["value"]
+
+
+def show_error(title: str, message: str) -> None:
+    """Сообщение с кнопкой OK (замена messagebox.showerror)."""
+    result: dict = {"value": None}
+    done = threading.Event()
+    app = make_dialog_app({"kind": "info", "title": title, "message": message}, result, done)
+    app.state.done = done
+    _serve_and_wait(app)
+
 
 def _filter_from(filetypes: Optional[Sequence[Tuple[str, str]]]) -> str:
     """Tk-список [(название, '*.xlsx *.xls'), ...] → строка расширений для проводника. «*.*» — все файлы."""
@@ -147,17 +275,7 @@ def make_app(mode: str, title: str, filt: str, start: str, result: dict, done: t
         html = PAGE.replace("__CONFIG__", json.dumps(config, ensure_ascii=False))
         return HTMLResponse(html)
 
-    async def finish(request: Request) -> JSONResponse:
-        try:
-            body: Any = await request.json()
-        except ValueError:
-            body = {}
-        paths = body.get("paths") if isinstance(body, dict) else None
-        result["paths"] = [str(p) for p in paths] if isinstance(paths, list) and paths else []
-        done.set()
-        return JSONResponse({"ok": True})
-
-    return Starlette(routes=[Route("/", page), Route("/api/pick/done", finish, methods=["POST"]), *fs_browse.routes()])
+    return Starlette(routes=[Route("/", page), *_answer_routes(result, done), *fs_browse.routes()])
 
 
 def _free_port() -> int:
@@ -167,24 +285,11 @@ def _free_port() -> int:
 
 
 def _pick(mode: str, title: str, filetypes, start: str) -> List[str]:
-    import uvicorn
-
     result: dict = {"paths": []}
     done = threading.Event()
     app = make_app(mode, title, _filter_from(filetypes), start or "", result, done)
-    port = _free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    started_at = time.monotonic()
-    while not server.started and thread.is_alive() and time.monotonic() - started_at < 10:
-        time.sleep(0.05)  # браузер открываем, когда сервер уже слушает порт
-    try:
-        webbrowser.open("http://127.0.0.1:%d/" % port)
-        done.wait(TIMEOUT)
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
+    app.state.done = done
+    _serve_and_wait(app)
     return result["paths"]
 
 

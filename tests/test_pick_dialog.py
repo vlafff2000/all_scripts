@@ -32,3 +32,21 @@ def test_cancel_returns_empty(tmp_path, monkeypatch):
     c = TestClient(pick_dialog.make_app("folder", "Тест", "", "", result, done))
     c.post("/api/pick/done", json={"paths": []})
     assert done.is_set() and result["paths"] == []
+
+
+def test_dialog_answers(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "cfg"))
+    result, done = {"value": None}, threading.Event()
+    c = TestClient(pick_dialog.make_dialog_app({"kind": "choice", "title": "Т", "message": "</script>x", "options": [[2, "два"]]}, result, done))
+    html = c.get("/").text
+    assert "</script>x" not in html and "<\\/script>x" in html
+    c.post("/api/pick/done", json={"value": 2})
+    assert done.is_set() and result["value"] == 2
+
+
+def test_dialog_cancel(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "cfg"))
+    result, done = {"value": "x"}, threading.Event()
+    c = TestClient(pick_dialog.make_dialog_app({"kind": "info", "title": "Т", "message": "м"}, result, done))
+    c.post("/api/pick/done", json={"value": None})
+    assert done.is_set() and result["value"] is None
