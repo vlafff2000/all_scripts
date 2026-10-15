@@ -1,8 +1,11 @@
 import os
 import shutil
+import sys
 from pathlib import Path
 import re
 from datetime import datetime
+
+from pxg_core import параметры
 
 
 def extract_year_from_path(file_path):
@@ -303,115 +306,58 @@ def create_detailed_report(stats, year_stats, failed_files, copied_files_info, t
     return report_path
 
 
-def main():
-    """Основная функция"""
-    print("=" * 80)
-    print("ПРОГРАММА КОПИРОВАНИЯ EXCEL-ФАЙЛОВ ПО ГОДАМ")
-    print("=" * 80)
-    print("\nКритерии распределения:")
-    print("  • Шаблон 1: 2016 год")
-    print("  • Шаблон 2: 2017-2023 годы")
-    print("  • Шаблон 3: 2024-2026 годы")
+def main(argv=None):
+    """Копирование замеров по годам. Папка — аргумент --folder (веб-форма) или вопрос в консоли.
 
-    while True:
-        print("\n" + "=" * 40)
-        print("ГЛАВНОЕ МЕНЮ")
-        print("=" * 40)
-        print("1 - Найти и скопировать файлы по годам")
-        print("2 - Выход")
-        print("=" * 40)
+    В веб-запуске вопроса «копировать?» нет: нажатие кнопки и есть подтверждение. Результаты и отчёт
+    кладутся в текущую папку (в веб-форме это папка результатов запуска).
+    """
+    args = параметры.parse("Копирование файлов замеров давлений по шаблонам", argv,
+                           folder="корневая папка для поиска файлов «набл», «замер», «Результаты»")
+    interactive = args.folder is None
+    folder_path = параметры.clean_path(args.folder if not interactive else input("Путь к корневой папке для поиска: ")).replace("\\", "/")
+    if folder_path.startswith("~"):
+        folder_path = os.path.expanduser(folder_path)
+    if not os.path.isdir(folder_path):
+        print("Папка не найдена: %s" % folder_path)
+        return 1
 
-        try:
-            choice = input("Ваш выбор (1-2): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n\nПрограмма прервана пользователем")
-            break
+    file_paths = find_specific_excel_files(folder_path)
+    if not file_paths:
+        print("Не найдено нужных файлов.")
+        return 0
 
-        if choice == "1":
-            folder_path = input("\nВведите путь к корневой папке для поиска: ").strip()
+    print("Найденные файлы (%d):" % len(file_paths))
+    preview = {1: [], 2: [], 3: [], None: []}
+    for path in file_paths:
+        preview[get_template_by_year(extract_year_from_path(path))].append(path)
+    names = {1: "Шаблон 1 (2016 год)", 2: "Шаблон 2 (2017-2023 годы)", 3: "Шаблон 3 (2024-2026 годы)", None: "Год не определен"}
+    for template in (1, 2, 3, None):
+        if preview[template]:
+            print("  %s: %d файлов" % (names[template], len(preview[template])))
 
-            if folder_path.startswith('~'):
-                folder_path = os.path.expanduser(folder_path)
+    if interactive and not параметры.yes(параметры.ask("Скопировать эти файлы в папки по годам? (да/нет)", "нет")):
+        print("Операция отменена")
+        return 0
 
-            folder_path = folder_path.replace('\\', '/')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_base_dir = os.path.join(os.getcwd(), "отсортированные_по_годам_%s" % timestamp)
+    stats, year_stats, failed_files, copied_files_info, template_folders = copy_files_by_year(file_paths, output_base_dir)
+    report_path = create_detailed_report(stats, year_stats, failed_files, copied_files_info, template_folders, output_base_dir)
 
-            if not os.path.isdir(folder_path):
-                print(f"\n❌ Папка не найдена!")
-                continue
-
-            # Ищем файлы
-            file_paths = find_specific_excel_files(folder_path)
-
-            if not file_paths:
-                print("\n❌ Не найдено нужных файлов!")
-                continue
-
-            # Показываем найденные файлы
-            print(f"\nНайденные файлы ({len(file_paths)}):")
-
-            # Группируем по годам для предпросмотра
-            files_by_template_preview = {1: [], 2: [], 3: [], None: []}
-            for path in file_paths:
-                year = extract_year_from_path(path)
-                template = get_template_by_year(year)
-                files_by_template_preview[template].append((year, path))
-
-            for template, files in files_by_template_preview.items():
-                if files:
-                    if template == 1:
-                        print(f"\n  Шаблон 1 (2016 год): {len(files)} файлов")
-                    elif template == 2:
-                        print(f"  Шаблон 2 (2017-2023 годы): {len(files)} файлов")
-                    elif template == 3:
-                        print(f"  Шаблон 3 (2024-2026 годы): {len(files)} файлов")
-                    else:
-                        print(f"  Год не определен: {len(files)} файлов")
-
-            confirm = input(f"\nСкопировать эти файлы в папки по годам? (да/нет): ").strip().lower()
-            if confirm not in ['да', 'д', 'yes', 'y']:
-                print("Операция отменена")
-                continue
-
-            # Создаем выходную папку
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_base_dir = os.path.join(os.getcwd(), f"отсортированные_по_годам_{timestamp}")
-
-            # Копируем файлы
-            stats, year_stats, failed_files, copied_files_info, template_folders = copy_files_by_year(
-                file_paths, output_base_dir
-            )
-
-            # Создаем отчет
-            report_path = create_detailed_report(
-                stats, year_stats, failed_files, copied_files_info,
-                template_folders, output_base_dir
-            )
-
-            # Выводим результаты
-            print(f"\n" + "=" * 60)
-            print("КОПИРОВАНИЕ ЗАВЕРШЕНО")
-            print("=" * 60)
-            print(f"\nРЕЗУЛЬТАТЫ:")
-            print(f"  Шаблон 1 (2016 год):          {stats[1]} файлов")
-            print(f"  Шаблон 2 (2017-2023 годы):    {stats[2]} файлов")
-            print(f"  Шаблон 3 (2024-2026 годы):    {stats[3]} файлов")
-            print(f"  Год не определен:              {stats[None]} файлов")
-            print(f"  ВСЕГО:                         {sum(stats.values())} файлов")
-
-            if failed_files:
-                print(f"\n  Ошибок при копировании: {len(failed_files)}")
-
-            print(f"\nПапка с результатами: {output_base_dir}")
-            print(f"Подробный отчет сохранен: {report_path}")
-            print("\n" + "=" * 60)
-
-        elif choice == "2":
-            print("\nВыход из программы.")
-            break
-
-        else:
-            print("\n❌ Неверный выбор. Попробуйте снова.")
+    print("=" * 60)
+    print("КОПИРОВАНИЕ ЗАВЕРШЕНО")
+    print("Шаблон 1 (2016 год): %d файлов" % stats[1])
+    print("Шаблон 2 (2017-2023 годы): %d файлов" % stats[2])
+    print("Шаблон 3 (2024-2026 годы): %d файлов" % stats[3])
+    print("Год не определен: %d файлов" % stats[None])
+    print("ВСЕГО: %d файлов" % sum(stats.values()))
+    if failed_files:
+        print("Ошибок при копировании: %d" % len(failed_files))
+    print("Папка с результатами: %s" % output_base_dir)
+    print("Подробный отчет: %s" % report_path)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

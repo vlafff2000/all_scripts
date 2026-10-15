@@ -421,6 +421,48 @@ SPECS: List[WebSpec] = [
         + (v.get("gsp") or "").strip() + "\n" + ((v.get("output") or "").strip() or "БД_ГДИ_объединенная.xlsx") + "\ny\nn\n",
         note="Результат — единая база ГДИ в папке результатов (с листом исправлений дат).",
     ),
+    WebSpec(
+        module="Копирование_файлов_по_маске",
+        params=(
+            Param("source", "Папка, где искать файлы", "folder", required=True, hint="Поиск идёт по этой папке и её подпапкам (если включено)"),
+            Param("dest", "Папка для копий", "folder", required=True, hint="Все найденные файлы копируются сюда без подпапок"),
+            Param("group", "Группа расширений", "choice", default="word", options=(
+                ("", "Не выбирать группу"),
+                ("word", "Word и текстовые: .docx, .doc, .odt, .rtf и др."),
+                ("excel", "Таблицы: .xlsx, .xls, .csv и др."),
+                ("pdf", "PDF"),
+                ("presentation", "Презентации: .pptx, .ppt, .odp и др."))),
+            Param("extensions", "Свои расширения", hint="Через запятую, например docx, odt. Если заполнено, группа не используется"),
+            Param("fragment", "Часть имени файла", hint="Без учёта регистра. Например «отчёт» или «акт». Пусто — не ограничивать"),
+            Param("recursive", "Искать в подпапках", "bool", default="1"),
+            Param("one_per_name", "Из одинаковых имён в папке брать один файл", "bool", default="1",
+                  hint="Если есть, например, «акт.docx» и «акт.pdf», берётся тот, чьё расширение важнее (по порядку группы)"),
+            Param("skip_duplicates", "Не копировать одинаковое содержимое дважды", "bool", default="1"),
+            Param("dry_run", "Только показать список, ничего не копировать", "bool", default=""),
+        ),
+        args=(("source", "source"), ("dest", "dest"), ("group", "group"), ("extensions", "extensions"), ("fragment", "fragment"),
+              ("recursive", "recursive"), ("one_per_name", "one-per-name"), ("skip_duplicates", "skip-duplicates"), ("dry_run", "dry-run")),
+        note="Отчёт «отчёт_копирования.txt» со списком скопированного и пропущенного — в папке результатов запуска.",
+    ),
+    WebSpec(
+        module="Распаковка_архивов",
+        params=(
+            Param("folder", "Папка с архивами", "folder", required=True, hint="Для каждого архива создаётся папка с его именем рядом с ним"),
+            Param("fragment", "Часть имени архива", hint="Пусто — распаковать все архивы"),
+            Param("recursive", "Искать в подпапках", "bool", default=""),
+            Param("delete", "Удалить архив после распаковки", "bool", default="",
+                  hint="Архив удаляется только после успешной распаковки"),
+        ),
+        args=(("folder", "folder"), ("fragment", "fragment"), ("recursive", "recursive"), ("delete", "delete")),
+        note="ZIP и TAR работают сразу; для RAR нужен rarfile, для 7Z — py7zr.",
+    ),
+    WebSpec(
+        module="Копирование_замеров_давлений_по_шаблонам",
+        params=(Param("folder", "Корневая папка с файлами замеров", "folder", required=True,
+                      hint="Ищутся файлы с «набл», «замер» или «Результаты замеров» в имени; год берётся из пути"),),
+        args=(("folder", "folder"),),
+        note="Результат — папка «отсортированные_по_годам_…» и отчёт о копировании в папке результатов запуска.",
+    ),
 ]
 
 BY_MODULE: Dict[str, WebSpec] = {s.module: s for s in SPECS}
