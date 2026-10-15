@@ -2,7 +2,6 @@ import os
 import re
 import tempfile
 import tkinter as tk
-from tkinter import filedialog
 from io import BytesIO
 import pandas as pd
 import numpy as np
@@ -42,13 +41,13 @@ html_path = generate_html_from_excel(
 # ============================================================
 # 1. ИНТЕРФЕЙС: ВЫБОР ФАЙЛОВ
 # ============================================================
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+from pxg_core.pick_dialog import pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
+
 def select_file(title="Выберите файл", filetypes=None):
-    root = tk.Tk()
-    root.withdraw()
     if filetypes is None:
         filetypes = [("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
-    filepath = filedialog.askopenfilename(title=title, filetypes=filetypes)
-    root.destroy()
+    filepath = pick_file(title=title, filetypes=filetypes)
     return filepath
 
 
@@ -90,20 +89,14 @@ def get_week_color(weeks):
         return '800080'
 
 def select_files(title="Выберите файлы", filetypes=None):
-    root = tk.Tk()
-    root.withdraw()
     if filetypes is None:
         filetypes = [("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
-    filepaths = filedialog.askopenfilenames(title=title, filetypes=filetypes)
-    root.destroy()
+    filepaths = pick_files(title=title, filetypes=filetypes)
     return list(filepaths)
 
 
 def select_directory(title="Выберите папку"):
-    root = tk.Tk()
-    root.withdraw()
-    dirpath = filedialog.askdirectory(title=title)
-    root.destroy()
+    dirpath = pick_folder(title=title)
     return dirpath
 
 
@@ -3846,7 +3839,6 @@ def main():
     all_gsp = sorted([str(g).strip() for g in all_gsp if pd.notna(g)])
     print(f"\nДоступные ГСП: {all_gsp}")
 
-    root = tk.Tk()
     root.title("Выбор ГСП")
     root.geometry("350x250")
     tk.Label(root, text="Выберите ГСП:", font=('Arial', 14)).pack(pady=15)
@@ -3857,7 +3849,6 @@ def main():
     dropdown.pack(pady=10)
     tk.Button(root, text="OK", command=root.quit, font=('Arial', 12)).pack(pady=10)
     root.mainloop()
-    root.destroy()
 
     gsp_filter = selected_gsp.get()
     if not gsp_filter:

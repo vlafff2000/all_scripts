@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import sys
 """
 ГЕНЕРАТОР ИНТЕРАКТИВНОЙ HTML-КАРТЫ v2.0
 С режимом двух карт, зумом, перемещением, автопрокруткой
@@ -7,8 +8,6 @@
 
 import os
 import json
-import tkinter as tk
-from tkinter import filedialog
 import pandas as pd
 import numpy as np
 from openpyxl import load_workbook
@@ -20,19 +19,16 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+from pxg_core.pick_dialog import pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
+
 def select_file(title="Выберите файл"):
-    root = tk.Tk()
-    root.withdraw()
-    filepath = filedialog.askopenfilename(title=title)
-    root.destroy()
+    filepath = pick_file(title=title)
     return filepath
 
 
 def select_directory(title="Выберите папку"):
-    root = tk.Tk()
-    root.withdraw()
-    dirpath = filedialog.askdirectory(title=title)
-    root.destroy()
+    dirpath = pick_folder(title=title)
     return dirpath
 
 
