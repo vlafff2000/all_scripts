@@ -90,7 +90,10 @@ def unpack(archive: Path, delete: bool = False) -> Tuple[bool, str, Optional[Pat
             target.rmdir()
         return False, "ошибка: %s" % e, None
     if delete:
-        archive.unlink()
+        try:
+            archive.unlink()
+        except OSError as e:
+            return True, "распакован в «%s», но архив не удалось удалить: %s" % (target.name, e), target
         return True, "распакован в «%s», архив удалён" % target.name, target
     return True, "распакован в «%s»" % target.name, target
 

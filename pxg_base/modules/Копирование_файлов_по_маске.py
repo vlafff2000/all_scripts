@@ -77,11 +77,12 @@ def file_md5(path: Path) -> str:
 def collect(source: Path, exts: Optional[List[str]], fragment: str, recursive: bool, skip_dir: Optional[Path] = None) -> List[Path]:
     """Файлы, подходящие под расширения и фрагмент имени. Папка назначения пропускается, чтобы не копировать копии."""
     needle = fragment.strip().lower()
+    skip_real = skip_dir.resolve() if skip_dir is not None else None
     found: List[Path] = []
     walker = os.walk(str(source)) if recursive else [(str(source), [], os.listdir(str(source)))]
     for root, dirs, names in walker:
         root_path = Path(root)
-        if skip_dir is not None and (root_path == skip_dir or skip_dir in root_path.parents):
+        if skip_real is not None and (root_path.resolve() == skip_real or skip_real in root_path.resolve().parents):
             dirs[:] = []
             continue
         for name in names:
