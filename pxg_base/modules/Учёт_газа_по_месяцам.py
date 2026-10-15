@@ -42,8 +42,12 @@ def main(argv=None):
         print("⚠️ Значений в строках суток не найдено — книга не создана.")
         return 0
 
-    water = учёт_газа.water_by_month(long_w) if len(long_w) else pd.DataFrame()
-    check = учёт_газа.checks(long_w) if len(long_w) else pd.DataFrame()
+    try:
+        water = учёт_газа.water_by_month(long_w) if len(long_w) else pd.DataFrame()
+        check = учёт_газа.checks(long_w) if len(long_w) else pd.DataFrame()
+    except ValueError as e:
+        print("❌ %s" % e)
+        return 1
 
     out = (args.output or "").strip() or "Учёт_газа_все_данные.xlsx"
     if not out.lower().endswith(".xlsx"):

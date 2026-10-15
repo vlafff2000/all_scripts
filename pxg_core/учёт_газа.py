@@ -88,6 +88,9 @@ def read_sheet(ws, kind: str, file_name: str):
     if not date_rows:
         return [], [], "нет строк с датой"
     first, last = min(date_rows), max(date_rows)
+    if first <= max(HEADER_ROWS):
+        raise ValueError("Лист «%s»: первая строка суток на %d-й строке, шапка занимает строки 1–%d"
+                         % (ws.title, first, max(HEADER_ROWS)))
     rows, excluded = [], []
     date_set = set(date_rows)
     for r in range(1, ws.max_row + 1):
@@ -129,16 +132,15 @@ FILLED_NEEDLES = (("пзрг - 4", "за сутки"), ("гис", "касимо�
 def _drop_template_days(rows: list) -> tuple:
     """Шаблонные сутки после последней заполненной (ПЗРГ-4 или ГИС за сутки пусты) — не данные, отбрасываются.
 
-    Нули внутри заполненного периода остаются. Возвращает (строки, число отброшенных суток).
+    Нули внутри заполненного периода остаются. Возвращает (строки, отброшенные строки).
     """
     filled = [r["Дата"] for r in rows
               if any(all(n in r["Параметр"].lower() for n in needles) for needles in FILLED_NEEDLES)
               and isinstance(r["Значение"], (int, float)) and not isinstance(r["Значение"], bool)]
     if not filled:
-        return rows, 0
+        return rows, []
     last = max(filled)
-    all_days = {r["Дата"] for r in rows}
-    dropped = len([d for d in all_days if d > last])
+    dropped = [r for r in rows if r["Дата"] > last]
     return [r for r in rows if r["Дата"] <= last], dropped
 
 
@@ -161,8 +163,12 @@ def read_book(path: str, kind: str):
         log.append((name, ws.title, note))
     wb.close()
     if kind == "закачка":
-        longs, dropped = _drop_template_days(longs)
-        log.append((name, "все листы", "шаблонные сутки после последней заполненной отброшены: %d" % dropped))
+        longs, dropped_rows = _drop_template_days(longs)
+        for r in dropped_rows:
+            excl.append((name, r["Лист"], r["Столбец"] + str(r["Дата"].day), r["Значение"],
+                             "шаблонные сутки после последней заполненной"))
+        log.append((name, "все листы", "шаблонные сутки после последней заполненной отброшены: %d суток, %d ячеек"
+                    % (len({r["Дата"] for r in dropped_rows}), len(dropped_rows))))
     long_df = pd.DataFrame(longs, columns=["Тип", "Файл", "Лист", "Дата", "Столбец", "Параметр", "Единица", "Значение"])
     excl_df = pd.DataFrame(excl, columns=["Файл", "Лист", "Ячейка", "Значение", "Причина"])
     log_df = pd.DataFrame(log, columns=["Файл", "Лист", "Что сделано"])
@@ -189,6 +195,8 @@ def select_series(long_df: pd.DataFrame, *needles: str) -> pd.Series:
     labels = sorted(part["Параметр"].unique())
     if len(labels) > 1:
         raise ValueError("Название %s подходит к нескольким столбцам: %s" % (" + ".join(needles), "; ".join(labels)))
+    if part.duplicated(["Лист", "Дата"]).any() and part.groupby(["Лист", "Дата"])["Столбец"].nunique().max() > 1:
+        raise ValueError("Два столбца с названием «%s» на одном листе: %s" % (" ".join(needles), labels))
     out = pd.Series(np.nan, index=days, dtype=float)
     for day, v in part.drop_duplicates("Дата", keep="last").set_index("Дата")["Значение"].items():
         if isinstance(v, (int, float)) and not isinstance(v, bool):
