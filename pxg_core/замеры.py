@@ -23,10 +23,15 @@ NON_EXPLOIT = ("Наблюдательные", "Контрольные", "Пог
 EXCESS_LIMIT = 20.0   # кгс/см²: Руст ниже этого у скважин не эксплуатационной категории считается избыточным давлением
 
 FIELDS = (("well", ("скв",)), ("layer", ("пласт", "горизонт")), ("date", ("дата",)), ("p_wh", ("руст", "устьев")),
-          ("level", ("нст", "уровень")), ("p_res", ("рпл", "пластов")))
+          ("level", ("нст", "уровень")), ("p_res", ("рпл", "пластов")), ("group", ("гсп", "групп")))
 
 COLUMNS = ["Скважина", "Дата", "Горизонт", "Категория", "Руст", "Избыточное давление", "Рпл", "Уровень жидкости",
-           "Примечание", "Источник", "L", "ES", "Плотность воды"]
+           "Примечание", "Источник", "L", "ES", "Плотность воды", "ГСП"]
+
+# Группа (ГСП) эксплуатационных скважин, если в строке файла её нет: ЭЛПРО-файлы 2022–2025 и исходная база давлений
+# (проверено 2026-10-15). Скважины 127 в ЭЛПРО нет — группа пустая, её надо указать.
+WELL_GROUPS = {56: "ГСП-1", 83: "ГСП-2", 182: "ГСП-3", 220: "ГСП-3", 237: "ГСП-4", 264: "ГСП-5", 437: "ГСП-8", 520: "ГСП-9"}
+_GROUP_RE = re.compile(r"ГСП\s*-?\s*(\d+)", re.IGNORECASE)
 
 
 @dataclass
@@ -47,6 +52,7 @@ class Row:
     sheet: str = ""
     row: int = 0
     raw: Dict[str, object] = field(default_factory=dict)
+    group: str = ""                     # «ГСП-N» из строки или из справочника скважин (только эксплуатационные)
 
 
 @dataclass
@@ -105,6 +111,12 @@ def _blocks(header_cells: List[str]) -> List[Dict[str, int]]:
     if cur:
         blocks.append(cur)
     return [b for b in blocks if "well" in b and ("p_wh" in b or "level" in b or "p_res" in b)]
+
+
+def group_name(text) -> str:
+    """Название группы в единой схеме: «ГСП 1», «гсп-1», «ГСП1» → «ГСП-1»; без номера — пусто."""
+    m = _GROUP_RE.search(_text(text))
+    return "ГСП-%d" % int(m.group(1)) if m else ""
 
 
 def _well_number(v) -> Optional[int]:
@@ -211,34 +223,122 @@ def _row(vals, block, well, category, src, sheet, rownum, excess_limit) -> Row:
     if p_wh is not None and category in NON_EXPLOIT and p_wh < excess_limit:
         p_wh, excess = None, nums["p_wh"]
     extra = {name: qc.to_number(cell(name))[0] for name in ("length", "es", "density")}
+    group = group_name(cell("group")) or (WELL_GROUPS.get(well, "") if category == "Эксплуатационные" else "")
     return Row(well, category, _text(cell("layer")), date, p_wh, excess, nums["p_res"], nums["level"], "; ".join(notes),
                src, extra["length"], extra["es"], extra["density"], sheet, rownum,
-               {"p_wh": cell("p_wh"), "p_res": cell("p_res"), "level": cell("level"), "date": raw_date})
+               {"p_wh": cell("p_wh"), "p_res": cell("p_res"), "level": cell("level"), "date": raw_date}, group)
+
+
+def parse_weekly(path: str) -> Parsed:
+    """«Итоговая таблица 2006–2026»: еженедельные замеры эксплуатационных скважин, Руст и Рпл по датам.
+
+    Формат: столбец A — дата; дальше пары столбцов «Р устье» / «Р пл.» под заголовком «Скв.№ NNN»; последний
+    столбец «Р среднее по ПХГ» читает `pc.read_average` (пересчёт давлений), здесь не нужен. Логика чтения перенесена
+    из модуля «Итоговая таблица давлений 2006–2025» без изменений в разборе.
+    """
+    out = Parsed()
+    src = os.path.basename(path)
+    try:
+        sheets = _read(path)
+    except Exception as e:
+        out.problems.append(("FILE", "Книга не открывается: %s" % str(e)[:200], src))
+        return out
+    if not sheets:
+        out.problems.append(("HEADER", "Книга пустая", src))
+        return out
+    sheet, df = next(iter(sheets.items()))
+    cells = [[_text(v) for v in r] for r in df.itertuples(index=False, name=None)]
+    values = df.values.tolist()
+    head = cells[0] if cells else []
+    sub = cells[1] if len(cells) > 1 else []
+    wells: List[Tuple[int, int, int]] = []          # (номер скважины, столбец Руст, столбец Рпл)
+    for col, text in enumerate(head):
+        m = re.search(r"(\d+)", text) if re.search("скв", text, re.IGNORECASE) else None
+        if m and col + 1 < len(sub) and "пл" in sub[col + 1].lower():
+            wells.append((int(m.group(1)), col, col + 1))
+    if not wells:
+        out.problems.append(("HEADER", "Скважины не найдены: нет шапки «Скв.№ …» с парами «Р устье» / «Р пл.»", src))
+        return out
+    out.tables = len(wells)
+    for i in range(2, len(values)):
+        date = qc.parse_date(values[i][0])
+        if date is None:
+            if cells[i][0]:
+                out.problems.append(("DATE", "Дата не распознана: «%s»" % cells[i][0][:40], "%s, строка %d" % (src, i + 1)))
+            continue
+        for well, c_wh, c_res in wells:
+            notes: List[str] = []
+            nums: Dict[str, Optional[float]] = {}
+            for name, c, label in (("p_wh", c_wh, "Руст"), ("p_res", c_res, "Рпл")):
+                v = values[i][c] if c < len(values[i]) else None
+                num, kind = qc.to_number(v)
+                if kind in ("text", "excel"):
+                    notes.append("%s: %s" % (label, _text(v)))
+                    num = None
+                nums[name] = num
+            if nums["p_wh"] is None and nums["p_res"] is None:
+                continue
+            out.rows.append(Row(well, "Эксплуатационные", "", date, nums["p_wh"], None, nums["p_res"], None,
+                                "; ".join(notes), src, sheet=sheet, row=i + 1, group=WELL_GROUPS.get(well, "")))
+    if not out.rows:
+        out.problems.append(("HEADER", "Замеров по скважинам не найдено", src))
+    return out
 
 
 def to_frame(rows: List[Row]) -> pd.DataFrame:
     return pd.DataFrame([[r.well, r.date, r.layer, r.category, r.p_wh, r.excess, r.p_res, r.level, r.note, r.source,
-                          r.length, r.es, r.density] for r in rows], columns=COLUMNS)
+                          r.length, r.es, r.density, r.group] for r in rows], columns=COLUMNS)
+
+
+def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True, whole_rows: bool = False) -> pd.DataFrame:
+    """Объединение источников в одну базу без дублей.
+
+    Порядок `frames` — приоритет: при одном ключе (скважина, день, горизонт) берётся значение из более раннего источника,
+    пустые поля дополняются из следующих. Горизонт сначала дополняется по скважине (`fill_layers`), иначе строка
+    без горизонта не совпала бы с той же строкой из месячного файла. Строки без даты — по скважине и источнику.
+    Счётчики: attrs["replaced"] — строк, слитых с другими (дубли), attrs["layer_*"] — см. `fill_layers`.
+    """
+    parts = []
+    for rank, f in enumerate(frames):
+        if f is None or f.empty:
+            continue
+        g = f.copy()
+        for col in COLUMNS:
+            if col not in g.columns:
+                g[col] = None
+        g = g[COLUMNS].copy()
+        g["_rank"] = rank
+        parts.append(g)
+    if not parts:
+        out = pd.DataFrame(columns=COLUMNS)
+        out.attrs["replaced"] = 0
+        return out
+    out = pd.concat(parts, ignore_index=True)
+    out["Дата"] = pd.to_datetime(out["Дата"], errors="coerce")
+    for col in ("Горизонт", "Примечание", "ГСП"):
+        out[col] = out[col].where(~_blank(out[col]), None)
+    layer_attrs: Dict[str, int] = {}
+    if fill:
+        out = fill_layers(out)
+        layer_attrs = {k: v for k, v in out.attrs.items() if k.startswith("layer_")}
+    key = out["Дата"].dt.strftime("%Y-%m-%d").fillna("без даты:" + out["Источник"].astype(str))
+    out["_k"] = out["Скважина"].astype(str) + "|" + key + "|" + out["Горизонт"].fillna("").astype(str).str.strip()
+    before = len(out)
+    out = out.sort_values("_rank", kind="stable")
+    if whole_rows:      # прежнее поведение: побеждает вся строка приоритетного источника
+        out = out.drop_duplicates("_k", keep="first")
+    else:               # пустые поля дополняются из следующих источников
+        out = out.groupby("_k", sort=False).first().reset_index()
+    out = out[COLUMNS]
+    out = out.sort_values(["Скважина", "Дата"], na_position="last").reset_index(drop=True)
+    out.attrs["replaced"] = before - len(out)
+    out.attrs.update(layer_attrs)
+    return out
 
 
 def merge(old: Optional[pd.DataFrame], new: pd.DataFrame) -> pd.DataFrame:
-    """Новые строки заменяют старые с тем же ключом (скважина + дата + горизонт); строки без даты — по скважине и источнику."""
-    if old is None or old.empty:
-        out = new.copy()
-    else:
-        old = old.copy()
-        for col in COLUMNS:
-            if col not in old.columns:
-                old[col] = None
-        out = pd.concat([old[COLUMNS], new[COLUMNS]], ignore_index=True)
-    out["Дата"] = pd.to_datetime(out["Дата"], errors="coerce")
-    key = out["Дата"].dt.strftime("%Y-%m-%d").fillna("без даты:" + out["Источник"].astype(str))
-    out["_k"] = out["Скважина"].astype(str) + "|" + key + "|" + out["Горизонт"].astype(str)
-    before = len(out)
-    out = out.drop_duplicates("_k", keep="last").drop(columns="_k")
-    out = out.sort_values(["Скважина", "Дата"], na_position="last").reset_index(drop=True)
-    out.attrs["replaced"] = before - len(out)      # сколько строк с тем же ключом заменено новыми (или совпало)
-    return out
+    """Новые строки целиком заменяют старые с тем же ключом (скважина + дата + горизонт), как и раньше."""
+    return combine([new, old], fill=False, whole_rows=True)
 
 
 def _blank(s: pd.Series) -> pd.Series:

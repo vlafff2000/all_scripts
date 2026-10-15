@@ -19,6 +19,54 @@ def _yes(value, default=False) -> bool:
     return str(value).strip().lower() in ("да", "y", "yes", "1", "true")
 
 
+def build(db_path, refs_path, output="Пересчёт_давлений.xlsx", excluded=None, sign="auto", atm=False, avg_path=None,
+          wanted=None, log=print):
+    """Пересчёт и запись книги: лист «Пересчёт», include-таблицы по флажкам `wanted`, лист «Сводка». Возвращает имя файла.
+
+    Вызывается и из модуля «База давлений по замерам» (опция «сразу пересчитать»), поэтому без вопросов к пользователю.
+    """
+    excluded = pc.DEFAULT_EXCLUDED if excluded is None else excluded
+    wanted = wanted or {"include_среднее_пластовое": True, "include_эксплуатационные": True,
+                        "include_набл_с_пересчётом": True, "include_набл_без_пересчёта": False}
+    refs = pc.read_refs(refs_path)
+    log("📚 Справочники: альтитуд %d, отметок перфорации %d" % (len(refs.altitude), len(refs.perf_mark)))
+    db = pc.read_measurements(db_path)
+    log("📄 Замеров в базе: %d" % len(db))
+    res = pc.recalc(db, refs, excluded, sign, atm)
+    stat = res["Способ расчёта"].value_counts()
+    for how, n in stat.items():
+        log("   %-45s %d" % (how, n))
+    missing = sorted(set(res.loc[res["Способ расчёта"] == pc.M_NO_ALT, "Скважина"]))
+    if missing:
+        log("⚠️ Нет альтитуды: %s" % ", ".join(map(str, missing[:30])))
+    missing = sorted(set(res.loc[res["Способ расчёта"] == pc.M_NO_PERF, "Скважина"]))
+    if missing:
+        log("⚠️ Нет отметки перфорации: %s" % ", ".join(map(str, missing[:30])))
+
+    avg = None
+    if avg_path:
+        avg = pc.read_average(avg_path)
+        log("📈 Среднее пластовое из файла: %d дат" % len(avg))
+        if avg.empty:
+            log("⚠️ В файле не найден столбец со словом «среднее» и датами в первом столбце; среднее будет посчитано")
+            avg = None
+    elif wanted.get("include_среднее_пластовое", True):
+        log("ℹ️ Файл со средним пластовым не указан: среднее считается по Рпл эксплуатационных скважин")
+    inc = pc.include_frames(res, atm, avg)
+    out = (output or "").strip() or "Пересчёт_давлений.xlsx"
+    if not out.lower().endswith(".xlsx"):
+        out += ".xlsx"
+    with pd.ExcelWriter(out, engine="openpyxl") as xw:
+        res.to_excel(xw, sheet_name="Пересчёт", index=False)
+        for name, frame in inc.items():
+            if wanted.get(name, False):
+                frame.to_excel(xw, sheet_name=name[:31], index=False)
+                log("📝 %s: %d строк" % (name, len(frame)))
+        pd.DataFrame({"Способ расчёта": stat.index, "Строк": stat.values}).to_excel(xw, sheet_name="Сводка", index=False)
+    log("✅ %s" % out)
+    return out
+
+
 def main(argv=None):
     args = параметры.parse(
         "Пересчёт давлений на верх перфораций", argv,
@@ -43,47 +91,11 @@ def main(argv=None):
         return 1
     sign = "as_is" if str(args.level_sign or "auto").strip() == "as_is" else "auto"
     atm = _yes(args.add_atm)
-
-    refs = pc.read_refs(refs_path)
-    print("📚 Справочники: альтитуд %d, отметок перфорации %d" % (len(refs.altitude), len(refs.perf_mark)))
-    db = pc.read_measurements(db_path)
-    print("📄 Замеров в базе: %d" % len(db))
-    res = pc.recalc(db, refs, excluded, sign, atm)
-    stat = res["Способ расчёта"].value_counts()
-    for how, n in stat.items():
-        print("   %-45s %d" % (how, n))
-    missing = sorted(set(res.loc[res["Способ расчёта"] == pc.M_NO_ALT, "Скважина"]))
-    if missing:
-        print("⚠️ Нет альтитуды: %s" % ", ".join(map(str, missing[:30])))
-    missing = sorted(set(res.loc[res["Способ расчёта"] == pc.M_NO_PERF, "Скважина"]))
-    if missing:
-        print("⚠️ Нет отметки перфорации: %s" % ", ".join(map(str, missing[:30])))
-
-    avg = None
     avg_path = параметры.ask_path("Исходники по эксплуатационным (Р среднее по ПХГ), Enter - посчитать", args.avg_file if args.avg_file is not None else "")
-    if avg_path:
-        avg = pc.read_average(avg_path)
-        print("📈 Среднее пластовое из файла: %d дат" % len(avg))
-        if avg.empty:
-            print("⚠️ В файле не найден столбец со словом «среднее» и датами в первом столбце; среднее будет посчитано")
-            avg = None
-    elif _yes(args.inc_mean, True):
-        print("ℹ️ Файл со средним пластовым не указан: среднее считается по Рпл эксплуатационных скважин")
-    inc = pc.include_frames(res, atm, avg)
     wanted = {"include_среднее_пластовое": _yes(args.inc_mean, True), "include_эксплуатационные": _yes(args.inc_exploit, True),
               "include_набл_с_пересчётом": _yes(args.inc_obs, True),
               "include_набл_без_пересчёта": _yes(args.inc_obs_raw, False)}
-    out = (args.output or "").strip() or "Пересчёт_давлений.xlsx"
-    if not out.lower().endswith(".xlsx"):
-        out += ".xlsx"
-    with pd.ExcelWriter(out, engine="openpyxl") as xw:
-        res.to_excel(xw, sheet_name="Пересчёт", index=False)
-        for name, frame in inc.items():
-            if wanted[name]:
-                frame.to_excel(xw, sheet_name=name[:31], index=False)
-                print("📝 %s: %d строк" % (name, len(frame)))
-        pd.DataFrame({"Способ расчёта": stat.index, "Строк": stat.values}).to_excel(xw, sheet_name="Сводка", index=False)
-    print("✅ %s" % out)
+    build(db_path, refs_path, args.output or "Пересчёт_давлений.xlsx", excluded, sign, atm, avg_path or None, wanted)
     return 0
 
 

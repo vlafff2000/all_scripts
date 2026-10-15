@@ -169,3 +169,87 @@ def test_layer_fill_in_module_run(tmp_path):
     db = pd.read_excel(out / "db.xlsx", sheet_name="Данные")
     assert db["Горизонт"].notna().all()
     assert set(db.loc[db["Скважина"] == 56, "Горизонт"]) == {"Щигровский"}
+
+
+def make_weekly(path):
+    """Итоговая таблица в формате образца: дата в A, пары «Р устье» / «Р пл.» под «Скв.№ NNN»."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "База данных"
+    ws.append(["Число, месяц, год", "Скв.№ 56", None, "Скв.№ 127", None, "Р среднее по ПХГ"])
+    ws.append([None, "Р устье", "Р пл.", "Р устье", "Р пл.", None])
+    ws.append([dt.datetime(2026, 9, 14), 89.5, 95.1, None, None, 93.0])
+    ws.append([dt.datetime(2026, 9, 25), 96.6, 102.6, "г-в", 101.0, 93.5])
+    ws.append([None, None, None, None, None, None])
+    wb.save(path)
+
+
+def test_group_name_scheme():
+    assert замеры.group_name("ГСП 1") == замеры.group_name("гсп-1") == замеры.group_name("ГСП1") == "ГСП-1"
+    assert замеры.group_name("Щигровский") == "" and замеры.group_name(None) == ""
+
+
+def test_parse_weekly_pairs_and_groups(tmp_path):
+    f = tmp_path / "Итоговая таблица.xlsx"
+    make_weekly(f)
+    parsed = замеры.parse_weekly(str(f))
+    rows = {(r.well, r.date.day): r for r in parsed.rows}
+    assert rows[(56, 25)].p_wh == 96.6 and rows[(56, 25)].p_res == 102.6
+    assert rows[(56, 25)].group == "ГСП-1" and rows[(56, 25)].category == "Эксплуатационные"
+    # текст в ячейке Руст — в примечание, Рпл на той же строке остаётся
+    assert rows[(127, 25)].p_wh is None and rows[(127, 25)].p_res == 101.0 and "г-в" in rows[(127, 25)].note
+    assert (56, 14) in rows and len(parsed.rows) == 3
+
+
+def test_combine_priority_no_duplicates():
+    monthly = pd.DataFrame([[56, dt.datetime(2026, 9, 25), "Щигровский", "Эксплуатационные", 96.6, None, None, None, "",
+                             "сентябрь.xlsx", None, None, None, "ГСП-1"]], columns=замеры.COLUMNS)
+    weekly = pd.DataFrame([[56, dt.datetime(2026, 9, 25), None, "Эксплуатационные", 96.0, None, 102.0, None, "",
+                            "Итоговая.xlsx", None, None, None, None],
+                           [56, dt.datetime(2026, 9, 14), None, "Эксплуатационные", 89.5, None, 95.1, None, "",
+                            "Итоговая.xlsx", None, None, None, None]], columns=замеры.COLUMNS)
+    data = замеры.combine([monthly, weekly])
+    assert len(data) == 2 and data.attrs["replaced"] == 1
+    sep = data[data["Дата"] == pd.Timestamp(2026, 9, 25)].iloc[0]
+    # месячный отчёт главнее; пустой Рпл дополнен из еженедельного файла, горизонт — из месячного
+    assert sep["Руст"] == 96.6 and sep["Рпл"] == 102.0 and sep["Горизонт"] == "Щигровский" and sep["ГСП"] == "ГСП-1"
+    assert data.loc[data["Дата"] == pd.Timestamp(2026, 9, 14), "Горизонт"].iloc[0] == "Щигровский"
+
+
+def test_run_module_weekly_and_recalc(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    make_book(src / "сентябрь.xlsx")
+    weekly = tmp_path / "Итоговая таблица.xlsx"
+    make_weekly(weekly)
+    refs = tmp_path / "refs.xlsx"
+    rb = openpyxl.Workbook()
+    alt = rb.active
+    alt.title = "Альтитуды"
+    alt.append(["Скважина", "Z"])
+    alt.append([56, 120.0])
+    perf = rb.create_sheet("Перфорации")
+    perf.append(["Скважина", "Абсолютная отметка верха перфораций"])
+    perf.append([56, -600.0])
+    rb.save(refs)
+    out = tmp_path / "out"
+    run_module("База_давлений_по_замерам", {"folder": str(src), "weekly": str(weekly), "recalc": "1", "refs": str(refs),
+                                             "output": "db.xlsx"}, out)
+    db = pd.read_excel(out / "db.xlsx", sheet_name="Данные")
+    w56 = db[db["Скважина"] == 56]
+    assert sorted(w56["Дата"].dt.day) == [14, 25] and w56["ГСП"].eq("ГСП-1").all()   # без дублей 25-го
+    assert (out / "Пересчёт_давлений.xlsx").exists()
+    inc = pd.read_excel(out / "Пересчёт_давлений.xlsx", sheet_name="include_эксплуатационные")
+    assert list(inc.columns) == ["Скважина", "Дата", "Давление, бар", "ГСП"]
+    assert inc.loc[inc["Скважина"] == 56, "ГСП"].eq("ГСП-1").all()
+    assert inc.loc[inc["Скважина"] != 56, "ГСП"].isna().all()     # 127 и 82 в справочнике нет: пусто, а не ноль
+
+
+def test_merge_replaces_whole_row_not_fields():
+    old = pd.DataFrame([[56, dt.datetime(2026, 9, 25), "Щигровский", "Эксплуатационные", 96.6, None, 102.6, None, "",
+                         "старый.xlsx", None, None, None, "ГСП-1"]], columns=замеры.COLUMNS)
+    new = pd.DataFrame([[56, dt.datetime(2026, 9, 25), "Щигровский", "Эксплуатационные", None, None, 102.0, None,
+                         "Руст: г-в", "новый.xlsx", None, None, None, "ГСП-1"]], columns=замеры.COLUMNS)
+    data = замеры.merge(old, new)
+    assert len(data) == 1 and pd.isna(data.loc[0, "Руст"])   # старое Руст не воскресает
+    assert data.loc[0, "Источник"] == "новый.xlsx"
