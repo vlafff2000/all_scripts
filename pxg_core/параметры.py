@@ -22,6 +22,16 @@ def parse(description: str, argv: Optional[Sequence[str]] = None, **flags: str) 
     return parser(description, **flags).parse_args(argv)
 
 
+def yes(text: str) -> bool:
+    """Логический параметр из командной строки: да/нет, 1/0, true/false, y/n. Пусто — нет."""
+    value = (text or "").strip().lower()
+    if value in ("да", "д", "1", "true", "y", "yes"):
+        return True
+    if value in ("нет", "н", "0", "false", "n", "no", ""):
+        return False
+    raise argparse.ArgumentTypeError("ожидалось да или нет: %s" % text)
+
+
 def clean_path(text: str) -> str:
     """Путь из текста: без кавычек и пробелов по краям (так его вставляет терминал при перетаскивании)."""
     return (text or "").strip().strip('"').strip("'").strip()
