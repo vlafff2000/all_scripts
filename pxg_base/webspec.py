@@ -114,15 +114,6 @@ def _vlookup_stdin(v: Dict[str, str]) -> str:
     return "".join(x.strip() + "\n" for x in lines)
 
 
-_FLOOR = ("Щигровский", "контрольные")
-_LEVEL_PARAMS = (
-    Param("input_dir", "Папка с Excel-файлами", "folder", required=True,
-          hint="Таблицы уровней и давлений, которые нужно преобразовать"),
-    Param("recursive", "Искать и в подпапках", "bool", default="1"),
-    Param("output", "Имя итогового файла", default="результаты.xlsx"),
-)
-_LEVEL_ENV = (("input_dir", "PXG_INPUT_DIR"), ("recursive", "PXG_RECURSIVE"), ("output", "PXG_OUTPUT"))
-
 def _history_stdin(v: Dict[str, str]) -> str:
     """Ответы модулю «Создание schedule по поскважинной истории» в порядке его вопросов: файл дат — только при включённом чекбоксе."""
     by_dates = (v.get("by_dates") or "").strip().lower() in ("1", "true", "y")
@@ -253,37 +244,6 @@ SPECS: List[WebSpec] = [
         ),
         args=(("folder", "folder"), ("db", "db"), ("excess_limit", "excess-limit"), ("output", "output")),
         note="Три замера в базе: Руст, Рпл и уровень жидкости; плюс избыточное давление и примечание с текстом из ячейки («г-в», «н.д.»).",
-    ),
-    WebSpec(
-        module="Создание_базы_уровней_и_давлений_Щигровский_горизонт",
-        params=_LEVEL_PARAMS + (
-            Param("simple", "Простой формат (4 столбца без пересчётов)", "bool", default=""),
-            Param("altitude", "Файл с альтитудами", "file", hint="Необязательно"),
-            Param("perforation", "Файл с верхними перфорациями", "file", hint="Необязательно"),
-        ),
-        env=_LEVEL_ENV + (("simple", "PXG_SIMPLE"),),
-        answers=("altitude", "perforation"),
-    ),
-    WebSpec(
-        module="Создание_базы_уровней_и_давлений_контрольные_горизонты",
-        params=_LEVEL_PARAMS,
-        env=_LEVEL_ENV,
-    ),
-    WebSpec(
-        module="Итоговая_таблица_давлений_2006_2025",
-        params=(Param("file", "Файл с давлениями", "file", required=True, hint="Таблица: дата, затем пары «устьевое/пластовое» по скважинам"),),
-        answers=("file",),
-    ),
-    WebSpec(
-        module="Выделение_Рмг_по_номерам_столбцов",
-        params=(EXCEL_PATHS, Param("columns", "Номера столбцов", required=True,
-                                   hint="Через пробел, нумерация с 0 по первому файлу (например 0 2 5 10). Не знаете номеров — возьмите вариант «по названию»")),
-        answers=("paths", "columns"),
-    ),
-    WebSpec(
-        module="Выделение_Рмг_по_названиям_столбцов",
-        params=(EXCEL_PATHS,),
-        answers=("paths",),
     ),
     WebSpec(
         module="Сопоставление_таблиц_ВПР",

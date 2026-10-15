@@ -17,7 +17,7 @@ from starlette.testclient import TestClient  # noqa: E402
 from pxg_base.api import app  # noqa: E402
 from pxg_base.registry import MODULES  # noqa: E402
 from pxg_base.testdata.flows import make_flow_tree  # noqa: E402
-from pxg_base.webspec import SPECS, get  # noqa: E402
+from pxg_base.webspec import SPECS  # noqa: E402
 
 
 def run_module(module, params, out_dir, timeout=180):
@@ -57,16 +57,6 @@ def test_vlookup_single_and_composite_key(tmp_path):
                        "pairs": "Год = Y", "columns": "B", "output": "r2.xlsx"}, tmp_path / "o2")
     df = pd.read_excel(tmp_path / "o2" / "r2.xlsx")
     assert df["B"].notna().sum() == 2 and df.loc[df["Скв"] == 2, "B"].iloc[0] == 20
-
-
-def test_pressure_table(tmp_path):
-    rows = [[None, "Скв. №56", None, "Скв. №83", None, None], [None, "Ру", "Рпл", "Ру", "Рпл", "Рср"],
-            ["2020-01-01", 1, 2, 3, 4, 5], ["2020-01-02", 6, 7, 8, 9, 10]]
-    src = tmp_path / "p.xlsx"
-    pd.DataFrame(rows).to_excel(src, header=False, index=False)
-    run_module("Итоговая_таблица_давлений_2006_2025", {"file": str(src)}, tmp_path / "o")
-    df = pd.read_excel(tmp_path / "o" / "БД_давления_2006-2025.xlsx")
-    assert len(df) == 4 and set(df["Номер ГСП"]) == {1, 2}
 
 
 def test_interannular_analysis_and_collection(tmp_path):

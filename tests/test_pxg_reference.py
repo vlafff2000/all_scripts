@@ -1,5 +1,5 @@
 """Тесты-эталоны: фиксируют нынешний результат модулей «Базы ПХГ», у которых раньше не было тестов
-(ГДИ, обе базы уровней и давлений, журнал 2019–2024, Рмг). Входные таблицы собираются в тесте, значения проверены
+(ГДИ, журнал 2019–2024). Входные таблицы собираются в тесте, значения проверены
 по результату запуска из формы; если изменение кода сдвинуло число, надо разобраться, а не подгонять тест."""
 import datetime as dt
 import importlib
@@ -22,39 +22,6 @@ D = dt.datetime
 
 def read_all(path):
     return pd.read_excel(path, sheet_name=None)
-
-
-# ---------- Выделение Рмг ----------
-
-def _rmg_book(path):
-    with pd.ExcelWriter(path) as w:
-        pd.DataFrame([[None, None, None], ["Дата", "Рпл", "ГИС Касимов"], ["2020-01-01", 1, 5.5], ["2020-02-01", 2, None],
-                      ["2020-03-01", 3, 7.5]]).to_excel(w, sheet_name="Л1", header=False, index=False)
-        pd.DataFrame([["Дата", "X"], [1, 2]]).to_excel(w, sheet_name="Л2", header=False, index=False)
-
-
-def test_rmg_by_column_name(tmp_path):
-    src = tmp_path / "a.xlsx"
-    _rmg_book(src)
-    job = run_module("Выделение_Рмг_по_названиям_столбцов", {"paths": str(src)}, tmp_path / "o")
-    assert job["files"] == ["ГИС_Касимов_данные.xlsx"]
-    df = pd.read_excel(tmp_path / "o" / "ГИС_Касимов_данные.xlsx")
-    assert list(df.columns) == ["Дата", "ГИС_Касимов", "Источник_файл", "Источник_лист"]
-    # пустое значение пропущено, лист без столбца «ГИС Касимов» пропущен
-    assert df["Дата"].tolist() == ["2020-01-01", "2020-03-01"]
-    assert df["ГИС_Касимов"].tolist() == [5.5, 7.5]
-    assert set(df["Источник_лист"]) == {"Л1"}
-
-
-def test_rmg_by_column_number(tmp_path):
-    src = tmp_path / "a.xlsx"
-    _rmg_book(src)
-    run_module("Выделение_Рмг_по_номерам_столбцов", {"paths": str(src), "columns": "0 2"}, tmp_path / "o")
-    df = pd.read_excel(tmp_path / "o" / "Универсальная_выборка_данных.xlsx")
-    assert list(df.columns) == ["Дата", "ГИС Касимов", "Источник_файл", "Источник_лист"]
-    assert len(df) == 4  # три строки первого листа (пустое значение не отбрасывает строку) и «1» со второго листа
-    assert df["ГИС Касимов"].isna().tolist() == [False, True, False, True]
-    assert df["Источник_лист"].tolist() == ["Л1", "Л1", "Л1", "Л2"]
 
 
 # ---------- Журнал отбора и закачки 2019–2024 ----------
@@ -99,105 +66,6 @@ def test_journal_daily_rates_and_cumulative(tmp_path):
     assert inj.loc["2020-02-02", "gas_production_thousand_m3"] == 60 and inj.loc["2020-02-02", "gas_rate_thousand_m3_per_day"] == 0
     assert inj.loc["2020-02-02", "cumulative_monthly_million_m3"] == pytest.approx(0.11)
     assert zakachka["gas_production_thousand_m3"].sum() == 110
-
-
-# ---------- Базы уровней и давлений ----------
-
-def _levels_folder(folder):
-    folder.mkdir()
-    new = [["Дата замера", "Скв. 101", None, "Скв. 102", None],
-           [None, "Нуст,м", "Рпл привед", "Нуст,м", "Рпл привед"],
-           [D(2020, 1, 1), 12.5, 8.1, "г-в", 7.9],
-           [D(2020, 2, 1), "13,5", "нет данных", 20, None],
-           [D(2020, 3, 1), None, None, None, None]]
-    pd.DataFrame(new).to_excel(folder / "Данные - Тульский горизонт.xlsx", header=False, index=False)
-    old = [[None, "132", None, "135", None],
-           [None, "Дата", "Нуст,м", "Дата", "Нуст,м"],
-           [1, D(2019, 5, 1), 30, D(2019, 5, 2), 40],
-           [2, D(2019, 6, 1), 31, D(2019, 6, 2), "н/д"],
-           [3, D(2019, 7, 1), 32, None, None]]
-    pd.DataFrame(old).to_excel(folder / "Замеры Окский горизонт.xlsx", header=False, index=False)
-
-
-def test_control_horizons_both_formats(tmp_path):
-    _levels_folder(tmp_path / "in")
-    params = {"input_dir": str(tmp_path / "in"), "recursive": "1", "output": "res.xlsx"}
-    job = run_module("Создание_базы_уровней_и_давлений_контрольные_горизонты", params, tmp_path / "o")
-    assert job["files"] == ["res.xlsx"]
-    sheets = read_all(tmp_path / "o" / "res.xlsx")
-    assert list(sheets) == ["Данные", "Статистика", "Скважины", "Файлы"]
-    df = sheets["Данные"]
-    # порядок столбцов в этом модуле зависит от запуска (набор имён из множества), поэтому сравниваем наборы
-    assert set(df.columns) == {"Скважина", "Горизонт", "Источник_файл", "Дата", "Уровень жидкости", "Рпл привед"}
-    assert len(df) == 9
-    got = {(str(r["Скважина"]), r["Дата"].strftime("%Y-%m-%d")): (r["Уровень жидкости"], r["Рпл привед"]) for _, r in df.iterrows()}
-    assert got[("132", "2019-05-01")][0] == 30 and pd.isna(got[("132", "2019-05-01")][1])  # старый формат: пары «дата, Нуст»
-    assert pd.isna(got[("135", "2019-06-02")][0])  # «н/д» не превращается в число
-    assert got[("101", "2020-01-01")] == (12.5, 8.1)  # новый формат: «уровень, Рпл» на скважину
-    assert pd.isna(got[("102", "2020-01-01")][0]) and got[("102", "2020-01-01")][1] == 7.9  # «г-в» убран
-    assert got[("101", "2020-02-01")][0] == 13.5 and pd.isna(got[("101", "2020-02-01")][1])  # «13,5» с запятой читается
-    assert ("101", "2020-03-01") not in got  # строка без значений не попадает в базу
-    assert df["Скважина"].astype(str).nunique() == 4
-    stat = dict(zip(sheets["Статистика"]["Параметр"], sheets["Статистика"]["Значение"]))
-    assert stat["Всего записей"] == 9 and stat["Уникальных скважин"] == 4 and stat["Источников (файлов)"] == 2
-    files = dict(zip(sheets["Файлы"]["Файл"], sheets["Файлы"]["Количество записей"]))
-    assert files == {"Замеры Окский горизонт.xlsx": 5, "Данные - Тульский горизонт.xlsx": 4}
-
-
-def test_shchigrovsky_enrichment(tmp_path):
-    """Скважина 4 — из списка «Руст», 1 — из списка избыточного давления, 5 — отрицательное значение (уровень), 77 — в списках нет."""
-    folder = tmp_path / "in"
-    folder.mkdir()
-    rows = [["Дата замера", "Скв. 4", None, "Скв. 1", None, "Скв. 5", None, "Скв. 77", None],
-            [None] + ["Руст/Уровень", "Рпл привед"] * 4,
-            [D(2021, 1, 1), -25.0, 100.0, 12.0, 110.0, -300.0, 120.0, 5.0, 90.0],
-            [D(2021, 2, 1), 30.0, 150.0, "н/д", 111.0, -250.0, 121.0, None, 91.0]]
-    pd.DataFrame(rows).to_excel(folder / "Щигровский горизонт.xlsx", header=False, index=False)
-    pd.DataFrame({"Скважина": ["1", "5"], "Альтитуда": [100.0, 50.0]}).to_excel(tmp_path / "alt.xlsx", index=False)
-    pd.DataFrame([[1, 1000], [5, 900], [4, 800]]).to_excel(tmp_path / "perf.xlsx", header=False, index=False)
-    mod = "Создание_базы_уровней_и_давлений_Щигровский_горизонт"
-    base = {"input_dir": str(folder), "recursive": "1", "output": "res.xlsx"}
-
-    run_module(mod, dict(base, altitude=str(tmp_path / "alt.xlsx"), perforation=str(tmp_path / "perf.xlsx")), tmp_path / "o")
-    sheets = read_all(tmp_path / "o" / "res.xlsx")
-    assert list(sheets) == ["Данные", "Статистика", "Скважины", "Файлы"]
-    df = sheets["Данные"]
-    assert len(df) == 8
-    assert set(df.columns) == {"Скважина", "Дата", "Горизонт", "Источник_файл", "Рпл привед", "Уровень жидкости, -м", "Руст, кгс/см2", "eS",
-                                "Избыточное давление, кгс/см2", "альтитуда, м", "плотность воды, г/см3", "Верхняя перфорация,м",
-                                "Рпл пересчет на верх перфораций, кгс/см2", "Рпл пересчет на верх перфораций, бар"}
-
-    def row(well, day):
-        part = df[(df["Скважина"].astype(str) == well) & (pd.to_datetime(df["Дата"]).dt.strftime("%Y-%m-%d") == day)]
-        assert len(part) == 1
-        return part.iloc[0]
-
-    r4 = row("4", "2021-01-01")  # Руст = |значение|, eS = Рпл / Руст
-    assert r4["Руст, кгс/см2"] == 25 and r4["eS"] == pytest.approx(4.0) and pd.isna(r4["альтитуда, м"])
-    assert r4["Верхняя перфорация,м"] == 800 and pd.isna(r4["Рпл пересчет на верх перфораций, кгс/см2"])
-    assert row("4", "2021-02-01")["eS"] == pytest.approx(5.0)
-    r1 = row("1", "2021-01-01")  # положительное значение — избыточное давление
-    assert r1["Избыточное давление, кгс/см2"] == 12 and pd.isna(r1["Уровень жидкости, -м"])
-    assert r1["плотность воды, г/см3"] == pytest.approx(10 * (110 - 12) / 770)
-    assert r1["Рпл пересчет на верх перфораций, кгс/см2"] == pytest.approx((1000 + 100) * (10 * 98 / 770) / 10 + 12)
-    assert r1["Рпл пересчет на верх перфораций, бар"] == pytest.approx(r1["Рпл пересчет на верх перфораций, кгс/см2"] * 0.980665)
-    assert pd.isna(row("1", "2021-02-01")["Избыточное давление, кгс/см2"])  # «н/д» отброшено
-    r5 = row("5", "2021-01-01")  # отрицательное значение — уровень жидкости (по модулю)
-    assert r5["Уровень жидкости, -м"] == 300 and pd.isna(r5["Руст, кгс/см2"])
-    assert r5["плотность воды, г/см3"] == pytest.approx(10 * 120 / (-300 + 670 + 50))
-    assert r5["Рпл пересчет на верх перфораций, кгс/см2"] == pytest.approx(185.714286, rel=1e-6)
-    r77 = row("77", "2021-01-01")  # скважины нет в списках: только исходное давление
-    assert r77["Рпл привед"] == 90 and r77[["Уровень жидкости, -м", "Руст, кгс/см2", "eS", "Избыточное давление, кгс/см2"]].isna().all()
-
-    run_module(mod, dict(base, simple="1"), tmp_path / "o2")
-    simple = read_all(tmp_path / "o2" / "res.xlsx")
-    assert list(simple) == ["Данные"]
-    sdf = simple["Данные"]
-    assert list(sdf.columns) == ["скважина", "дата", "замер на устье", "пластовое давление"]
-    assert len(sdf) == 8
-    first = sdf.iloc[0]
-    assert (str(first["скважина"]), first["замер на устье"], first["пластовое давление"]) == ("4", -25.0, 100)
-    assert sdf["замер на устье"].isna().sum() == 2  # «н/д» и пустая ячейка
 
 
 # ---------- ГДИ в единую базу ----------
