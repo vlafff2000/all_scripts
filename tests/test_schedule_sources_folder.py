@@ -9,7 +9,7 @@ from schedule_pxg import sources  # noqa: E402
 
 
 def test_detect_flow_files_by_name(tmp_path):
-    (tmp_path / "БД_расходы_нормированная_ПЗРГ.xlsx").write_bytes(b"x")
+    (tmp_path / "БД_расходы_2024.xlsx").write_bytes(b"x")
     (tmp_path / "БД_расходы.xlsx").write_bytes(b"x")
     (tmp_path / "БД_давлений_по_замерам.xlsx").write_bytes(b"x")
     (tmp_path / "~$БД_расходы.xlsx").write_bytes(b"x")
