@@ -131,3 +131,41 @@ def test_combined_well_measurement_is_written_to_both_wells(tmp_path):
     assert got == {54: (96.6, 102.6), 80: (96.6, 102.6), 56: (97.0, 103.0)}
     assert any("54/80" in text and "54, 80" in text for _, text, _ in parsed.problems)
     assert замеры._combined_wells("54 / 80") == [54, 80] and замеры._combined_wells(54) == [] and замеры._combined_wells("54") == []
+
+
+def test_layer_taken_from_latest_year_for_blank_rows(tmp_path):
+    """Горизонт пустой в файле прошлого года: берём соответствие скважина → горизонт из файла последнего года."""
+    old = pd.DataFrame([
+        [56, dt.datetime(2025, 9, 25), "", "Эксплуатационные"],
+        [17, dt.datetime(2025, 9, 24), "Окский", "Наблюдательные"],
+        [99, dt.datetime(2025, 9, 24), "", "Наблюдательные"],
+    ], columns=["Скважина", "Дата", "Горизонт", "Категория"])
+    new = pd.DataFrame([
+        [56, dt.datetime(2026, 9, 25), "Щигровский", "Эксплуатационные"],
+        [17, dt.datetime(2026, 9, 24), "Щигровский", "Наблюдательные"],
+    ], columns=["Скважина", "Дата", "Горизонт", "Категория"])
+    data = замеры.fill_layers(замеры.merge(old, new.reindex(columns=замеры.COLUMNS)))
+    got = data.set_index(["Скважина", "Дата"])["Горизонт"]
+    assert got[(56, dt.datetime(2025, 9, 25))] == "Щигровский"          # пустая строка прошлого года заполнена
+    assert got[(17, dt.datetime(2025, 9, 24))] == "Окский"              # уже проставленное не переписано
+    assert data.attrs["layer_filled"] == 1 and data.attrs["layer_conflicts"] == 1
+    assert data.attrs["layer_unresolved"] == 1                          # скважина 99 нигде не имеет горизонта
+
+
+def test_layer_fill_in_module_run(tmp_path):
+    """Два файла: в старом горизонт пуст, в новом проставлен — база получает горизонт во всех строках."""
+    src = tmp_path / "src"
+    src.mkdir()
+    make_book(src / "сентябрь.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "Результаты замеров по скважинам Касимовского ПХГ за август 2026 года."
+    ws.append(HEAD)
+    ws.append(["Эксплуатационные", None, None, None, None, None, None])
+    ws.append([1, 56, None, dt.datetime(2026, 8, 25), 95.0, None, 101.0])
+    wb.save(src / "август.xlsx")
+    out = tmp_path / "out"
+    run_module("База_давлений_по_замерам", {"folder": str(src), "output": "db.xlsx"}, out)
+    db = pd.read_excel(out / "db.xlsx", sheet_name="Данные")
+    assert db["Горизонт"].notna().all()
+    assert set(db.loc[db["Скважина"] == 56, "Горизонт"]) == {"Щигровский"}

@@ -66,7 +66,7 @@ def _check_rows(rep: Report, path: str, parsed) -> None:
         if r.note:
             rep.warn("NUM", "Текст вместо числа, в базе пусто, текст в «Примечании»: %s" % r.note, **where)
         if not r.layer:
-            rep.warn("HEADER", "Не указан пласт (горизонт)", **where)
+            rep.warn("HEADER", "Не указан пласт (горизонт): если в других файлах горизонт этой скважины есть, он подставится в базу", **where)
         if r.excess is not None:
             rep.note("RANGE", "Малое Руст принято как избыточное давление (категория «%s»)" % r.category,
                      value=r.excess, **where)
