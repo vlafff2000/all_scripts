@@ -272,7 +272,7 @@ def make_app(mode: str, title: str, filt: str, start: str, result: dict, done: t
 
     async def page(request: Request) -> HTMLResponse:
         config = {"mode": mode, "title": title, "filter": filt, "start": start}
-        html = PAGE.replace("__CONFIG__", json.dumps(config, ensure_ascii=False))
+        html = PAGE.replace("__CONFIG__", _config_json(config))
         return HTMLResponse(html)
 
     return Starlette(routes=[Route("/", page), *_answer_routes(result, done), *fs_browse.routes()])
