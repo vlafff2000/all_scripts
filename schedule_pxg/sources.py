@@ -59,7 +59,9 @@ def detect_flow_files(folder: str) -> List[str]:
         low = name.lower()
         if low.endswith((".xlsx", ".xlsm")) and not name.startswith("~$") and "бд" in low and "расход" in low:
             out.append(os.path.join(folder, name))
-    return out
+    # нормированная база — итог Базы ПХГ; рядом с ней исходная берётся не будет, иначе строки задвоятся
+    normalized = [x for x in out if "нормирован" in os.path.basename(x).lower()]
+    return normalized or out
 
 
 def set_groups(p: Project, mode: str, path: str = "", template: Optional[dict] = None) -> None:

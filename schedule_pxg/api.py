@@ -779,7 +779,11 @@ async def sources_folder(request: Request):
     found = sources.detect_flow_files(folder)
     if not found:
         return _err("В папке нет базы расходов (xlsx с «бд» и «расход» в имени)")
-    sources.set_flows(p, found)
+    cur = sources.flows(p)                     # шаблон и вид, которые задал пользователь, сохраняем
+    try:
+        sources.set_flows(p, found, cur.get("template") or "", cur.get("kind_default") or "")
+    except ValueError as e:
+        return _err(str(e))
     p.save(FOLDER)
     return JSONResponse({"found": [os.path.basename(x) for x in found], **_sources_view(p)})
 
