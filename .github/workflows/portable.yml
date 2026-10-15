@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
       - name: Build portable folder (own Python, no install needed)
         run: python tools/build_portable.py ${{ matrix.target }}
       - name: Run from the unpacked archive on generated source files

@@ -3,6 +3,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      all_pythons:
+        description: 'Дополнительно 3.12 и 3.14 (информационно; на РЕД ОС 7.3 работает только 3.13)'
+        type: boolean
+        default: false
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -11,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.11', '3.14']
+        python: ${{ fromJSON(inputs.all_pythons && '["3.12","3.13","3.14"]' || '["3.13"]') }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4

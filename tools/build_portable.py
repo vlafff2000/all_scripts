@@ -1,4 +1,4 @@
-"""Build a portable «База ПХГ» folder: its own CPython (3.14 for Windows, 3.13 for Linux) + the newest libraries that exist for it + the application.
+"""Build a portable «База ПХГ» folder: its own CPython (3.13 for Windows and Linux) + the newest libraries that exist for it + the application.
 
     python tools/build_portable.py windows   ->  dist/PXG_Base_portable_windows_x64.zip
     python tools/build_portable.py linux     ->  dist/PXG_Base_portable_linux_x64.tar.gz
@@ -9,7 +9,7 @@ requirements.txt (binary wheels for the target platform, nothing is compiled); t
 of the unpacked folder.
 
 Runtimes (python-build-standalone, pinned by sha256; both include tkinter):
-- Windows: CPython 3.14.8 x86_64 msvc, Windows 10 or newer.
+- Windows: CPython 3.13.16 x86_64 msvc, Windows 10 or newer.
 - Linux: CPython 3.13.16 x86_64 gnu (glibc 2.17+, РЕД ОС 7.3); wheels are limited to manylinux2014, so pip takes the newest
   releases that still have them (numpy 2.2, pandas 2.3: later ones need glibc 2.27/2.28, i.e. РЕД ОС 8).
 """
@@ -33,8 +33,8 @@ PBS = ('https://github.com/astral-sh/python-build-standalone/releases/download/2
 
 RUNTIMES = {
     'windows': dict(
-        url=PBS.format('3.14.8', 'x86_64-pc-windows-msvc'), pyver='3.14',
-        sha256='74fd19aac6ef6014be21e5de293c68ae4e54608cf19f6bf559f185943eb35b3a',
+        url=PBS.format('3.13.16', 'x86_64-pc-windows-msvc'), pyver='3.13',
+        sha256='5e100ee3d592ff500f4408a624f054d202e32d9dba8a12b2226bef81083fd778',
         site='Lib/site-packages', platforms=['win_amd64'], exe='python.exe',
         # pip evaluates markers for the build machine, so the Windows-only packages of pywebview are listed here
         extra=['pywebview', 'pythonnet', 'clr-loader', 'cffi', 'pycparser', 'bottle', 'proxy-tools', 'colorama', 'pywin32']),
