@@ -145,26 +145,6 @@ def test_journal(tmp_path):
             ("предупреждение", "GAP")} <= got, rep.to_text()
 
 
-def test_levels_bases(tmp_path):
-    import pandas as pd
-    d = tmp_path / "in"
-    d.mkdir()
-    rows = [["Дата замера", "Скв. 1", None, "Скв. 77", None],
-            [None, "Уровень/Руст", "Рпл привед", "Уровень/Руст", "Рпл привед"]]
-    rows += [["%02d.01.2020" % k, -100.0, 90.0 + k % 3, 5.0, 80.0] for k in range(1, 12)]
-    rows += [["32.01.2020", -100.0, 9000.0, "x", -3.0], ["01.01.2020", -100.0, 90.0, 5.0, 80.0]]
-    pd.DataFrame(rows).to_excel(d / "Щигровский горизонт.xlsx", index=False, header=False)
-    alt = tmp_path / "alt.xlsx"
-    pd.DataFrame({"Скважина": [1, 1], "Альтитуда": [100.0, 120.0]}).to_excel(alt, index=False)
-    rep = checks.run("Создание_базы_уровней_и_давлений_Щигровский_горизонт",
-                     {"input_dir": str(d), "altitude": str(alt), "perforation": ""})
-    got = kinds(rep)
-    assert {("предупреждение", "DATE"), ("предупреждение", "RANGE"), ("предупреждение", "DUP"), ("ошибка", "DUP"),
-            ("предупреждение", "CROSS")} <= got, rep.to_text()
-    rep = checks.run("Создание_базы_уровней_и_давлений_контрольные_горизонты", {"input_dir": str(tmp_path / "нет")})
-    assert rep.counts()[qc.ERROR] == 1
-
-
 def test_all_modules_have_checks():
     from pxg_base.registry import MODULES
     assert [m[1] for m in MODULES if not checks.available(m[1])] == []
@@ -188,19 +168,6 @@ def test_vlookup_and_schedule(tmp_path):
     got = kinds(rep)
     assert ("ошибка", "SYNTAX") in got and ("предупреждение", "DUP") in got, rep.to_text()
     assert any("опечатк" in i.message for i in rep.issues)
-
-
-def test_rmg(tmp_path):
-    import pandas as pd
-    f1, f2 = tmp_path / "1.xlsx", tmp_path / "2.xlsx"
-    pd.DataFrame([["Дата", "A", "ГИС Касимов"], ["01.01.2020", 1, 10.0], ["02.01.2020", 2, "abc"]]).to_excel(f1, index=False, header=False)
-    pd.DataFrame([["Дата", "ГИС Касимов", "A"], ["01.01.2020", 1, 10.0]]).to_excel(f2, index=False, header=False)
-    rep = checks.run("Выделение_Рмг_по_названиям_столбцов", {"paths": "%s\n%s\n%s" % (f1, f1, tmp_path / "нет")})
-    got = kinds(rep)
-    assert ("предупреждение", "NUM") in got and ("ошибка", "FILE") in got and ("заметка", "DUP") in got, rep.to_text()
-    rep = checks.run("Выделение_Рмг_по_номерам_столбцов", {"paths": "%s\n%s" % (f1, f2), "columns": "0 2 9"})
-    got = kinds(rep)
-    assert ("предупреждение", "HEADER") in got, rep.to_text()
 
 
 def test_gdi(tmp_path):

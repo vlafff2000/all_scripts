@@ -1,4 +1,4 @@
-"""Проверки остальных модулей: Рмг, ВПР, schedule, перераспределение отборов, ГДИ."""
+"""Проверки остальных модулей: ВПР, schedule, перераспределение отборов, ГДИ."""
 from __future__ import annotations
 
 import difflib
@@ -41,110 +41,6 @@ def _expand_paths(rep: Report, raw: str) -> List[str]:
     if len(out) < len(files):
         rep.note("DUP", "Повторяющиеся пути: %d (модуль возьмёт каждый файл один раз)" % (len(files) - len(out)))
     return out
-
-
-# ---------------------------------------------------------------------------------------------------------------------
-# Выделение Рмг
-# ---------------------------------------------------------------------------------------------------------------------
-def _first_nonempty_row(raw: pd.DataFrame) -> int:
-    for i in range(len(raw)):
-        if not raw.iloc[i].isnull().all():
-            return i
-    return 0
-
-
-def check_rmg_names(v: Dict[str, str]) -> Report:
-    rep = Report("Выделение Рмг по названиям столбцов")
-    files = _expand_paths(rep, v.get("paths", ""))
-    n_sheets = hit_sheets = 0
-    for path in files:
-        names = qc.excel_sheets(rep, path)
-        if names is None:
-            continue
-        for sheet in names:
-            raw = pd.read_excel(path, sheet_name=sheet, header=None)
-            if raw.empty:
-                continue
-            n_sheets += 1
-            where = dict(file=path, sheet=sheet)
-            h = _first_nonempty_row(raw)
-            cols = [j for j in range(raw.shape[1]) if any(
-                pd.notna(raw.iat[r, j]) and "ГИС Касимов" in str(raw.iat[r, j]) for r in range(h, min(h + 5, len(raw))))]
-            if not cols:
-                rep.note("HEADER", "Столбец «ГИС Касимов» в первых 5 строках заголовка не найден: лист будет пропущен", **where)
-                continue
-            hit_sheets += 1
-            col = cols[0]
-            if len(cols) > 1:
-                rep.warn("HEADER", "Столбцов «ГИС Касимов» несколько (%s): будет взят первый" % ", ".join(map(str, cols)), **where)
-            found_row = next(r for r in range(h, min(h + 5, len(raw))) if pd.notna(raw.iat[r, col]) and "ГИС Касимов" in str(raw.iat[r, col]))
-            if found_row > h:
-                rep.warn("HEADER", "Заголовок найден в строке %d, а данные модуль берёт с %d: подписи шапки попадут в данные" % (found_row + 1, h + 2), **where)
-            data = raw.iloc[h + 1:, [0, col]].dropna(subset=[raw.columns[col]])
-            dates = [qc.parse_date(x) for x in data.iloc[:, 0]]
-            bad = sum(1 for d, x in zip(dates, data.iloc[:, 0]) if d is None)
-            if bad:
-                rep.warn("DATE", "В первом столбце %d значений не даты (подписи, итоги или другой столбец дат)" % bad, **where)
-            nums = [qc.to_number(x) for x in data.iloc[:, 1]]
-            txt = sum(1 for _, p in nums if p in ("text", "excel", "comma"))
-            if txt:
-                rep.warn("NUM", "В столбце «ГИС Касимов» %d значений не числа" % txt, **where)
-            arr = np.array([n if n is not None else np.nan for n, _ in nums], dtype=float)
-            if (arr < 0).any():
-                rep.warn("RANGE", "Отрицательные значения в «ГИС Касимов»: %d" % int((arr < 0).sum()), **where)
-            for k in qc.outliers(arr)[:2]:
-                rep.warn("OUTLIER", "Выброс в столбце «ГИС Касимов»", row=h + 2 + k, value=arr[k], **where)
-    rep.saw("файлов: %d, листов: %d, с нужным столбцом: %d" % (len(files), n_sheets, hit_sheets))
-    if files and not hit_sheets:
-        rep.error("HEADER", "Ни на одном листе нет столбца «ГИС Касимов»: результат будет пустым")
-    return rep
-
-
-def check_rmg_numbers(v: Dict[str, str]) -> Report:
-    rep = Report("Выделение Рмг по номерам столбцов")
-    files = _expand_paths(rep, v.get("paths", ""))
-    cols_raw = (v.get("columns") or "").split()
-    try:
-        cols = [int(x) for x in cols_raw]
-    except ValueError:
-        rep.error("NUM", "Номера столбцов должны быть целыми числами через пробел", value=v.get("columns", ""))
-        return rep
-    if not cols:
-        rep.error("NUM", "Не заданы номера столбцов")
-        return rep
-    if any(c < 0 for c in cols) or len(set(cols)) != len(cols):
-        rep.error("RANGE", "Отрицательные или повторяющиеся номера столбцов", value=v.get("columns", ""))
-    first_names: Dict[int, str] = {}
-    for fi, path in enumerate(files):
-        names = qc.excel_sheets(rep, path)
-        if names is None:
-            continue
-        for si, sheet in enumerate(names):
-            raw = pd.read_excel(path, sheet_name=sheet, header=None)
-            if raw.empty:
-                continue
-            where = dict(file=path, sheet=sheet)
-            h = _first_nonempty_row(raw)
-            header = [str(x).strip() if pd.notna(x) else "" for x in raw.iloc[h]]
-            beyond = [c for c in cols if c >= len(header)]
-            if beyond:
-                rep.warn("HEADER", "В листе %d столбцов, номера %s вне диапазона: они будут пропущены" % (len(header), ", ".join(map(str, beyond))), **where)
-            if fi == 0 and si == 0:
-                first_names = {c: header[c] for c in cols if c < len(header)}
-            else:
-                diff = {c: (first_names[c], header[c]) for c in first_names if c < len(header) and header[c] != first_names[c]}
-                if diff:
-                    c, (a, b) = next(iter(diff.items()))
-                    rep.warn("HEADER", "Названия выбранных столбцов отличаются от первого листа (столбец %d: «%s» ≠ «%s»); отличий: %d. "
-                             "Номера из первого файла указывают не туда" % (c, a, b, len(diff)), **where)
-            sel = [c for c in cols if c < raw.shape[1]]
-            body = raw.iloc[h + 1:, sel]
-            if body.dropna(how="all").empty:
-                rep.note("GAP", "В выбранных столбцах нет данных: лист будет пропущен", **where)
-            for c in sel:
-                if header[c] == "":
-                    rep.note("HEADER", "У столбца %d нет названия: в результате он будет назван по заголовку pandas" % c, **where)
-    return rep
 
 
 # ---------------------------------------------------------------------------------------------------------------------
