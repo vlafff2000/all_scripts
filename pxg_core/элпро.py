@@ -293,6 +293,12 @@ def read_file(path: str) -> Tuple[pd.DataFrame, FileInfo]:
             df.loc[bad_q, "Q газа, тыс. м³/сут"] = np.nan
             info.warnings.append("%s: значения вне диапазона заменены пропуском: давление %d, расход %d"
                                  % (name, int(bad_p.sum()), int(bad_q.sum())))
+        # подозрительные, но не отбрасываемые значения: Y вне 0–100 %, T ниже нуля — только предупреждение
+        bad_y = int(((df["Y кру, %"] < 0) | (df["Y кру, %"] > 100)).sum())
+        bad_t = int((df["T газа, °C"] < 0).sum())
+        if bad_y or bad_t:
+            info.warnings.append("%s: подозрительные значения (оставлены): Y вне 0–100 %% — %d, T < 0 — %d"
+                                 % (name, bad_y, bad_t))
         # номер скважины в двух строках с разными значениями — не дубль, сохраняем обе, но сообщаем
         multi = df.groupby(["Дата", "ГСП", "Режим", "Скважина"])["№ п/п"].nunique()
         twice = sorted({int(w) for (_, _, _, w), n in multi.items() if n > 1})

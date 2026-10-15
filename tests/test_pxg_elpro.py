@@ -146,3 +146,11 @@ def test_same_well_in_two_lines_is_kept_and_reported(tmp_path):
     df, info = elpro.read_file(str(a))
     assert len(df) == 2
     assert any("двух строках" in w for w in info.warnings)
+
+
+def test_suspicious_but_kept_values_are_warned(tmp_path):
+    f = month_xlsx(tmp_path / "Month_20221101_GSP4_Lift_20221021.xlsx", 4, datetime(2022, 11, 1),
+                   [datetime(2022, 11, 1)], [(90, 1000.0)])
+    df, info = elpro.read_file(str(f))
+    assert len(df) == 1 and df["Y кру, %"].iloc[0] == 99
+    assert not any("Y вне" in w for w in info.warnings)
