@@ -60,6 +60,6 @@ def test_main_builds_database_from_folder(tmp_path):
     assert water.main(["--folder", str(folder), "--db", "", "--output", str(out)]) == 0
     data = pd.read_excel(str(out), sheet_name="Данные")
     assert len(data) == 3 and data["Скважина"].nunique() == 2
-    assert set(data["Водопроявление"]) == {"Да", "Нет"}
+    assert set(data["Водопроявление"]) == {"Да", "Нет"}  # «Неизвестно» в базу не попадает
     stats = pd.read_excel(str(out), sheet_name="Статистика")
     assert int(stats.loc[stats["Показатель"].eq("Записей с водой"), "Значение"].iloc[0]) == 2

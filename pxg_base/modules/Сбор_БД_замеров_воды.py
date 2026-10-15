@@ -55,8 +55,7 @@ def merge(old: pd.DataFrame | None, new: pd.DataFrame) -> tuple[pd.DataFrame, in
     return data.sort_values(key).reset_index(drop=True), replaced
 
 
-def stats(data: pd.DataFrame, files: int, warn: list) -> pd.DataFrame:
-    unknown = int(data["Водопроявление"].eq("Неизвестно").sum()) if not data.empty else 0
+def stats(data: pd.DataFrame, files: int, warn: list, unknown: int) -> pd.DataFrame:
     rows = [["Файлов", files], ["Записей (скважина × месяц)", len(data)],
             ["Скважин", int(data["Скважина"].nunique()) if not data.empty else 0],
             ["Первый месяц", data["Дата"].min().strftime("%m.%Y") if not data.empty else ""],
@@ -90,6 +89,9 @@ def main(argv=None):
         print("⚠️ Замеры воды не найдены, база не создана.")
         return 0
     new = to_atlas(raw)
+    unknown = int(new["Водопроявление"].eq("Неизвестно").sum())
+    # «Неизвестно» (песок, ремонт) без объёма Атлас отклоняет; в базе такие месяцы не нужны, число — в «Статистике»
+    new = new[new["Водопроявление"].ne("Неизвестно")].reset_index(drop=True)
     old = pd.read_excel(db_path, sheet_name="Данные") if db_path else None
     if old is not None:
         print("📚 Прежняя база: %d строк" % len(old))
@@ -101,7 +103,7 @@ def main(argv=None):
         out += ".xlsx"
     with pd.ExcelWriter(out, engine="openpyxl") as xw:
         data.to_excel(xw, sheet_name="Данные", index=False)
-        stats(data, len(files), warn).to_excel(xw, sheet_name="Статистика", index=False)
+        stats(data, len(files), warn, unknown).to_excel(xw, sheet_name="Статистика", index=False)
     print("✅ База замеров воды: %s (%d записей, %d скважин)" % (out, len(data), data["Скважина"].nunique()))
     return 0
 

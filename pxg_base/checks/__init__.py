@@ -35,6 +35,7 @@ REGISTRY: Dict[str, str] = {
     "Копирование_файлов_по_маске": "reports:check_copy_by_mask",
     "Распаковка_архивов": "reports:check_unpack",
     "Копирование_замеров_давлений_по_шаблонам": "reports:check_pressure_copy",
+    "Сбор_БД_замеров_воды": "water:check_water",
 }
 
 
