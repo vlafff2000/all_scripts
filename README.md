@@ -21,7 +21,7 @@
 ## Запуск из исходников
 
 ```
-pip install -r requirements.txt            # Python 3.9+, последние версии библиотек
+pip install -r requirements.txt            # Python 3.13, последние версии библиотек
 python -m pxg_base                         # консольное меню модулей
 python -m pxg_base --server                # «База ПХГ» в браузере, http://127.0.0.1:8766
 python -m gsp_maps                         # «Карты ГСП», окно приложения
@@ -38,15 +38,15 @@ python -m gsp_maps --server                # только сервер, порт
 
 | Система | Архив | Python | Запуск |
 |---|---|---|---|
-| Windows 10 и новее, x64 | `PXG_Base_portable_windows_x64.zip` | 3.14 | `PXG_Base.bat`, `Karty_GSP.bat`, `Skedul_PXG.bat`, `PXG_Base_console.bat`, `Sozdat_yarlyki.bat` |
+| Windows 10 и новее, x64 | `PXG_Base_portable_windows_x64.zip` | 3.13 | `PXG_Base.bat`, `Karty_GSP.bat`, `Skedul_PXG.bat`, `PXG_Base_console.bat`, `Sozdat_yarlyki.bat` |
 | Linux x86_64, glibc 2.17+ (целевая система РЕД ОС 7.3) | `PXG_Base_portable_linux_x64.tar.gz` | 3.13 | `pxg_base.sh`, `karty_gsp.sh`, `skedul_pxg.sh`, `pxg_base_console.sh`, `sozdat_yarlyki.sh` |
 
 Для РЕД ОС 7.3 берутся только колёса manylinux2014, поэтому numpy и pandas там на последних версиях, у которых такие колёса ещё есть (numpy 2.2, pandas 2.3). Результаты «Базы ПХГ» пишутся в папку `pxg_runs` рядом с архивом.
 
 Ярлыки со значками на рабочем столе: один раз запустить `Sozdat_yarlyki.bat` (Windows) или `bash sozdat_yarlyki.sh` (РЕД ОС) — у каждого приложения свой значок.
 
-Сборка вручную (нужны интернет и Python 3.9+): `python tools/build_portable.py windows` или `linux`, результат в `dist/`.
-В GitHub: Actions → «Portable archives» → Run workflow (или тег `v*`). Задание собирает оба архива, запускает «Базу ПХГ», «Карты ГСП» и «Скедул ПХГ» из распакованного архива и выкладывает архивы как артефакты. Обычный CI (`CI`) гоняет тесты на Python 3.11 и 3.14 при каждом PR.
+Сборка вручную (нужны интернет и Python 3.13): `python tools/build_portable.py windows` или `linux`, результат в `dist/`.
+В GitHub: Actions → «Portable archives» → Run workflow (или тег `v*`). Задание собирает оба архива, запускает «Базу ПХГ», «Карты ГСП» и «Скедул ПХГ» из распакованного архива и выкладывает архивы как артефакты. Обычный CI (`CI`) гоняет тесты на Python 3.13 при каждом PR (3.12 и 3.14 — вручную, Actions → CI → Run workflow).
 
 ## Что дальше
 - «Карты ГСП»: html-карта и GIF из старого скрипта не переносятся (PNG и Excel остаются); дальше развивается интерактивная карта и сверка по `docs/parity/gsp_maps.md`.

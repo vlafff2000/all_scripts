@@ -1,4 +1,4 @@
-# Последние версии библиотек (CPython 3.14 для Windows и 3.13 для Linux в переносной сборке; из исходников подойдёт и более ранний Python).
+# Последние версии библиотек, существующие для CPython 3.13 (Windows 10+ и РЕД ОС 7.3, manylinux2014). Python 3.14 не берём: для него нет колёс manylinux2014 у numpy, pandas, pyarrow.
 pandas
 numpy
 openpyxl
