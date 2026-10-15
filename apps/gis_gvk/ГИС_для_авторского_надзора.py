@@ -1,14 +1,18 @@
+import sys
 import os
 import re
 import pandas as pd
 import tkinter as tk
-from tkinter import filedialog, simpledialog
+from tkinter import simpledialog
 import json
 from datetime import datetime
 import PyPDF2
 import warnings
 warnings.filterwarnings("ignore")
 
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+from pxg_core.pick_dialog import pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
 
 def extract_well_number_from_folder_name(folder_name):
     """Извлечение номера скважины из названия папки"""
@@ -471,10 +475,7 @@ def create_summary_excel_simple(data_list, output_path):
 
 def select_folder_dialog(title="Выберите папку"):
     """Диалог выбора папки"""
-    root = tk.Tk()
-    root.withdraw()
-    folder_path = filedialog.askdirectory(title=title)
-    root.destroy()
+    folder_path = pick_folder(title=title)
     return folder_path
 
 

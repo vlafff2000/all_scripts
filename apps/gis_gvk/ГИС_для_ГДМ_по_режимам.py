@@ -1,6 +1,7 @@
+import sys
 import pandas as pd
 import numpy as np
-from tkinter import filedialog, Tk, messagebox, simpledialog
+from tkinter import Tk, messagebox, simpledialog
 import os
 import re
 from datetime import datetime
@@ -8,13 +9,13 @@ import openpyxl
 
 
 # --- Функция для выбора файла ---
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+from pxg_core.pick_dialog import pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
+
 def select_file(title="Выберите файл с данными"):
     """Открывает диалоговое окно для выбора файла и возвращает путь к нему."""
-    root = Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
 
-    file_path = filedialog.askopenfilename(
+    file_path = pick_file(
         title=title,
         filetypes=[
             ("Excel files", "*.xlsx *.xls *.xlsm *.xlsb"),
@@ -30,11 +31,8 @@ def select_file(title="Выберите файл с данными"):
 # --- Функция для выбора директории ---
 def select_directory(title="Выберите папку для сохранения результатов"):
     """Открывает диалоговое окно для выбора директории сохранения."""
-    root = Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
 
-    directory = filedialog.askdirectory(
+    directory = pick_folder(
         title=title
     )
 

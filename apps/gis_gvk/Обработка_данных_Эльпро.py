@@ -1,11 +1,10 @@
+import sys
 import pandas as pd
 import os
 import numpy as np
 from pathlib import Path
 import re
 from datetime import datetime
-import tkinter as tk
-from tkinter import filedialog
 import zipfile
 import xml.etree.ElementTree as ET
 import warnings
@@ -18,12 +17,12 @@ season_periods = None
 warnings.filterwarnings('ignore')
 
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+from pxg_core.pick_dialog import pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
+
 def select_file_dialog(title="Выберите файл"):
     """Открывает диалог выбора файла"""
-    root = tk.Tk()
-    root.withdraw()
-    file_path = filedialog.askopenfilename(title=title)
-    root.destroy()
+    file_path = pick_file(title=title)
     return file_path
 
 
