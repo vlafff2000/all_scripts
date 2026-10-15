@@ -65,3 +65,16 @@ def test_real_withdrawal_file_matches_file_water_factor():
 def test_real_injection_file_drops_unfilled_template_days():
     i = g.read_injection(str(Path(SAMPLE) / "Учет газа- Закачка 2026.xlsx"))
     assert i["Дата"].max() <= i.loc[i["pzrg4"].notna() | i["gis"].notna(), "Дата"].max()
+
+
+def test_qc_check_reports_missing_and_wrong_template(tmp_path):
+    from pxg_base.checks import gas_accounting as ga
+    rep = ga.check_gas_accounting({"withdrawal": str(tmp_path / "нет.xlsx")})
+    assert rep.counts()["ошибка"] >= 1
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.active.title = "Лист1"
+    p = tmp_path / "чужой.xlsx"
+    wb.save(p)
+    rep = ga.check_gas_accounting({"withdrawal": str(p)})
+    assert rep.counts()["ошибка"] >= 1
