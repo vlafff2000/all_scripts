@@ -123,6 +123,25 @@ def read_sheet(ws, kind: str, file_name: str):
     return rows, excluded, "%d строк суток, %d столбцов с названием" % (len(date_rows), len(labels))
 
 
+FILLED_NEEDLES = (("пзрг - 4", "за сутки"), ("гис", "касимов", "за сутки"))
+
+
+def _drop_template_days(rows: list) -> tuple:
+    """Шаблонные сутки после последней заполненной (ПЗРГ-4 или ГИС за сутки пусты) — не данные, отбрасываются.
+
+    Нули внутри заполненного периода остаются. Возвращает (строки, число отброшенных суток).
+    """
+    filled = [r["Дата"] for r in rows
+              if any(all(n in r["Параметр"].lower() for n in needles) for needles in FILLED_NEEDLES)
+              and isinstance(r["Значение"], (int, float)) and not isinstance(r["Значение"], bool)]
+    if not filled:
+        return rows, 0
+    last = max(filled)
+    all_days = {r["Дата"] for r in rows}
+    dropped = len([d for d in all_days if d > last])
+    return [r for r in rows if r["Дата"] <= last], dropped
+
+
 def read_book(path: str, kind: str):
     """Все листы месяцев книги: (длинная таблица, исключённое, журнал по листам)."""
     import openpyxl
@@ -141,6 +160,9 @@ def read_book(path: str, kind: str):
         excl.extend(ex)
         log.append((name, ws.title, note))
     wb.close()
+    if kind == "закачка":
+        longs, dropped = _drop_template_days(longs)
+        log.append((name, "все листы", "шаблонные сутки после последней заполненной отброшены: %d" % dropped))
     long_df = pd.DataFrame(longs, columns=["Тип", "Файл", "Лист", "Дата", "Столбец", "Параметр", "Единица", "Значение"])
     excl_df = pd.DataFrame(excl, columns=["Файл", "Лист", "Ячейка", "Значение", "Причина"])
     log_df = pd.DataFrame(log, columns=["Файл", "Лист", "Что сделано"])

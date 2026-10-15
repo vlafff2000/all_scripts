@@ -95,7 +95,11 @@ def test_real_withdrawal_book_long_table_and_water():
 @pytest.mark.skipif(not SAMPLE, reason="нужен PXG_GAS_SAMPLE_DIR с реальными файлами учёта газа")
 def test_real_injection_book_reads_all_sheets_with_changing_columns():
     long_df, excluded, log = g.read_book(str(Path(SAMPLE) / "Учет газа- Закачка 2026.xlsx"), "закачка")
-    assert len(log) == 6
+    sheets = log[log["Лист"] != "все листы"]
+    assert len(sheets) == 6
+    # шаблонные сутки после последней заполненной (19 в реальном файле) отброшены и учтены в журнале
+    assert long_df["Дата"].max().strftime("%d.%m.%Y") == "12.10.2026"
+    assert "отброшены: 19" in log.loc[log["Лист"] == "все листы", "Что сделано"].iloc[0]
     # состав столбцов меняется от листа к листу (шапка до ~92 столбцов): каждый лист даёт значения
-    assert set(long_df["Лист"]) == set(log["Лист"])
+    assert set(long_df["Лист"]) == set(sheets["Лист"])
     assert long_df.groupby("Лист")["Столбец"].nunique().min() > 40
