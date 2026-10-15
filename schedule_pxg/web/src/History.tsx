@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+
 import PageHead from './PageHead'
-import { AppState, HistoryBody, HistoryView, downloadHistoryLog, downloadHistorySchedule, pickFile, runHistory } from './api'
+import { AppState, HistoryBody, HistoryView, downloadHistoryLog, downloadHistoryResidual, downloadHistorySchedule, pickFile, runHistory } from './api'
 
 const KINDS: Record<string, string> = { закачка: 'закачка', отбор: 'отбор', нейтральный: 'нейтральный' }
 const fmt = (x: number) => Math.round(x).toLocaleString('ru-RU')
@@ -12,11 +13,16 @@ export default function History({ st }: { st: AppState }) {
   const [pzrg, setPzrg] = useState('')
   const [split, setSplit] = useState(true)
   const [stitch, setStitch] = useState('')
+  const [winLo, setWinLo] = useState('80')
+  const [winHi, setWinHi] = useState('600')
   const [view, setView] = useState<HistoryView | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
+  useEffect(() => { if (st.pzrg_window) { setWinLo(String(st.pzrg_window.lo)); setWinHi(String(st.pzrg_window.hi)) } }, [st.pzrg_window])
+
   const body = (): HistoryBody => ({
+    window_lo: winLo, window_hi: winHi,
     mode, ...(mode === 'dates' ? { dates } : {}), ...(periods.trim() ? { periods } : {}), ...(pzrg.trim() ? { pzrg_file: pzrg.trim() } : {}),
     ...(split ? {} : { split: {} }), ...(stitch ? { stitch } : {}),
   })
@@ -47,6 +53,13 @@ export default function History({ st }: { st: AppState }) {
           <button onClick={pick} disabled={busy}>Выбрать…</button>
         </div>
         <div className="row">
+          <label title="Скважины с дебитом вне окна при поправке по ПЗРГ не меняются, невязка уходит скважинам в окне. Окно запоминается в проекте.">
+            Окно рабочего дебита, тыс. м³/сут: от{' '}
+            <input style={{ width: 70 }} value={winLo} onChange={e => setWinLo(e.target.value)} /></label>
+          <label>до <input style={{ width: 70 }} value={winHi} onChange={e => setWinHi(e.target.value)} /></label>
+          <span className="muted small">скважины вне окна при поправке не меняются</span>
+        </div>
+        <div className="row">
           <label><input type="checkbox" checked={split} onChange={e => setSplit(e.target.checked)} /> Скважину «54/80» делить пополам на 54 и 80</label>
           <label>Сшить с прогнозом сценария:{' '}
             <select value={stitch} onChange={e => { setStitch(e.target.value); setView(null) }}>
@@ -56,6 +69,7 @@ export default function History({ st }: { st: AppState }) {
           <button className="primary" disabled={busy || !ready} onClick={run}>Посчитать</button>
           {view && view.steps > 0 && <button disabled={busy} onClick={() => guard(() => downloadHistorySchedule(body()))}>Скачать schedule.inc</button>}
           {view?.correction && <button disabled={busy} onClick={() => guard(() => downloadHistoryLog(body()))}>Журнал поправки (CSV)</button>}
+          {view?.residual && <button disabled={busy} onClick={() => guard(() => downloadHistoryResidual(body()))}>Невязка по суткам (CSV)</button>}
         </div>
         {msg && <p className="note warn">{msg}</p>}
       </section>
@@ -74,11 +88,27 @@ export default function History({ st }: { st: AppState }) {
         {view.correction && <>
           <h3>Поправка по ПЗРГ</h3>
           <p className="note">Периодов: {view.correction.periods}, поправлено: {view.correction.corrected}, пропущено: {view.correction.skipped}.
-            Наибольшее расхождение с ПЗРГ после поправки: {view.correction.worst.toFixed(2)} %.</p>
-          <table className="raw"><thead><tr><th>С</th><th>По</th><th>Метод</th><th>ПЗРГ, м³</th><th>Коэфф.</th><th>После, м³</th><th>Расхожд., %</th><th>Комментарий</th></tr></thead>
-            <tbody>{view.log.map((r, i) => <tr key={i} className={r.method === 'SKIP' || r.category >= 2 ? 'bad' : ''}>
+            Наибольшее расхождение с ПЗРГ после поправки: {view.correction.worst.toFixed(2)} %.
+            {view.window && <> Окно рабочего дебита: {view.window.lo}–{view.window.hi} тыс. м³/сут.</>}
+            {view.correction.unallocated > 0 && <> Не распределено (нечему): {fmt(view.correction.unallocated)} м³.</>}</p>
+          <table className="raw"><thead><tr><th>С</th><th>По</th><th>Метод</th><th>ПЗРГ, м³</th><th>Коэфф.</th><th>После, м³</th><th>Расхожд., %</th><th>Не распред., м³</th><th>Комментарий</th></tr></thead>
+            <tbody>{view.log.map((r, i) => <tr key={i} className={r.method === 'SKIP' || r.method === 'NO_WELLS' || r.category >= 2 ? 'bad' : ''}>
               <td>{r.start}</td><td>{r.end}</td><td>{r.method}</td><td className="num">{fmt(r.pzrg)}</td><td className="num">{r.coef.toFixed(4)}</td>
-              <td className="num">{fmt(r.total_after)}</td><td className="num">{r.discrepancy.toFixed(2)}</td><td>{r.comment}</td></tr>)}</tbody></table>
+              <td className="num">{fmt(r.total_after)}</td><td className="num">{r.discrepancy.toFixed(2)}</td>
+              <td className="num">{r.unallocated > 0 ? fmt(r.unallocated) : ''}</td><td>{r.comment}</td></tr>)}</tbody></table>
+        </>}
+        {view.residual && <>
+          <h3>Невязка по суткам (до поправки)</h3>
+          <p className="note">{view.residual.summary.verdict} Суток: {view.residual.summary.days}, с невязкой от 2 %: {view.residual.summary.over},
+            медиана {view.residual.summary.median.toFixed(1)} %, разброс {view.residual.summary.spread.toFixed(1)} п. п.</p>
+          {view.residual.rows.length > 0 && <>
+            <p className="muted small">Сутки с невязкой от 2 %{view.residual.total > view.residual.shown && <> — {view.residual.shown} самых больших из {view.residual.total}</>}; все сутки — в CSV.
+              «За 3 суток» — невязка по сумме трёх соседних суток: если она мала, а за сутки велика, это сдвиг учётных суток, а не ошибка скважин.</p>
+            <table className="raw"><thead><tr><th>Дата</th><th>Вид</th><th>ПЗРГ, м³</th><th>Скважины, м³</th><th>Невязка, м³</th><th>%</th><th>За 3 суток, %</th><th>Подсказка</th></tr></thead>
+              <tbody>{view.residual.rows.map((r, i) => <tr key={i}><td>{r.date}</td><td>{KINDS[r.kind] || r.kind}</td><td className="num">{fmt(r.pzrg)}</td>
+                <td className="num">{fmt(r.wells)}</td><td className="num">{fmt(r.residual)}</td><td className="num">{r.pct.toFixed(1)}</td>
+                <td className="num">{r.pct3.toFixed(1)}</td><td>{r.hint}</td></tr>)}</tbody></table>
+          </>}
         </>}
         <h3>Шаги{view.table.length < view.steps && <span className="muted small"> — первые {view.table.length} из {view.steps}</span>}</h3>
         <table className="raw"><thead><tr><th>С</th><th>По</th><th>Вид</th><th>Скважин</th><th>Расход, м³/сут</th><th>Объём шага, м³</th></tr></thead>

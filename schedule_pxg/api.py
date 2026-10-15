@@ -46,7 +46,7 @@ def _state() -> dict:
     return {"folder": FOLDER, "project": p.name, "templates": list(p.templates.values()),
             "units": list(history.UNITS), "kinds": list(history.KINDS),
             "techmaps": [techmap.summary(techmap.TechMap.from_dict(d)) for d in p.techmaps.values()],
-            "scenarios": _scenario_list(p)}
+            "scenarios": _scenario_list(p), "pzrg_window": sources.pzrg_window(p)}
 
 
 async def state(request: Request):
@@ -554,7 +554,13 @@ def _history_run(body: dict):
     # эталон: файл запроса, иначе «Эталонный суточный объём» проекта
     pz = historymode.read_pzrg(_clean(body["pzrg_file"])) if body.get("pzrg_file") else sources.pzrg_from_project(p)
     split = body.get("split")
-    res = historymode.build_history(df, p, mode, dates, periods, pz, split=split if isinstance(split, dict) else None)
+    # окно рабочего дебита — настройка объекта: пришло в запросе — запоминаем в проекте, иначе берём из проекта
+    if "window_lo" in body or "window_hi" in body:
+        if sources.set_pzrg_window(p, body.get("window_lo"), body.get("window_hi")):
+            p.save(FOLDER)
+    w = sources.pzrg_window(p)
+    res = historymode.build_history(df, p, mode, dates, periods, pz, split=split if isinstance(split, dict) else None,
+                                    lo=w["lo"] * 1000.0, hi=w["hi"] * 1000.0)
     res.notes = notes + res.notes
     steps, stitch = res.steps, None
     if body.get("stitch"):
@@ -581,9 +587,19 @@ async def history_build(request: Request):
     return JSONResponse({"mode": res.mode, "steps": len(steps), "kinds": res.counts(), "notes": notes,
                          "from": steps[0].start.isoformat() if steps else "", "to": steps[-1].end.isoformat() if steps else "",
                          "correction": historymode.log_summary(res.log) if res.log else None,
-                         "log": res.log[:200], "stitch": historymode.stitch_issues(steps) if stitch else [],
+                         "log": res.log[:200], "window": sources.pzrg_window(p) if res.log else None,
+                         "residual": _residual_view(res.residual), "stitch": historymode.stitch_issues(steps) if stitch else [],
                          "table": _steps_table(steps), "volumes": _kind_volumes(steps),
                          "sources": [os.path.basename(f) for f in (body.get("files") or sources.flow_paths(p))]})
+
+
+def _residual_view(rows: list, limit: int = 200) -> Optional[dict]:
+    """Невязка по суткам для экрана: сводка с выводом и сутки с невязкой от 2 % (самые большие), полный список — в CSV."""
+    if not rows:
+        return None
+    big = sorted((r for r in rows if abs(r["pct"]) >= historymode.SHIFT_DAY_PCT), key=lambda r: -abs(r["pct"]))
+    return {"summary": historymode.residual_summary(rows), "rows": sorted(big[:limit], key=lambda r: (r["date"], r["kind"])),
+            "shown": min(len(big), limit), "total": len(big)}
 
 
 def _steps_table(steps, limit: int = 300) -> list:
@@ -618,6 +634,27 @@ async def history_log(request: Request):
     w.writerows(historymode.log_rows(res.log))
     return PlainTextResponse("\ufeff" + buf.getvalue(), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename*=UTF-8''correction_log_periods.csv"})
+
+
+async def history_residual(request: Request):
+    """Невязка эталон − скважины по суткам до поправки — CSV с «;»."""
+    try:
+        body = await request.json()
+        _, res, _, _ = await run_in_threadpool(_history_run, body)
+    except KeyError as e:
+        return _err(str(e.args[0]), 404)
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    except Exception as e:
+        return _err("История не обработана: %s" % e, 500)
+    if not res.residual:
+        return _err("Невязки нет: ПЗРГ не задан")
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(historymode.RESIDUAL_HEAD_RU)
+    w.writerows(historymode.residual_rows(res.residual))
+    return PlainTextResponse("\ufeff" + buf.getvalue(), media_type="text/csv",
+                             headers={"Content-Disposition": "attachment; filename*=UTF-8''residual_by_day.csv"})
 
 
 async def history_schedule(request: Request):
@@ -948,6 +985,7 @@ def build_app() -> Starlette:
         Route("/api/history", history_build, methods=["POST"]),
         Route("/api/history/schedule", history_schedule, methods=["POST"]),
         Route("/api/history/log", history_log, methods=["POST"]),
+        Route("/api/history/residual", history_residual, methods=["POST"]),
         Route("/api/sources", sources_get),
         Route("/api/sources/set", sources_set, methods=["POST"]),
         Route("/api/sources/build", sources_build, methods=["POST"]),

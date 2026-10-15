@@ -136,6 +136,23 @@ def load_daily_total(p: Project, rep: Optional[qc.Report] = None, raw: bool = Fa
     return df
 
 
+def pzrg_window(p: Project) -> dict:
+    """Окно «рабочего» дебита для поправки по ПЗРГ в тыс. м³/сут (настройка объекта; нет настройки — 80 и 600)."""
+    w = p.sources.get("pzrg_window") or {}
+    return {"lo": float(w.get("lo", 80)), "hi": float(w.get("hi", 600))}
+
+
+def set_pzrg_window(p: Project, lo_k, hi_k) -> bool:
+    """Сохраняет окно в проекте (проверка границ — `historymode.parse_window`); True, если значение изменилось."""
+    from . import historymode
+    lo, hi = historymode.parse_window(lo_k, hi_k)
+    new = {"lo": lo / 1000.0, "hi": hi / 1000.0}
+    if pzrg_window(p) == new and "pzrg_window" in p.sources:
+        return False
+    p.sources["pzrg_window"] = new
+    return True
+
+
 def pzrg_from_project(p: Project):
     """Эталонный суточный объём проекта в виде таблицы ПЗРГ (`date`, `rate`, м³/сут) для `historymode`; нет эталона — None."""
     df = load_daily_total(p)

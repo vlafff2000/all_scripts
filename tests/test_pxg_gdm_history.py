@@ -68,3 +68,34 @@ def test_web_stdin_matches_console_questions():
     assert off.split("\n")[:3] == ["h.inc", "", "n"] and off.split("\n")[3] == "" and off.split("\n")[4] == "o"
     on = spec.build_stdin({"history": "h.inc", "pzrg": "", "by_dates": "1", "dates": "d.txt", "periods": "", "out": "o"})
     assert on.split("\n")[:4] == ["h.inc", "", "y", "d.txt"] and on.split("\n")[5] == "o"
+
+
+def _pzrg_xlsx(tmp_path, rows):
+    import pandas as pd
+    p = tmp_path / "pzrg.xlsx"
+    pd.DataFrame({"a": [r[0] for r in rows], "b": ["" for _ in rows], "c": [r[1] for r in rows]}).to_excel(p, header=False, index=False)
+    return str(p)
+
+
+def test_pzrg_window_and_residual_files(tmp_path):
+    hist = _write(tmp_path, "h.inc", HIST)
+    pz = _pzrg_xlsx(tmp_path, [("01.01.2024", 1200.0 * 1000), ("02.01.2024", 0)])
+    r = gdm.create(hist, str(tmp_path / "o"), pzrg_file=pz, window_lo="0.1", window_hi="5000")
+    assert r["log"] and os.path.isfile(r["log"]) and r["residual"] and os.path.isfile(r["residual"])
+    head = open(r["log"], encoding="utf-8-sig").readline()
+    assert "Не_распределено" in head and "Окно_от" in head
+    assert "ZERO" in {x["method"] for x in gdm.historymode.build_history(gdm.history.import_history(hist), None, "daily",
+                                                                        pzrg=gdm.historymode.read_pzrg(pz)).log}
+    try:
+        gdm.create(hist, str(tmp_path / "o2"), pzrg_file=pz, window_lo="600", window_hi="80")
+    except ValueError as e:
+        assert "Окно" in str(e)
+    else:
+        raise AssertionError("ожидалась ошибка окна")
+
+
+def test_web_stdin_has_window_only_with_pzrg():
+    from pxg_base.webspec import get
+    spec = get("Создание_schedule_по_поскважинной_истории")
+    on = spec.build_stdin({"history": "h.inc", "pzrg": "p.xlsx", "window_lo": "50", "window_hi": "700", "by_dates": "", "periods": "", "out": "o"})
+    assert on.split("\n")[:5] == ["h.inc", "p.xlsx", "50", "700", "n"]

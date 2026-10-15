@@ -113,10 +113,12 @@ def test_daily_pzrg_parity_with_old_correction():
     pz = pd.DataFrame({"date": pd.to_datetime(["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04"]),
                        "rate": [450000.0, 200000.0, 0.0, 600000.0]})
     got, log, notes = hm.correct_pzrg(inj, pz)
-    assert list(got["rate_corr"]) == pytest.approx(golden("hm_daily_pzrg"))
+    # старый скрипт при ПЗРГ = 0 расходы не менял; теперь сутки с нулевым узлом обнуляются, остальные сутки — как в эталоне
+    want = [0.0 if pd.Timestamp(d).date() == date(2026, 5, 3) else v for d, v in zip(inj["date"], golden("hm_daily_pzrg"))]
+    assert list(got["rate_corr"]) == pytest.approx(want)
     methods = {r["start"]: r["method"] for r in log}
-    assert methods["2026-05-03"] == "SKIP" and methods["2026-05-01"] in ("IN_RANGE_ONLY", "ALL_WELLS")
-    assert hm.log_summary(log)["skipped"] == 3  # ПЗРГ = 0 и два дня без ПЗРГ
+    assert methods["2026-05-03"] == "ZERO" and methods["2026-05-01"] in ("IN_RANGE_ONLY", "ALL_WELLS")
+    assert hm.log_summary(log)["skipped"] == 2  # два дня без ПЗРГ
 
 
 def test_correct_set_branches():
@@ -263,3 +265,87 @@ def test_api_history_stitch_with_scenario(client, monkeypatch):
     assert r["to"] == "2026-06-30" and r["stitch"] == [] and any("нейтральным шагом" in n for n in r["notes"])
     t = c.post("/api/history/schedule", json={"files": [xl], "stitch": "Базовый"}).text
     assert t.count("DATES") > 30 and "JUN" in t and t.rstrip().endswith("-" * 80)
+
+
+# ---------------------------------------------------------------- окно, обнуление, невязка по суткам
+
+def test_zero_pzrg_zeroes_wells_and_no_wells_is_logged():
+    h = frame([("1", date(2026, 5, 1), 100000, INJ), ("2", date(2026, 5, 1), 50000, INJ), ("1", date(2026, 5, 2), 0, INJ)])
+    pz = pd.DataFrame({"date": pd.to_datetime(["2026-05-01", "2026-05-02"]), "rate": [0.0, 90000.0]})
+    got, log, _ = hm.correct_pzrg(h, pz)
+    assert list(got["rate_corr"]) == [0.0, 0.0, 0.0]
+    m = {r["start"]: r for r in log}
+    assert m["2026-05-01"]["method"] == "ZERO" and m["2026-05-01"]["discrepancy"] == 0
+    assert m["2026-05-02"]["method"] == "NO_WELLS" and m["2026-05-02"]["unallocated"] == pytest.approx(90000.0)
+    s = hm.log_summary(log)
+    assert s["corrected"] == 1 and s["skipped"] == 1 and s["unallocated"] == pytest.approx(90000.0)
+
+
+def test_custom_window_changes_who_is_fixed():
+    rates = [100000.0, 200000.0, 10000.0]
+    new, _ = hm._correct_set(rates, 400000.0, 80000, 600000)
+    assert new[2] == 10000.0
+    new, info = hm._correct_set(rates, 400000.0, 5000, 600000)       # окно шире: малая скважина тоже правится
+    assert info["n_in"] == 3 and new[2] != 10000.0 and sum(new) == pytest.approx(400000.0)
+    _, log, _ = hm.correct_pzrg(frame([("1", date(2026, 5, 1), 100000, INJ)]),
+                                pd.DataFrame({"date": pd.to_datetime(["2026-05-01"]), "rate": [120000.0]}), None, 50000.0, 150000.0)
+    assert (log[0]["lo"], log[0]["hi"]) == (50000.0, 150000.0)
+
+
+def test_parse_window():
+    assert hm.parse_window("", "") == (80000.0, 600000.0)
+    assert hm.parse_window("50", "700,5") == (50000.0, 700500.0)
+    for bad in (("600", "80"), ("abc", ""), ("-1", "")):
+        with pytest.raises(ValueError):
+            hm.parse_window(*bad)
+
+
+def test_residual_detects_systematic_shift_and_day_shift():
+    days = [date(2026, 5, 1) + timedelta(days=k) for k in range(12)]
+    base = [100000.0 + 5000 * (k % 3) for k in range(12)]
+    # общий сдвиг: скважины дают на 5 % меньше узла каждые сутки
+    h = frame([("1", d, v * 0.95, INJ) for d, v in zip(days, base)])
+    pz = pd.DataFrame({"date": pd.to_datetime(days), "rate": base})
+    rows = hm.residual_by_day(h, pz)
+    assert len(rows) == 12 and all(abs(r["pct"] - 5.0) < 1e-6 for r in rows)
+    assert "общий сдвиг" in hm.residual_summary(rows)["verdict"]
+    # узел отстаёт на сутки: за сутки невязка заметная, за 3 суток исчезает
+    wells = [100000.0, 130000.0, 70000.0] * 4
+    node = [70000.0, 100000.0, 130000.0] * 4          # то же с задержкой на сутки: сумма за 3 суток совпадает
+    h = frame([("1", d, v, INJ) for d, v in zip(days, wells)])
+    rows = hm.residual_by_day(h, pd.DataFrame({"date": pd.to_datetime(days), "rate": node}))
+    mid = [r for r in rows[1:-1]]
+    assert all(abs(r["pct"]) >= 2 for r in mid) and any(r["hint"] for r in mid)
+    assert "сдвиг учётных суток" in hm.residual_summary(rows)["verdict"]
+    assert hm.residual_by_day(h, None) == []
+
+
+def test_build_history_fills_residual_and_log_has_new_columns():
+    h = frame([("1", date(2026, 5, 1) + timedelta(days=k), 100000, INJ) for k in range(3)])
+    pz = pd.DataFrame({"date": pd.date_range("2026-05-01", periods=3), "rate": [110000.0] * 3})
+    res = hm.build_history(h, None, "daily", pzrg=pz, lo=50000.0, hi=300000.0)
+    assert len(res.residual) == 3 and res.log[0]["lo"] == 50000.0
+    assert len(hm.LOG_HEAD_RU) == len(hm.LOG_COLUMNS) == len(hm.log_rows(res.log)[0])
+
+
+def test_api_history_window_residual_and_csv(client):
+    from schedule_pxg import api, sources
+    c, xl, tmp = client
+    days = pd.date_range("2026-05-01", "2026-05-04")
+    pz = str(tmp / "pz.xlsx")
+    pd.DataFrame({"a": days, "b": "", "c": [450000.0, 450000.0, 0.0, 450000.0]}).to_excel(pz, header=False, index=False)
+    assert sources.pzrg_window(api._project()) == {"lo": 80.0, "hi": 600.0}
+    r = c.post("/api/history", json={"files": [xl], "mode": "daily", "pzrg_file": pz}).json()
+    assert r["window"] == {"lo": 80.0, "hi": 600.0} and r["residual"]["summary"]["days"] > 0
+    assert any(x["method"] == "ZERO" for x in r["log"])
+    # окно приходит из экрана и запоминается в проекте
+    r = c.post("/api/history", json={"files": [xl], "pzrg_file": pz, "window_lo": "50", "window_hi": "700"}).json()
+    assert r["window"] == {"lo": 50.0, "hi": 700.0} and r["log"][0]["lo"] == 50000.0
+    assert api._state()["pzrg_window"] == {"lo": 50.0, "hi": 700.0}
+    r = c.post("/api/history", json={"files": [xl], "pzrg_file": pz}).json()
+    assert r["window"]["lo"] == 50.0                   # без поля берётся из проекта
+    assert c.post("/api/history", json={"files": [xl], "pzrg_file": pz, "window_lo": "900", "window_hi": "100"}).status_code == 400
+    t = c.post("/api/history/residual", json={"files": [xl], "pzrg_file": pz})
+    assert t.status_code == 200 and "Невязка_3_суток_%" in t.text
+    assert c.post("/api/history/residual", json={"files": [xl]}).status_code == 400    # эталона нет
+    assert "Не_распределено" in c.post("/api/history/log", json={"files": [xl], "pzrg_file": pz}).text
