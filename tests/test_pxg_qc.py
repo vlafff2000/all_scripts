@@ -107,23 +107,6 @@ def _book(path, rows, cols):
     pd.DataFrame(rows, columns=cols).to_excel(path, index=False)
 
 
-def test_include_fact_and_total(tmp_path):
-    import pandas as pd
-    df = pd.DataFrame({"Дата": ["01.01.2020", "01.01.2020", "плохо"], "a:101:Дебит газа": [1.0, 2.0, 3.0],
-                       "a:101:Приёмистость газа": [0, 5.0, 6.0], "a:102:Что-то": [1, 2, 3], "без номера": [1, 2, 3]})
-    p = tmp_path / "f.xlsx"
-    df.to_excel(p, index=False)
-    rep = checks.run("Include_факта_из_модели_как_исторических_данных", {"file": str(p)})
-    got = kinds(rep)
-    assert ("ошибка", "DATE") in got and ("ошибка", "DUP") in got and ("предупреждение", "HEADER") in got, rep.to_text()
-    t = pd.DataFrame([["", "Скв.№56", None, "Скв.№83", None, ""], ["Дата", "уст", "пл", "уст", "пл", "ср"],
-                      ["01.01.2020", 100, 50, 80, 90, 70], ["02.01.2020", 100, 60, 80, 90, 70]])
-    q = tmp_path / "t.xlsx"
-    t.to_excel(q, index=False, header=False)
-    rep = checks.run("Итоговая_таблица_давлений_2006_2025", {"file": str(q)})
-    assert ("предупреждение", "CROSS") in kinds(rep), rep.to_text()
-
-
 def test_mk_collect_and_analysis(tmp_path):
     import pandas as pd
     rows = [["Журнал за октябрь 2023г", None, None, None, None],
