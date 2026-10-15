@@ -123,6 +123,16 @@ _LEVEL_PARAMS = (
 )
 _LEVEL_ENV = (("input_dir", "PXG_INPUT_DIR"), ("recursive", "PXG_RECURSIVE"), ("output", "PXG_OUTPUT"))
 
+def _history_stdin(v: Dict[str, str]) -> str:
+    """Ответы модулю «Создание schedule по поскважинной истории» в порядке его вопросов: файл дат — только при включённом чекбоксе."""
+    by_dates = (v.get("by_dates") or "").strip().lower() in ("1", "true", "y")
+    parts = [(v.get("history") or "").strip(), (v.get("pzrg") or "").strip(), "y" if by_dates else "n"]
+    if by_dates:
+        parts.append((v.get("dates") or "").strip())
+    parts += [(v.get("periods") or "").strip(), (v.get("out") or "").strip()]
+    return "\n".join(parts) + "\n"
+
+
 SPECS: List[WebSpec] = [
     WebSpec(
         module="Создание_базы_данных_расходов",
@@ -321,14 +331,7 @@ SPECS: List[WebSpec] = [
                   hint="Строки «ДД.ММ.ГГГГ prod|inj|none». Пусто — периоды берутся из истории"),
             Param("out", "Папка для результата", "folder", required=True),
         ),
-        stdin=lambda v: "\n".join([
-            (v.get("history") or "").strip(),
-            (v.get("pzrg") or "").strip(),
-            "y" if v.get("by_dates") in ("1", "true", "y") else "n",
-            (v.get("dates") or "").strip() if v.get("by_dates") in ("1", "true", "y") else "",
-            (v.get("periods") or "").strip(),
-            (v.get("out") or "").strip(),
-        ]) + "\n",
+        stdin=lambda v: _history_stdin(v),
         note="Schedule и журнал поправки по ПЗРГ (если задан ПЗРГ) сохраняются в выбранную папку.",
     ),
     WebSpec(

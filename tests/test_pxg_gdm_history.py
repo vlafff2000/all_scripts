@@ -59,3 +59,12 @@ def test_dates_mode_needs_dates_file(tmp_path):
         assert "дат" in str(e)
     else:
         raise AssertionError("ожидалась ошибка без файла дат")
+
+
+def test_web_stdin_matches_console_questions():
+    from pxg_base.webspec import get
+    spec = get("Создание_schedule_по_поскважинной_истории")
+    off = spec.build_stdin({"history": "h.inc", "pzrg": "", "by_dates": "", "dates": "x.txt", "periods": "", "out": "o"})
+    assert off.split("\n")[:3] == ["h.inc", "", "n"] and off.split("\n")[3] == "" and off.split("\n")[4] == "o"
+    on = spec.build_stdin({"history": "h.inc", "pzrg": "", "by_dates": "1", "dates": "d.txt", "periods": "", "out": "o"})
+    assert on.split("\n")[:4] == ["h.inc", "", "y", "d.txt"] and on.split("\n")[5] == "o"
