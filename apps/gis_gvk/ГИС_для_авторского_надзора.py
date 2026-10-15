@@ -2,8 +2,6 @@ import sys
 import os
 import re
 import pandas as pd
-import tkinter as tk
-from tkinter import simpledialog
 import json
 from datetime import datetime
 import PyPDF2
@@ -12,7 +10,7 @@ warnings.filterwarnings("ignore")
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-from pxg_core.pick_dialog import pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
+from pxg_core.pick_dialog import ask_text, pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
 
 def extract_well_number_from_folder_name(folder_name):
     """Извлечение номера скважины из названия папки"""
@@ -481,12 +479,7 @@ def select_folder_dialog(title="Выберите папку"):
 
 def input_season_name():
     """Ввод названия сезона"""
-    root = tk.Tk()
-    root.withdraw()
-    season_name = simpledialog.askstring("Название сезона", 
-                                        "Введите название сезона (например: 'конец отбора 2024/25 гг.'):")
-    root.destroy()
-    return season_name
+    return ask_text("Название сезона", "Введите название сезона (например: 'конец отбора 2024/25 гг.'):")
 
 
 def main_simple():

@@ -1,7 +1,6 @@
 import sys
 import pandas as pd
 import numpy as np
-from tkinter import Tk, messagebox, simpledialog
 import os
 import re
 from datetime import datetime
@@ -10,7 +9,7 @@ import openpyxl
 
 # --- Функция для выбора файла ---
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-from pxg_core.pick_dialog import pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
+from pxg_core.pick_dialog import ask_choice, pick_file, pick_files, pick_folder  # веб-проводник вместо Tk
 
 def select_file(title="Выберите файл с данными"):
     """Открывает диалоговое окно для выбора файла и возвращает путь к нему."""
@@ -41,30 +40,12 @@ def select_directory(title="Выберите папку для сохранен�
 
 # --- Функция для выбора режима работы ---
 def select_mode():
-    """Открывает диалоговое окно для выбора режима работы программы."""
-    root = Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-
-    modes = {
-        1: "Создание общей БД из Excel",
-        2: "Создание LAS-файлов из готовой БД",
-        3: "Полный цикл (БД + LAS-файлы)"
-    }
-
-    # Создаем простое диалоговое окно для выбора
-    mode = simpledialog.askinteger(
-        "Выбор режима работы",
-        "Выберите режим работы программы:\n\n"
-        "1 - Создание общей БД из Excel\n"
-        "2 - Создание LAS-файлов из готовой БД\n"
-        "3 - Полный цикл (БД + LAS-файлы)\n\n"
-        "Введите номер режима (1, 2 или 3):",
-        minvalue=1,
-        maxvalue=3
-    )
-
-    return mode
+    """Окно выбора режима работы программы (веб-диалог вместо Tk)."""
+    return ask_choice("Выбор режима работы", "Выберите режим работы программы:", [
+        (1, "1 - Создание общей БД из Excel"),
+        (2, "2 - Создание LAS-файлов из готовой БД"),
+        (3, "3 - Полный цикл (БД + LAS-файлы)"),
+    ])
 
 
 # --- Функция для чтения готовой БД ---
