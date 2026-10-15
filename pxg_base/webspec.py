@@ -174,15 +174,6 @@ SPECS: List[WebSpec] = [
         note="База не меняется на месте: обновлённая копия лежит в папке результатов.",
     ),
     WebSpec(
-        module="Таблица_среднесуточных_расходов_из_базы",
-        params=(
-            Param("year", "Год", default="2024", required=True, hint="Берутся данные за апрель–октябрь этого года"),
-            Param("file", "Файл базы расходов", "file", required=True),
-            Param("sheet", "Лист", default="Закачка", required=True, hint="Например «Закачка» или «Отборы»"),
-        ),
-        answers=("year", "file", "sheet"),
-    ),
-    WebSpec(
         module="Журнал_отбора_и_закачки_2019_2024",
         params=(Param("root", "Папка «Журнал учёта работы скважин ПХГ (прил.4)»", "folder", required=True,
                       hint="Внутри — папки по годам 2019–2024 с файлами ГГГГ_ММ.xlsx"),),

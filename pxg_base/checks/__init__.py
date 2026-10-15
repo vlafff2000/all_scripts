@@ -15,7 +15,6 @@ REGISTRY: Dict[str, str] = {
     "Создание_базы_данных_расходов": "flows:check_create",
     "Нулевые_расходы_и_несоответствия_часов": "flows:check_zero",
     "Дополнение_базы_данных_расходов": "flows:check_append",
-    "Таблица_среднесуточных_расходов_из_базы": "flows:check_average",
     "Сбор_данных_по_межколонным_давлениям": "interkolonka:check_collect",
     "Анализ_межколонных_давлений_для_авторского_надзора": "interkolonka:check_analysis",
     "Журнал_отбора_и_закачки_2019_2024": "interkolonka:check_journal",

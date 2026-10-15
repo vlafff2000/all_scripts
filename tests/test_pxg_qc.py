@@ -95,9 +95,6 @@ def test_db_checks(tmp_path):
     path = tmp_path / "db.xlsx"
     with pd.ExcelWriter(path) as xw:
         pd.DataFrame(rows).to_excel(xw, sheet_name="Закачка", index=False)
-    rep = checks.run("Таблица_среднесуточных_расходов_из_базы", {"year": "2024", "file": str(path), "sheet": "Закачка"})
-    got = kinds(rep)
-    assert ("ошибка", "DUP") in got and ("ошибка", "RANGE") in got and ("предупреждение", "GAP") in got, rep.to_text()
     rep = checks.run("Дополнение_базы_данных_расходов", {"db": str(path), "max_date": "01.01.2020", "periods": "", "kind": "закачка", "folder": str(tmp_path)})
     assert ("ошибка", "CROSS") in kinds(rep) and ("ошибка", "GAP") in kinds(rep)
 

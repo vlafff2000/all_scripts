@@ -69,17 +69,6 @@ def test_pressure_table(tmp_path):
     assert len(df) == 4 and set(df["Номер ГСП"]) == {1, 2}
 
 
-def test_average_flow_table(tmp_path):
-    days = pd.date_range("2024-04-01", "2024-10-31", freq="7D")
-    db = pd.DataFrame([{"Дата": d, "Скважина": w, "Источник": g, "Суточный расход газа": q * 1000}
-                       for d in days for w, g, q in (("1", "ГСП-1", 120), ("2", "ГСП-1", 260), ("3", "ГСП-2", 40))])
-    src = tmp_path / "db.xlsx"
-    with pd.ExcelWriter(src) as w:
-        db.to_excel(w, sheet_name="Закачка", index=False)
-    job = run_module("Таблица_среднесуточных_расходов_из_базы", {"year": "2024", "file": str(src), "sheet": "Закачка"}, tmp_path / "o")
-    assert "результат_приемистость_по_скважинам_2024.xlsx" in job["files"]
-
-
 def test_interannular_analysis_and_collection(tmp_path):
     db = pd.DataFrame([{"дата": "2024-01-31", "год": 2024, "месяц": 1, "сезон": s, "номер_скважины": w, "расход_газа_МК_сут": q, "расход_газа_МК_мес": q * 30, "давление_МК": p}
                        for s in ("2023-2024", "2024-2025") for w, q, p in ((1, 0, 0), (2, 15, 10), (3, 40, 31))])
