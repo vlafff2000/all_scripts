@@ -64,6 +64,19 @@ async def load(request: Request):
     return JSONResponse(await run_in_threadpool(_state))
 
 
+async def locate(request: Request):
+    """Адрес карты: по записи группы и скважины — настоящее имя группы и все группы, где есть скважина."""
+    if PROJECT.store is None:
+        return _err("База расходов ещё не загружена.", 409)
+    try:
+        well = int(request.query_params.get("well") or "")
+    except ValueError:
+        return _err("Номер скважины — целое число.")
+    store = PROJECT.store
+    return JSONResponse({"well": well, "gsp": store.resolve_gsp(request.query_params.get("gsp") or ""),
+                         "groups": await run_in_threadpool(store.groups_of_well, well)})
+
+
 async def gsp(request: Request):
     if PROJECT.store is None:
         return _err("База расходов ещё не загружена.", 409)
@@ -145,6 +158,7 @@ def build_app() -> Starlette:
         Route("/api/scan", scan, methods=["POST"]),
         Route("/api/load", load, methods=["POST"]),
         Route("/api/gsp", gsp),
+        Route("/api/locate", locate),
         Route("/api/season", season),
         Route("/api/work", work),
         Route("/api/summary", summary),
