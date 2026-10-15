@@ -114,30 +114,6 @@ def _vlookup_stdin(v: Dict[str, str]) -> str:
     return "".join(x.strip() + "\n" for x in lines)
 
 
-def _percent_lines(v: Dict[str, str]) -> List[str]:
-    """Проценты: единый (режим 1) или по одному на сезон отбора в порядке сезонов (режим 2)."""
-    if (v.get("pct_mode") or "1") == "2":
-        return ["2"] + lines_of(v.get("percents", ""))
-    return ["1", (v.get("percent") or "").strip()]
-
-
-def _redistribute_stdin(v: Dict[str, str]) -> str:
-    lines = [v.get("file", ""), v.get("seasons", ""), v.get("add_sheet", ""), v.get("sub_sheet", "")]
-    lines += _percent_lines(v) + ["y" if v.get("debug") in ("1", "true", "y") else "n"]
-    return "".join(x.strip() + "\n" for x in lines)
-
-
-def _redistribute400_stdin(v: Dict[str, str]) -> str:
-    if (v.get("work_mode") or "1") == "2":
-        lines = [v.get("file", ""), "2", v.get("data_sheet", ""), v.get("add_sheet", ""), v.get("sub_sheet", ""), (v.get("percent") or "").strip()]
-    else:
-        lines = [v.get("file", ""), "1", v.get("seasons_sheet", ""), v.get("add_sheet", ""), v.get("sub_sheet", "")] + _percent_lines(v)
-    return "".join(x.strip() + "\n" for x in lines)
-
-
-_SHEET_HINT = "Номер листа по порядку в книге (1, 2, …)"
-
-
 _FLOOR = ("Щигровский", "контрольные")
 _LEVEL_PARAMS = (
     Param("input_dir", "Папка с Excel-файлами", "folder", required=True,
