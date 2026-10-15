@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import PageHead from './PageHead'
 import ColumnWizard from './ColumnWizard'
-import { AppState, SourcesCheck, SourcesView, buildSources, getSources, pickFile, pickFiles, setSources } from './api'
+import { AppState, SourcesCheck, SourcesView, buildSources, getSources, pickFile, pickFiles, pickFolder, setSources, sourcesFromFolder } from './api'
 
 const base = (p: string) => p.split(/[\\/]/).pop() || p
 
@@ -67,6 +67,7 @@ export default function Import({ st, setSt }: { st: AppState; setSt: (s: AppStat
           <input className="grow" value={addPath} placeholder="Нажмите «Добавить файлы…» или вставьте путь и нажмите Enter" onChange={e => setAddPath(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && addFlows([addPath])} />
           <button onClick={() => guard(async () => addFlows(await pickFiles(flows[flows.length - 1] || '')))} disabled={busy}>Добавить файлы…</button>
+          <button title="Папка, куда База ПХГ сложила выгрузки" onClick={() => guard(async () => { const d = await pickFolder(flows[0] || ''); if (d) { const r = await sourcesFromFolder(d); apply(r); setMsg('Из папки выгрузок взята база расходов: ' + r.found.join(', ')); setQc(null) } })} disabled={busy}>Из папки выгрузок…</button>
           <button className="primary" onClick={check} disabled={busy || !flows.length}>Проверить</button>
           <button onClick={() => setWizard(flows[0] || '')} disabled={busy || !flows.length}>Настроить столбцы</button>
         </div>
