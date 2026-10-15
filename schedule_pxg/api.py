@@ -771,6 +771,19 @@ async def sources_set(request: Request):
     return JSONResponse(_sources_view(p))
 
 
+async def sources_folder(request: Request):
+    """Папка выгрузок Базы ПХГ: находит базу расходов по имени и ставит её источником (группы — столбец в базе)."""
+    b = await request.json()
+    p = _project()
+    folder = _clean(b.get("folder"))
+    found = sources.detect_flow_files(folder)
+    if not found:
+        return _err("В папке нет базы расходов (xlsx с «бд» и «расход» в имени)")
+    sources.set_flows(p, found)
+    p.save(FOLDER)
+    return JSONResponse({"found": [os.path.basename(x) for x in found], **_sources_view(p)})
+
+
 def _scan(p: Project, jump: float) -> "pd.DataFrame":
     flows = sources.load_project_history(p, raw=True) if sources.flow_paths(p) else None
     daily = sources.load_daily_total(p, raw=True) if (p.sources.get("daily_total") or {}).get("path") else None
@@ -995,6 +1008,7 @@ def build_app() -> Starlette:
         Route("/api/history/residual", history_residual, methods=["POST"]),
         Route("/api/sources", sources_get),
         Route("/api/sources/set", sources_set, methods=["POST"]),
+        Route("/api/sources/folder", sources_folder, methods=["POST"]),
         Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),

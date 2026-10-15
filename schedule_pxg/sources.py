@@ -50,6 +50,18 @@ def set_flows(p: Project, paths: List[str], template: str = "", kind_default: st
     _cache.clear()
 
 
+def detect_flow_files(folder: str) -> List[str]:
+    """База расходов в папке выгрузок (результаты Базы ПХГ): xlsx с «бд» и «расход» в имени, по алфавиту."""
+    if not folder or not os.path.isdir(folder):
+        return []
+    out = []
+    for name in sorted(os.listdir(folder)):
+        low = name.lower()
+        if low.endswith((".xlsx", ".xlsm")) and not name.startswith("~$") and "бд" in low and "расход" in low:
+            out.append(os.path.join(folder, name))
+    return out
+
+
 def set_groups(p: Project, mode: str, path: str = "", template: Optional[dict] = None) -> None:
     if mode not in ("file", "column"):
         raise ValueError("Разбивка на группы: файл или столбец в базе расходов")
