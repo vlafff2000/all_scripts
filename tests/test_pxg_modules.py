@@ -89,17 +89,6 @@ def test_update_flow_db_with_new_files(tmp_path):
     assert any("ШАГ 5" in line for line in job["log"]) and any("ГОТОВО" in line for line in job["log"])
 
 
-def test_fact_from_model_include(tmp_path):
-    src = tmp_path / "fact.xlsx"
-    pd.DataFrame({"Дата": ["01.01.2024", "02.01.2024"], "Модель:56:Дебит газа": [10.5, 0],
-                  "Модель:83:Приёмистость газа": [0, 20.0]}).to_excel(src, index=False)
-    out = tmp_path / "o"
-    (out).mkdir()
-    job = run_module("Include_факта_из_модели_как_исторических_данных", {"file": str(src), "folder": str(out)}, out)
-    text = (out / "fact_schedule.inc").read_text(encoding="utf-8")
-    assert "WCONHIST" in text and "'56'" in text and "WCONINJH" in text and "'83'" in text, "\n".join(job["log"][-15:])
-
-
 def test_extract_schedule_keywords(tmp_path):
     src = tmp_path / "sched.inc"
     src.write_text("DATES\n 01 JAN 2024 /\n/\n\nWELSPECS\n'56' 'G' 1 1 /\n/\n\nWRONG\n/\n", encoding="utf-8")

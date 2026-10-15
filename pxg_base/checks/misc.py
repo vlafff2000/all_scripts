@@ -15,6 +15,7 @@ from pxg_core import qc
 from pxg_core.qc import Report
 from pxg_core.расходы_файлы import get_excel_files_from_folder
 from pxg_base.webspec import lines_of
+from schedule_pxg import historymode
 
 
 def _expand_paths(rep: Report, raw: str) -> List[str]:
@@ -507,4 +508,51 @@ def check_office_convert(v: Dict[str, str]) -> Report:
             if not soffice:
                 rep.warn("LOSS", "Без LibreOffice формулы .xls будут заменены значениями, рисунки и диаграммы не перенесутся", file=f)
     rep.note("SUMMARY", "К конвертации: %d, уже готовых будет пропущено: %d. Движок: %s" % (n_ok, n_exist, soffice or "запасной (Python)"))
+    return rep
+
+
+def check_gdm_history(v: Dict[str, str]) -> Report:
+    """Проверка входов «Создание schedule по поскважинной истории»: история (та же QC, что у модуля истории ГДМ),
+    дата замеров давлений, эталонный суточный объём и периоды. Файлы не меняет."""
+    from schedule_pxg import history
+    rep = Report("Schedule по поскважинной истории")
+    path = (v.get("history") or "").strip()
+    if not qc.check_path(rep, path, "Файл истории"):
+        return rep
+    by_dates = (v.get("by_dates") or "").strip().lower() in ("1", "true", "y")
+    if by_dates:
+        dpath = (v.get("dates") or "").strip()
+        if qc.check_path(rep, dpath, "Файл дат замеров давлений"):
+            try:
+                dates, notes = historymode.parse_dates(historymode.read_text(dpath))
+            except UnicodeDecodeError:
+                rep.error("FILE", "Файл дат не в UTF-8", file=dpath, hint="Пересохраните как UTF-8")
+            else:
+                rep.saw("дат замеров давлений: %d" % len(dates))
+                for n in notes:
+                    rep.warn("DATES", n, file=dpath)
+                if not dates:
+                    rep.error("DATES", "В файле дат нет ни одной даты", file=dpath, hint="Даты ДД.ММ.ГГГГ, по одной в строке")
+    try:
+        df = history.import_history(path)
+    except Exception as e:  # формат, который модуль не узнаёт
+        rep.error("FILE", "Файл истории не прочитан: %s" % e, file=path)
+        return rep
+    if not len(df):
+        rep.error("FILE", "В файле истории нет строк с расходом", file=path,
+                  hint="Нужна база расходов «Базы ПХГ», месячные/дневные файлы или schedule WCONHIST/WCONINJH")
+        return rep
+    history.check_history(df, None, rep, file=path)
+    ppath = (v.get("pzrg") or "").strip()
+    if ppath and qc.check_path(rep, ppath, "Эталонный суточный объём ПЗРГ"):
+        try:
+            pz = historymode.read_pzrg(ppath)
+            rep.saw("ПЗРГ: %d суток" % len(pz))
+            if not len(pz):
+                rep.error("FILE", "В ПЗРГ нет дат с расходом", file=ppath, hint="Даты в столбце A, расход в столбце C")
+        except Exception as e:
+            rep.error("FILE", "ПЗРГ не прочитан: %s" % e, file=ppath, hint="Даты в столбце A, расход в столбце C")
+    qpath = (v.get("periods") or "").strip()
+    if qpath and qc.check_path(rep, qpath, "Файл периодов"):
+        qc.check_periods_file(rep, qpath)
     return rep
