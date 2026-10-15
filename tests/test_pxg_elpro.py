@@ -154,3 +154,13 @@ def test_suspicious_but_kept_values_are_warned(tmp_path):
     df, info = elpro.read_file(str(f))
     assert len(df) == 1 and df["Y кру, %"].iloc[0] == 99
     assert not any("Y вне" in w for w in info.warnings)
+
+
+def test_gsp8_pressure_in_mpa_becomes_kgf(tmp_path):
+    f = xml_file(tmp_path / "2022_11gsp8.xlsx", [
+        ("ГСП-8", [(420, [8.2, 37.0, 50.0, 100.0, 24.0], [8.0, 37.0, 50.0, 0.0, 24.0])]),
+    ])
+    df, _ = elpro.read_file(str(f))
+    by_day = df.set_index("Дата")["P газа, кгс/см²"]
+    assert by_day[pd.Timestamp("2022-11-01")] == pytest.approx(8.2 * 10.1972)
+    assert by_day[pd.Timestamp("2022-11-02")] == pytest.approx(8.0 * 10.1972)

@@ -22,6 +22,9 @@ import numpy as np
 import pandas as pd
 
 KPA_PER_KGF = 98.0665          # 1 кгс/см² в кПа
+MPA_TO_KGF = 10.1972           # 1 МПа в кгс/см²
+# Группы, у которых давление в файлах ЭЛПРО в МПа, хотя в шапке стоит «кгс/см²» (подтвердил Egor, 2026-10-15)
+PRESSURE_MPA_GROUPS = {"ГСП-8"}
 SS = "{urn:schemas-microsoft-com:office:spreadsheet}"
 BLOCK = 5                      # P, T, Y, Q, В работе
 COLUMNS = ["Дата", "Режим", "ГСП", "Скважина", "№ п/п", "Начало сезона", "P газа, кгс/см²", "T газа, °C",
@@ -226,6 +229,8 @@ def _parse_grid(sheet: str, grid: List[list], info: FileInfo, default_group: Opt
                 continue
             if unit_p == "kpa":
                 vals[0] = vals[0] / KPA_PER_KGF
+            elif group in PRESSURE_MPA_GROUPS:
+                vals[0] = vals[0] * MPA_TO_KGF
             if unit_q == "m3":
                 vals[3] = vals[3] / 1000
             recs.append({
@@ -339,11 +344,6 @@ def build(paths: Sequence[str], db: Optional[pd.DataFrame] = None) -> Tuple[pd.D
     if m3:
         warn.insert(0, "Q подписан «м3/ч» в %d файлах: принято как м³ за сутки (значения сопоставимы с «т. м³» в XML). "
                        "Подтвердить по БД расходов" % len(m3))
-    # ГСП-8 в XML: давления 4–8 при 50–80 у остальных групп — похоже на МПа; не пересчитываем, подтвердить
-    p8 = data[(data["ГСП"] == "ГСП-8") & data["P газа, кгс/см²"].notna()]["P газа, кгс/см²"]
-    if len(p8) and p8.median() < 15:
-        warn.insert(0, "ГСП-8: медиана давления %.1f кгс/см² (у ГСП-1…3 около 50–80). Похоже на МПа — пересчёт не делался, "
-                       "подтвердить единицы в ЭЛПРО" % p8.median())
     if db is not None and not db.empty:
         old = db.reindex(columns=COLUMNS).copy()
         old["Дата"] = pd.to_datetime(old["Дата"])
