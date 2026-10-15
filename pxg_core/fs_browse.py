@@ -1,6 +1,6 @@
 """Серверная часть веб-проводника: список папки, быстрые места, «последняя папка» и недавние файлы.
 
-Только стандартная библиотека (Python 3.8, РЕД ОС 7.3, Windows). Сервер слушает 127.0.0.1, поэтому
+Только стандартная библиотека (Python 3.12+, РЕД ОС 7.3, Windows). Сервер слушает 127.0.0.1, поэтому
 показ файловой системы безопасен для одного пользователя. Одна «последняя папка» на пользователя
 общая для всех строк импорта, экранов и приложений: хранится в ~/.pxg/ui.json
 (каталог можно сменить переменной PXG_HOME, например для переносной сборки).
@@ -16,7 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
 MAX_RECENT = 12
@@ -240,8 +240,19 @@ async def _last(request: Request) -> JSONResponse:
     return JSONResponse(get_last())
 
 
+async def _file(request: Request):
+    """Содержимое файла по пути из проводника (сервер локальный, 127.0.0.1): интерфейс получает его как обычный выбранный файл."""
+    path = request.query_params.get("path") or ""
+    if not path or not os.path.isfile(path):
+        return JSONResponse({"error": "Файл не найден: %s" % (path or "—")}, status_code=404)
+    if not os.access(path, os.R_OK):
+        return JSONResponse({"error": "Нет доступа к файлу"}, status_code=403)
+    return FileResponse(path, media_type="application/octet-stream")
+
+
 def routes() -> List[Route]:
     return [
+        Route("/api/fs/file", _file),
         Route("/api/fs/list", _list),
         Route("/api/fs/places", _places),
         Route("/api/fs/last", _last, methods=["GET", "POST"]),
