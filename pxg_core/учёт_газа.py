@@ -151,7 +151,7 @@ def water_by_month(withdrawal: pd.DataFrame) -> pd.DataFrame:
             "Дней с отбором": int((g["pzrg_total"] > 0).sum()),
             "Дней с замером выноса": int(g["water"].notna().sum()),
             "Отбор ПЗРГ за месяц, тыс. м³": round(g["pzrg_total"].sum(), 3),
-            "Вынос воды за месяц, м³": round(g["water"].sum(), 3),
+            "Вынос воды за месяц, м³": round(g["water"].sum(min_count=1), 3),
             "Средний вынос по замерам, м³/сут": round(g["water"].mean(), 3) if g["water"].notna().any() else np.nan,
             "Водный фактор, м³/млн м³": round(pairs["water"].sum() / (pairs["pzrg_total"].sum() / 1000.0), 3)
             if len(pairs) and pairs["pzrg_total"].sum() > 0 else np.nan,
@@ -164,7 +164,7 @@ def water_by_month(withdrawal: pd.DataFrame) -> pd.DataFrame:
         "Дней с отбором": int((df["pzrg_total"] > 0).sum()),
         "Дней с замером выноса": int(df["water"].notna().sum()),
         "Отбор ПЗРГ за месяц, тыс. м³": round(df["pzrg_total"].sum(), 3),
-        "Вынос воды за месяц, м³": round(df["water"].sum(), 3),
+        "Вынос воды за месяц, м³": round(df["water"].sum(min_count=1), 3),
         "Средний вынос по замерам, м³/сут": round(df["water"].mean(), 3) if df["water"].notna().any() else np.nan,
         "Водный фактор, м³/млн м³": round(pairs["water"].sum() / (pairs["pzrg_total"].sum() / 1000.0), 3)
         if len(pairs) and pairs["pzrg_total"].sum() > 0 else np.nan,
