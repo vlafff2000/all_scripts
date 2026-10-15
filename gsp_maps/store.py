@@ -107,8 +107,10 @@ def _build(path: str, progress: Progress) -> Dict[str, np.ndarray]:
 
 
 def gsp_key(name: str) -> str:
-    """Единая схема имён групп: регистр, пробелы, «_» и «-» не различаются («ГСП-1» = «ГСП 1»)."""
-    return re.sub(r"[\s_\-]+", " ", str(name)).strip().casefold()
+    """Единая схема имён групп (как в Атласе): регистр, пробелы, «_» и «-» не различаются, а буквы и цифры
+    отделяются пробелом («ГСП-1» = «ГСП 1» = «ГСП1»)."""
+    spaced = re.sub(r"(?<=[^\W\d_])(?=\d)", " ", str(name).strip())
+    return re.sub(r"[\s_\-]+", " ", spaced).strip().casefold()
 
 
 class Store:
