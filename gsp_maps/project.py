@@ -11,6 +11,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from pxg_core import workspace
+
 from . import inputs, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
 
@@ -66,6 +68,15 @@ def detect_files(folder: str) -> Dict[str, str]:
         elif ext in (".txt", ".csv", ".dat", ".xlsx", ".xls", ".inc") and ("xy" in name or "координат" in name or "tnav" in name or "навигатор" in name):
             out.setdefault("xy", path)
     return out
+
+
+def detect_project_files() -> Dict[str, str]:
+    """Роли файлов из подпапок выбранного проекта («готовые», затем «выгрузки»); при одинаковой роли побеждает первая."""
+    merged: Dict[str, str] = {}
+    for folder in workspace.project_folders():
+        for role, path in detect_files(folder).items():
+            merged.setdefault(role, path)
+    return merged
 
 
 def water_files(spec: str) -> List[str]:
