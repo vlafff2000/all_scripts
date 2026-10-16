@@ -11,6 +11,7 @@ from pxg_core import workspace  # noqa: E402
 
 def _home(tmp_path, monkeypatch):
     monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("PXG_PROJECT", raising=False)
     return tmp_path / "home" / workspace.FILE_NAME
 
 
@@ -115,3 +116,29 @@ def test_add_ready_skips_blank_paths(tmp_path, monkeypatch):
     project.mkdir()
     workspace.save(str(project))
     assert workspace.add_ready(["", "   "]) == []
+
+
+def test_hub_project_is_default_when_nothing_chosen(tmp_path, monkeypatch):
+    # в едином архиве меню передаёт общую папку «Проект» через PXG_PROJECT: без выбора она и есть проект
+    _home(tmp_path, monkeypatch)
+    hub = tmp_path / "Проект"
+    monkeypatch.setenv("PXG_PROJECT", str(hub))
+    assert workspace.load() == str(hub)
+    assert workspace.folder("exports") == os.path.join(str(hub), "выгрузки")
+    # явный выбор сильнее
+    other = tmp_path / "другой"
+    workspace.save(str(other))
+    assert workspace.load() == os.path.abspath(other)
+
+
+def test_save_none_does_not_pin_hub_default(tmp_path, monkeypatch):
+    # save(None) не должен записывать значение из окружения как явный выбор
+    path = _home(tmp_path, monkeypatch)
+    hub = tmp_path / "Проект"
+    monkeypatch.setenv("PXG_PROJECT", str(hub))
+    assert workspace.save(None) == ""
+    assert json.loads(path.read_text(encoding="utf-8")) == {"project": ""}
+    # после смены папки по умолчанию выбора нет: действует новая
+    new_hub = tmp_path / "Проект2"
+    monkeypatch.setenv("PXG_PROJECT", str(new_hub))
+    assert workspace.load() == str(new_hub)

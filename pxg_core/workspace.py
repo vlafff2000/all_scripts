@@ -25,20 +25,30 @@ def settings_path() -> str:
     return os.path.join(home, FILE_NAME)
 
 
-def load() -> str:
-    """Путь папки проекта или '' (нет файла, битый файл или поле пустое)."""
+def _chosen_in_file() -> str:
+    """Только явный выбор из файла (без запасного варианта из окружения). Пусто, если выбора нет или файл битый."""
     try:
         with open(settings_path(), encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
-        return ""
+        data = None
     value = data.get("project") if isinstance(data, dict) else None
-    return value.strip() if isinstance(value, str) else ""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
+
+
+def load() -> str:
+    """Путь папки проекта: из файла выбора; если выбора нет — общая папка «Проект» единого архива (PXG_PROJECT).
+    Пустая строка, если ничего нет."""
+    return _chosen_in_file() or os.environ.get("PXG_PROJECT", "").strip()
 
 
 def save(project: str | None) -> str:
-    """Записывает папку проекта (None — не менять, '' — сбросить). Возвращает сохранённый путь или ''."""
-    current = load()
+    """Записывает явный выбор в файл (None — не менять, '' — снять выбор: тогда снова действует папка по умолчанию
+    из PXG_PROJECT, если она задана). Возвращает записанный путь или ''.
+    Значение из окружения сюда не попадает: оно не становится выбором пользователя."""
+    current = _chosen_in_file()
     if project is not None:
         current = os.path.abspath(os.path.expanduser(project.strip())) if project.strip() else ""
     path = settings_path()
