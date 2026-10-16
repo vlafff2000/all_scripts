@@ -98,7 +98,11 @@ def add_ready(paths: List[str]) -> List[Dict[str, str]]:
 
 def project_folders() -> List[str]:
     """Существующие подпапки выбранного проекта: сначала «готовые», потом «выгрузки». Пусто, если проект не выбран."""
-    return [folder(slot) for slot in SUBFOLDERS if folder(slot) and os.path.isdir(folder(slot))]
+    project = load()          # читаем файл выбора один раз, чтобы все подпапки относились к одному проекту
+    if not project:
+        return []
+    paths = [os.path.join(project, SUBFOLDERS[slot]) for slot in SUBFOLDERS]
+    return [path for path in paths if os.path.isdir(path)]
 
 
 def status() -> List[Dict[str, Any]]:

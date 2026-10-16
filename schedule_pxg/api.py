@@ -778,6 +778,8 @@ async def sources_folder(request: Request):
     folder = _clean(b.get("folder")) or workspace.folder("exports")   # без папки — выгрузки выбранного проекта
     if not folder:
         return _err("Выберите папку проекта (на стартовой странице Базы ПХГ) или папку выгрузок")
+    if not os.path.isdir(folder):
+        return _err("Папка выгрузок проекта не найдена: %s. Её создаёт База ПХГ после первого запуска." % folder)
     found = sources.detect_flow_files(folder)
     if not found:
         return _err("В папке нет базы расходов (xlsx с «бд» и «расход» в имени)")
