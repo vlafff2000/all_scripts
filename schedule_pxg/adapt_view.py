@@ -112,8 +112,8 @@ def write_kit(p: Project, body: dict, sel: selection.Selection, cfg: Config) -> 
     out = str(body.get("out") or "").strip().strip('"')
     if not out:
         raise ValueError("Укажите папку для комплекта.")
-    chosen = selection.chosen_for_kit(sel)
     conf = {k: v for k, v in (body.get("config") or {}).items() if k in _CONFIG_KEYS}
+    chosen = selection.chosen_for_kit(sel, bool(conf.get("all_dates")))
     res = kit.write_kit(out, chosen, conf, str(body.get("pvt") or ""))
     p.adapt["kit"] = out
     return res

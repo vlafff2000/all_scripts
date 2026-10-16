@@ -100,6 +100,7 @@ class SnapshotProvider:
         self.snaps = snaps
 
     def __call__(self, gdi) -> WellSnapshot:
-        if gdi.wname not in self.snaps:
-            raise ModelDataError(f'в файле снимков нет скважины {gdi.wname}')
-        return self.snaps[gdi.wname]
+        for k in (gdi.key, gdi.wname):      # wname - старый формат снимков (одна дата на скважину)
+            if k in self.snaps:
+                return self.snaps[k]
+        raise ModelDataError(f'в файле снимков нет скважины {gdi.wname} на {gdi.date:%d.%m.%Y}')

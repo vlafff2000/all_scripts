@@ -150,7 +150,7 @@ def assess(gdi: GDI, cfg) -> QC:
 
 
 def assess_all(gdis: List[GDI], cfg) -> Dict[str, QC]:
-    return {g.wname: assess(g, cfg) for g in gdis}
+    return {g.key: assess(g, cfg) for g in gdis}
 
 
 # ----------------------------------------------------------------------------------------------
@@ -166,14 +166,14 @@ class AverageWell:
 def build_average(gdis: List[GDI], qcs: Dict[str, QC], cfg) -> Optional[AverageWell]:
     """Медианные (физичные, A,B >= 0) A и B по хорошим ГДИ; если их меньше qc_min_good_for_average - добавляются 'fair'."""
     def pick(statuses):
-        return [g for g in gdis if qcs[g.wname].status in statuses and np.isfinite(qcs[g.wname].metrics['a'])]
+        return [g for g in gdis if qcs[g.key].status in statuses and np.isfinite(qcs[g.key].metrics['a'])]
     sel, used_fair = pick(('good',)), False
     if len(sel) < cfg.qc_min_good_for_average:
         sel, used_fair = pick(('good', 'fair')), True
     if len(sel) < cfg.qc_min_good_for_average:
         return None
-    a = float(np.median([qcs[g.wname].metrics['a'] for g in sel]))
-    b = float(np.median([qcs[g.wname].metrics['b'] for g in sel]))
+    a = float(np.median([qcs[g.key].metrics['a'] for g in sel]))
+    b = float(np.median([qcs[g.key].metrics['b'] for g in sel]))
     if a <= 0:
         return None
     return AverageWell(a, b, len(sel), [g.wname for g in sel], used_fair)
@@ -199,4 +199,4 @@ def synthetic_gdi(gdi: GDI, avg: AverageWell, cfg, q_fallback: float = float('na
     notes = list(gdi.notes) + [f'настроена по СРЕДНЕЙ скважине объекта: A={avg.a:.4g}, B={avg.b:.4g} '
                                f'(медиана по {avg.n} ГДИ{", включая удовлетворительные" if avg.used_fair else ""})']
     return GDI(wname=gdi.wname, date=gdi.date, wbp=np.full(len(q), p_res), bhp=bhp, q=q, a=avg.a, b=avg.b,
-               notes=notes, n_dropped=0, source='average')
+               notes=notes, n_dropped=0, source='average', multi=gdi.multi)

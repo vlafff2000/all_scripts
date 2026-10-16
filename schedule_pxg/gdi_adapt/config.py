@@ -52,6 +52,8 @@ class Config:
     well_bounds: Optional[dict] = None    # индивидуальные границы: {"33": {"pi_mult_bounds": [0.1, 50], "dfac_bounds": [0, 1e-5]}}
     n_starts: int = 3                     # число стартовых точек оптимизации (защита от локальных минимумов)
 
+    all_dates: bool = False               # настроить на все исследования скважины (динамика), а не только на последнее
+    include_sequential: bool = True       # при нескольких датах WPIMULT в include - приращение к уже заданному (WPIMULT в симуляторе накопительный)
     ci_jackknife: bool = True             # оценить устойчивость WPIMULT (отбрасывание режимов по одному)
     ci_warn_ratio: float = 0.5            # (макс - мин) / WPIMULT выше - замечание «неустойчив»
 

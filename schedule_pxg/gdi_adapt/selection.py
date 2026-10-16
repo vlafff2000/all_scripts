@@ -181,6 +181,7 @@ class Selection:
     rows: List[Row] = field(default_factory=list)
     chosen: Dict[str, GDI] = field(default_factory=dict)     # имя в модели -> выбранное исследование
     qcs: Dict[str, quality.QC] = field(default_factory=dict)  # те же ключи
+    history: Dict[str, List[GDI]] = field(default_factory=dict)  # все прошедшие контроль исследования (по возрастанию даты)
     notes: List[str] = field(default_factory=list)
     model_only: List[str] = field(default_factory=list)       # скважины модели без ГДИ
 
@@ -233,6 +234,7 @@ def select(studies: Sequence[GDI], cfg, st: Settings, model: Optional[Sequence[s
                 row.note = "; ".join(x for x in [row.note] + warn if x)
             sel.qcs[row.model or w] = q
             sel.chosen[row.model or w] = g
+            sel.history[row.model or w] = sorted((u for u, _ in usable), key=lambda u: u.date)
         row.include = bool(overrides.get(w, row.auto)) and row.date is not None and bool(row.model)
         sel.rows.append(row)
     if model is not None:
@@ -241,6 +243,12 @@ def select(studies: Sequence[GDI], cfg, st: Settings, model: Optional[Sequence[s
     return sel
 
 
-def chosen_for_kit(sel: Selection) -> List[Tuple[str, GDI]]:
-    """Выбранные исследования для комплекта: (имя в модели, GDI), только включённые."""
-    return [(r.model, sel.chosen[r.model]) for r in sel.rows if r.include and r.model in sel.chosen]
+def chosen_for_kit(sel: Selection, all_dates: bool = False) -> List[Tuple[str, GDI]]:
+    """Исследования для комплекта: (имя в модели, GDI), только включённые скважины.
+    all_dates - все прошедшие контроль исследования скважины (по возрастанию даты), а не только последнее."""
+    out: List[Tuple[str, GDI]] = []
+    for r in sel.rows:
+        if r.include and r.model in sel.chosen:
+            for g in (sel.history.get(r.model) or [sel.chosen[r.model]]) if all_dates else [sel.chosen[r.model]]:
+                out.append((r.model, g))
+    return out
