@@ -63,6 +63,25 @@ def test_checks_flag_water_without_offtake_and_factor_mismatch():
     assert "Водный фактор в файле не сходится с пересчётом" in kinds
 
 
+def test_two_pzrg_total_columns_do_not_crash_and_object_total_is_chosen():
+    # Шапка из файла Egor: «пзрг + за сутки + всего» подходит к двум столбцам — раньше падало с ValueError
+    by_numbers = "Отобрано газа из ПХГ за сутки / Всего по ПЗРГ - 1,2,3,4,5"
+    by_object = "Отобрано газа из ПХГ за сутки / Всего по ПЗРГ - за сутки по ПХГ"
+    rows = []
+    for d, gas, water in [("2026-01-01", 80000.0, 100.0), ("2026-01-02", 20000.0, 60.0)]:
+        rows += [(d, "H", by_object, gas), (d, "G", by_numbers, 1.0), (d, "AM", WATER, water)]
+    long_df = _long(rows)
+    # по объекту берётся столбец «за сутки по ПХГ», а не сумма по номерам ПЗРГ
+    m = g.water_by_month(long_df)
+    jan = m[m["Месяц"] == "2026-01"].iloc[0]
+    assert jan["Отбор ПЗРГ, тыс. м³"] == pytest.approx(100000.0)
+    assert jan["Вынос воды, м³"] == pytest.approx(160.0)
+    # выбор записан в проверках, без падения
+    items = g.checks(long_df)
+    assert any("выбран один" in k for k in items["Проверка"])
+    assert any("1,2,3,4,5" in c for c in items["Комментарий"])
+
+
 def test_header_column_without_name_is_excluded_not_read():
     # Значение в столбце без названия и в строке без даты в таблицу не попадает
     import openpyxl

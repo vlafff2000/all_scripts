@@ -56,7 +56,7 @@ def check_gas_accounting(values: Dict[str, str]) -> Report:
     if long_w is None:
         return rep
     if not long_w.empty:
-        gas = учёт_газа.select_series(long_w, *учёт_газа.GAS_NEEDLES).dropna().tolist()
+        gas = учёт_газа.pick_column(long_w, учёт_газа.GAS_NEEDLES, учёт_газа.GAS_PREFER)[0].dropna().tolist()
         for idx in qc.unit_suspects(gas):
             rep.warn("UNIT", "ПЗРГ за сутки сильно отличается от медианы ряда (позиция %d): возможно, другие единицы"
                      % (idx + 1))

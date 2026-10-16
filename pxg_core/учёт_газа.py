@@ -184,36 +184,55 @@ def _col_key(letters: str) -> int:
     return n
 
 
-def select_series(long_df: pd.DataFrame, *needles: str) -> pd.Series:
-    """Значения столбца с нужным названием по всем суткам файла (NaN — ячейки не было или она пустая).
+def pick_column(long_df: pd.DataFrame, needles: tuple, prefer: tuple = ()) -> tuple:
+    """Один столбец по названию: (значения по суткам, все подошедшие названия, выбранное название или None).
 
-    Столбец ищется по названию на каждом листе, а не по букве: буквы в листах могут не совпадать.
-    Если по названию подходят несколько разных столбцов, бросается ошибка — выбирать молча нельзя.
+    Столбец ищется по названию на каждом листе, а не по букве. Если подходят несколько названий, выбор
+    детерминированный и ошибки не бросается: сначала берётся название, в котором есть первая фраза из prefer
+    (по порядку фраз), иначе самое короткое — оно самое общее. Выбор и остальные варианты показываются в «Проверках».
+    NaN — ячейки не было или она пустая.
     """
     days = pd.DatetimeIndex(sorted(long_df["Дата"].unique())) if len(long_df) else pd.DatetimeIndex([])
-    mask = long_df["Параметр"].str.lower().apply(lambda p: all(n.lower() in p for n in needles)) \
-        if len(long_df) else pd.Series([], dtype=bool)
-    part = long_df[mask]
-    labels = sorted(part["Параметр"].unique())
-    if len(labels) > 1:
-        raise ValueError("Название %s подходит к нескольким столбцам: %s" % (" + ".join(needles), "; ".join(labels)))
-    if part.duplicated(["Лист", "Дата"]).any() and part.groupby(["Лист", "Дата"])["Столбец"].nunique().max() > 1:
-        raise ValueError("Два столбца с названием «%s» на одном листе: %s" % (" ".join(needles), labels))
+    labels = []
+    if len(long_df):
+        mask = long_df["Параметр"].str.lower().apply(lambda p: all(n.lower() in p for n in needles))
+        labels = sorted(long_df.loc[mask, "Параметр"].unique())
+    chosen = None
+    for want in prefer:
+        hit = [label for label in labels if want in label.lower()]
+        if hit:
+            chosen = hit[0]
+            break
+    if chosen is None and labels:
+        chosen = min(labels, key=lambda label: (len(label), label))
     out = pd.Series(np.nan, index=days, dtype=float)
+    if chosen is None:
+        return out, labels, chosen
+    part = long_df[long_df["Параметр"] == chosen]
     for day, v in part.drop_duplicates("Дата", keep="last").set_index("Дата")["Значение"].items():
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             out[day] = float(v)
-    return out
+    return out, labels, chosen
+
+
+def _ambiguity(long_df: pd.DataFrame, title: str, needles: tuple, labels: list, chosen) -> list:
+    """Запись в «Проверки», если по названию подошло больше одного столбца."""
+    if len(labels) < 2:
+        return []
+    others = "; ".join(label for label in labels if label != chosen)
+    return [("Несколько столбцов «%s»: выбран один" % title, "весь файл", len(labels),
+             "Взято «%s», не взято: %s" % (chosen, others))]
 
 
 WATER_NEEDLES = ("пластовая жидкость", "всего по пхг")
 GAS_NEEDLES = ("пзрг", "за сутки", "всего")
+GAS_PREFER = ("всего по пзрг - за сутки по пхг",)  # суточный объём по объекту
 
 
 def water_by_month(long_df: pd.DataFrame) -> pd.DataFrame:
     """Вынос воды по месяцам и по объекту. Фактор — только по суткам, где есть замер выноса и отбор > 0."""
-    water = select_series(long_df, *WATER_NEEDLES)
-    gas = select_series(long_df, *GAS_NEEDLES)
+    water, _, _ = pick_column(long_df, WATER_NEEDLES)
+    gas, _, _ = pick_column(long_df, GAS_NEEDLES, GAS_PREFER)
     days = pd.DataFrame({"water": water, "gas": gas}).sort_index()
     days["Месяц"] = days.index.to_period("M").astype(str)
 
@@ -239,8 +258,15 @@ def water_by_month(long_df: pd.DataFrame) -> pd.DataFrame:
 def checks(long_df: pd.DataFrame, tolerance: float = 0.05) -> pd.DataFrame:
     """Что посмотреть руками: нет столбца выноса, нет замера при отборе, вынос при нулевом отборе, фактор не сходится."""
     items = []
-    water = select_series(long_df, *WATER_NEEDLES)
-    gas = select_series(long_df, *GAS_NEEDLES)
+    water, water_labels, water_chosen = pick_column(long_df, WATER_NEEDLES)
+    gas, gas_labels, gas_chosen = pick_column(long_df, GAS_NEEDLES, GAS_PREFER)
+    items += _ambiguity(long_df, "пластовая жидкость, всего по ПХГ", WATER_NEEDLES, water_labels, water_chosen)
+    items += _ambiguity(long_df, "ПЗРГ за сутки, всего", GAS_NEEDLES, gas_labels, gas_chosen)
+    for label in (water_chosen, gas_chosen):
+        part = long_df[long_df["Параметр"] == label] if label else long_df.iloc[0:0]
+        if len(part) and part.groupby(["Лист", "Дата"])["Столбец"].nunique().max() > 1:
+            items.append(("Одно название в двух столбцах листа: взято последнее", label, 1,
+                          "Проверьте шапку листа"))
     if water.isna().all():
         items.append(("Нет столбца «Пластовая жидкость … Всего по ПХГ» с данными", "весь файл", 0,
                       "Вынос воды не посчитан: проверьте шапку листов"))
@@ -249,7 +275,8 @@ def checks(long_df: pd.DataFrame, tolerance: float = 0.05) -> pd.DataFrame:
         items.append(("Нет замера выноса при отборе", month, len(g), "Пропуск, не ноль: в расчёт не входит"))
     for day, v in water[(water > 0) & (gas.reindex(water.index) == 0)].items():
         items.append(("Вынос при нулевом отборе", day.strftime("%d.%m.%Y"), 1, "Вынос есть, отбора нет"))
-    factor_file = select_series(long_df, "водный фактор")
+    factor_file, factor_labels, factor_chosen = pick_column(long_df, ("водный фактор",))
+    items += _ambiguity(long_df, "водный фактор", ("водный фактор",), factor_labels, factor_chosen)
     calc = (water / (gas / 1000.0)).where(gas > 0)
     both = factor_file.notna() & calc.reindex(factor_file.index).notna()
     diff = factor_file[both]
