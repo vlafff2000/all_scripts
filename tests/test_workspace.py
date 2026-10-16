@@ -11,6 +11,7 @@ from pxg_core import workspace  # noqa: E402
 
 def _home(tmp_path, monkeypatch):
     monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("PXG_PROJECT", raising=False)
     return tmp_path / "home" / workspace.FILE_NAME
 
 
@@ -128,3 +129,16 @@ def test_hub_project_is_default_when_nothing_chosen(tmp_path, monkeypatch):
     other = tmp_path / "другой"
     workspace.save(str(other))
     assert workspace.load() == os.path.abspath(other)
+
+
+def test_save_none_does_not_pin_hub_default(tmp_path, monkeypatch):
+    # save(None) не должен записывать значение из окружения как явный выбор
+    path = _home(tmp_path, monkeypatch)
+    hub = tmp_path / "Проект"
+    monkeypatch.setenv("PXG_PROJECT", str(hub))
+    assert workspace.save(None) == ""
+    assert json.loads(path.read_text(encoding="utf-8")) == {"project": ""}
+    # после смены папки по умолчанию выбора нет: действует новая
+    new_hub = tmp_path / "Проект2"
+    monkeypatch.setenv("PXG_PROJECT", str(new_hub))
+    assert workspace.load() == str(new_hub)
