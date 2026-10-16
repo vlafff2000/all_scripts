@@ -1,9 +1,12 @@
-"""Общий выбор двух папок для всех программ: «готовые файлы» и «данные после Базы ПХГ» (выгрузки).
+"""Общий выбор проекта для всех программ: одна папка проекта, внутри две подпапки.
 
-Хранится в одном файле ``рабочие_папки.json`` в каталоге пользователя (``~/.pxg/``, как ``ui.json`` проводника;
-каталог меняется переменной PXG_HOME). Выбор делается один раз; программы читают файл и берут нужные файлы по роли.
+    <папка проекта>/готовые/    — готовые файлы (не пересобираются)
+    <папка проекта>/выгрузки/   — данные после Базы ПХГ (сюда пишет База ПХГ)
 
-Только стандартная библиотека (Python 3.12+, РЕД ОС 7.3, Windows). Битый файл не падает: работаем так, будто папки не выбраны.
+Выбор хранится в одном файле ``рабочие_папки.json`` в каталоге пользователя (``~/.pxg/``, как ``ui.json`` проводника;
+каталог меняется переменной PXG_HOME). Программы читают его и берут нужные файлы по роли.
+
+Только стандартная библиотека (Python 3.12+, РЕД ОС 7.3, Windows). Битый файл не падает: работаем так, будто проект не выбран.
 """
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ import os
 from typing import Any, Dict, List
 
 FILE_NAME = "рабочие_папки.json"
-SLOTS = ("ready", "exports")
+SUBFOLDERS = {"ready": "готовые", "exports": "выгрузки"}
 LABELS = {"ready": "Готовые файлы", "exports": "Данные после Базы ПХГ"}
 
 
@@ -21,45 +24,48 @@ def settings_path() -> str:
     return os.path.join(home, FILE_NAME)
 
 
-def load() -> Dict[str, str]:
-    """Текущий выбор: {'ready': путь или '', 'exports': путь или ''}. Нет файла или он битый — пустые значения."""
-    empty = {slot: "" for slot in SLOTS}
+def load() -> str:
+    """Путь папки проекта или '' (нет файла, битый файл или поле пустое)."""
     try:
         with open(settings_path(), encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
-        return empty
-    if not isinstance(data, dict):
-        return empty
-    return {slot: str(data.get(slot) or "").strip() for slot in SLOTS}
+        return ""
+    value = data.get("project") if isinstance(data, dict) else None
+    return value.strip() if isinstance(value, str) else ""
 
 
-def save(ready: str | None = None, exports: str | None = None) -> Dict[str, str]:
-    """Меняет только переданные поля (None — оставить как есть, '' — очистить). Запись атомарная."""
+def save(project: str | None) -> str:
+    """Записывает папку проекта (None — не менять, '' — сбросить). Возвращает сохранённый путь или ''."""
     current = load()
-    for slot, value in (("ready", ready), ("exports", exports)):
-        if value is not None:
-            current[slot] = os.path.abspath(value.strip()) if value.strip() else ""
+    if project is not None:
+        current = os.path.abspath(os.path.expanduser(project.strip())) if project.strip() else ""
     path = settings_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(current, f, ensure_ascii=False, indent=2)
+        json.dump({"project": current}, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
     return current
 
 
+def folder(slot: str) -> str:
+    """Путь подпапки ('ready' или 'exports') внутри выбранного проекта; '' если проект не выбран."""
+    project = load()
+    return os.path.join(project, SUBFOLDERS[slot]) if project else ""
+
+
 def status() -> List[Dict[str, Any]]:
-    """Для каждой папки: выбрана ли она, существует ли и какие файлы в ней лежат (имена, без чтения содержимого)."""
+    """По каждой подпапке: выбран ли проект, существует ли подпапка и какие файлы в ней (имена, без чтения содержимого)."""
     out: List[Dict[str, Any]] = []
-    chosen = load()
-    for slot in SLOTS:
-        path = chosen[slot]
+    project = load()
+    for slot, name in SUBFOLDERS.items():
+        path = os.path.join(project, name) if project else ""
         exists = bool(path) and os.path.isdir(path)
         try:
             files = sorted(
-                name for name in os.listdir(path)
-                if os.path.isfile(os.path.join(path, name)) and not name.startswith("~$")
+                f for f in os.listdir(path)
+                if os.path.isfile(os.path.join(path, f)) and not f.startswith("~$")
             ) if exists else []
         except OSError:          # нет прав на чтение папки: показываем её как не найденную
             files, exists = [], False
@@ -67,7 +73,7 @@ def status() -> List[Dict[str, Any]]:
             "slot": slot,
             "label": LABELS[slot],
             "path": path,
-            "chosen": bool(path),
+            "chosen": bool(project),
             "found": exists,
             "files": files,
         })
