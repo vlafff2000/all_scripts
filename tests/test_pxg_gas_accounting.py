@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("openpyxl")
 
 from pxg_core import учёт_газа as g  # noqa: E402
+from pxg_core.имена_бд_газа import WITHDRAW  # noqa: E402
 
 SAMPLE = os.environ.get("PXG_GAS_SAMPLE_DIR", "")
 WATER = "Пластовая жидкость (м3) / Всего по ПХГ"
@@ -119,7 +120,7 @@ def test_season_and_wide_base_one_column_per_parameter():
     db, dictionary, excl, checks = g.build_db(long_df, pd.DataFrame(columns=["Файл", "Лист", "Ячейка", "Значение", "Причина"]))
     assert list(db["Режим"]) == ["отбор", "отбор", "закачка"]
     assert list(db["Сезон"]) == ["2025/2026", "2025/2026", "2026"]
-    assert db.loc[0, GAS_TOTAL] == 100.0 and pd.isna(db.loc[2, GAS_TOTAL])  # параметр отбора пуст у закачки
+    assert db.loc[0, WITHDRAW] == 100.0 and pd.isna(db.loc[2, WITHDRAW])  # параметр отбора пуст у закачки
     assert len(dictionary) == 3
 
 

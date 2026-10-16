@@ -205,5 +205,5 @@ def test_gas_db_without_reference_column_is_an_error(files, tmp_path):
     db, pz, tmp = files
     bad = tmp_path / "bad.xlsx"
     pd.DataFrame({"Режим": ["отбор"], "Дата": [D0], "Другое": [1.0]}).to_excel(bad, sheet_name="БД", index=False)
-    with pytest.raises(ValueError, match="найден 0 раз"):
+    with pytest.raises(ValueError, match="нет столбца"):
         nm.normalize(db, "", str(tmp / "o"), gas_db=str(bad))

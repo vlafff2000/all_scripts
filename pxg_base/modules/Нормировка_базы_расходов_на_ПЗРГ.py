@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from pxg_core import параметры
+from pxg_core.имена_бд_газа import INJECT, WITHDRAW, найти_столбец
 from pxg_core.расходы_файлы import read_excel_safe
 from schedule_pxg import history, historymode
 
@@ -47,19 +48,13 @@ WITHDRAW_TOTAL = "Всего по ПЗРГ - за сутки по ПХГ"       
 INJECT_TOTAL = "Закачано в ПХГ за СУТКИ, тыс.м3/сут"    # «БД по учету газа»: закачка, тыс. м³/сут
 
 
-def _one_column(db: pd.DataFrame, part: str) -> str:
-    hits = [c for c in db.columns if part in str(c)]
-    if len(hits) != 1:
-        raise ValueError("В «БД по учету газа» столбец «%s» найден %d раз: проверьте лист «БД»" % (part, len(hits)))
-    return hits[0]
-
-
 def gas_pzrg(path: str) -> pd.DataFrame:
     """Суточный объём по объекту из «БД по учету газа» (лист «БД») в виде таблицы (date, rate), м³/сут.
     Отбор берём из «Всего по ПЗРГ», закачку — из «Закачано в ПХГ за СУТКИ»; значения в тыс. м³ умножаем на 1000.
     Пустые сутки в эталон не входят (по ним нормировки нет)."""
     db = pd.read_excel(path, sheet_name="БД")
-    w, i = _one_column(db, WITHDRAW_TOTAL), _one_column(db, INJECT_TOTAL)
+    w = найти_столбец(db.columns, WITHDRAW, WITHDRAW_TOTAL)
+    i = найти_столбец(db.columns, INJECT, INJECT_TOTAL)
     rate = np.where(db["Режим"] == "отбор", pd.to_numeric(db[w], errors="coerce"),
                     np.where(db["Режим"] == "закачка", pd.to_numeric(db[i], errors="coerce"), np.nan))
     out = pd.DataFrame({"date": pd.to_datetime(db["Дата"], errors="coerce"), "rate": rate * 1000.0})
