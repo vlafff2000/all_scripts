@@ -34,7 +34,7 @@ GDI_FILE = os.path.join(HERE, 'data_gdi_adapt', 'all_gdi.xlsx')
 
 
 def make_cfg(**kw):
-    base = dict(gdi_file=GDI_FILE, pvt_file=PVT_FILE, make_png=False, qc_enabled=False)
+    base = dict(gdi_file=GDI_FILE, pvt_file=PVT_FILE, make_png=False, qc_enabled=False, ci_jackknife=False)
     base.update(kw)
     return Config.load(None, **base)
 
@@ -241,6 +241,30 @@ class TestIO(unittest.TestCase):
         self.assertIn('DATES\n01 JAN 2022\t/\n/\nWPIMULT\n1\t', txt)
         self.assertIn('\n/\nWDFAC\n1\t', txt)
         shutil.rmtree(d)
+
+
+class TestJackknife(unittest.TestCase):
+    def _gdi(self, bhp_bad=None):
+        pvt = PVT.from_csv(PVT_FILE)
+        q = np.array([4e4, 8e4, 1.2e5, 1.6e5])
+        wbp = np.full(4, 85.0)
+        bhp = np.sqrt(85.0 ** 2 - (0.9 * q / 1000 + 0.004 * (q / 1000) ** 2))
+        if bhp_bad is not None:
+            bhp = bhp.copy()
+            bhp[1] = bhp_bad
+        return GDI(wname='T', date=pd.Timestamp('2022-01-01').to_pydatetime(), wbp=wbp, bhp=bhp, q=q, a=float('nan'), b=float('nan')), pvt
+
+    def test_stable_and_unstable(self):
+        from schedule_pxg.gdi_adapt.adapt import jackknife
+        snap, cfg = synthetic_snapshot(), make_cfg(strategy='dp')
+        g, pvt = self._gdi()
+        r = adapt_well(g, snap, pvt, cfg)
+        jackknife(g, snap, pvt, cfg, r)
+        self.assertTrue(r.pi_lo <= r.pi_mult <= r.pi_hi)
+        g2, _ = self._gdi(bhp_bad=70.0)                       # один замер сильно выбивается
+        r2 = adapt_well(g2, snap, pvt, cfg)
+        jackknife(g2, snap, pvt, cfg, r2)
+        self.assertGreater(r2.pi_hi - r2.pi_lo, r.pi_hi - r.pi_lo)
 
 
 class TestEndToEnd(unittest.TestCase):

@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 
 from . import outputs, report
-from .adapt import AdaptResult, adapt_well
+from .adapt import AdaptResult, adapt_well, jackknife
 from .errors import AdaptError
 from .gdi import load_gdi
 from .pvt import PVT
@@ -122,6 +122,8 @@ def run(cfg, project_dir: str, provider) -> RunResult:
                     snap = provider(g0)
                 snaps[g0.wname] = snap
                 res = adapt_well(g, snap, pvt, cfg)
+                if cfg.ci_jackknife and g.source == 'gdi':
+                    jackknife(g, snap, pvt, cfg, res)
                 if qc is not None:
                     res.qc_status = qc.status
                     if qc.status == 'bad':

@@ -218,7 +218,7 @@ export interface AdaptSettings { p_units: string; q_units: string; min_status: s
 export interface AdaptState {
   config: AdaptConfig; settings: AdaptSettings; p_units: string[]; q_units: string[]
   db: string; sheet: string; cols: Record<string, string>; saved_settings: Partial<AdaptSettings>; saved_config: Partial<AdaptConfig>
-  overrides: Record<string, boolean>; scenario: string; scenarios: { name: string; path: string }[]
+  overrides: Record<string, boolean>; scenario: string; kit: string; scenarios: { name: string; path: string }[]
 }
 export interface AdaptColumns { columns: string[]; detected: Record<string, string>; rows: number }
 export interface AdaptRow {
@@ -237,3 +237,26 @@ export const getAdapt = () => call<AdaptState>('/api/adapt')
 export const getAdaptColumns = (path: string, sheet = '') => call<AdaptColumns>('/api/adapt/columns?' + new URLSearchParams({ path, sheet }))
 export const adaptSelect = (b: AdaptRequest) => call<AdaptSelection>('/api/adapt/select', post(b))
 export const adaptKit = (b: AdaptRequest & { out: string }) => call<{ folder: string; wells: string[]; files: string[] }>('/api/adapt/kit', post(b))
+
+export interface AdaptResultRow {
+  well: string; date: string; source: string; qc: string; n_regimes: number
+  pi_mult: number | null; pi_lo: number | null; pi_hi: number | null; d: number | null; old_d: number | null
+  r2_old: number | null; r2: number | null; mape_old: number | null; mape: number | null
+  a_gdi: number | null; b_gdi: number | null; a_model: number | null; b_model: number | null
+  wbp_model: number | null; q_op: number | null; q_ratio: number | null; dp2_err_before: number | null; dp2_err_after: number | null
+  ok: boolean; problems: string[]; notes: string[]; substituted: boolean; t_name: string
+  q_gdi: (number | null)[]; q_before: (number | null)[]; q_after: (number | null)[]; dp2_gdi: (number | null)[]
+  curve_q: (number | null)[]; curve_before: (number | null)[]; curve_after: (number | null)[]; at_bound: boolean
+}
+export interface AdaptGroupRow { group: string; wells: number; q_gdi: number; q_before: number; q_after: number; err_before: number | null; err_after: number | null }
+export interface AdaptView {
+  run_dir: string; made: string; rows: AdaptResultRow[]; failures: { well: string; reason: string }[]
+  summary: { wells: number; ok: number; with_problems: number; skipped: number; at_bound: number; unstable: number; r2_old: number | null; r2: number | null
+    mape_old: number | null; mape: number | null; pi_mult: number | null; d: number | null; improved: number }
+  groups: AdaptGroupRow[]
+}
+export interface AdaptRun { dir: string; name: string; has_snapshots: boolean; has_results: boolean; has_inc: boolean }
+export const adaptRecompute = (kit: string, snapshots: string, config: Partial<AdaptConfig>) => call<AdaptView>('/api/adapt/recompute', post({ kit, snapshots, config }))
+export const adaptRuns = (kit: string) => call<{ runs: AdaptRun[] }>('/api/adapt/runs?' + new URLSearchParams({ kit }))
+export const adaptRun = (dir: string) => call<AdaptView>('/api/adapt/run?' + new URLSearchParams({ dir }))
+export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv') => '/api/adapt/file?' + new URLSearchParams({ dir, kind })

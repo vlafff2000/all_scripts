@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from .gdi_adapt import kit, selection
+from .gdi_adapt import kit, runs, selection
 from .gdi_adapt.config import Config
 from .project import Project
 
@@ -29,7 +29,7 @@ def defaults() -> dict:
 def view(p: Project) -> dict:
     a = p.adapt or {}
     return dict(defaults(), db=a.get("db", ""), sheet=a.get("sheet", ""), cols=a.get("cols") or {}, saved_settings=a.get("settings") or {},
-                saved_config=a.get("config") or {}, overrides=a.get("overrides") or {}, scenario=a.get("scenario", ""),
+                saved_config=a.get("config") or {}, kit=a.get("kit", ""), overrides=a.get("overrides") or {}, scenario=a.get("scenario", ""),
                 scenarios=[dict(name=n, path=p.results.get(n, "")) for n in p.scenarios])
 
 
@@ -104,7 +104,7 @@ def selection_view(sel: selection.Selection) -> dict:
 def save_state(p: Project, folder: str, body: dict, cols: dict) -> None:
     p.adapt = {"db": str(body.get("db") or "").strip().strip('"'), "sheet": str(body.get("sheet") or ""), "cols": cols,
                "settings": body.get("settings") or {}, "config": body.get("config") or {},
-               "overrides": body.get("overrides") or {}, "scenario": str(body.get("scenario") or "")}
+               "overrides": body.get("overrides") or {}, "scenario": str(body.get("scenario") or ""), "kit": (p.adapt or {}).get("kit", "")}
     p.save(folder)
 
 
@@ -114,4 +114,24 @@ def write_kit(p: Project, body: dict, sel: selection.Selection, cfg: Config) -> 
         raise ValueError("Укажите папку для комплекта.")
     chosen = selection.chosen_for_kit(sel)
     conf = {k: v for k, v in (body.get("config") or {}).items() if k in _CONFIG_KEYS}
-    return kit.write_kit(out, chosen, conf, str(body.get("pvt") or ""))
+    res = kit.write_kit(out, chosen, conf, str(body.get("pvt") or ""))
+    p.adapt["kit"] = out
+    return res
+
+
+FILES = {"inc": "wpimult_wdfac.inc", "xlsx": "report.xlsx", "csv": "results.csv"}
+
+
+def recompute(p: Project, body: dict) -> dict:
+    conf = {k: v for k, v in (body.get("config") or {}).items() if k in _CONFIG_KEYS}
+    v = runs.recompute(str(body.get("kit") or "").strip().strip('"'), str(body.get("snapshots") or ""), conf, p.well_group)
+    p.adapt["kit"] = str(body.get("kit") or "").strip().strip('"')
+    return v
+
+
+def run_file(run_dir: str, kind: str) -> str:
+    name = FILES.get(kind)
+    path = os.path.join(run_dir, name) if name else ""
+    if not name or not os.path.isfile(path):
+        raise ValueError("В «%s» нет файла %s." % (run_dir, name or kind))
+    return path
