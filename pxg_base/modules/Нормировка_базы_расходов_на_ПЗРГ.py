@@ -43,19 +43,51 @@ def _frames(sheets: dict) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["well", "date", "rate", "kind", "_sheet", "_row"])
 
 
-def normalize(db_file: str, pzrg_file: str, out_dir: str, window_lo: str = "", window_hi: str = "") -> dict:
-    """Нормирует базу расходов на ПЗРГ и пишет базу и журнал в `out_dir`. Возвращает пути и сводку."""
-    db_file, pzrg_file = параметры.clean_path(db_file), параметры.clean_path(pzrg_file)
+WITHDRAW_TOTAL = "Всего по ПЗРГ - за сутки по ПХГ"       # «БД по учету газа»: отбор, тыс. м³/сут
+INJECT_TOTAL = "Закачано в ПХГ за СУТКИ, тыс.м3/сут"    # «БД по учету газа»: закачка, тыс. м³/сут
+
+
+def _one_column(db: pd.DataFrame, part: str) -> str:
+    hits = [c for c in db.columns if part in str(c)]
+    if len(hits) != 1:
+        raise ValueError("В «БД по учету газа» столбец «%s» найден %d раз: проверьте лист «БД»" % (part, len(hits)))
+    return hits[0]
+
+
+def gas_pzrg(path: str) -> pd.DataFrame:
+    """Суточный объём по объекту из «БД по учету газа» (лист «БД») в виде таблицы (date, rate), м³/сут.
+    Отбор берём из «Всего по ПЗРГ», закачку — из «Закачано в ПХГ за СУТКИ»; значения в тыс. м³ умножаем на 1000.
+    Пустые сутки в эталон не входят (по ним нормировки нет)."""
+    db = pd.read_excel(path, sheet_name="БД")
+    w, i = _one_column(db, WITHDRAW_TOTAL), _one_column(db, INJECT_TOTAL)
+    rate = np.where(db["Режим"] == "отбор", pd.to_numeric(db[w], errors="coerce"),
+                    np.where(db["Режим"] == "закачка", pd.to_numeric(db[i], errors="coerce"), np.nan))
+    out = pd.DataFrame({"date": pd.to_datetime(db["Дата"], errors="coerce"), "rate": rate * 1000.0})
+    return out.dropna(subset=["date", "rate"]).sort_values("date").reset_index(drop=True)
+
+
+def normalize(db_file: str, pzrg_file: str, out_dir: str, window_lo: str = "", window_hi: str = "", gas_db: str = "") -> dict:
+    """Нормирует базу расходов на ПЗРГ и пишет базу и журнал в `out_dir`. Возвращает пути и сводку.
+    Если задана «БД по учету газа» (`gas_db`), её суточные объёмы по объекту — эталон, файл ПЗРГ не нужен."""
+    db_file, pzrg_file, gas_db = параметры.clean_path(db_file), параметры.clean_path(pzrg_file), параметры.clean_path(gas_db)
     if not os.path.isfile(db_file):
         raise FileNotFoundError("Файл базы расходов не найден: %s" % db_file)
-    if not os.path.isfile(pzrg_file):
+    if gas_db and not os.path.isfile(gas_db):
+        raise FileNotFoundError("Файл «БД по учету газа» не найден: %s" % gas_db)
+    if not gas_db and not os.path.isfile(pzrg_file):
         raise FileNotFoundError("Файл ПЗРГ не найден: %s" % pzrg_file)
     if history.is_normalized_db(db_file):
         raise ValueError("База уже нормирована на ПЗРГ (есть столбец «%s»): возьмите исходную базу" % history.RAW_RATE_COLUMN)
     lo, hi = historymode.parse_window(window_lo, window_hi)
-    pz = historymode.read_pzrg(pzrg_file)
+    if gas_db:
+        pz = gas_pzrg(gas_db)
+        source = gas_db
+    else:
+        pz = historymode.read_pzrg(pzrg_file)
+        source = pzrg_file
     if not len(pz):
-        raise ValueError("В файле ПЗРГ нет дат с расходом (даты в столбце A, расход в столбце C)")
+        raise ValueError("Эталон суточного объёма пуст: в «БД по учету газа» нет суток с объёмом по объекту"
+                         if gas_db else "В файле ПЗРГ нет дат с расходом (даты в столбце A, расход в столбце C)")
     os.makedirs(out_dir, exist_ok=True)
 
     names = pd.ExcelFile(db_file).sheet_names
@@ -118,7 +150,7 @@ def normalize(db_file: str, pzrg_file: str, out_dir: str, window_lo: str = "", w
     out_log = os.path.join(out_dir, OUT_LOG)
     summary = historymode.log_summary(log)
     rsum = historymode.residual_summary(residual)
-    _write_log(out_log, db_file, pzrg_file, lo, hi, log, residual, summary, rsum, notes)
+    _write_log(out_log, db_file, source, lo, hi, log, residual, summary, rsum, notes)
     return {"db": os.path.abspath(out_db), "log": os.path.abspath(out_log), "rows": len(frame), "window": (lo / 1000.0, hi / 1000.0),
             "log_summary": summary, "residual_summary": rsum, "notes": notes, "mixed_days": mixed_days,
             "statuses": {s: int((status == s).sum()) for s in sorted(set(status))}}
@@ -155,9 +187,9 @@ def _write_db(path: str, names, sheets, data, frame, corr, k_col, status) -> Non
                     ws.set_column(j, j, width)
 
 
-def _write_log(path, db_file, pzrg_file, lo, hi, log, residual, summary, rsum, notes) -> None:
+def _write_log(path, db_file, source, lo, hi, log, residual, summary, rsum, notes) -> None:
     params = pd.DataFrame([
-        ("База расходов", db_file), ("Файл ПЗРГ", pzrg_file), ("Окно рабочего дебита, тыс. м³/сут", "%g – %g" % (lo / 1000.0, hi / 1000.0)),
+        ("База расходов", db_file), ("Эталон суточного объёма", source),("Окно рабочего дебита, тыс. м³/сут", "%g – %g" % (lo / 1000.0, hi / 1000.0)),
         ("Суток нормировано", summary["corrected"]), ("Суток не менялось", summary["skipped"]),
         ("Наибольшее расхождение после нормировки, %", round(summary["worst"], 3)), ("Не распределено, м³", round(summary["unallocated"], 1)),
         ("Вывод по невязке", rsum["verdict"]), ("Медиана невязки, %", round(rsum["median"], 2))] + [("Замечание", n) for n in notes],
@@ -174,21 +206,23 @@ def main(argv: Optional[list] = None) -> int:
     args = параметры.parse(
         "Нормировка базы расходов на суточный объём коммерческого узла учёта (ПЗРГ)", argv,
         db="файл базы расходов (Excel с листами «Отборы» и «Закачка»)", pzrg="файл ПЗРГ (даты в столбце A, расход в столбце C)",
+        gas_db="«БД по учету газа» — суточные объёмы по объекту, приоритетный эталон (вместо файла ПЗРГ)",
         window_lo="окно рабочего дебита, от, тыс. м3/сут (пусто — 80)", window_hi="окно рабочего дебита, до, тыс. м3/сут (пусто — 600)",
         out="папка результата (пусто — текущая)")
     print("=" * 60)
     print("НОРМИРОВКА БАЗЫ РАСХОДОВ НА ПЗРГ")
     print("=" * 60)
     db = параметры.ask_path("Файл базы расходов", args.db)
-    pz = параметры.ask_path("Файл ПЗРГ (даты — столбец A, расход — столбец C)", args.pzrg) if db else ""
-    if not db or not pz:
-        print("Нужны файл базы расходов и файл ПЗРГ.")
+    gas = параметры.clean_path(args.gas_db) if args.gas_db else ""
+    pz = "" if gas else параметры.ask_path("Файл ПЗРГ (даты — столбец A, расход — столбец C)", args.pzrg)
+    if not db or not (gas or pz):
+        print("Нужны файл базы расходов и либо «БД по учету газа», либо файл ПЗРГ.")
         return 1
     lo = args.window_lo if args.window_lo is not None else параметры.ask("Окно рабочего дебита, от (тыс. м3/сут)", "80")
     hi = args.window_hi if args.window_hi is not None else параметры.ask("Окно рабочего дебита, до (тыс. м3/сут)", "600")
     out = параметры.clean_path(args.out) if args.out else os.getcwd()
     try:
-        r = normalize(db, pz, out, lo, hi)
+        r = normalize(db, pz, out, lo, hi, gas_db=gas)
     except Exception as e:  # ошибки входа — понятным текстом, без трассировки
         print("Ошибка: %s" % e)
         return 1
