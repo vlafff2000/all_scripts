@@ -19,6 +19,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from pxg_core.имена_бд_газа import MAIN_COLUMNS, canonical_name, param_key
+
 HEADER_ROWS = range(1, 7)  # шапка листа, 1-based; строки ниже первой строки данных не читаются как шапка
 UNIT_PATTERNS = [
     (r"тыс\.?\s*м3\s*/\s*сут", "тыс. м³/сут"),
@@ -334,12 +336,6 @@ def collect_books(paths) -> tuple:
     return sorted(set(books)), skipped
 
 
-def param_key(label: str) -> str:
-    """Ключ параметра для сравнения между листами и файлами: регистр, пробелы, «-» и «_» не различаются."""
-    text = re.sub(r"\s+", " ", str(label)).strip().lower()
-    return re.sub(r"\s*([-_])\s*", r"\1", text)
-
-
 def season_of(day: pd.Timestamp, kind: str) -> str:
     """Сезон: отбор — с октября по апрель («2025/2026»); закачка — календарный год («2026»)."""
     if kind == "отбор":
@@ -359,7 +355,7 @@ def build_db(long_df: pd.DataFrame, excl_df: pd.DataFrame) -> tuple:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(excl, columns=["Файл", "Лист", "Ячейка", "Значение", "Причина"]), \
             pd.DataFrame(columns=["Проверка", "Дата или месяц", "Записей", "Комментарий"])
     df = long_df.copy()
-    df["Ключ"] = df["Параметр"].map(param_key)
+    df["Ключ"] = df["Параметр"].map(lambda p: canonical_name(p) or param_key(p))
     numeric = df["Значение"].map(lambda v: isinstance(v, (int, float)) and not isinstance(v, bool))
     for _, r in df[~numeric].iterrows():
         excl.append((r["Файл"], r["Лист"], "%s%d" % (r["Столбец"], r["Строка"]), r["Значение"],
@@ -382,8 +378,10 @@ def build_db(long_df: pd.DataFrame, excl_df: pd.DataFrame) -> tuple:
     wide["Месяц"] = wide["Дата"].dt.month
     order = {"отбор": 0, "закачка": 1}
     wide = wide.assign(_o=wide["Тип"].map(order).fillna(9)).sort_values(["_o", "Дата"]).drop(columns="_o")
-    param_cols = [k for k in labels.index]
-    names = {k: labels.loc[k, "Параметр"] for k in param_cols}
+    # главные колонки — первыми (MAIN_COLUMNS), остальные — в порядке появления в файле
+    rank = {name: i for i, name in enumerate(MAIN_COLUMNS)}
+    param_cols = sorted(labels.index, key=lambda k: rank.get(k, len(rank)))
+    names = {k: (k if canonical_name(labels.loc[k, "Параметр"]) == k else labels.loc[k, "Параметр"]) for k in param_cols}
     wide = wide.rename(columns={"Тип": "Режим", **names})
     base_cols = ["Режим", "Дата", "Год", "Месяц", "Сезон", "Файл", "Лист"]
     db = wide[base_cols + [names[k] for k in param_cols]].reset_index(drop=True)
