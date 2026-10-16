@@ -17,7 +17,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from .project import PATH_KEYS, Project, detect_files
+from .project import PATH_KEYS, Project, detect_files, detect_project_files
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
 PROJECT = Project()
@@ -51,9 +51,10 @@ async def config(request: Request):
 async def scan(request: Request):
     body = await request.json()
     folder = str(body.get("folder") or "").strip().strip('"')
-    found = detect_files(folder)
+    # без папки берём файлы выбранного проекта (готовые и выгрузки Базы ПХГ)
+    found = detect_files(folder) if folder else detect_project_files()
     if not found:
-        return _err("В папке не нашлось знакомых файлов (ожидается БД_расходы.xlsx и другие).")
+        return _err("В папке не нашлось знакомых файлов (ожидается БД_расходы.xlsx и другие). Выберите папку проекта или папку с файлами.")
     PROJECT.set_paths(found)
     PROJECT.start_loading()
     return JSONResponse(await run_in_threadpool(_state))
