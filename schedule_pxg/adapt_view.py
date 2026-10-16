@@ -1,0 +1,117 @@
+"""Адаптация модели по ГДИ (вкладка «Адаптация по ГДИ»): чтение БД ГДИ, отбор исследований, комплект для тНавигатора.
+
+Настройки лежат в `Project.adapt` (adapt.json): db (путь), sheet, cols, settings (gdi_adapt.selection.Settings),
+config (поля gdi_adapt.config.Config), overrides ({скважина БД: True/False}), scenario (чьи результаты задают скважины модели).
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import asdict, fields
+from typing import Dict, List, Optional, Tuple
+
+import pandas as pd
+
+from .gdi_adapt import kit, selection
+from .gdi_adapt.config import Config
+from .project import Project
+
+_cache: Dict[tuple, Tuple[list, list]] = {}
+_SETTINGS = {f.name for f in fields(selection.Settings)}
+_CONFIG_KEYS = {f.name for f in fields(Config)} - {"gdi_file", "pvt_file", "wbp_units", "bhp_units", "q_units", "from_date", "wells", "output_dir", "date_format", "model_index"}
+
+
+def defaults() -> dict:
+    d = asdict(Config())
+    d = {k: v for k, v in d.items() if k in _CONFIG_KEYS}
+    return {"config": d, "settings": asdict(selection.Settings()), "p_units": list(selection.P_UNITS), "q_units": list(selection.Q_UNITS)}
+
+
+def view(p: Project) -> dict:
+    a = p.adapt or {}
+    return dict(defaults(), db=a.get("db", ""), sheet=a.get("sheet", ""), cols=a.get("cols") or {}, saved_settings=a.get("settings") or {},
+                saved_config=a.get("config") or {}, overrides=a.get("overrides") or {}, scenario=a.get("scenario", ""),
+                scenarios=[dict(name=n, path=p.results.get(n, "")) for n in p.scenarios])
+
+
+def _merge_settings(raw: Optional[dict]) -> selection.Settings:
+    clean = {k: v for k, v in (raw or {}).items() if k in _SETTINGS and v not in (None, "")}
+    if "max_age_years" in clean:
+        clean["max_age_years"] = float(clean["max_age_years"])
+    st = selection.Settings(**clean)
+    st.validate()
+    return st
+
+
+def _config(raw: Optional[dict]) -> Config:
+    clean = {k: v for k, v in (raw or {}).items() if k in _CONFIG_KEYS}
+    return Config.load(None, **clean)
+
+
+def read_columns(path: str, sheet: str = "") -> dict:
+    """Столбцы БД ГДИ и найденные роли (well, date, wbp, bhp, q)."""
+    if not os.path.isfile(path):
+        raise ValueError("Не нашёл файл «%s». Проверьте путь или нажмите «Выбрать файл»." % path)
+    df = selection.read_db(path, sheet)
+    cols = [str(c) for c in df.columns if not str(c).startswith("Unnamed")]
+    return {"columns": cols, "detected": selection.detect_columns(cols), "rows": int(len(df))}
+
+
+def _studies(path: str, sheet: str, cols: dict, st: selection.Settings):
+    key = (os.path.abspath(path), os.path.getmtime(path), sheet, tuple(sorted(cols.items())), st.p_units, st.q_units, st.from_date)
+    if key not in _cache:
+        if len(_cache) > 4:
+            _cache.pop(next(iter(_cache)))
+        _cache[key] = selection.build_studies(selection.read_db(path, sheet), cols, st)
+    return _cache[key]
+
+
+def model_wells_for(p: Project, scenario: str) -> Tuple[Optional[List[str]], str]:
+    """Скважины модели: из результатов сценария (SMSPEC); если не привязаны - скважины проекта; иначе None."""
+    path = (p.results or {}).get(scenario or "", "")
+    if path:
+        return selection.model_wells(path), "результаты сценария «%s»" % scenario
+    if p.wells:
+        return list(p.wells), "скважины проекта"
+    return None, ""
+
+
+def run_selection(p: Project, body: dict) -> Tuple[selection.Selection, dict, Config, selection.Settings]:
+    path = str(body.get("db") or "").strip().strip('"')
+    if not os.path.isfile(path):
+        raise ValueError("Не нашёл БД ГДИ «%s». Укажите файл базы ГДИ из «Базы ПХГ»." % path)
+    cols = {k: v for k, v in (body.get("cols") or {}).items() if v}
+    if not cols:
+        cols = selection.detect_columns(selection.read_db(path, body.get("sheet") or "").columns)
+    st = _merge_settings(body.get("settings"))
+    cfg = _config(body.get("config"))
+    studies, notes = _studies(path, str(body.get("sheet") or ""), cols, st)
+    model, src = model_wells_for(p, str(body.get("scenario") or ""))
+    overrides = {str(k): bool(v) for k, v in (body.get("overrides") or {}).items()}
+    sel = selection.select(studies, cfg, st, model=model, resolve=p.resolve if p.wells else None, overrides=overrides)
+    sel.notes = notes + ([("Скважины модели взяты из: %s" % src)] if src else ["Скважины модели неизвестны: привяжите результаты расчёта к сценарию — тогда отбор сверится с моделью."])
+    return sel, cols, cfg, st
+
+
+def selection_view(sel: selection.Selection) -> dict:
+    rows = [r.to_dict() for r in sel.rows]
+    inc = [r for r in sel.rows if r.include]
+    counts = dict(wells_db=len(rows), included=len(inc), no_model=sum(1 for r in sel.rows if r.note == "нет в модели"),
+                  all_bad=sum(1 for r in sel.rows if r.note.startswith("все ГДИ забракованы")),
+                  old=sum(1 for r in sel.rows if "старше" in r.note), model_only=len(sel.model_only))
+    return {"rows": rows, "counts": counts, "model_only": sel.model_only, "notes": sel.notes}
+
+
+def save_state(p: Project, folder: str, body: dict, cols: dict) -> None:
+    p.adapt = {"db": str(body.get("db") or "").strip().strip('"'), "sheet": str(body.get("sheet") or ""), "cols": cols,
+               "settings": body.get("settings") or {}, "config": body.get("config") or {},
+               "overrides": body.get("overrides") or {}, "scenario": str(body.get("scenario") or "")}
+    p.save(folder)
+
+
+def write_kit(p: Project, body: dict, sel: selection.Selection, cfg: Config) -> dict:
+    out = str(body.get("out") or "").strip().strip('"')
+    if not out:
+        raise ValueError("Укажите папку для комплекта.")
+    chosen = selection.chosen_for_kit(sel)
+    conf = {k: v for k, v in (body.get("config") or {}).items() if k in _CONFIG_KEYS}
+    return kit.write_kit(out, chosen, conf, str(body.get("pvt") or ""))

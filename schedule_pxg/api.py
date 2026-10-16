@@ -22,7 +22,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import avg_view, charts, checks, control, dataquality, forecast, history, historymode, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
+from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, historymode, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -979,6 +979,45 @@ async def results_indicators(request: Request):
     return JSONResponse({"rows": rows, "notes": notes})
 
 
+async def adapt_get(request: Request):
+    return JSONResponse(await run_in_threadpool(lambda: adapt_view.view(_project())))
+
+
+async def adapt_columns(request: Request):
+    q = request.query_params
+    try:
+        return JSONResponse(await run_in_threadpool(adapt_view.read_columns, _clean(q.get("path")), q.get("sheet") or ""))
+    except (ValueError, OSError) as e:
+        return _err(str(e))
+
+
+def _adapt_select(body: dict):
+    p = _project()
+    sel, cols, cfg, st = adapt_view.run_selection(p, body)
+    adapt_view.save_state(p, FOLDER, body, cols)
+    return p, sel, cols, cfg
+
+
+async def adapt_select(request: Request):
+    body = await request.json()
+    try:
+        _p, sel, cols, _cfg = await run_in_threadpool(_adapt_select, body)
+    except (ValueError, OSError, KeyError) as e:
+        return _err(str(e))
+    return JSONResponse(dict(adapt_view.selection_view(sel), cols=cols))
+
+
+async def adapt_kit(request: Request):
+    body = await request.json()
+    try:
+        def go():
+            p, sel, _cols, cfg = _adapt_select(body)
+            return adapt_view.write_kit(p, body, sel, cfg)
+        return JSONResponse(await run_in_threadpool(go))
+    except (ValueError, OSError, KeyError) as e:
+        return _err(str(e))
+
+
 def build_app() -> Starlette:
     routes = [
         Route("/api/state", state),
@@ -1027,6 +1066,10 @@ def build_app() -> Starlette:
         Route("/api/averaging/advice", averaging_advice, methods=["POST"]),
         Route("/api/averaging/exclude", averaging_exclude, methods=["POST"]),
         Route("/api/averaging/manual", averaging_manual, methods=["POST"]),
+        Route("/api/adapt", adapt_get),
+        Route("/api/adapt/columns", adapt_columns),
+        Route("/api/adapt/select", adapt_select, methods=["POST"]),
+        Route("/api/adapt/kit", adapt_kit, methods=["POST"]),
         Route("/api/results", results_get),
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
