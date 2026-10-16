@@ -86,6 +86,17 @@ def read_db(path: str, sheet=None) -> pd.DataFrame:
     return df
 
 
+def _dates(col: pd.Series) -> pd.Series:
+    """Даты Excel как есть; строки: ГГГГ-ММ-ДД разбираются по ISO, остальные (дд.мм.гггг) день-вперёд."""
+    if pd.api.types.is_datetime64_any_dtype(col):
+        return col
+    def one(v):
+        if isinstance(v, str) and re.match(r"^\s*\d{4}-\d{2}-\d{2}", v):
+            return pd.to_datetime(v, errors="coerce")
+        return pd.to_datetime(v, errors="coerce", dayfirst=True)
+    return col.map(one)
+
+
 def build_studies(df: pd.DataFrame, cols: Dict[str, str], st: Settings) -> Tuple[List[GDI], List[str]]:
     """Исследования = группа (скважина, дата). a и b считаются МНК по режимам (Pпл²−Pз² = A·Q + B·Q²), а не берутся из файла."""
     st.validate()
@@ -97,7 +108,7 @@ def build_studies(df: pd.DataFrame, cols: Dict[str, str], st: Settings) -> Tuple
     d.columns = ["w", "d", "wbp", "bhp", "q"]
     n0 = len(d)
     d["wbp"], d["bhp"], d["q"] = (pd.to_numeric(d[c], errors="coerce") for c in ("wbp", "bhp", "q"))
-    d["d"] = pd.to_datetime(d["d"], errors="coerce", dayfirst=True)
+    d["d"] = _dates(d["d"])
     d = d.dropna()
     notes: List[str] = []
     if len(d) < n0:

@@ -1,0 +1,165 @@
+import { useEffect, useMemo, useState } from 'react'
+import PageHead from './PageHead'
+import {
+  AdaptColumns, AdaptConfig, AdaptRequest, AdaptSelection, AdaptSettings, AdaptState, adaptKit, adaptSelect, getAdapt, getAdaptColumns, pickFile,
+} from './api'
+
+const ROLES: [string, string][] = [['well', 'Скважина'], ['date', 'Дата'], ['wbp', 'Рпл'], ['bhp', 'Рзаб'], ['q', 'Дебит']]
+const STRATEGIES: [string, string][] = [['andrey', 'Сохранить ΔP² ГДИ при пластовом давлении модели'], ['dp', 'Депрессия как в ГДИ'], ['pzab', 'Рпл модели минус Рзаб ГДИ']]
+const P_UNITS: Record<string, string> = { 'kgf/cm2': 'кгс/см² (абс.)', bar: 'бар (абс.)', MPa: 'МПа (абс.)' }
+const Q_UNITS: Record<string, string> = { '10^3 m3/day': 'тыс. м³/сут', 'm3/day': 'м³/сут' }
+const num = (s: string): number | undefined => { const v = Number(s.replace(',', '.')); return s.trim() !== '' && Number.isFinite(v) ? v : undefined }
+const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
+const STATUS: Record<string, string> = { good: 'хорошее', fair: 'удовлетворительное' }
+
+/** Вкладка «Адаптация по ГДИ», шаг 1: подготовка. БД ГДИ → отбор исследований → комплект для тНавигатора. */
+export default function Adapt() {
+  const [st, setSt] = useState<AdaptState | null>(null)
+  const [db, setDb] = useState('')
+  const [colsInfo, setColsInfo] = useState<AdaptColumns | null>(null)
+  const [cols, setCols] = useState<Record<string, string>>({})
+  const [settings, setSettings] = useState<Partial<AdaptSettings>>({})
+  const [config, setConfig] = useState<Partial<AdaptConfig>>({})
+  const [scenario, setScenario] = useState('')
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({})
+  const [sel, setSel] = useState<AdaptSelection | null>(null)
+  const [filter, setFilter] = useState('all')
+  const [out, setOut] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
+  useEffect(() => {
+    getAdapt().then(s => {
+      setSt(s); setDb(s.db); setCols(s.cols); setSettings(s.saved_settings); setConfig(s.saved_config); setOverrides(s.overrides)
+      setScenario(s.scenario || s.scenarios.find(x => x.path)?.name || '')
+      if (s.db) getAdaptColumns(s.db, s.sheet).then(setColsInfo).catch(() => undefined)
+    }).catch(e => setMsg((e as Error).message))
+  }, [])
+
+  const cfg = { ...(st?.config || {}), ...config } as AdaptConfig
+  const set = { ...(st?.settings || {}), ...settings } as AdaptSettings
+  const upd = <K extends keyof AdaptConfig>(k: K, v: AdaptConfig[K]) => setConfig(c => ({ ...c, [k]: v }))
+  const req = (): AdaptRequest => ({ db, cols, settings: set, config: cfg, overrides, scenario })
+
+  const pick = () => guard(async () => {
+    const r = await pickFile(db)
+    if (!r.path) return
+    setDb(r.path); setSel(null)
+    const c = await getAdaptColumns(r.path)
+    setColsInfo(c); setCols(c.detected)
+  })
+  const run = (o = overrides) => guard(async () => { const r = await adaptSelect({ ...req(), overrides: o }); setSel(r); setCols(r.cols) })
+  const toggle = (well: string, on: boolean) => { const o = { ...overrides, [well]: on }; setOverrides(o); run(o) }
+  const bound = (well: string, key: 'pi_mult_bounds' | 'dfac_bounds', idx: 0 | 1, s: string) => {
+    const wb = { ...(cfg.well_bounds || {}) }
+    const cur = { ...(wb[well] || {}) }
+    const base = (cur[key] || cfg[key]) as [number, number]
+    const v = num(s)
+    if (v === undefined) { delete cur[key] } else { const arr = [...base] as [number, number]; arr[idx] = v; cur[key] = arr }
+    if (Object.keys(cur).length) wb[well] = cur; else delete wb[well]
+    upd('well_bounds', Object.keys(wb).length ? wb : null)
+  }
+  const makeKit = () => guard(async () => {
+    const dir = out || (await pickFile(out)).path
+    if (!dir) return
+    setOut(dir)
+    const r = await adaptKit({ ...req(), out: dir })
+    setMsg('Комплект готов: ' + r.folder + ', скважин: ' + r.wells.length + '. Откройте code.py в python-секции тНавигатора.')
+  })
+
+  const rows = useMemo(() => (sel?.rows || []).filter(r =>
+    filter === 'all' ? true : filter === 'on' ? r.include : filter === 'off' ? !r.include : filter === 'bad' ? r.note.startsWith('все ГДИ забракованы') : filter === 'nomodel' ? r.note === 'нет в модели' : true), [sel, filter])
+  const pm = cfg.pi_mult_bounds || [1e-4, 1000]
+  const dm = cfg.dfac_bounds || [0, 1e-4]
+
+  if (!st) return <main className="workspace">{msg && <p className="note warn">{msg}</p>}</main>
+  return (
+    <main className="workspace">
+      <PageHead title="Адаптация по ГДИ" lede="Подбираем для каждой скважины множитель продуктивности (WPIMULT) и D-фактор так, чтобы модель повторяла результаты ГДИ. Здесь готовим запуск: какие исследования и скважины брать, в каких границах подбирать." />
+
+      <section className="card">
+        <div className="step-head"><span className="step-n">1</span><h2>База ГДИ</h2></div>
+        <p className="lead">Файл, который собрала «База ПХГ» (модуль «Преобразование таблиц ГДИ в базу»). Коэффициенты a и b берутся не из файла, а считаются заново по режимам.</p>
+        <div className="row">
+          <label className="grow">Файл<input value={db} onChange={e => setDb(e.target.value)} placeholder="Путь к БД ГДИ (.xlsx)" /></label>
+          <button onClick={pick} disabled={busy}>Выбрать файл</button>
+          {db && !colsInfo && <button onClick={() => guard(async () => { const c = await getAdaptColumns(db); setColsInfo(c); setCols(c.detected) })} disabled={busy}>Прочитать столбцы</button>}
+        </div>
+        {colsInfo && <div className="row">
+          {ROLES.map(([k, title]) => <label key={k}>{title}
+            <select value={cols[k] || ''} onChange={e => setCols(c => ({ ...c, [k]: e.target.value }))}>
+              <option value="">— не выбрано —</option>{colsInfo.columns.map(c => <option key={c}>{c}</option>)}</select></label>)}
+          <label>Давление в файле<select value={set.p_units} onChange={e => setSettings(s => ({ ...s, p_units: e.target.value }))}>
+            {st.p_units.map(u => <option key={u} value={u}>{P_UNITS[u] || u}</option>)}</select></label>
+          <label>Дебит в файле<select value={set.q_units} onChange={e => setSettings(s => ({ ...s, q_units: e.target.value }))}>
+            {st.q_units.map(u => <option key={u} value={u}>{Q_UNITS[u] || u}</option>)}</select></label>
+        </div>}
+        {colsInfo && <p className="muted small">Строк в файле: {colsInfo.rows}. Давления должны быть абсолютными.</p>}
+      </section>
+
+      <section className="card">
+        <div className="step-head"><span className="step-n">2</span><h2>Какие исследования брать</h2></div>
+        <div className="row">
+          <label>Модель (откуда взять скважины)<select value={scenario} onChange={e => setScenario(e.target.value)}>
+            <option value="">— скважины проекта —</option>
+            {st.scenarios.map(s => <option key={s.name} value={s.name} disabled={!s.path}>{s.name}{s.path ? '' : ' (нет результатов)'}</option>)}</select></label>
+          <label>Допустимое качество ГДИ<select value={set.min_status} onChange={e => setSettings(s => ({ ...s, min_status: e.target.value }))}>
+            <option value="fair">хорошее и удовлетворительное</option><option value="good">только хорошее</option></select></label>
+          <label>Не старше, лет<input style={{ width: 90 }} value={set.max_age_years ?? ''} placeholder="без ограничения"
+            onChange={e => setSettings(s => ({ ...s, max_age_years: num(e.target.value) ?? null }))} /></label>
+        </div>
+        <p className="muted small">По каждой скважине проверяется качество всех исследований; берётся самое свежее из прошедших проверку. Модель задаёт, какие скважины вообще можно адаптировать.</p>
+      </section>
+
+      <section className="card">
+        <div className="step-head"><span className="step-n">3</span><h2>Настройки подбора</h2></div>
+        <div className="row">
+          <label className="grow">Что сохранять<select value={cfg.strategy} onChange={e => upd('strategy', e.target.value)}>
+            {STRATEGIES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+          <label>Приток<select value={cfg.inflow} onChange={e => upd('inflow', e.target.value)}><option value="p-p">псевдодавление</option><option value="r-g">Рассел — Гудрич</option></select></label>
+          <label>Ошибка дебита<select value={cfg.objective} onChange={e => upd('objective', e.target.value)}><option value="relative">относительная</option><option value="absolute">абсолютная</option></select></label>
+        </div>
+        <div className="row">
+          <label>WPIMULT от<input style={{ width: 110 }} defaultValue={pm[0]} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('pi_mult_bounds', [v, pm[1]]) }} /></label>
+          <label>до<input style={{ width: 110 }} defaultValue={pm[1]} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('pi_mult_bounds', [pm[0], v]) }} /></label>
+          <label>D-фактор от<input style={{ width: 110 }} defaultValue={dm[0]} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('dfac_bounds', [v, dm[1]]) }} /></label>
+          <label>до<input style={{ width: 110 }} defaultValue={dm[1]} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('dfac_bounds', [dm[0], v]) }} /></label>
+          <label>R² ниже — замечание<input style={{ width: 80 }} defaultValue={cfg.r2_ok} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('r2_ok', v) }} /></label>
+          <label>Мин. режимов<input style={{ width: 80 }} defaultValue={cfg.min_regimes} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('min_regimes', v) }} /></label>
+        </div>
+        <p className="muted small">Границы можно задать и для отдельной скважины в таблице ниже (пустое поле — общие границы).</p>
+        <div className="row"><button className="primary" onClick={() => run()} disabled={busy || !db || !colsInfo}>Подобрать исследования и скважины</button></div>
+        {msg && <p className="note">{msg}</p>}
+      </section>
+
+      {sel && <section className="card">
+        <div className="step-head"><span className="step-n">4</span><h2>Скважины и исследования</h2></div>
+        <p className="lead">Выбрано <b>{sel.counts.included}</b> из {sel.counts.wells_db} скважин БД ГДИ. Нет в модели: {sel.counts.no_model}; все ГДИ забракованы: {sel.counts.all_bad}; старше допустимого: {sel.counts.old}; в модели есть, а ГДИ нет: {sel.counts.model_only}.</p>
+        {sel.notes.map((n, i) => <p key={i} className="muted small">{n}</p>)}
+        <div className="row">
+          <label>Показать<select value={filter} onChange={e => setFilter(e.target.value)}>
+            <option value="all">все</option><option value="on">включённые</option><option value="off">выключенные</option>
+            <option value="bad">все ГДИ забракованы</option><option value="nomodel">нет в модели</option></select></label>
+          <button className="primary" onClick={makeKit} disabled={busy || !sel.counts.included}>Подготовить комплект для тНавигатора</button>
+          {out && <span className="muted small">Папка: {out} <button className="link" onClick={() => setOut('')}>сменить</button></span>}
+        </div>
+        <div className="scroll" style={{ maxHeight: 520 }}><table className="raw"><thead><tr>
+          <th /><th>Скв. БД</th><th>В модели</th><th>ГДИ в БД</th><th>Прошли</th><th>Взято</th><th>Качество</th><th>Возраст, лет</th><th>Режимов</th><th>a</th><th>b</th>
+          <th>WPIMULT от</th><th>до</th><th>D до</th><th>Примечание</th></tr></thead>
+          <tbody>{rows.map(r => {
+            const wb = cfg.well_bounds?.[r.well] || {}
+            return <tr key={r.well} className={r.include ? '' : 'dim'}>
+              <td><input type="checkbox" checked={r.include} disabled={busy || !r.date || !r.model} onChange={e => toggle(r.well, e.target.checked)} aria-label="Адаптировать скважину" /></td>
+              <td>{r.well}</td><td>{r.model || '—'}</td><td>{r.n_studies}</td><td>{r.n_usable}</td><td>{r.date || '—'}</td><td>{STATUS[r.status] || ''}</td>
+              <td>{fmt(r.age_years, 1)}</td><td>{r.n_regimes || ''}</td><td>{fmt(r.a, 4)}</td><td>{fmt(r.b, 5)}</td>
+              <td><input style={{ width: 70 }} defaultValue={wb.pi_mult_bounds?.[0] ?? ''} placeholder={String(pm[0])} onBlur={e => bound(r.well, 'pi_mult_bounds', 0, e.target.value)} /></td>
+              <td><input style={{ width: 70 }} defaultValue={wb.pi_mult_bounds?.[1] ?? ''} placeholder={String(pm[1])} onBlur={e => bound(r.well, 'pi_mult_bounds', 1, e.target.value)} /></td>
+              <td><input style={{ width: 80 }} defaultValue={wb.dfac_bounds?.[1] ?? ''} placeholder={String(dm[1])} onBlur={e => bound(r.well, 'dfac_bounds', 1, e.target.value)} /></td>
+              <td className="muted small">{r.note}</td></tr>
+          })}</tbody></table></div>
+        {sel.model_only.length > 0 && <p className="muted small">В модели есть, а исследований нет: {sel.model_only.slice(0, 60).join(', ')}{sel.model_only.length > 60 ? ' …' : ''}</p>}
+      </section>}
+    </main>
+  )
+}

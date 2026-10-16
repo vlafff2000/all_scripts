@@ -133,3 +133,12 @@ def test_api_flow(tmp_path, monkeypatch):
     assert r.status_code == 200 and r.json()["wells"] == ["33"]
     assert c.post("/api/adapt/kit", json=dict(body, out="")).status_code == 400
     assert c.post("/api/adapt/select", json=dict(body, db=str(tmp_path / "nope.xlsx"))).status_code == 400
+
+
+def test_string_dates_iso_and_dayfirst():
+    df = _db()
+    df["дата"] = df["дата"].astype(str)
+    df.loc[df["дата"] == "2023-02-01", "дата"] = "01.02.2023"        # дд.мм.гггг
+    studies, _ = selection.build_studies(df, selection.detect_columns(df.columns), selection.Settings())
+    dates = {(s.wname, s.date.strftime("%Y-%m-%d")) for s in studies}
+    assert ("35", "2023-02-01") in dates and ("33", "2022-04-01") in dates
