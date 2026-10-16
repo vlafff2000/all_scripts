@@ -54,3 +54,13 @@ def test_add_ready_copies_and_returns_state(tmp_path, monkeypatch):
     assert (project / "готовые" / "откуда.xlsx").read_bytes() == b"data"
     ready = next(f for f in r.json()["folders"] if f["slot"] == "ready")
     assert ready["files"] == ["откуда.xlsx"]
+
+
+def test_bad_bodies_are_400_not_500(tmp_path, monkeypatch):
+    c = _client(tmp_path, monkeypatch)
+    assert c.post("/api/workspace/project", json=[1]).status_code == 400
+    assert c.post("/api/workspace/project", json={}).status_code == 400
+    assert c.post("/api/workspace/project", content=b"не json").status_code == 400
+    assert c.post("/api/workspace/ready", json="x").status_code == 400
+    assert c.post("/api/workspace/ready", json={"paths": "строка"}).status_code == 400
+    assert c.post("/api/workspace/ready", json={"paths": 5}).status_code == 400
