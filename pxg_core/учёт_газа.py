@@ -105,7 +105,7 @@ def read_sheet(ws, kind: str, file_name: str):
                     excluded.append((file_name, ws.title, ws.cell(r, c).coordinate, v, "столбец без названия"))
                     continue
                 rows.append({
-                    "Тип": kind, "Файл": file_name, "Лист": ws.title, "Дата": day,
+                    "Тип": kind, "Файл": file_name, "Лист": ws.title, "Дата": day, "Строка": r,
                     "Столбец": ws.cell(r, c).column_letter, "Параметр": label, "Единица": _unit(label),
                     "Значение": v,
                 })
@@ -165,14 +165,16 @@ def read_book(path: str, kind: str):
     if kind == "закачка":
         longs, dropped_rows = _drop_template_days(longs)
         for r in dropped_rows:
-            excl.append((name, r["Лист"], r["Столбец"] + str(r["Дата"].day), r["Значение"],
+            excl.append((name, r["Лист"], "%s%d" % (r["Столбец"], r["Строка"]), r["Значение"],
                              "шаблонные сутки после последней заполненной"))
         log.append((name, "все листы", "шаблонные сутки после последней заполненной отброшены: %d суток, %d ячеек"
                     % (len({r["Дата"] for r in dropped_rows}), len(dropped_rows))))
-    long_df = pd.DataFrame(longs, columns=["Тип", "Файл", "Лист", "Дата", "Столбец", "Параметр", "Единица", "Значение"])
+    long_df = pd.DataFrame(longs, columns=["Тип", "Файл", "Лист", "Дата", "Строка", "Столбец", "Параметр", "Единица",
+                                           "Значение"])
     excl_df = pd.DataFrame(excl, columns=["Файл", "Лист", "Ячейка", "Значение", "Причина"])
     log_df = pd.DataFrame(log, columns=["Файл", "Лист", "Что сделано"])
-    return long_df.sort_values(["Дата", "Столбец"], key=lambda s: s if s.name == "Дата" else s.map(_col_key)).reset_index(drop=True), excl_df, log_df
+    long_df = long_df.sort_values(["Дата", "Столбец"], key=lambda s: s if s.name == "Дата" else s.map(_col_key))
+    return long_df.reset_index(drop=True), excl_df, log_df
 
 
 def _col_key(letters: str) -> int:
@@ -255,3 +257,110 @@ def checks(long_df: pd.DataFrame, tolerance: float = 0.05) -> pd.DataFrame:
         items.append(("Водный фактор в файле не сходится с пересчётом", day.strftime("%d.%m.%Y"), 1,
                       "файл %.2f, пересчёт %.2f" % (v, calc[day])))
     return pd.DataFrame(items, columns=["Проверка", "Дата или месяц", "Записей", "Комментарий"])
+
+
+# ---------------------------------------------------------------- сборка БД: один параметр — один столбец
+
+SEASON_START_MONTH = 10  # сезон отбора идёт с октября по апрель: 2025-10 … 2026-03 — сезон «2025/2026»
+
+
+def is_gas_book(path: str) -> bool:
+    """Книга учёта газа: есть хотя бы один лист месяца."""
+    import openpyxl
+
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        names = wb.sheetnames
+        wb.close()
+    except Exception:  # не Excel или повреждён: в список не берём, причину напишет разбор книг
+        return False
+    return any(_is_month_sheet(n) for n in names)
+
+
+def collect_books(paths) -> tuple:
+    """Книги учёта газа по списку путей: файл — как есть, папка — рекурсивно (подпапки по сезонам/годам или всё в одной).
+
+    Возвращает (список книг, список путей, которые не найдены или не являются книгами учёта газа).
+    """
+    import os
+
+    books, skipped = [], []
+    for raw in paths:
+        p = str(raw or "").strip().strip('"')
+        if not p:
+            continue
+        if os.path.isdir(p):
+            found = []
+            for root, dirs, files in os.walk(p):
+                dirs.sort()
+                for f in sorted(files):
+                    if f.lower().endswith((".xlsx", ".xlsm")) and not f.startswith("~$"):
+                        found.append(os.path.join(root, f))
+            if not found:
+                skipped.append(p + " (папка без xlsx)")
+            for f in found:
+                (books if is_gas_book(f) else skipped).append(f)
+        elif os.path.isfile(p):
+            (books if is_gas_book(p) else skipped).append(p)
+        else:
+            skipped.append(p + " (нет такого пути)")
+    return sorted(set(books)), skipped
+
+
+def param_key(label: str) -> str:
+    """Ключ параметра для сравнения между листами и файлами: регистр, пробелы, «-» и «_» не различаются."""
+    text = re.sub(r"\s+", " ", str(label)).strip().lower()
+    return re.sub(r"\s*([-_])\s*", r"\1", text)
+
+
+def season_of(day: pd.Timestamp, kind: str) -> str:
+    """Сезон: отбор — с октября по апрель («2025/2026»); закачка — календарный год («2026»)."""
+    if kind == "отбор":
+        return "%d/%d" % (day.year, day.year + 1) if day.month >= SEASON_START_MONTH else "%d/%d" % (day.year - 1, day.year)
+    return str(day.year)
+
+
+def build_db(long_df: pd.DataFrame, excl_df: pd.DataFrame) -> tuple:
+    """Широкая база: строка — сутки одного режима (отбор/закачка), столбец — параметр.
+
+    Возвращает (база, словарь параметров, исключено, проверки). Текст вместо числа и дубли суток уходят в проверки и
+    в «Исключено», в базе такой ячейки нет.
+    """
+    excl = [] if excl_df is None else excl_df.values.tolist()
+    checks_rows = []
+    if long_df.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(excl, columns=["Файл", "Лист", "Ячейка", "Значение", "Причина"]), \
+            pd.DataFrame(columns=["Проверка", "Дата или месяц", "Записей", "Комментарий"])
+    df = long_df.copy()
+    df["Ключ"] = df["Параметр"].map(param_key)
+    numeric = df["Значение"].map(lambda v: isinstance(v, (int, float)) and not isinstance(v, bool))
+    for _, r in df[~numeric].iterrows():
+        excl.append((r["Файл"], r["Лист"], "%s%d" % (r["Столбец"], r["Строка"]), r["Значение"],
+                     "текст вместо числа (ошибка формулы и т.п.)"))
+    df = df[numeric]
+    # одна и та же дата в одном режиме из двух файлов или листов: берём последнюю, остальное — в проверки
+    dup = df.groupby(["Тип", "Дата", "Ключ"])["Файл"].nunique()
+    for (typ, day, key), n in dup[dup > 1].items():
+        checks_rows.append(("Сутки есть в нескольких файлах (взято последнее)",
+                            "%s %s" % (typ, pd.Timestamp(day).strftime("%d.%m.%Y")), int(n),
+                            "параметр: " + key))
+    df = df.sort_values(["Тип", "Дата", "Файл", "Лист", "Строка"]).drop_duplicates(["Тип", "Дата", "Ключ"], keep="last")
+    labels = df.sort_values("Строка").drop_duplicates("Ключ").set_index("Ключ")
+    units = df.sort_values("Строка").drop_duplicates("Ключ").set_index("Ключ")["Единица"]
+    wide = df.pivot_table(index=["Тип", "Дата"], columns="Ключ", values="Значение", aggfunc="first")
+    meta = df.groupby(["Тип", "Дата"]).agg(Файл=("Файл", "last"), Лист=("Лист", "last")).reset_index().set_index(["Тип", "Дата"])
+    wide = wide.join(meta).reset_index()
+    wide["Сезон"] = [season_of(pd.Timestamp(d), t) for t, d in zip(wide["Тип"], wide["Дата"])]
+    wide["Год"] = wide["Дата"].dt.year
+    wide["Месяц"] = wide["Дата"].dt.month
+    order = {"отбор": 0, "закачка": 1}
+    wide = wide.assign(_o=wide["Тип"].map(order).fillna(9)).sort_values(["_o", "Дата"]).drop(columns="_o")
+    param_cols = [k for k in labels.index]
+    names = {k: labels.loc[k, "Параметр"] for k in param_cols}
+    wide = wide.rename(columns={"Тип": "Режим", **names})
+    base_cols = ["Режим", "Дата", "Год", "Месяц", "Сезон", "Файл", "Лист"]
+    db = wide[base_cols + [names[k] for k in param_cols]].reset_index(drop=True)
+    dictionary = pd.DataFrame({"Параметр": [names[k] for k in param_cols],
+                               "Единица": [units.get(k, "") for k in param_cols]})
+    excl_df = pd.DataFrame(excl, columns=["Файл", "Лист", "Ячейка", "Значение", "Причина"])
+    return db, dictionary, excl_df, pd.DataFrame(checks_rows, columns=["Проверка", "Дата или месяц", "Записей", "Комментарий"])
