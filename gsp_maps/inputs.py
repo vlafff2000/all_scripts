@@ -193,6 +193,17 @@ def _load_base_water(fp: str) -> Tuple[List[dict], List[str]]:
     return records, []
 
 
+def load_gas_db(path: str) -> pd.DataFrame:
+    """«БД по учету газа» Базы ПХГ (лист «БД»): одна строка на сутки, параметры — столбцами.
+    Возвращает таблицу с колонками Режим, Дата, Сезон, Год, Месяц и далее параметры; без листа «БД» — пустая таблица."""
+    try:
+        data = pd.read_excel(path, sheet_name="БД")
+    except (ValueError, KeyError):
+        return pd.DataFrame(columns=["Режим", "Дата", "Сезон", "Год", "Месяц"])
+    data["Дата"] = pd.to_datetime(data["Дата"], errors="coerce")
+    return data.dropna(subset=["Дата"]).sort_values(["Режим", "Дата"]).reset_index(drop=True)
+
+
 def load_water(paths: List[str]) -> Tuple[pd.DataFrame, List[str]]:
     """Замеры выноса пластовой жидкости по файлам «… <месяц> <год>»: одна запись на скважину и месяц.
     Или одна xlsx «БД замеров воды» Базы ПХГ."""

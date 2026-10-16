@@ -16,10 +16,10 @@ from pxg_core import workspace
 from . import inputs, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
 
-PATH_KEYS = ["db", "periods", "water", "map", "xy", "press_gsp", "press_obj", "depths"]
+PATH_KEYS = ["db", "periods", "water", "map", "xy", "press_gsp", "press_obj", "depths", "gas"]
 LABELS = {"db": "База расходов", "periods": "Периоды работы", "water": "Замеры воды", "map": "Карта-сетка (Excel)",
           "xy": "Координаты XY (tNavigator)", "press_gsp": "Давление по ГСП", "press_obj": "Давление по объекту",
-          "depths": "Глубины и альтитуды"}
+          "depths": "Глубины и альтитуды", "gas": "БД по учету газа (по суткам)"}
 
 
 def config_file() -> Path:
@@ -61,6 +61,8 @@ def detect_files(folder: str) -> Dict[str, str]:
             # База давлений по замерам: одна таблица и для ГСП, и для объекта (Рпл по скважинам)
             out.setdefault("press_gsp", path)
             out.setdefault("press_obj", path)
+        elif ext in (".xlsx", ".xlsm", ".xls") and "бд" in name and "учету" in name and "газа" in name:
+            out.setdefault("gas", path)       # «БД по учету газа» Базы ПХГ — лист «БД», одна строка на сутки
         elif ext in (".xlsx", ".xlsm", ".xls") and "карта" in name:
             out.setdefault("map", path)
         elif ext in (".xlsx", ".xlsm", ".xls") and ("глубин" in name or "перфор" in name):
