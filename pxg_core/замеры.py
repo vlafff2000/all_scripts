@@ -290,7 +290,36 @@ def to_frame(rows: List[Row]) -> pd.DataFrame:
                           r.length, r.es, r.density, r.group] for r in rows], columns=COLUMNS)
 
 
-def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True, whole_rows: bool = False) -> pd.DataFrame:
+def parse_pairs(text: str) -> Dict[str, str]:
+    """«437=438; 83=82» -> {"437": "438", "83": "82"}: слева заменяемая скважина, справа та, что остаётся."""
+    pairs: Dict[str, str] = {}
+    for part in re.split(r"[;,\n]+", text or ""):
+        m = re.match(r"\s*(\S+?)\s*(?:=|->|→)\s*(\S+)\s*$", part)
+        if m and m.group(1) != m.group(2):
+            pairs[m.group(1)] = m.group(2)
+    return pairs
+
+
+def neighbour_pairs(data: pd.DataFrame, explicit: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Скважины с соседними номерами выполняют одну функцию (замер делают на соседней, если на своей нельзя).
+
+    Автоматически заменяется скважина, у которой нигде нет горизонта, на соседа (номер ±1) с известным горизонтом.
+    `explicit` — заданные вручную пары, они главнее.
+    """
+    pairs = dict(explicit or {})
+    blank = _blank(data["Горизонт"])
+    with_layer = set(data.loc[~blank, "Скважина"].astype(str))
+    for w in sorted(set(data["Скважина"].astype(str)) - with_layer):
+        if w in pairs or not w.isdigit():
+            continue
+        near = [str(int(w) + d) for d in (1, -1) if str(int(w) + d) in with_layer]
+        if near:
+            pairs[w] = near[0]
+    return pairs
+
+
+def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True, whole_rows: bool = False,
+            neighbours: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     """Объединение источников в одну базу без дублей.
 
     Порядок `frames` — приоритет: при одном ключе (скважина, день, горизонт) берётся значение из более раннего источника,
@@ -318,9 +347,19 @@ def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True, whole_rows:
     for col in ("Горизонт", "Примечание", "ГСП"):
         out[col] = out[col].where(~_blank(out[col]), None)
     layer_attrs: Dict[str, int] = {}
+    if neighbours is not None:
+        pairs = neighbour_pairs(out, neighbours)
+        key_w = out["Скважина"].astype(str)
+        moved = key_w.isin(pairs)
+        numeric = pd.api.types.is_numeric_dtype(out["Скважина"])
+        out["Скважина"] = [(int(pairs[w]) if numeric else pairs[w]) if m else orig
+                           for w, m, orig in zip(key_w, moved, out["Скважина"])]
+        out.attrs["neighbours"] = pairs
+        out.attrs["neighbours_rows"] = int(moved.sum())
     if fill:
         out = fill_layers(out)
         layer_attrs = {k: v for k, v in out.attrs.items() if k.startswith("layer_")}
+    pre_attrs = dict(out.attrs)
     key = out["Дата"].dt.strftime("%Y-%m-%d").fillna("без даты:" + out["Источник"].astype(str))
     out["_k"] = out["Скважина"].astype(str) + "|" + key + "|" + out["Горизонт"].fillna("").astype(str).str.strip()
     before = len(out)
@@ -333,6 +372,9 @@ def combine(frames: List[Optional[pd.DataFrame]], fill: bool = True, whole_rows:
     out = out.sort_values(["Скважина", "Дата"], na_position="last").reset_index(drop=True)
     out.attrs["replaced"] = before - len(out)
     out.attrs.update(layer_attrs)
+    for k in ("neighbours", "neighbours_rows"):
+        if k in pre_attrs:
+            out.attrs[k] = pre_attrs[k]
     return out
 
 

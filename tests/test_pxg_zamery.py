@@ -253,3 +253,18 @@ def test_merge_replaces_whole_row_not_fields():
     data = замеры.merge(old, new)
     assert len(data) == 1 and pd.isna(data.loc[0, "Руст"])   # старое Руст не воскресает
     assert data.loc[0, "Источник"] == "новый.xlsx"
+
+
+def test_neighbour_wells_merged_into_one_number():
+    """437 без горизонта и 438 с горизонтом — одна функция: 437 заменяется на 438, дубль слит, горизонт проставлен."""
+    a = pd.DataFrame([[437, dt.datetime(2026, 1, 5), "", "Эксплуатационные", 70.0],
+                      [437, dt.datetime(2026, 1, 12), "", "Эксплуатационные", 71.0],
+                      [56, dt.datetime(2026, 1, 5), "Щигровский", "Эксплуатационные", 60.0]],
+                     columns=["Скважина", "Дата", "Горизонт", "Категория", "Руст"])
+    b = pd.DataFrame([[438, dt.datetime(2026, 1, 12), "Щигровский", "Эксплуатационные", 71.0]],
+                     columns=["Скважина", "Дата", "Горизонт", "Категория", "Руст"])
+    data = замеры.combine([a, b], neighbours={})
+    assert sorted(data["Скважина"]) == [56, 438, 438] and data.attrs["neighbours"] == {"437": "438"}
+    assert set(data["Горизонт"]) == {"Щигровский"}
+    assert замеры.parse_pairs("83=82; 437 → 438") == {"83": "82", "437": "438"}
+    assert sorted(замеры.combine([a, b], neighbours=None)["Скважина"]) == [56, 437, 437, 438]   # выключено
