@@ -206,3 +206,34 @@ export interface GroupMapRow { key: string; techmaps: string[]; volume: number; 
 export interface GroupMap { rows: GroupMapRow[]; groups: { group: string; wells: number }[]; unused: string[] }
 export const getGroupMap = () => call<GroupMap>('/api/groupmap')
 export const setGroupMap = (key: string, group: string) => call<GroupMap>('/api/groupmap/set', post({ key, group }))
+
+// ───── Адаптация по ГДИ ─────
+export interface AdaptConfig {
+  strategy: string; inflow: string; objective: string; pi_mult_bounds: [number, number]; dfac_bounds: [number, number]
+  r2_ok: number; min_regimes: number; bad_gdi_policy: string; qc_enabled: boolean; n_starts: number; include_only_ok: boolean
+  well_bounds?: Record<string, { pi_mult_bounds?: [number, number]; dfac_bounds?: [number, number] }> | null
+  [k: string]: unknown
+}
+export interface AdaptSettings { p_units: string; q_units: string; min_status: string; max_age_years: number | null; from_date: string | null }
+export interface AdaptState {
+  config: AdaptConfig; settings: AdaptSettings; p_units: string[]; q_units: string[]
+  db: string; sheet: string; cols: Record<string, string>; saved_settings: Partial<AdaptSettings>; saved_config: Partial<AdaptConfig>
+  overrides: Record<string, boolean>; scenario: string; scenarios: { name: string; path: string }[]
+}
+export interface AdaptColumns { columns: string[]; detected: Record<string, string>; rows: number }
+export interface AdaptRow {
+  well: string; model: string; n_studies: number; n_usable: number; date: string; status: string; age_years: number | null
+  a: number | null; b: number | null; n_regimes: number; note: string; include: boolean; auto: boolean
+}
+export interface AdaptSelection {
+  rows: AdaptRow[]; model_only: string[]; notes: string[]; cols: Record<string, string>
+  counts: { wells_db: number; included: number; no_model: number; all_bad: number; old: number; model_only: number }
+}
+export interface AdaptRequest {
+  db: string; sheet?: string; cols?: Record<string, string>; settings: Partial<AdaptSettings>; config: Partial<AdaptConfig>
+  overrides: Record<string, boolean>; scenario: string
+}
+export const getAdapt = () => call<AdaptState>('/api/adapt')
+export const getAdaptColumns = (path: string, sheet = '') => call<AdaptColumns>('/api/adapt/columns?' + new URLSearchParams({ path, sheet }))
+export const adaptSelect = (b: AdaptRequest) => call<AdaptSelection>('/api/adapt/select', post(b))
+export const adaptKit = (b: AdaptRequest & { out: string }) => call<{ folder: string; wells: string[]; files: string[] }>('/api/adapt/kit', post(b))
