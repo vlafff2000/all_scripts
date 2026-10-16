@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from pxg_core import fs_browse
+from pxg_core import fs_browse, workspace_api
 import subprocess
 import sys
 from pathlib import Path
@@ -173,6 +173,7 @@ def build_app() -> Starlette:
         Route("/api/jobs", start_job, methods=["POST"]),
         Route("/api/jobs", job_list, methods=["GET"]),
         *fs_browse.routes(),
+        *workspace_api.routes(),
         Route("/api/check", run_check, methods=["POST"]),
         Route("/api/check/{id}.{fmt}", check_download),
         Route("/api/jobs/{id}", job_status),

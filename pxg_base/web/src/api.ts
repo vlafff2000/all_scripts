@@ -58,3 +58,16 @@ export const saveDateFixes = (id: string, fixes: { file: string; sheet: string; 
   call<{ path: string; count: number }>(`/api/jobs/${id}/date-fixes`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fixes }),
   })
+
+export interface WorkspaceFolder { slot: 'ready' | 'exports'; label: string; path: string; chosen: boolean; found: boolean; files: string[] }
+export interface WorkspaceState { project: string; folders: WorkspaceFolder[] }
+export interface WorkspaceCopyResult { source: string; name: string; status: 'copied' | 'exists' | 'missing' | 'error'; message: string }
+export const getWorkspace = () => call<WorkspaceState>('/api/workspace')
+export const setWorkspaceProject = (project: string) =>
+  call<WorkspaceState>('/api/workspace/project', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project }),
+  })
+export const addReadyFiles = (paths: string[]) =>
+  call<WorkspaceState & { results: WorkspaceCopyResult[] }>('/api/workspace/ready', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths }),
+  })

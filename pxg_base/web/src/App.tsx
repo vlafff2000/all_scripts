@@ -1,3 +1,4 @@
+import { WorkspacePanel } from './WorkspacePanel'
 import { useEffect, useMemo, useState } from 'react'
 import { getModules, type ModuleInfo } from './api'
 import ModulePage from './ModulePage'
@@ -44,6 +45,7 @@ function Home({ groups, modules }: { groups: [string, ModuleInfo[]][]; modules: 
         <p className="lede">Скрипты подготовки и анализа данных ПХГ в одном окне: выберите модуль слева или найдите его по Ctrl+K.
           С веб-формой работают {ready} из {modules.length}. Остальное — скрипты будущих приложений («ГИС и ГВК», «Отчёты и файлы», группа «ГДМ»), они лежат в папке apps и пока запускаются из консоли.</p>
       </div></header>
+      <WorkspacePanel />
       {groups.map(([group, items]) => (
         <section key={group} className="group">
           <h2>{group}</h2>
