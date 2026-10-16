@@ -65,21 +65,30 @@ def add_ready(paths: List[str]) -> List[Dict[str, str]]:
     target = folder("ready")
     if not target:
         raise ValueError("Сначала выберите папку проекта.")
-    os.makedirs(target, exist_ok=True)
+    try:
+        os.makedirs(target, exist_ok=True)
+    except OSError as e:
+        raise ValueError(f"Папка «готовые» недоступна: {e}") from e
     out: List[Dict[str, str]] = []
     for raw in paths:
-        source = os.path.abspath(os.path.expanduser(str(raw).strip()))
+        text = str(raw).strip()
+        if not text:
+            continue
+        source = os.path.abspath(os.path.expanduser(text))
         name = os.path.basename(source)
         if not os.path.isfile(source):
             out.append({"source": source, "name": name, "status": "missing", "message": "Файл не найден."})
             continue
         dest = os.path.join(target, name)
-        if os.path.exists(dest):
+        try:
+            # режим "xb": создание без перезаписи — если файл появился раньше, он не тронется
+            with open(dest, "xb") as out_file, open(source, "rb") as in_file:
+                shutil.copyfileobj(in_file, out_file)
+            shutil.copystat(source, dest)
+        except FileExistsError:
             out.append({"source": source, "name": name, "status": "exists",
                         "message": "Такой файл уже есть в «готовых»: не перезаписан."})
             continue
-        try:
-            shutil.copy2(source, dest)
         except OSError as e:
             out.append({"source": source, "name": name, "status": "error", "message": f"Не скопирован: {e}"})
             continue

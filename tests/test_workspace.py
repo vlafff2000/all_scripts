@@ -107,3 +107,11 @@ def test_add_ready_needs_project(tmp_path, monkeypatch):
         assert "папку проекта" in str(e)
     else:
         raise AssertionError("ожидали ValueError без проекта")
+
+
+def test_add_ready_skips_blank_paths(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    project = tmp_path / "проект"
+    project.mkdir()
+    workspace.save(str(project))
+    assert workspace.add_ready(["", "   "]) == []
