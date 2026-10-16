@@ -164,3 +164,15 @@ def test_gsp8_pressure_in_mpa_becomes_kgf(tmp_path):
     by_day = df.set_index("Дата")["P газа, кгс/см²"]
     assert by_day[pd.Timestamp("2022-11-01")] == pytest.approx(8.2 * 10.1972)
     assert by_day[pd.Timestamp("2022-11-02")] == pytest.approx(8.0 * 10.1972)
+
+
+def test_module_reads_season_subfolders(tmp_path, monkeypatch):
+    """Файлы ЭЛПРО у Egor лежат по сезонам («2022-2023», «2025»): модуль просматривает и подпапки."""
+    for season, name, well in (("2022-2023", "2022_11.xlsx", 55), ("2025", "2022_11gsp8.xlsx", 56)):
+        (tmp_path / "элпро" / season).mkdir(parents=True)
+        xml_file(tmp_path / "элпро" / season / name, [("ГСП-1", [(well, [88.0, 14.0, 45.0, 120.0, 24.0], ["-"] * 5)])])
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("pxg_base.modules.Импорт_данных_ЭЛПРО")
+    assert module.main(["--folder", str(tmp_path / "элпро"), "--db", "", "--output", "out.xlsx"]) == 0
+    data = pd.read_excel(tmp_path / "out.xlsx", sheet_name="Данные")
+    assert sorted(data["Скважина"].unique()) == [55, 56]

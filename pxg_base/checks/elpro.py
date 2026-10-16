@@ -17,7 +17,7 @@ def check_elpro(values: dict) -> Report:
     db = (values.get("db") or "").strip()
     if db:
         qc.check_path(rep, db, "Прежняя база")
-    files = [f for f in qc.list_excel(folder) if not os.path.basename(f).startswith("~$")]
+    files = [f for f in qc.list_excel(folder, recursive=True) if not os.path.basename(f).startswith("~$")]  # и подпапки сезонов
     if not files:
         rep.note("FILE", "В папке нет файлов Excel")
         return rep
