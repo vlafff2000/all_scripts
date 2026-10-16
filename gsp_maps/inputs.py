@@ -276,18 +276,26 @@ KGF_TO_BAR = 0.980665   # Base пишет давления в кгс/см², К�
 
 
 def load_base_pressure(path: str, is_gsp: bool) -> Tuple[pd.DataFrame, List[str]]:
-    """База давлений по замерам (xlsx, лист «Данные»): давление — Рпл, кгс/см², переводится в бары."""
+    """База давлений по замерам (xlsx, лист «Данные»): давление — Рпл, кгс/см², переводится в бары.
+    Для объекта берутся только эксплуатационные скважины (наблюдательные и контрольные — другие горизонты и уровни),
+    несколько замеров за день усредняются: одна точка на дату, как в файле «давление по объекту»."""
     cols = ["Дата", "Давление_бар", "Скважина"]
     data = pd.read_excel(path, sheet_name="Данные", dtype={"Скважина": str})
     need = {"Скважина", "Дата", "Рпл"}
     if not need <= set(data.columns):
         return pd.DataFrame(columns=cols), ["в базе давлений нет колонок: " + ", ".join(sorted(need - set(data.columns)))]
+    if not is_gsp and "Категория" in data.columns:
+        exploit = data["Категория"].astype(str).str.strip().str.lower().str.startswith("эксплуатац")
+        if exploit.any():
+            data = data[exploit]
     dt = pd.to_datetime(data["Дата"], dayfirst=True, errors="coerce").dt.normalize()   # время суток не нужно: замеры группируются по дню
     p = pd.to_numeric(data["Рпл"], errors="coerce")
     ok = dt.notna() & p.notna()
     well = pd.to_numeric(data["Скважина"], errors="coerce").fillna(0).astype(int) if is_gsp else 0
     df = pd.DataFrame({"Дата": dt[ok], "Давление_бар": (p[ok] * KGF_TO_BAR).round(2),
                        "Скважина": well[ok] if is_gsp else 0}, columns=cols)
+    if not is_gsp and len(df):
+        df = df.groupby("Дата", as_index=False)["Давление_бар"].mean().round({"Давление_бар": 2}).assign(Скважина=0)[cols]
     df = df.sort_values("Дата", kind="stable").reset_index(drop=True)
     skipped = int((~ok).sum())
     warn = ["пропущено строк без даты или Рпл — %d" % skipped] if skipped else []
