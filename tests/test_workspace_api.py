@@ -60,7 +60,7 @@ def test_bad_bodies_are_400_not_500(tmp_path, monkeypatch):
     c = _client(tmp_path, monkeypatch)
     assert c.post("/api/workspace/project", json=[1]).status_code == 400
     assert c.post("/api/workspace/project", json={}).status_code == 400
-    assert c.post("/api/workspace/project", content=b"не json").status_code == 400
+    assert c.post("/api/workspace/project", content=b"{not json").status_code == 400
     assert c.post("/api/workspace/ready", json="x").status_code == 400
     assert c.post("/api/workspace/ready", json={"paths": "строка"}).status_code == 400
     assert c.post("/api/workspace/ready", json={"paths": 5}).status_code == 400
