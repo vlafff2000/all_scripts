@@ -12,6 +12,8 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from pxg_core import workspace
+
 from .registry import MODULES
 from .webspec import WebSpec, get as get_spec, lines_of
 
@@ -25,9 +27,15 @@ def runs_dir() -> Path:
 
 
 def export_dir() -> Path:
-    """Общая папка «выгрузки»: последние файлы всех модулей в одном месте (по умолчанию ./выгрузки, меняется PXG_EXPORT_DIR).
+    """Общая папка «выгрузки»: последние файлы всех модулей в одном месте.
+    Порядок: PXG_EXPORT_DIR, затем подпапка «выгрузки» выбранного проекта (pxg_core/workspace.py), иначе ./выгрузки.
     Историю запусков по-прежнему хранит runs_dir()."""
-    return Path(os.environ.get("PXG_EXPORT_DIR") or "выгрузки").resolve()
+    if os.environ.get("PXG_EXPORT_DIR"):
+        return Path(os.environ["PXG_EXPORT_DIR"]).resolve()
+    project_exports = workspace.folder("exports")
+    if project_exports:
+        return Path(project_exports).resolve()
+    return Path("выгрузки").resolve()
 
 
 class Job:
