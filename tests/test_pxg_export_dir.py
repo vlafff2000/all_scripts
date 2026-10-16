@@ -7,6 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from pxg_base import jobs  # noqa: E402
+from pxg_core import workspace  # noqa: E402
 
 
 def test_export_dir_default_and_env(tmp_path, monkeypatch):
@@ -78,3 +79,16 @@ class _spec:  # noqa: N801 — минимальная подмена WebSpec д�
     @staticmethod
     def build_stdin(values):
         return ""
+
+
+def test_export_dir_follows_chosen_project(tmp_path, monkeypatch):
+    # без PXG_EXPORT_DIR папка выгрузок — подпапка «выгрузки» выбранного проекта
+    monkeypatch.delenv("PXG_EXPORT_DIR", raising=False)
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    project = tmp_path / "проект"
+    project.mkdir()
+    workspace.save(str(project))
+    assert jobs.export_dir() == (project / "выгрузки").resolve()
+    # переменная окружения сильнее выбора проекта
+    monkeypatch.setenv("PXG_EXPORT_DIR", str(tmp_path / "другая"))
+    assert jobs.export_dir() == (tmp_path / "другая").resolve()
