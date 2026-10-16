@@ -437,6 +437,36 @@ def test_base_pressure_xlsx_is_read_as_rpl_in_bar(tmp_path):
     assert found["press_gsp"] == str(path) and found["press_obj"] == str(path)
 
 
+def test_object_pressure_from_base_is_daily_mean_of_production_wells(tmp_path):
+    """Давление объекта из Базы давлений: только эксплуатационные скважины и одна точка на день (среднее);
+    наблюдательные и контрольные (другие горизонты, уровни) в объект не идут. Для ГСП строки остаются по скважинам."""
+    import pandas as pd
+
+    path = tmp_path / "БД_давлений_по_замерам.xlsx"
+    pd.DataFrame({
+        "Скважина": ["56", "83", "4", "10"],
+        "Дата": ["14.09.2026"] * 4,
+        "Категория": ["Эксплуатационные", "Эксплуатационные", "Наблюдательные", "Контрольные"],
+        "Рпл": [100.0, 102.0, 80.0, 60.0],
+    }).to_excel(path, sheet_name="Данные", index=False)
+    obj, _ = inputs.load_pressure(str(path), False)
+    assert len(obj) == 1 and obj["Давление_бар"].iloc[0] == round(101.0 * 0.980665, 2)
+    gsp, _ = inputs.load_pressure(str(path), True)
+    assert sorted(gsp["Скважина"].tolist()) == [4, 10, 56, 83]
+
+
+def test_flow_db_by_base_name_and_normalized_wins(tmp_path):
+    """Итог «Создание базы данных расходов» Базы ПХГ узнаётся по имени; нормированная база важнее исходной."""
+    from gsp_maps.project import detect_files
+
+    for name in ("Сводка_закачка_отбор_обновленный_скрипт.xlsx", "Часы_ненулевые_расход_нулевой.xlsx"):
+        (tmp_path / name).write_bytes(b"x")
+    assert detect_files(str(tmp_path))["db"].endswith("Сводка_закачка_отбор_обновленный_скрипт.xlsx")
+    (tmp_path / "БД_расходы.xlsx").write_bytes(b"x")
+    (tmp_path / "БД_расходы_нормированная_ПЗРГ.xlsx").write_bytes(b"x")
+    assert detect_files(str(tmp_path))["db"].endswith("БД_расходы_нормированная_ПЗРГ.xlsx")
+
+
 def test_base_water_xlsx_is_read_as_monthly_flow_in_lh(tmp_path):
     """«БД замеров воды» Базы ПХГ: расход м³/сут переходит в л/ч; «Неизвестно» без примечания — без нуля."""
     import pandas as pd

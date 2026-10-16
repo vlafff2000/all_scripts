@@ -51,13 +51,15 @@ def set_flows(p: Project, paths: List[str], template: str = "", kind_default: st
 
 
 def detect_flow_files(folder: str) -> List[str]:
-    """База расходов в папке выгрузок (результаты Базы ПХГ): xlsx с «бд» и «расход» в имени, по алфавиту."""
+    """База расходов в папке выгрузок (результаты Базы ПХГ): xlsx с «бд» и «расход» в имени или итог «Создание базы
+    данных расходов» («Сводка_закачка_отбор_обновленный_скрипт.xlsx»), по алфавиту."""
     if not folder or not os.path.isdir(folder):
         return []
     out = []
     for name in sorted(os.listdir(folder)):
         low = name.lower()
-        if low.endswith((".xlsx", ".xlsm")) and not name.startswith("~$") and "бд" in low and "расход" in low:
+        flow_db = ("бд" in low and "расход" in low) or "сводка закачка отбор" in low.replace("_", " ")
+        if low.endswith((".xlsx", ".xlsm")) and not name.startswith("~$") and flow_db:
             out.append(os.path.join(folder, name))
     # нормированная база — итог Базы ПХГ; рядом с ней исходная берётся не будет, иначе строки задвоятся
     normalized = [x for x in out if "нормирован" in os.path.basename(x).lower()]

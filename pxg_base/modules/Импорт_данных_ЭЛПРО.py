@@ -31,7 +31,7 @@ def main(argv=None):
         print("❌ Папка не выбрана.")
         return 1
     db_path = параметры.ask_path("Прежняя база для дозаписи (Enter — создать новую)", args.db if args.db is not None else "")
-    files = [f for f in qc.list_excel(folder) if not os.path.basename(f).startswith("~$")]
+    files = [f for f in qc.list_excel(folder, recursive=True) if not os.path.basename(f).startswith("~$")]  # и подпапки сезонов
     if not files:
         print("⚠️ В папке нет файлов Excel: %s" % folder)
         return 0

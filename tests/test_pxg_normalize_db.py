@@ -207,3 +207,17 @@ def test_gas_db_without_reference_column_is_an_error(files, tmp_path):
     pd.DataFrame({"Режим": ["отбор"], "Дата": [D0], "Другое": [1.0]}).to_excel(bad, sheet_name="БД", index=False)
     with pytest.raises(ValueError, match="нет столбца"):
         nm.normalize(db, "", str(tmp / "o"), gas_db=str(bad))
+
+
+def test_incomplete_base_is_reported(files, tmp_path):
+    """В «БД по учету газа» работают скважины ГСП-2, а в базе только «ГСП 1»: замечание; большой коэффициент — тоже."""
+    db, pz, tmp = files
+    gas = pd.read_excel(_gas_db(tmp, pz), sheet_name="БД")
+    gas["Работающие скважины, ГСП-1"] = 3
+    gas["Работающие скважины, ГСП-2"] = 2
+    gas["Работающие скважины, ГСП-6"] = 0          # ГСП без работающих скважин — не замечание
+    gas.to_excel(tmp / "БД_по_учету_газа.xlsx", sheet_name="БД", index=False)
+    r = nm.normalize(db, "", str(tmp / "o"), gas_db=str(tmp / "БД_по_учету_газа.xlsx"))
+    assert any("ГСП-2" in n and "ГСП-1" not in n and "ГСП-6" not in n for n in r["notes"])
+    assert not any("Коэффициент нормировки доходит" in n for n in r["notes"])     # здесь коэффициенты около 1
+    assert nm.completeness_notes({}, pd.Series([1.0, 3.5, float("nan")]).to_numpy())[0].startswith("Коэффициент нормировки доходит до 3.5")
