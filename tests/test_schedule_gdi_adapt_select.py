@@ -142,3 +142,57 @@ def test_string_dates_iso_and_dayfirst():
     studies, _ = selection.build_studies(df, selection.detect_columns(df.columns), selection.Settings())
     dates = {(s.wname, s.date.strftime("%Y-%m-%d")) for s in studies}
     assert ("35", "2023-02-01") in dates and ("33", "2022-04-01") in dates
+
+
+def test_recompute_flow_and_api(tmp_path, monkeypatch):
+    """Комплект -> снимки модели (заглушка тНавигатора) -> пересчёт без тНавигатора -> результаты, запуски, файлы."""
+    import glob
+    from starlette.testclient import TestClient
+    from schedule_pxg import api
+    from schedule_pxg.project import Project
+    sys.path.insert(0, os.path.dirname(__file__))
+    import gdi_adapt_mock_tnav as mock
+    from schedule_pxg.gdi_adapt import tnav_api
+    from schedule_pxg.gdi_adapt.snapshot import save_snapshots
+
+    folder = str(tmp_path / "proj")
+    p = Project()
+    p.add_group("ГСП-1")
+    p.add_well("33", group="ГСП-1")
+    p.add_well("35", group="ГСП-1")
+    p.save(folder)
+    monkeypatch.setattr(api, "FOLDER", folder)
+    db = str(tmp_path / "gdi.xlsx")
+    _db().to_excel(db, index=False)
+    c = TestClient(api.build_app())
+    kitdir = str(tmp_path / "kit")
+    body = {"db": db, "settings": {}, "config": {"strategy": "andrey"}, "overrides": {}, "scenario": "", "out": kitdir}
+    assert c.post("/api/adapt/kit", json=body).status_code == 200
+    assert c.get("/api/adapt").json()["kit"] == kitdir
+
+    # «тНавигатор»: заглушка читает модель, снимки сохраняются как это делает code.py
+    cfg = kit.kit_config({})
+    tnav_api.bind(mock.make_tnav({"33": 91.0, "35": 91.0}), 0)
+    snaps = {}
+    for g in selection.chosen_for_kit(selection.select(_studies()[0], Config.load(None), selection.Settings(), model=["33", "35"])):
+        snaps[g[0]] = tnav_api.extract_snapshot(g[0], g[1].date)
+    os.makedirs(os.path.join(kitdir, "runs", "2026-01-01_00-00-00"))
+    pkl = os.path.join(kitdir, "runs", "2026-01-01_00-00-00", "snapshots.pkl")
+    save_snapshots(snaps, pkl)
+
+    r = c.post("/api/adapt/recompute", json={"kit": kitdir, "snapshots": kitdir, "config": {"strategy": "dp"}})
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert v["summary"]["wells"] + v["summary"]["skipped"] == 2
+    assert all(x["well"] in ("33", "35") for x in v["rows"])
+    assert v["summary"]["wells"] == 2
+    row = v["rows"][0]
+    assert row["curve_q"] and len(row["curve_before"]) == len(row["curve_q"]) and row["pi_mult"] > 0
+    assert {g["group"] for g in v["groups"]} == {"ГСП-1"}
+    runs_ = c.get("/api/adapt/runs", params={"kit": kitdir}).json()["runs"]
+    assert any(x["has_results"] for x in runs_)
+    again = c.get("/api/adapt/run", params={"dir": v["run_dir"]}).json()
+    assert again["summary"] == v["summary"]
+    assert c.get("/api/adapt/file", params={"dir": v["run_dir"], "kind": "inc"}).status_code == 200
+    assert c.get("/api/adapt/file", params={"dir": v["run_dir"], "kind": "exe"}).status_code == 404
+    assert c.post("/api/adapt/recompute", json={"kit": str(tmp_path), "snapshots": kitdir}).status_code == 400

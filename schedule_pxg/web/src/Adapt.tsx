@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
+import AdaptResults from './AdaptResults'
 import {
   AdaptColumns, AdaptConfig, AdaptRequest, AdaptSelection, AdaptSettings, AdaptState, adaptKit, adaptSelect, getAdapt, getAdaptColumns, pickFile,
 } from './api'
@@ -25,13 +26,14 @@ export default function Adapt() {
   const [sel, setSel] = useState<AdaptSelection | null>(null)
   const [filter, setFilter] = useState('all')
   const [out, setOut] = useState('')
+  const [kit, setKit] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   useEffect(() => {
     getAdapt().then(s => {
-      setSt(s); setDb(s.db); setCols(s.cols); setSettings(s.saved_settings); setConfig(s.saved_config); setOverrides(s.overrides)
+      setSt(s); setKit(s.kit); setOut(s.kit); setDb(s.db); setCols(s.cols); setSettings(s.saved_settings); setConfig(s.saved_config); setOverrides(s.overrides)
       setScenario(s.scenario || s.scenarios.find(x => x.path)?.name || '')
       if (s.db) getAdaptColumns(s.db, s.sheet).then(setColsInfo).catch(() => undefined)
     }).catch(e => setMsg((e as Error).message))
@@ -65,6 +67,7 @@ export default function Adapt() {
     if (!dir) return
     setOut(dir)
     const r = await adaptKit({ ...req(), out: dir })
+    setKit(dir)
     setMsg('Комплект готов: ' + r.folder + ', скважин: ' + r.wells.length + '. Откройте code.py в python-секции тНавигатора.')
   })
 
@@ -160,6 +163,7 @@ export default function Adapt() {
           })}</tbody></table></div>
         {sel.model_only.length > 0 && <p className="muted small">В модели есть, а исследований нет: {sel.model_only.slice(0, 60).join(', ')}{sel.model_only.length > 60 ? ' …' : ''}</p>}
       </section>}
+      <AdaptResults kit={kit} config={cfg} />
     </main>
   )
 }

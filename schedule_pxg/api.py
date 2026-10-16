@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -1012,10 +1012,43 @@ async def adapt_kit(request: Request):
     try:
         def go():
             p, sel, _cols, cfg = _adapt_select(body)
-            return adapt_view.write_kit(p, body, sel, cfg)
+            res = adapt_view.write_kit(p, body, sel, cfg)
+            p.save(FOLDER)
+            return res
         return JSONResponse(await run_in_threadpool(go))
     except (ValueError, OSError, KeyError) as e:
         return _err(str(e))
+
+
+async def adapt_recompute(request: Request):
+    body = await request.json()
+    p = _project()
+    try:
+        v = await run_in_threadpool(adapt_view.recompute, p, body)
+        p.save(FOLDER)
+    except (ValueError, OSError, KeyError) as e:
+        return _err(str(e))
+    return JSONResponse(v)
+
+
+async def adapt_runs(request: Request):
+    return JSONResponse({"runs": await run_in_threadpool(adapt_view.runs.list_runs, _clean(request.query_params.get("kit")))})
+
+
+async def adapt_run(request: Request):
+    try:
+        return JSONResponse(await run_in_threadpool(adapt_view.runs.load_view, _clean(request.query_params.get("dir")), _project().well_group))
+    except (ValueError, OSError) as e:
+        return _err(str(e))
+
+
+async def adapt_file(request: Request):
+    q = request.query_params
+    try:
+        path = adapt_view.run_file(_clean(q.get("dir")), q.get("kind") or "")
+    except ValueError as e:
+        return _err(str(e), 404)
+    return FileResponse(path, filename=os.path.basename(path))
 
 
 def build_app() -> Starlette:
@@ -1070,6 +1103,10 @@ def build_app() -> Starlette:
         Route("/api/adapt/columns", adapt_columns),
         Route("/api/adapt/select", adapt_select, methods=["POST"]),
         Route("/api/adapt/kit", adapt_kit, methods=["POST"]),
+        Route("/api/adapt/recompute", adapt_recompute, methods=["POST"]),
+        Route("/api/adapt/runs", adapt_runs),
+        Route("/api/adapt/run", adapt_run),
+        Route("/api/adapt/file", adapt_file),
         Route("/api/results", results_get),
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),

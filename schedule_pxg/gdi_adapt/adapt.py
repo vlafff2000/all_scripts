@@ -74,6 +74,9 @@ class AdaptResult:
     dp2_op: float = float('nan')                        # dP^2 модели в рабочей точке
     dp2_op_gdi: float = float('nan')                    # dP^2 по индикаторной кривой ГДИ при том же дебите
     q_ratio: float = float('nan')                       # q_op / средний дебит ГДИ
+    # --- устойчивость: WPIMULT при отбрасывании по одному режиму (jackknife) ---
+    pi_lo: float = float('nan')
+    pi_hi: float = float('nan')
 
     @property
     def ok(self) -> bool:
@@ -223,3 +226,23 @@ def adapt_well(gdi: GDI, snap, pvt, cfg) -> AdaptResult:
         dp2_gdi=dp2_gdi, dp2_before=dp2_b, dp2_after=dp2_a, dp2_err_before=rel_err(dp2_b), dp2_err_after=rel_err(dp2_a),
         curve_q=grid, curve_dp2_before=curve_b, curve_dp2_after=curve_a,
         q_op=q_op, dp_op=dp_op, dp2_op=dp2_op, dp2_op_gdi=dp2_op_gdi, q_ratio=q_ratio)
+
+
+def jackknife(gdi: GDI, snap, pvt, cfg, res: AdaptResult):
+    """Разброс WPIMULT при отбрасывании каждого режима по очереди: показывает, держится ли результат на одном замере.
+    Нужно >= 3 режимов (останется >= 2). Заполняет res.pi_lo / res.pi_hi, при большом разбросе добавляет замечание."""
+    n = len(gdi.q)
+    if n < 3:
+        return
+    vals = [res.pi_mult]
+    for i in range(n):
+        keep = np.arange(n) != i
+        sub = GDI(wname=gdi.wname, date=gdi.date, wbp=gdi.wbp[keep], bhp=gdi.bhp[keep], q=gdi.q[keep], a=float('nan'), b=float('nan'),
+                  notes=[], n_dropped=0, source=gdi.source)
+        try:
+            vals.append(adapt_well(sub, snap, pvt, cfg).pi_mult)
+        except AdaptError:
+            continue
+    res.pi_lo, res.pi_hi = float(min(vals)), float(max(vals))
+    if res.pi_mult > 0 and (res.pi_hi - res.pi_lo) / res.pi_mult > cfg.ci_warn_ratio:
+        res.problems.append(f'WPIMULT неустойчив: при отбрасывании одного режима от {res.pi_lo:.3g} до {res.pi_hi:.3g}')
