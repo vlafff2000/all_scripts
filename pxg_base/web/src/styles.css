@@ -107,3 +107,8 @@ button.quiet { min-height: 34px; }
 .date-item { margin: 8px 0 8px 12px; }
 .fragment { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
 .fragment td { border: 1px solid var(--line, #ddd); padding: 2px 6px; white-space: nowrap; }
+
+/* Папка проекта на стартовой странице (WorkspacePanel) */
+.folder-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.folder-checklist { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; max-width: 110ch; }
+.workspace-panel { margin-bottom: 24px; }
