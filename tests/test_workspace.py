@@ -73,3 +73,37 @@ def test_status_not_chosen(tmp_path, monkeypatch):
     rows = workspace.status()
     assert [r["chosen"] for r in rows] == [False, False]
     assert all(r["found"] is False and r["path"] == "" for r in rows)
+
+
+def test_add_ready_copies_from_anywhere_and_keeps_existing(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    project = tmp_path / "проект"
+    project.mkdir()
+    workspace.save(str(project))
+    elsewhere = tmp_path / "другой диск"
+    elsewhere.mkdir()
+    (elsewhere / "бд расходы.xlsx").write_bytes(b"new")
+    (elsewhere / "бд давл.xlsx").write_bytes(b"press")
+    (project / "готовые").mkdir()
+    (project / "готовые" / "бд давл.xlsx").write_bytes(b"old")
+
+    rows = workspace.add_ready([
+        str(elsewhere / "бд расходы.xlsx"),
+        str(elsewhere / "бд давл.xlsx"),
+        str(elsewhere / "нет такого.xlsx"),
+    ])
+    by_name = {r["name"]: r["status"] for r in rows}
+    assert by_name == {"бд расходы.xlsx": "copied", "бд давл.xlsx": "exists", "нет такого.xlsx": "missing"}
+    assert (project / "готовые" / "бд расходы.xlsx").read_bytes() == b"new"
+    # готовый файл не перезаписан
+    assert (project / "готовые" / "бд давл.xlsx").read_bytes() == b"old"
+
+
+def test_add_ready_needs_project(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    try:
+        workspace.add_ready([str(tmp_path / "x.xlsx")])
+    except ValueError as e:
+        assert "папку проекта" in str(e)
+    else:
+        raise AssertionError("ожидали ValueError без проекта")

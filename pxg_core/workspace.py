@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from typing import Any, Dict, List
 
 FILE_NAME = "рабочие_папки.json"
@@ -53,6 +54,37 @@ def folder(slot: str) -> str:
     """Путь подпапки ('ready' или 'exports') внутри выбранного проекта; '' если проект не выбран."""
     project = load()
     return os.path.join(project, SUBFOLDERS[slot]) if project else ""
+
+
+def add_ready(paths: List[str]) -> List[Dict[str, str]]:
+    """Копирует файлы с любых мест диска в подпапку «готовые» выбранного проекта.
+
+    Готовые файлы не пересобираются, поэтому файл с таким же именем не перезаписывается: он пропускается с пометкой.
+    Возвращает по каждому пути: {'source', 'name', 'status': 'copied' | 'exists' | 'missing' | 'error', 'message'}.
+    """
+    target = folder("ready")
+    if not target:
+        raise ValueError("Сначала выберите папку проекта.")
+    os.makedirs(target, exist_ok=True)
+    out: List[Dict[str, str]] = []
+    for raw in paths:
+        source = os.path.abspath(os.path.expanduser(str(raw).strip()))
+        name = os.path.basename(source)
+        if not os.path.isfile(source):
+            out.append({"source": source, "name": name, "status": "missing", "message": "Файл не найден."})
+            continue
+        dest = os.path.join(target, name)
+        if os.path.exists(dest):
+            out.append({"source": source, "name": name, "status": "exists",
+                        "message": "Такой файл уже есть в «готовых»: не перезаписан."})
+            continue
+        try:
+            shutil.copy2(source, dest)
+        except OSError as e:
+            out.append({"source": source, "name": name, "status": "error", "message": f"Не скопирован: {e}"})
+            continue
+        out.append({"source": source, "name": name, "status": "copied", "message": "Скопирован."})
+    return out
 
 
 def status() -> List[Dict[str, Any]]:
