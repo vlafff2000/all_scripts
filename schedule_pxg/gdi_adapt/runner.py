@@ -93,8 +93,8 @@ def run(cfg, project_dir: str, provider) -> RunResult:
 
         snaps: Dict[str, WellSnapshot] = {}
         for i, g0 in enumerate(gdis, 1):
-            g, qc, treat = g0, qcs.get(g0.wname), 'настроена по ГДИ'
-            tag = f'[{i}/{len(gdis)}] {g0.wname}'
+            g, qc, treat = g0, qcs.get(g0.key), 'настроена по ГДИ'
+            tag = f'[{i}/{len(gdis)}] {g0.wname} {g0.date:%d.%m.%Y}' if cfg.all_dates else f'[{i}/{len(gdis)}] {g0.wname}'
             try:
                 if qc is not None and qc.status == 'bad':
                     pol = cfg.bad_gdi_policy
@@ -120,7 +120,7 @@ def run(cfg, project_dir: str, provider) -> RunResult:
                         treat = 'настроена по забракованному ГДИ (политика adapt)'
                 else:
                     snap = provider(g0)
-                snaps[g0.wname] = snap
+                snaps[g0.key] = snap
                 res = adapt_well(g, snap, pvt, cfg)
                 if cfg.ci_jackknife and g.source == 'gdi':
                     jackknife(g, snap, pvt, cfg, res)
@@ -157,7 +157,7 @@ def run(cfg, project_dir: str, provider) -> RunResult:
             report.write_excel(out.results, out.failures, cfg, meta, os.path.join(run_dir, 'report.xlsx'), qc_rows=out.qc_rows)
             outputs.write_csv(out.results, os.path.join(run_dir, 'results.csv'))
             if cfg.write_include:
-                n = outputs.write_include(out.results, os.path.join(run_dir, 'wpimult_wdfac.inc'), cfg.include_only_ok)
+                n = outputs.write_include(out.results, os.path.join(run_dir, 'wpimult_wdfac.inc'), cfg.include_only_ok, cfg.include_sequential)
                 log(f'Include для модели: {n} скважин')
             if cfg.make_png:
                 n = report.write_pngs(out.results, os.path.join(run_dir, 'figs'), log=log)

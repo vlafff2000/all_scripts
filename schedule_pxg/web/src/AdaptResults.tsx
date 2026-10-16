@@ -33,7 +33,8 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   const reload = () => kit ? adaptRuns(kit).then(r => setRuns(r.runs)).catch(() => setRuns([])) : Promise.resolve()
   useEffect(() => { reload() }, [kit])
-  const show = (v: AdaptView) => { setView(v); setWell(v.rows[0]?.well || '') }
+  const id = (r: AdaptResultRow) => r.well + '|' + r.date
+  const show = (v: AdaptView) => { setView(v); setWell(v.rows[0] ? id(v.rows[0]) : '') }
 
   const pick = () => guard(async () => { const r = await pickFile(snap || kit); if (r.path) setSnap(r.path) })
   const calc = () => guard(async () => { show(await adaptRecompute(kit, snap || kit, config)); await reload() })
@@ -44,9 +45,15 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
     const cmp = (a: AdaptResultRow, b: AdaptResultRow) => { const x = a[sort.k] as unknown, y = b[sort.k] as unknown; return (x === null ? 1 : y === null ? -1 : x! < y! ? -1 : x! > y! ? 1 : 0) * sort.dir }
     return [...f].sort(cmp)
   }, [view, filter, sort])
-  const cur = view?.rows.find(r => r.well === well)
+  const cur = view?.rows.find(r => id(r) === well)
+  const dyn = useMemo(() => {
+    const pts = cur ? (view?.rows || []).filter(r => r.well === cur.well && r.pi_mult !== null).sort((a, b) => a.date < b.date ? -1 : 1) : []
+    return pts.length < 2 ? null : mkChart('adapt-dyn', 'Динамика WPIMULT по датам ГДИ, скв. ' + cur!.well, mkAxis('Дата ГДИ', '', 'time'), mkAxis('WPIMULT (итого от базовой модели)', '', 'value'), [
+      mkSeries({ name: 'WPIMULT', kind: 'points', slot: 0, x: pts.map(r => Date.parse(r.date)), y: pts.map(r => r.pi_mult!) }),
+      mkSeries({ name: 'линия', slot: 0, x: pts.map(r => Date.parse(r.date)), y: pts.map(r => r.pi_mult!) })])
+  }, [view, cur])
 
-  const curve = useMemo(() => cur && mkChart('adapt-ip', 'Индикаторная кривая, скв. ' + cur.well, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('ΔP² = Pпл² − Pз²', 'бар²', 'value', { from_zero: true }), [
+  const curve = useMemo(() => cur && mkChart('adapt-ip', 'Индикаторная кривая, скв. ' + cur.well + ' от ' + cur.date, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('ΔP² = Pпл² − Pз²', 'бар²', 'value', { from_zero: true }), [
     mkSeries({ name: 'ГДИ', kind: 'points', slot: 3, x: nn(cur.q_gdi), y: nn(cur.dp2_gdi) }),
     mkSeries({ name: 'модель до', slot: 5, dashed: true, x: nn(cur.curve_q), y: cur.curve_before as number[] }),
     mkSeries({ name: 'модель после', slot: 0, x: nn(cur.curve_q), y: cur.curve_after as number[] }),
@@ -107,13 +114,14 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
           <span className="muted small">Нажмите на строку, чтобы посмотреть график скважины; на заголовок — сортировать.</span>
         </div>
         <div className="scroll" style={{ maxHeight: 460 }}><table className="raw"><thead><tr>{COLS.map(([k, t]) => th(k, t))}<th>Замечания</th></tr></thead>
-          <tbody>{rows.map(r => <tr key={r.well} className={(r.ok ? '' : 'warnrow ') + (r.well === well ? 'sel' : '')} onClick={() => setWell(r.well)} style={r.well === well ? { background: 'var(--accent-soft)' } : undefined}>
+          <tbody>{rows.map(r => <tr key={id(r)} className={(r.ok ? '' : 'warnrow ') + (id(r) === well ? 'sel' : '')} onClick={() => setWell(id(r))} style={id(r) === well ? { background: 'var(--accent-soft)' } : undefined}>
             {COLS.map(([k, , f]) => <td key={k}>{f(r)}</td>)}<td className="muted small">{[...r.problems, ...r.notes].join('; ')}</td></tr>)}</tbody></table></div>
         {view.failures.length > 0 && <details><summary className="muted small">Пропущено скважин: {view.failures.length}</summary>
           <ul className="issues">{view.failures.map(f => <li key={f.well}><b>{f.well}</b>: {f.reason}</li>)}</ul></details>}
 
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', marginTop: 12 }}>
           {curve && <div><ChartView chart={curve} excludeMode={false} onExclude={() => {}} /></div>}
+          {dyn && <div><ChartView chart={dyn} excludeMode={false} onExclude={() => {}} /></div>}
           {hist && <div><ChartView chart={hist} excludeMode={false} onExclude={() => {}} /></div>}
           {r2c && <div><ChartView chart={r2c} excludeMode={false} onExclude={() => {}} /></div>}
         </div>

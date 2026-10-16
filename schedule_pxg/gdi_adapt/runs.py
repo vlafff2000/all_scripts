@@ -62,7 +62,11 @@ def summary(rows: List[dict], failures: List[tuple]) -> dict:
 def group_check(rows: List[dict], well_group: Dict[str, str]) -> List[dict]:
     """По группам проекта: сумма средних дебитов ГДИ и модели до и после адаптации (при депрессиях ГДИ), тыс. м3/сут."""
     acc: Dict[str, dict] = {}
-    for r in rows:
+    latest = {}
+    for r in rows:         # при нескольких датах на скважину в сумму идёт самая свежая
+        if r["well"] not in latest or r["date"] > latest[r["well"]]["date"]:
+            latest[r["well"]] = r
+    for r in latest.values():
         g = well_group.get(r["well"]) or "без группы"
         q = [x for x in r["q_gdi"] if x is not None]
         if not q:
@@ -102,7 +106,13 @@ def recompute(kit: str, snapshots: str, settings: Optional[dict] = None, well_gr
     if not os.path.isfile(os.path.join(kit or "", "all_gdi.xlsx")):
         raise ValueError("«%s» не похоже на комплект (нет all_gdi.xlsx). Подготовьте комплект кнопкой выше." % kit)
     snaps = load_snapshots(find_snapshots(snapshots))
-    cfg = kit_config(dict(settings or {}, make_png=False, save_snapshots=False))
+    saved = {}
+    try:        # режим «все даты» задан при подготовке комплекта (в all_gdi.xlsx несколько дат), настройки экрана его могут не нести
+        with open(os.path.join(kit, "config.json"), encoding="utf-8") as f:
+            saved = {k: v for k, v in json.load(f).items() if k in ("all_dates",)}
+    except (OSError, ValueError):
+        pass
+    cfg = kit_config(dict(saved, **(settings or {}), make_png=False, save_snapshots=False))
     out = run(cfg, kit, SnapshotProvider(snaps))
     return _finish(out, well_group or {})
 

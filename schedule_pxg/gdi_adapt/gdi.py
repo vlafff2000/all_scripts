@@ -42,7 +42,13 @@ class GDI:
     b: float
     notes: List[str] = field(default_factory=list)
     n_dropped: int = 0           # режимов отброшено при загрузке (Pзаб >= Pпл или Q <= 0)
+    multi: bool = False          # у скважины несколько дат в одном прогоне: ключ включает дату
     source: str = 'gdi'          # 'gdi' - реальное исследование; 'average' - синтетическое по средней скважине
+
+    @property
+    def key(self) -> str:
+        """Ключ снимков и контроля качества: имя скважины; при нескольких датах на скважину - скважина@дата."""
+        return f'{self.wname}@{self.date:%Y-%m-%d}' if self.multi else self.wname
 
     @property
     def n_points(self) -> int:
@@ -117,23 +123,27 @@ def load_gdi(cfg, gdi_path: str, log=print) -> Tuple[List[GDI], List[Tuple[str, 
     has_ab = cfg.a_col in df.columns and cfg.b_col in df.columns
     out: List[GDI] = []
     for w, g in df.groupby('_w', sort=False):
-        last = g['_d'].max()
-        g = g[g['_d'] == last]
-        wbp = to_base_units(g[cfg.wbp_col].values, cfg.wbp_units, 'pressure')
-        bhp = to_base_units(g[cfg.bhp_col].values, cfg.bhp_units, 'pressure')
-        q = to_base_units(g[cfg.q_col].values, cfg.q_units, 'flow_rate')
-        ok = np.isfinite(wbp) & np.isfinite(bhp) & np.isfinite(q) & (wbp > bhp) & (q > 0)
-        notes = []
-        if not ok.all():
-            notes.append(f'отброшено режимов (Pзаб >= Pпл или Q <= 0): {int((~ok).sum())}')
-        if not ok.any():
-            skipped.append((w, 'нет ни одного корректного режима (Pпл > Pзаб, Q > 0)'))
-            continue
-        wbp, bhp, q = wbp[ok], bhp[ok], q[ok]
-        if has_ab and g[cfg.a_col].notna().any() and g[cfg.b_col].notna().any():
-            a, b = float(g[cfg.a_col].dropna().iloc[0]), float(g[cfg.b_col].dropna().iloc[0])
-        else:
-            a, b = fit_ab(q, wbp, bhp, cfg.ab_q_units)
-        out.append(GDI(wname=w, date=last.to_pydatetime(), wbp=wbp, bhp=bhp, q=q, a=a, b=b, notes=notes,
-                       n_dropped=int((~ok).sum())))
+        days = sorted(g['_d'].unique()) if getattr(cfg, 'all_dates', False) else [g['_d'].max()]
+        for last in days:
+            _one(out, skipped, cfg, w, g[g['_d'] == last], last, has_ab)
     return out, skipped
+
+
+def _one(out, skipped, cfg, w, g, last, has_ab) -> None:
+    wbp = to_base_units(g[cfg.wbp_col].values, cfg.wbp_units, 'pressure')
+    bhp = to_base_units(g[cfg.bhp_col].values, cfg.bhp_units, 'pressure')
+    q = to_base_units(g[cfg.q_col].values, cfg.q_units, 'flow_rate')
+    ok = np.isfinite(wbp) & np.isfinite(bhp) & np.isfinite(q) & (wbp > bhp) & (q > 0)
+    notes = []
+    if not ok.all():
+        notes.append(f'отброшено режимов (Pзаб >= Pпл или Q <= 0): {int((~ok).sum())}')
+    if not ok.any():
+        skipped.append((w, 'нет ни одного корректного режима (Pпл > Pзаб, Q > 0)'))
+        return
+    wbp, bhp, q = wbp[ok], bhp[ok], q[ok]
+    if has_ab and g[cfg.a_col].notna().any() and g[cfg.b_col].notna().any():
+        a, b = float(g[cfg.a_col].dropna().iloc[0]), float(g[cfg.b_col].dropna().iloc[0])
+    else:
+        a, b = fit_ab(q, wbp, bhp, cfg.ab_q_units)
+    out.append(GDI(wname=w, date=last.to_pydatetime(), wbp=wbp, bhp=bhp, q=q, a=a, b=b, notes=notes,
+                   n_dropped=int((~ok).sum()), multi=bool(getattr(cfg, 'all_dates', False))))

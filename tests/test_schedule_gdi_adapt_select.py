@@ -196,3 +196,35 @@ def test_recompute_flow_and_api(tmp_path, monkeypatch):
     assert c.get("/api/adapt/file", params={"dir": v["run_dir"], "kind": "inc"}).status_code == 200
     assert c.get("/api/adapt/file", params={"dir": v["run_dir"], "kind": "exe"}).status_code == 404
     assert c.post("/api/adapt/recompute", json={"kit": str(tmp_path), "snapshots": kitdir}).status_code == 400
+
+
+def test_all_dates_sequential_include(tmp_path):
+    """Все прошедшие контроль исследования скважины -> снимки по ключу скважина@дата -> include с приращением WPIMULT."""
+    import re
+    sys.path.insert(0, os.path.dirname(__file__))
+    import gdi_adapt_mock_tnav as mock
+    from schedule_pxg.gdi_adapt import runs, tnav_api
+    from schedule_pxg.gdi_adapt.gdi import load_gdi
+    from schedule_pxg.gdi_adapt.snapshot import save_snapshots
+    sel = selection.select(_studies()[0], Config.load(None), selection.Settings(), model=["33", "35"])
+    last = selection.chosen_for_kit(sel)
+    allp = selection.chosen_for_kit(sel, all_dates=True)
+    assert [n for n, _ in last] == ["33", "35"]
+    assert [(n, g.date.year) for n, g in allp] == [("33", 2019), ("33", 2022), ("35", 2023)]     # 2024 забраковано
+    kitdir = str(tmp_path / "k")
+    kit.write_kit(kitdir, allp, {"all_dates": True, "ci_jackknife": False})
+    cfg = Config.load(os.path.join(kitdir, "config.json"))
+    gs, _ = load_gdi(cfg, os.path.join(kitdir, "all_gdi.xlsx"))
+    assert sorted(g.key for g in gs) == ["33@2019-03-01", "33@2022-04-01", "35@2023-02-01"]
+    tnav_api.bind(mock.make_tnav({"33": 91.0, "35": 91.0}), 0)
+    snaps = {g.key: tnav_api.extract_snapshot(g.wname, g.date) for g in gs}
+    os.makedirs(os.path.join(kitdir, "runs", "x"))
+    save_snapshots(snaps, os.path.join(kitdir, "runs", "x", "snapshots.pkl"))
+    v = runs.recompute(kitdir, kitdir, {"strategy": "dp", "ci_jackknife": False})
+    assert v["summary"]["wells"] == 3
+    w33 = sorted((r for r in v["rows"] if r["well"] == "33"), key=lambda r: r["date"])
+    inc = open(os.path.join(v["run_dir"], "wpimult_wdfac.inc"), encoding="utf-8").read()
+    mult = [float(m) for m in re.findall(r"^33\t(\S+)\t/$", inc, re.M) if "e" not in m][:2]      # WPIMULT первой и второй даты (WDFAC в экспоненте)
+    assert len(w33) == 2 and abs(mult[0] - w33[0]["pi_mult"]) < 1e-6 * w33[0]["pi_mult"] + 1e-9
+    assert abs(mult[1] - w33[1]["pi_mult"] / w33[0]["pi_mult"]) < 1e-5 * mult[1] + 1e-9
+    assert [x["group"] for x in v["groups"]] == ["без группы"] and v["groups"][0]["wells"] == 2   # 33 считается один раз (свежее ГДИ)

@@ -124,6 +124,11 @@ export default function Adapt() {
           <label>Ошибка дебита<select value={cfg.objective} onChange={e => upd('objective', e.target.value)}><option value="relative">относительная</option><option value="absolute">абсолютная</option></select></label>
         </div>
         <div className="row">
+          <label className="grow"><input type="checkbox" checked={!!cfg.all_dates} onChange={e => upd('all_dates', e.target.checked)} /> Настроить на все исследования скважины (динамика по датам)</label>
+          <label><input type="checkbox" checked={cfg.include_sequential !== false} onChange={e => upd('include_sequential', e.target.checked)} /> В include — приращение WPIMULT (накопительный множитель)</label>
+        </div>
+        <p className="muted small">С динамикой в include для каждой даты ГДИ записывается свой WPIMULT; итог по дате считается от базовой модели, в файл идёт отношение к уже заданному ранее. Для строгой проверки подключите include к модели, пересчитайте её и повторите адаптацию — остаточный WPIMULT должен быть около 1.</p>
+        <div className="row">
           <label>WPIMULT от<input style={{ width: 110 }} defaultValue={pm[0]} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('pi_mult_bounds', [v, pm[1]]) }} /></label>
           <label>до<input style={{ width: 110 }} defaultValue={pm[1]} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('pi_mult_bounds', [pm[0], v]) }} /></label>
           <label>D-фактор от<input style={{ width: 110 }} defaultValue={dm[0]} onBlur={e => { const v = num(e.target.value); if (v !== undefined) upd('dfac_bounds', [v, dm[1]]) }} /></label>

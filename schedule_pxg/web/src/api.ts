@@ -210,7 +210,7 @@ export const setGroupMap = (key: string, group: string) => call<GroupMap>('/api/
 // ───── Адаптация по ГДИ ─────
 export interface AdaptConfig {
   strategy: string; inflow: string; objective: string; pi_mult_bounds: [number, number]; dfac_bounds: [number, number]
-  r2_ok: number; min_regimes: number; bad_gdi_policy: string; qc_enabled: boolean; n_starts: number; include_only_ok: boolean
+  r2_ok: number; min_regimes: number; bad_gdi_policy: string; qc_enabled: boolean; n_starts: number; include_only_ok: boolean; all_dates?: boolean; include_sequential?: boolean
   well_bounds?: Record<string, { pi_mult_bounds?: [number, number]; dfac_bounds?: [number, number] }> | null
   [k: string]: unknown
 }
