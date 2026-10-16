@@ -29,3 +29,11 @@ def test_normalized_base_wins_over_raw_copy(tmp_path):
     (tmp_path / "БД_расходы_нормированная_ПЗРГ.xlsx").write_bytes(b"x")
     found = [os.path.basename(x) for x in sources.detect_flow_files(str(tmp_path))]
     assert found == ["БД_расходы_нормированная_ПЗРГ.xlsx"]
+
+
+def test_detect_flow_files_knows_base_output_name(tmp_path):
+    """Итог «Создание базы данных расходов» Базы ПХГ — тоже база расходов; отчёт «Часы_…_расход_…» — нет."""
+    (tmp_path / "Сводка_закачка_отбор_обновленный_скрипт.xlsx").write_bytes(b"x")
+    (tmp_path / "Часы_ненулевые_расход_нулевой.xlsx").write_bytes(b"x")
+    found = [os.path.basename(x) for x in sources.detect_flow_files(str(tmp_path))]
+    assert found == ["Сводка_закачка_отбор_обновленный_скрипт.xlsx"]

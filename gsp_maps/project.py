@@ -33,6 +33,13 @@ def _mtime(path: str) -> float:
         return 0.0
 
 
+def is_flow_db(name: str) -> bool:
+    """База расходов по имени: «БД_расходы…» или итог «Создание базы данных расходов» Базы ПХГ
+    («Сводка_закачка_отбор_обновленный_скрипт.xlsx»)."""
+    low = name.lower().replace("_", " ")
+    return ("бд" in low and "расход" in low) or "сводка закачка отбор" in low
+
+
 def detect_files(folder: str) -> Dict[str, str]:
     """Находит файлы в папке данных по именам (как в старом скрипте, плюс координаты XY)."""
     out: Dict[str, str] = {}
@@ -47,8 +54,10 @@ def detect_files(folder: str) -> Dict[str, str]:
                 out.setdefault("water", path)
             continue
         ext = os.path.splitext(name)[1]
-        if ext in (".xlsx", ".xlsm", ".xls") and "бд" in name and "расход" in name:
-            out.setdefault("db", path)
+        if ext in (".xlsx", ".xlsm", ".xls") and is_flow_db(name):
+            # нормированная на ПЗРГ база — итог Базы ПХГ: она важнее исходной, как в Скедуле и Атласе
+            if "db" not in out or ("нормирован" in name and "нормирован" not in out["db"].lower()):
+                out["db"] = path
         elif ext == ".txt" and ("period" in name or "период" in name):
             out.setdefault("periods", path)
         elif ext == ".txt" and "давление" in name and "гсп" in name:
