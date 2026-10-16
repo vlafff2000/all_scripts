@@ -115,3 +115,16 @@ def test_add_ready_skips_blank_paths(tmp_path, monkeypatch):
     project.mkdir()
     workspace.save(str(project))
     assert workspace.add_ready(["", "   "]) == []
+
+
+def test_hub_project_is_default_when_nothing_chosen(tmp_path, monkeypatch):
+    # в едином архиве меню передаёт общую папку «Проект» через PXG_PROJECT: без выбора она и есть проект
+    _home(tmp_path, monkeypatch)
+    hub = tmp_path / "Проект"
+    monkeypatch.setenv("PXG_PROJECT", str(hub))
+    assert workspace.load() == str(hub)
+    assert workspace.folder("exports") == os.path.join(str(hub), "выгрузки")
+    # явный выбор сильнее
+    other = tmp_path / "другой"
+    workspace.save(str(other))
+    assert workspace.load() == os.path.abspath(other)
