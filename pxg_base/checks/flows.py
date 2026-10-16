@@ -1,6 +1,7 @@
 """Проверки исходников расходов: месячные книги отбора/закачки, файл периодов, база расходов."""
 from __future__ import annotations
 
+import importlib
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -372,7 +373,19 @@ def check_normalize(v: Dict[str, str]) -> Report:
                 _check_db_sheet(rep, db, sh)
     elif not db:
         rep.error("FILE", "Не выбран файл базы расходов")
-    if pz and qc.check_path(rep, pz, "ПЗРГ"):
+    gas = (v.get("gas_db") or "").strip()
+    if gas:
+        # «БД по учету газа» — приоритетный эталон: файл ПЗРГ не нужен
+        if qc.check_path(rep, gas, "БД по учету газа"):
+            try:
+                nm = importlib.import_module("pxg_base.modules.Нормировка_базы_расходов_на_ПЗРГ")
+                tab = nm.gas_pzrg(gas)
+                rep.saw("Эталон из «БД по учету газа»: %d суток" % len(tab))
+                if not len(tab):
+                    rep.error("FILE", "В «БД по учету газа» нет суток с объёмом по объекту", file=gas, hint="Нужен лист «БД» из модуля «БД по учету газа»")
+            except Exception as e:
+                rep.error("FILE", "«БД по учету газа» не прочитана: %s" % e, file=gas, hint="Нужен лист «БД» из модуля «БД по учету газа»")
+    elif pz and qc.check_path(rep, pz, "ПЗРГ"):
         try:
             tab = historymode.read_pzrg(pz)
             rep.saw("ПЗРГ: %d суток" % len(tab))
@@ -381,7 +394,7 @@ def check_normalize(v: Dict[str, str]) -> Report:
         except Exception as e:
             rep.error("FILE", "ПЗРГ не прочитан: %s" % e, file=pz, hint="Даты в столбце A, расход в столбце C")
     elif not pz:
-        rep.error("FILE", "Не выбран файл ПЗРГ")
+        rep.error("FILE", "Не выбран файл ПЗРГ или «БД по учету газа»")
     try:
         historymode.parse_window(v.get("window_lo"), v.get("window_hi"))
     except ValueError as e:

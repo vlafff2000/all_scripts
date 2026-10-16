@@ -120,7 +120,7 @@ def test_registered():
     from pxg_base.registry import MODULES
     from pxg_base.webspec import get
     assert any(m[1] == "Нормировка_базы_расходов_на_ПЗРГ" for m in MODULES)
-    assert [a[1] for a in get("Нормировка_базы_расходов_на_ПЗРГ").args] == ["db", "pzrg", "window-lo", "window-hi"]
+    assert [a[1] for a in get("Нормировка_базы_расходов_на_ПЗРГ").args] == ["db", "gas-db", "pzrg", "window-lo", "window-hi"]
 
 
 def test_total_row_nan_rate_and_bad_date_are_kept(tmp_path):
@@ -173,3 +173,37 @@ def test_schedule_api_skips_correction_for_normalized_base_and_warns_on_mix(file
     assert not res.log and any("Не нормированы" in n for n in res.notes)
     p, res, _, _ = api._history_run({"files": [db], "pzrg_file": pz})
     assert res.log
+
+
+def _gas_db(tmp_path, pz_file):
+    """«БД по учету газа» с теми же суточными объёмами, что и файл ПЗРГ (тыс. м³/сут): отбор с 6 мая, закачка до."""
+    pz = pd.read_excel(pz_file, header=None, usecols=[0, 2])
+    rows = []
+    for d, v in zip(pd.to_datetime(pz[0], dayfirst=True), pz[2]):
+        kind = "отбор" if d >= pd.Timestamp(D0 + timedelta(days=5)) else "закачка"
+        rows.append({"Режим": kind, "Дата": d,
+                     "Отобрано газа из ПХГ за сутки / Всего по ПЗРГ - за сутки по ПХГ": v / 1000.0 if kind == "отбор" else None,
+                     "Закачано в ПХГ за СУТКИ, тыс.м3/сут": v / 1000.0 if kind == "закачка" else None})
+    path = tmp_path / "БД_по_учету_газа.xlsx"
+    pd.DataFrame(rows).to_excel(path, sheet_name="БД", index=False)
+    return str(path)
+
+
+def test_gas_db_is_priority_reference_and_matches_pzrg_file(files, tmp_path):
+    db, pz, tmp = files
+    gas = _gas_db(tmp, pz)
+    by_file = nm.normalize(db, pz, str(tmp / "by_file"))
+    by_gas = nm.normalize(db, "", str(tmp / "by_gas"), gas_db=gas)     # файл ПЗРГ не нужен
+    a = pd.read_excel(by_file["db"], sheet_name="Закачка", dtype={"Скважина": str})
+    b = pd.read_excel(by_gas["db"], sheet_name="Закачка", dtype={"Скважина": str})
+    assert list(a[history.STATUS_COLUMN]) == list(b[history.STATUS_COLUMN])
+    assert a["Суточный расход газа"].sum() == pytest.approx(b["Суточный расход газа"].sum())
+    assert gas in pd.read_excel(by_gas["log"], sheet_name="Параметры")["Значение"].astype(str).tolist()
+
+
+def test_gas_db_without_reference_column_is_an_error(files, tmp_path):
+    db, pz, tmp = files
+    bad = tmp_path / "bad.xlsx"
+    pd.DataFrame({"Режим": ["отбор"], "Дата": [D0], "Другое": [1.0]}).to_excel(bad, sheet_name="БД", index=False)
+    with pytest.raises(ValueError, match="найден 0 раз"):
+        nm.normalize(db, "", str(tmp / "o"), gas_db=str(bad))
