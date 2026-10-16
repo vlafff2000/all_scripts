@@ -1,4 +1,4 @@
-"""Учёт газа по месяцам: длинная таблица листов, вынос воды, проверки.
+"""БД по учету газа: длинная таблица листов, широкая база, вынос воды, папки и подпапки, проверки.
 
 Реальные файлы компании не лежат в репозитории: задайте PXG_GAS_SAMPLE_DIR с «Учет газаТБОР 2025-2026гг.xlsx»
 и «Учет газа- Закачка 2026.xlsx». Без него проверки на файлах пропускаются. Синтетических файлов нет: в
@@ -82,6 +82,42 @@ def test_header_column_without_name_is_excluded_not_read():
 
 
 @pytest.mark.skipif(not SAMPLE, reason="нужен PXG_GAS_SAMPLE_DIR с реальными файлами учёта газа")
+def test_param_key_ignores_case_spaces_and_dash_spacing():
+    assert g.param_key("ПЗРГ - 4 / за сутки") == g.param_key("пзрг-4 / за сутки")
+    assert g.param_key("ГИС-  Касимов") == g.param_key("гис-касимов")
+
+
+def test_season_and_wide_base_one_column_per_parameter():
+    rows = [
+        ("отбор", "2025-10-01", "H", GAS_TOTAL, 100.0),
+        ("отбор", "2025-10-01", "AM", WATER, 10.0),
+        ("отбор", "2025-10-02", "H", GAS_TOTAL, 200.0),
+        ("закачка", "2026-05-01", "R", "Закачано в ПХГ за СУТКИ, тыс.м3/сут", 50.0),
+    ]
+    long_df = pd.DataFrame([
+        {"Тип": t, "Файл": "f.xlsx", "Лист": "Лист", "Дата": pd.Timestamp(d), "Строка": 8, "Столбец": c,
+         "Параметр": p, "Единица": "", "Значение": v} for t, d, c, p, v in rows])
+    db, dictionary, excl, checks = g.build_db(long_df, pd.DataFrame(columns=["Файл", "Лист", "Ячейка", "Значение", "Причина"]))
+    assert list(db["Режим"]) == ["отбор", "отбор", "закачка"]
+    assert list(db["Сезон"]) == ["2025/2026", "2025/2026", "2026"]
+    assert db.loc[0, GAS_TOTAL] == 100.0 and pd.isna(db.loc[2, GAS_TOTAL])  # параметр отбора пуст у закачки
+    assert len(dictionary) == 3
+
+
+def test_folder_with_subfolders_is_scanned_recursively(tmp_path):
+    import shutil
+
+    sample = os.environ.get("PXG_GAS_SAMPLE_DIR", "")
+    if not sample:
+        pytest.skip("нужен PXG_GAS_SAMPLE_DIR")
+    (tmp_path / "сезон 2025-2026").mkdir()
+    shutil.copy(Path(sample) / "Учет газаТБОР 2025-2026гг.xlsx", tmp_path / "сезон 2025-2026" / "otbor.xlsx")
+    shutil.copy(Path(sample) / "Учет газа- Закачка 2026.xlsx", tmp_path / "zakachka.xlsx")
+    books, skipped = g.collect_books([str(tmp_path)])
+    assert len(books) == 2 and not skipped
+
+
+@pytest.mark.skipif(not SAMPLE, reason="нужен PXG_GAS_SAMPLE_DIR с реальными файлами учёта газа")
 def test_real_withdrawal_book_long_table_and_water():
     long_df, excluded, log = g.read_book(str(Path(SAMPLE) / "Учет газаТБОР 2025-2026гг.xlsx"), "отбор")
     assert len(log) == 6 and long_df["Дата"].nunique() == 182
@@ -103,3 +139,15 @@ def test_real_injection_book_reads_all_sheets_with_changing_columns():
     # состав столбцов меняется от листа к листу (шапка до ~92 столбцов): каждый лист даёт значения
     assert set(long_df["Лист"]) == set(sheets["Лист"])
     assert long_df.groupby("Лист")["Столбец"].nunique().min() > 40
+
+
+@pytest.mark.skipif(not SAMPLE, reason="нужен PXG_GAS_SAMPLE_DIR с реальными файлами учёта газа")
+def test_real_books_build_one_row_per_day_and_water_column():
+    w, ex_w, _ = g.read_book(str(Path(SAMPLE) / "Учет газаТБОР 2025-2026гг.xlsx"), "отбор")
+    i, ex_i, _ = g.read_book(str(Path(SAMPLE) / "Учет газа- Закачка 2026.xlsx"), "закачка")
+    db, dictionary, excl, checks = g.build_db(pd.concat([w, i], ignore_index=True), pd.concat([ex_w, ex_i]))
+    assert len(db) == 182 + 165  # шаблонные сутки закачки уже отброшены
+    water_cols = [c for c in db.columns if "Пластовая жидкость" in c]
+    assert len(water_cols) == 1
+    assert db.loc[db["Режим"] == "отбор", water_cols[0]].sum() == pytest.approx(15650.0)
+    assert db["Сезон"].str.contains("/").sum() == 182
