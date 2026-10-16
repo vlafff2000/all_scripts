@@ -15,6 +15,7 @@ Schedule по истории, построенный по нормированн
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import Optional
 
@@ -59,6 +60,41 @@ def gas_pzrg(path: str) -> pd.DataFrame:
                     np.where(db["Режим"] == "закачка", pd.to_numeric(db[i], errors="coerce"), np.nan))
     out = pd.DataFrame({"date": pd.to_datetime(db["Дата"], errors="coerce"), "rate": rate * 1000.0})
     return out.dropna(subset=["date", "rate"]).sort_values("date").reset_index(drop=True)
+
+
+K_SUSPECT = 2.0     # коэффициент больше — вероятно, в базе не все ГСП (весь объём объекта уходит части скважин)
+
+
+def _gsp_key(name) -> str:
+    """«ГСП-1» = «ГСП 1» = «гсп1»: единая схема имён групп."""
+    spaced = re.sub(r"(?<=[^\W\d_])(?=\d)", " ", str(name).strip())
+    return re.sub(r"[\s_\-]+", " ", spaced).strip().casefold()
+
+
+def completeness_notes(data: dict, k_col: np.ndarray, gas_db: str = "") -> list:
+    """Замечания о неполной базе: ГСП, у которых по «БД по учету газа» были работающие скважины, но в базе
+    расходов их нет (группа — «Источник»), и подозрительно большой коэффициент нормировки."""
+    notes = []
+    k = k_col[np.isfinite(k_col)]
+    if len(k) and k.max() > K_SUSPECT:
+        notes.append("Коэффициент нормировки доходит до %.1f (у %d строк больше %.0f): похоже, в базе расходов не все ГСП "
+                     "или не все скважины — объём узла учёта ушёл оставшимся" % (k.max(), int((k > K_SUSPECT).sum()), K_SUSPECT))
+    if gas_db:
+        try:
+            db = pd.read_excel(gas_db, sheet_name="БД")
+        except (ValueError, KeyError, OSError):
+            return notes
+        in_base = {_gsp_key(v) for df in data.values() if "Источник" in df.columns for v in df["Источник"].dropna().unique()}
+        working = []
+        for col in db.columns:
+            m = re.match(r"^Работающие скважины,\s*(ГСП.*)$", str(col).strip())
+            if m and (pd.to_numeric(db[col], errors="coerce") > 0).any():
+                working.append(m.group(1).strip())
+        missing = [g for g in working if _gsp_key(g) not in in_base]
+        if in_base and missing:
+            notes.append("В «БД по учету газа» есть работающие скважины на %s, а в базе расходов этих ГСП нет: "
+                         "нормировка раздаст их объём другим ГСП" % ", ".join(missing))
+    return notes
 
 
 def normalize(db_file: str, pzrg_file: str, out_dir: str, window_lo: str = "", window_hi: str = "", gas_db: str = "") -> dict:
@@ -139,6 +175,8 @@ def normalize(db_file: str, pzrg_file: str, out_dir: str, window_lo: str = "", w
     mixed_days = len({r["start"] for r in log if "отбор, и закачка" in r["comment"]})
     if mixed_days:
         notes.append("Сутки, когда расход есть и у отбора, и у закачки: %d. Они не менялись, сумма по скважинам за эти сутки с узлом может не сойтись" % mixed_days)
+
+    notes += completeness_notes(data, k_col, gas_db)
 
     out_db = os.path.join(out_dir, OUT_DB)
     _write_db(out_db, names, sheets, data, frame, corr, k_col, status)
