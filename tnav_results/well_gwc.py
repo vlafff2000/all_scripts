@@ -104,16 +104,20 @@ def wells_gwc_over_time(model: CellModel, init_path: Optional[str], unrst_path: 
                         wells: Optional[Sequence[str]] = None, steps: Optional[Sequence[RestartStep]] = None,
                         sgas: str = "SGAS") -> Tuple[List[WellGwc], Dict[str, object]]:
     """ГВК выбранных скважин (пусто — все) по датам рестарта. Возвращает строки и сведения: источник Sgr, скважины без ячеек."""
-    conn = read_well_connections(unrst_path)
     want = set(wells) if wells else None
-    use = {w: c for w, c in conn.items() if (want is None or w in want) and c}
     thr, src = sgr_by_units(model, init_path, fallback_sgr)
     out: List[WellGwc] = []
+    used: set = set()
     for st in (steps if steps is not None else iter_restart_steps(unrst_path)):
         sg = read_restart_keyword(unrst_path, st, sgas)
         if sg is None:
             continue
         sg = model.to_units(sg, sgas)[0]
-        for w, cells in use.items():
+        # ячейки вскрытия берутся на том же шаге, что и насыщенность: скважина могла быть пробурена или перфорирована позже
+        conn = read_well_connections(unrst_path, st)
+        for w, cells in conn.items():
+            if (want is not None and w not in want) or not cells:
+                continue
+            used.add(w)
             out.append(well_gwc(model, sg, thr, w, cells, st.date))
-    return out, {"sgr_source": src, "wells": sorted(use), "missing": sorted(want - set(use)) if want else []}
+    return out, {"sgr_source": src, "wells": sorted(used), "missing": sorted(want - used) if want else []}
