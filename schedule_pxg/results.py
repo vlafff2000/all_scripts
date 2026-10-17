@@ -165,3 +165,25 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
         notes.append("Нет ячеек вскрытия для скважин: " + ", ".join(info["missing"]))
     notes.append("Ячейки вскрытия прочитаны из рестарта (раскладка проверена на синтетике): сверьте одну скважину с профилем в tNavigator")
     return out, {"notes": notes, "sgr_source": info["sgr_source"], "wells": info["wells"]}
+
+
+def report(path: str, kind: str) -> str:
+    """Те же отчёты, что делают Opisat_model и Perechislit_UNRST: kind 'model' (EGRID/INIT/SMSPEC/UNSMRY) или 'restart' (UNRST).
+
+    path — папка или любой файл расчёта: остальные файлы с тем же именем находятся сами.
+    """
+    from tnav_results import describe_model, list_restart
+
+    f = find_files(path)
+    if not f:
+        raise ValueError("По пути «%s» не найдено файлов расчёта (EGRID, INIT, SMSPEC, UNSMRY, UNRST)" % path)
+    if kind == "model":
+        files = [f[k] for k in ("EGRID", "INIT", "SMSPEC", "UNSMRY") if k in f]
+        if not files:
+            raise ValueError("Нет файлов EGRID, INIT, SMSPEC, UNSMRY рядом с «%s»" % path)
+        return describe_model.describe(files)
+    if kind == "restart":
+        if "UNRST" not in f:
+            raise ValueError("Нет файла UNRST рядом с «%s»" % path)
+        return list_restart.report(f["UNRST"])
+    raise ValueError("kind: 'model' или 'restart'")

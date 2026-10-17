@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
-import { AppState, IndicatorRow, ResultsInfo, attachResults, getIndicators, getResultSeries, getWellGwc, WellGwcRow, getResults, getState, pickFile } from './api'
+import { AppState, IndicatorRow, ResultsInfo, attachResults, getIndicators, getResultSeries, getWellGwc, WellGwcRow, getResults, getResultsReport, getState, pickFile } from './api'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
@@ -32,6 +32,9 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
   const [gwDate, setGwDate] = useState('')
   const [gwRows, setGwRows] = useState<Record<string, WellGwcRow[]>>({})
   const [gwNotes, setGwNotes] = useState<string[]>([])
+  const [rpPath, setRpPath] = useState('')
+  const [rpText, setRpText] = useState('')
+  const [rpName, setRpName] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -80,6 +83,16 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
     return Object.entries(by).slice(0, 20).map(([w, rs]) => ({ label: n + ' · ' + w, pts: rs.map(r => [r.date, r.interp_top_down as number] as [string, number]) }))
   })
 
+  const rpPick = () => guard(async () => { const r = await pickFile(rpPath); if (r.path) setRpPath(r.path) })
+  const rpRun = (kind: 'model' | 'restart') => guard(async () => {
+    const r = await getResultsReport(rpPath, kind)
+    setRpText(r.text); setRpName((rpPath.split(/[\\/]/).pop() || 'расчёт').replace(/\.[^.]*$/, '') + (kind === 'model' ? '_model.txt' : '_keywords.txt'))
+  })
+  const rpSave = () => {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([rpText + '\n'], { type: 'text/plain;charset=utf-8' })); a.download = rpName; a.click(); URL.revokeObjectURL(a.href)
+  }
+
   const shown = chosen.filter(n => ind[n])
   const line = (f: (r: IndicatorRow) => number | null): Line[] => shown.map(n => ({ label: n, pts: ind[n].filter(r => f(r) !== null).map(r => [r.date, f(r) as number] as [string, number]) }))
   const last = (n: string) => ind[n][ind[n].length - 1]
@@ -106,6 +119,19 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
                 {s.results && <button disabled={busy} onClick={() => attach(s.name, '')}>Отвязать</button>}</td></tr> })}</tbody></table></div>
         </>}
         {msg && <p className="note warn">{msg}</p>}
+      </section>
+      <section className="card">
+        <h2>Описание расчёта</h2>
+        <p className="muted small">Те же отчёты, что делали Opisat_model и Perechislit_UNRST: размеры сетки, свойства, вектора и даты сводки, шаги и ключевые слова рестарта.
+          Укажите любой файл расчёта (.EGRID, .INIT, .SMSPEC, .UNSMRY, .UNRST) или папку: остальные файлы с тем же именем находятся сами.</p>
+        <div className="row">
+          <input style={{ width: 380 }} placeholder="путь к результатам расчёта" value={rpPath} onChange={e => setRpPath(e.target.value)} />
+          <button disabled={busy} onClick={rpPick}>Выбрать…</button>
+          <button disabled={busy || !rpPath} onClick={() => rpRun('model')}>Описать расчёт</button>
+          <button disabled={busy || !rpPath} onClick={() => rpRun('restart')}>Перечислить UNRST</button>
+          {rpText && <button onClick={rpSave}>Сохранить отчёт .txt</button>}
+        </div>
+        {rpText && <pre className="small" style={{ maxHeight: 420, overflow: 'auto', whiteSpace: 'pre' }}>{rpText}</pre>}
       </section>
       {chosen.length > 0 && <section className="card">
         <h3>Показатели «сценарий × показатель»</h3>

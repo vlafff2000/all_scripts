@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import glob
 import os
 import sys
 from collections import OrderedDict
@@ -164,12 +165,36 @@ def describe(paths):
     return "\n".join(lines)
 
 
+MODEL_EXTS = (".EGRID", ".INIT", ".SMSPEC", ".UNSMRY")
+
+
+def expand(args):
+    """Маски * ? раскрываются здесь (cmd.exe этого не делает); любой файл расчёта тянет за собой одноимённые."""
+    out = []
+    for a in args:
+        found = sorted(glob.glob(a)) if any(c in a for c in "*?[") else [a]
+        for f in found:
+            if os.path.splitext(f)[1].upper() in MODEL_EXTS and os.path.isfile(f):
+                folder, name = os.path.split(f)
+                stem = os.path.splitext(name)[0].lower()
+                for n in sorted(os.listdir(folder or ".")):
+                    if os.path.splitext(n)[0].lower() == stem and os.path.splitext(n)[1].upper() in MODEL_EXTS:
+                        out.append(os.path.join(folder, n))
+            else:
+                out.append(f)
+    return list(OrderedDict.fromkeys(out))
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("files", nargs="+")
     p.add_argument("-o", "--out", help="сохранить отчёт в файл")
     p.add_argument("--report-next-to", action="store_true", help="сохранить отчёт рядом с первым файлом (<имя>_model.txt)")
     a = p.parse_args(argv)
+    a.files = expand(a.files)
+    if not a.files:
+        print("Файлы расчёта (.EGRID, .INIT, .SMSPEC, .UNSMRY) не найдены")
+        return 0
     groups = OrderedDict()  # файлы одного расчёта — с одним именем без расширения
     for f in a.files:
         groups.setdefault(os.path.splitext(f)[0], []).append(f)

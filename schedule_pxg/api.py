@@ -1067,6 +1067,15 @@ async def adapt_file(request: Request):
     return FileResponse(path, filename=os.path.basename(path))
 
 
+async def results_report(request: Request):
+    q = request.query_params
+    try:
+        text = await run_in_threadpool(results.report, _clean(q.get("path")), q.get("kind") or "")
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось описать расчёт: %s" % e)
+    return JSONResponse({"text": text})
+
+
 def build_app() -> Starlette:
     routes = [
         Route("/api/state", state),
@@ -1128,6 +1137,7 @@ def build_app() -> Starlette:
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
         Route("/api/results/wellgwc", results_well_gwc),
+        Route("/api/results/report", results_report),
         *fs_browse.routes(),
         Route("/api/sources/sample", sources_sample),
         Route("/api/quality", quality_get),
