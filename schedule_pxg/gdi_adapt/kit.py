@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from typing import Dict, List, Tuple
@@ -18,16 +19,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 _SKIP = {"selection.py", "kit.py", "runs.py"}       # модули приложения, самому комплекту не нужны
 README = """Комплект адаптации WPIMULT и D-фактора по ГДИ (подготовлен в «Скедул ПХГ»).
 
-1. Откройте проект модели в тНавигаторе, вкладку python-секции.
-2. Выполните code.py из этой папки. Если скрипт не находит папку, впишите в начале code.py:
-   PROJECT_DIR = r"путь\\к\\этой\\папке"
-3. Результаты появятся в runs/<дата_время>/: snapshots.pkl (данные модели), wpimult_wdfac.inc, report.xlsx, results.csv.
-4. Вернитесь в «Скедул ПХГ», вкладка «Адаптация по ГДИ»: выберите папку runs/<дата_время> или файл snapshots.pkl.
+1. В «Скедул ПХГ» (вкладка «Адаптация по ГДИ», шаг 4) нажмите «Копировать код».
+2. Откройте проект модели в тНавигаторе, python-секцию, вставьте код и запустите. Править ничего не нужно.
+3. Код прочитает данные модели по отобранным скважинам и положит runs/<дата_время>/snapshots.pkl и run.log.
+4. Вернитесь в «Скедул ПХГ», шаг 5: выберите папку runs/<дата_время> и нажмите «Пересчитать».
    Дальше настройки можно менять и пересчитывать без тНавигатора.
 
-Файл all_gdi.xlsx: по одному (самому свежему из прошедших контроль качества) исследованию на скважину; давления в барах,
-дебит в м3/сут, A и B посчитаны заново по режимам.
+Файл all_gdi.xlsx: отобранные исследования (давления в барах, дебит в м3/сут, A и B посчитаны заново по режимам);
+studies.json: список скважин и дат, которые читает код.
 """
+
+
+def code_text(folder: str) -> str:
+    """Готовый код для python-секции тНавигатора: путь к комплекту вписан, править ничего не нужно."""
+    with open(os.path.join(HERE, "kit_code.txt"), encoding="utf-8") as f:
+        return f.read().replace("__PROJECT_DIR__", os.path.abspath(folder))
 
 
 def selected_table(chosen: List[Tuple[str, GDI]]) -> pd.DataFrame:
@@ -61,9 +67,14 @@ def write_kit(folder: str, chosen: List[Tuple[str, GDI]], settings: Dict = None,
             shutil.copy2(os.path.join(HERE, name), pkg)
     selected_table(chosen).to_excel(os.path.join(folder, "all_gdi.xlsx"), index=False)
     shutil.copy2(pvt_path or os.path.join(HERE, "pvt_default.csv"), os.path.join(folder, "pvt_data.csv"))
-    shutil.copy2(os.path.join(HERE, "kit_code.txt"), os.path.join(folder, "code.py"))
+    studies = [{"key": g.key, "well": n, "date": g.date.strftime("%Y-%m-%d")} for n, g in chosen]
+    with open(os.path.join(folder, "studies.json"), "w", encoding="utf-8") as f:
+        json.dump(studies, f, ensure_ascii=False, indent=1)
+    code = code_text(folder)
+    with open(os.path.join(folder, "code.py"), "w", encoding="utf-8") as f:
+        f.write(code)
     cfg.to_json(os.path.join(folder, "config.json"))
     with open(os.path.join(folder, "README.txt"), "w", encoding="utf-8") as f:
         f.write(README)
     return {"folder": folder, "wells": [n for n, _ in chosen],
-            "files": ["code.py", "config.json", "all_gdi.xlsx", "pvt_data.csv", "README.txt", "pi_dfac/"]}
+            "code": code, "files": ["code.py", "studies.json", "config.json", "all_gdi.xlsx", "pvt_data.csv", "README.txt", "pi_dfac/"]}

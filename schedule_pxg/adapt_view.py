@@ -80,8 +80,8 @@ def run_selection(p: Project, body: dict) -> Tuple[selection.Selection, dict, Co
     if not os.path.isfile(path):
         raise ValueError("Не нашёл БД ГДИ «%s». Укажите файл базы ГДИ из «Базы ПХГ»." % path)
     cols = {k: v for k, v in (body.get("cols") or {}).items() if v}
-    if not cols:
-        cols = selection.detect_columns(selection.read_db(path, body.get("sheet") or "").columns)
+    if len(cols) < 5:       # недостающее подставляется автоопределением, выбранное вручную не трогаем
+        cols = dict(selection.detect_columns(selection.read_db(path, body.get("sheet") or "").columns), **cols)
     st = _merge_settings(body.get("settings"))
     cfg = _config(body.get("config"))
     studies, notes = _studies(path, str(body.get("sheet") or ""), cols, st)
@@ -117,6 +117,47 @@ def write_kit(p: Project, body: dict, sel: selection.Selection, cfg: Config) -> 
     res = kit.write_kit(out, chosen, conf, str(body.get("pvt") or ""))
     p.adapt["kit"] = out
     return res
+
+
+def kit_code(kit_dir: str) -> dict:
+    """Код комплекта заново с актуальным путём (комплект могли перенести)."""
+    code = kit.code_text(kit_dir)
+    with open(os.path.join(kit_dir, "code.py"), "w", encoding="utf-8") as f:
+        f.write(code)
+    return {"code": code, "path": os.path.abspath(os.path.join(kit_dir, "code.py"))}
+
+
+_ROLE_TITLES = {"well": "скважина", "date": "дата", "wbp": "пластовое давление", "bhp": "забойное давление", "q": "дебит"}
+
+
+def check_columns(path: str, sheet: str, cols: dict) -> dict:
+    """Проверка сопоставления столбцов БД ГДИ: что прочитано в каждой роли и сколько значений разобралось."""
+    if not os.path.isfile(path):
+        raise ValueError("Не нашёл файл «%s»." % path)
+    df = selection.read_db(path, sheet)
+    roles, problems = [], []
+    for role, title in _ROLE_TITLES.items():
+        col = str((cols or {}).get(role) or "")
+        item = dict(role=role, title=title, col=col, total=0, valid=0, examples=[])
+        if not col:
+            problems.append("Не выбран столбец: %s." % title)
+        elif col not in {str(c) for c in df.columns}:
+            problems.append("Столбца «%s» (%s) нет в файле." % (col, title))
+        else:
+            s = df[[c for c in df.columns if str(c) == col][0]]
+            if isinstance(s, pd.DataFrame):
+                s = s.iloc[:, 0]
+            item["total"] = int(s.notna().sum())
+            parsed = selection._dates(s) if role == "date" else (s if role == "well" else selection._numbers(s))
+            item["valid"] = int(parsed.notna().sum())
+            item["examples"] = [str(x) for x in s.dropna().head(3)]
+            if item["valid"] == 0:
+                problems.append("В столбце «%s» (%s) не нашлось ни одного подходящего значения." % (col, title))
+            elif item["valid"] < item["total"]:
+                problems.append("В столбце «%s» (%s) разобралось %d из %d значений." % (col, title, item["valid"], item["total"]))
+        roles.append(item)
+    ok = not any(r["valid"] == 0 for r in roles)
+    return {"ok": ok, "roles": roles, "problems": problems, "rows": int(len(df))}
 
 
 FILES = {"inc": "wpimult_wdfac.inc", "xlsx": "report.xlsx", "csv": "results.csv"}

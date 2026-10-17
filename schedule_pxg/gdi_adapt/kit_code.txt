@@ -1,40 +1,56 @@
-#пишите здесь ваш код
 # =====================================================================================
-#  Адаптация WPIMULT / WDFAC по ГДИ. Запускать в python-секции тНавигатора.
-#  Все настройки - в config.json (рядом с этим файлом). Результаты - в папке runs/<дата_время>/.
+#  Скедул ПХГ: чтение данных модели для адаптации по ГДИ. Вставьте код целиком в python-секцию
+#  тНавигатора и запустите. Править ничего не нужно. Дальше вернитесь в «Скедул ПХГ».
+#  Нужен только numpy (scipy, pandas и Excel здесь не используются).
 # =====================================================================================
+import json
 import os
 import sys
+import time
+import traceback
+from datetime import datetime
 
-# Папка проекта: рядом с этим скриптом; если в тНавигаторе __file__ не определён - текущая папка.
-# Если ни то, ни другое не подходит, впишите путь сюда:  PROJECT_DIR = r"C:\...\pi_dfac_adaptation"
-PROJECT_DIR = globals().get('PROJECT_DIR') or None
-if PROJECT_DIR is None:
-    for cand in (os.path.dirname(os.path.abspath(globals().get('__file__', ''))) if '__file__' in globals() else None,
-                 os.getcwd()):
-        if cand and os.path.isdir(os.path.join(cand, 'pi_dfac')):
-            PROJECT_DIR = cand
-            break
-if PROJECT_DIR is None:
-    raise RuntimeError('Не найдена папка проекта (с подпапкой pi_dfac). Задайте PROJECT_DIR в начале code.py.')
+PROJECT_DIR = r"__PROJECT_DIR__"
+
+if not os.path.isdir(os.path.join(PROJECT_DIR, 'pi_dfac')):
+    raise RuntimeError('Не найдена папка комплекта: %s (внутри должна быть папка pi_dfac). '
+                       'Если комплект перенесли, заново скопируйте код из «Скедул ПХГ».' % PROJECT_DIR)
 if PROJECT_DIR not in sys.path:
     sys.path.insert(0, PROJECT_DIR)
-
-# при повторном запуске в одной сессии тНавигатора подхватываем правки модулей
 for _m in [m for m in sys.modules if m == 'pi_dfac' or m.startswith('pi_dfac.')]:
-    del sys.modules[_m]
+    del sys.modules[_m]       # при повторном запуске в одной сессии подхватываются правки
 
-from pi_dfac.config import Config
 from pi_dfac import tnav_api
-from pi_dfac.runner import run
+from pi_dfac.snapshot import save_snapshots
 
-cfg = Config.load(os.path.join(PROJECT_DIR, 'config.json'))
+RUN_DIR = os.path.join(PROJECT_DIR, 'runs', datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+os.makedirs(RUN_DIR)
+_log = open(os.path.join(RUN_DIR, 'run.log'), 'w', encoding='utf-8')
 
-# --- быстрые переопределения без правки config.json (раскомментируйте нужное) ---
-# cfg.wells = ['33', '35']          # только эти скважины
-# cfg.strategy = 'dp'               # 'dp' | 'andrey' | 'pzab'
-# cfg.make_png = False
-cfg.validate()
 
-tnav_api.bind(globals(), cfg.model_index)
-result = run(cfg, PROJECT_DIR, tnav_api.TnavProvider())
+def log(s):
+    print(s)
+    _log.write(s + '\n')
+    _log.flush()
+
+
+try:
+    with open(os.path.join(PROJECT_DIR, 'studies.json'), encoding='utf-8') as f:
+        studies = json.load(f)
+    tnav_api.bind(globals(), 0)
+    snaps, failed, t0 = {}, [], time.time()
+    for i, s in enumerate(studies, 1):
+        try:
+            snaps[s['key']] = tnav_api.extract_snapshot(s['well'], datetime.strptime(s['date'], '%Y-%m-%d'))
+            log('[%d/%d] %s %s: ок' % (i, len(studies), s['well'], s['date']))
+        except Exception as e:      # одна скважина не должна останавливать остальные
+            failed.append(s['key'])
+            log('[%d/%d] %s %s: ПРОПУЩЕНА - %s' % (i, len(studies), s['well'], s['date'], e))
+    save_snapshots(snaps, os.path.join(RUN_DIR, 'snapshots.pkl'))
+    log('Готово: прочитано %d из %d, пропущено %d, %.0f с. Файл: %s' % (len(snaps), len(studies), len(failed), time.time() - t0,
+                                                                       os.path.join(RUN_DIR, 'snapshots.pkl')))
+    log('Вернитесь в «Скедул ПХГ»: вкладка «Адаптация по ГДИ», шаг 5.')
+except Exception:
+    log('ОШИБКА:\n' + traceback.format_exc())
+    _log.close()
+    raise

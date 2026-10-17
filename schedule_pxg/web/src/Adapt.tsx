@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
 import AdaptResults from './AdaptResults'
 import {
-  AdaptColumns, AdaptConfig, AdaptRequest, AdaptSelection, AdaptSettings, AdaptState, adaptKit, adaptSelect, getAdapt, getAdaptColumns, pickFile,
+  AdaptColCheck, AdaptColumns, AdaptConfig, adaptCheckColumns, adaptCode, AdaptRequest, AdaptSelection, AdaptSettings, AdaptState, adaptKit, adaptSelect, getAdapt, getAdaptColumns, pickFile,
 } from './api'
 
 const ROLES: [string, string][] = [['well', 'Скважина'], ['date', 'Дата'], ['wbp', 'Рпл'], ['bhp', 'Рзаб'], ['q', 'Дебит']]
@@ -29,6 +29,8 @@ export default function Adapt() {
   const [kit, setKit] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [check, setCheck] = useState<AdaptColCheck | null>(null)
+  const [code, setCode] = useState('')
 
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   useEffect(() => {
@@ -42,7 +44,14 @@ export default function Adapt() {
   const cfg = { ...(st?.config || {}), ...config } as AdaptConfig
   const set = { ...(st?.settings || {}), ...settings } as AdaptSettings
   const upd = <K extends keyof AdaptConfig>(k: K, v: AdaptConfig[K]) => setConfig(c => ({ ...c, [k]: v }))
-  const req = (): AdaptRequest => ({ db, cols, settings: set, config: cfg, overrides, scenario })
+  const req = (): AdaptRequest => ({ db, sheet: st?.sheet || '', cols, settings: set, config: cfg, overrides, scenario })
+  const applyCols = () => guard(async () => { setCheck(await adaptCheckColumns({ db, sheet: st?.sheet || '', cols })) })
+  const copyCode = () => guard(async () => {
+    const r = await adaptCode(kit)
+    setCode(r.code)
+    try { await navigator.clipboard.writeText(r.code); setMsg('Код скопирован. Вставьте его в python-секцию тНавигатора и запустите.') }
+    catch { setMsg('Браузер не дал скопировать сам: выделите код в окне ниже (Ctrl+A) и скопируйте (Ctrl+C).') }
+  })
 
   const pick = () => guard(async () => {
     const r = await pickFile(db)
@@ -68,7 +77,8 @@ export default function Adapt() {
     setOut(dir)
     const r = await adaptKit({ ...req(), out: dir })
     setKit(dir)
-    setMsg('Комплект готов: ' + r.folder + ', скважин: ' + r.wells.length + '. Откройте code.py в python-секции тНавигатора.')
+    setCode(r.code)
+    setMsg('Комплект готов: ' + r.folder + ', скважин: ' + r.wells.length + '. Дальше шаг 5: скопируйте код и запустите его в тНавигаторе.')
   })
 
   const rows = useMemo(() => (sel?.rows || []).filter(r =>
@@ -91,13 +101,18 @@ export default function Adapt() {
         </div>
         {colsInfo && <div className="row">
           {ROLES.map(([k, title]) => <label key={k}>{title}
-            <select value={cols[k] || ''} onChange={e => setCols(c => ({ ...c, [k]: e.target.value }))}>
+            <select value={cols[k] || ''} onChange={e => { setCols(c => ({ ...c, [k]: e.target.value })); setCheck(null) }}>
               <option value="">— не выбрано —</option>{colsInfo.columns.map(c => <option key={c}>{c}</option>)}</select></label>)}
           <label>Давление в файле<select value={set.p_units} onChange={e => setSettings(s => ({ ...s, p_units: e.target.value }))}>
             {st.p_units.map(u => <option key={u} value={u}>{P_UNITS[u] || u}</option>)}</select></label>
           <label>Дебит в файле<select value={set.q_units} onChange={e => setSettings(s => ({ ...s, q_units: e.target.value }))}>
             {st.q_units.map(u => <option key={u} value={u}>{Q_UNITS[u] || u}</option>)}</select></label>
         </div>}
+        {colsInfo && <div className="row"><button onClick={applyCols} disabled={busy}>Применить столбцы</button>
+          {check && <span className={check.ok ? 'ok' : 'warn'}>{check.ok ? 'Столбцы применены.' : 'Нужно поправить столбцы.'}</span>}</div>}
+        {check && <div className="scroll"><table className="raw"><thead><tr><th>Роль</th><th>Столбец</th><th>Разобрано значений</th><th>Примеры</th></tr></thead>
+          <tbody>{check.roles.map(r => <tr key={r.role} className={r.valid ? '' : 'warnrow'}><td>{r.title}</td><td>{r.col || '—'}</td><td>{r.valid} из {r.total}</td><td className="muted small">{r.examples.join(' · ')}</td></tr>)}</tbody></table>
+          {check.problems.map((x, i) => <p key={i} className="note warn">{x}</p>)}</div>}
         {colsInfo && <p className="muted small">Строк в файле: {colsInfo.rows}. Давления должны быть абсолютными.</p>}
       </section>
 
@@ -167,6 +182,18 @@ export default function Adapt() {
               <td className="muted small">{r.note}</td></tr>
           })}</tbody></table></div>
         {sel.model_only.length > 0 && <p className="muted small">В модели есть, а исследований нет: {sel.model_only.slice(0, 60).join(', ')}{sel.model_only.length > 60 ? ' …' : ''}</p>}
+      </section>}
+      {kit && <section className="card">
+        <div className="step-head"><span className="step-n">5</span><h2>Запуск в тНавигаторе</h2></div>
+        <p className="lead">Один раз читаем данные модели по отобранным скважинам. Править код не нужно: путь к комплекту уже вписан.</p>
+        <ol className="steps">
+          <li>Нажмите «Копировать код».</li>
+          <li>В тНавигаторе откройте проект модели, python-секцию, вставьте код и запустите.</li>
+          <li>Дождитесь строки «Готово» в консоли тНавигатора и вернитесь сюда: результаты читаются на шаге 6.</li>
+        </ol>
+        <div className="row"><button className="primary" onClick={copyCode} disabled={busy}>Копировать код</button>
+          <span className="muted small">Комплект: {kit}</span></div>
+        {code && <textarea readOnly rows={8} value={code} onFocus={e => e.currentTarget.select()} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }} />}
       </section>}
       <AdaptResults kit={kit} config={cfg} />
     </main>

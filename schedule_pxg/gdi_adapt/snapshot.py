@@ -44,6 +44,15 @@ def save_snapshots(snaps: Dict[str, WellSnapshot], path: str) -> None:
         pickle.dump(snaps, f)
 
 
+class _Unpickler(pickle.Unpickler):
+    """Снимки пишет код в тНавигаторе (пакет pi_dfac из комплекта); в Скедуле тот же класс лежит в этом пакете."""
+
+    def find_class(self, module, name):
+        if module == 'pi_dfac.snapshot' and name == 'WellSnapshot':
+            return WellSnapshot
+        return super().find_class(module, name)
+
+
 def load_snapshots(path: str) -> Dict[str, WellSnapshot]:
     with open(path, 'rb') as f:
-        return pickle.load(f)
+        return _Unpickler(f).load()
