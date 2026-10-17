@@ -75,3 +75,18 @@ def test_reports_for_ui_and_cli_globs(tmp_path, capsys):
     assert (tmp_path / "M_model.txt").read_text(encoding="utf-8").count("PORV") >= 1
     assert list_restart.main(["--report-next-to", str(tmp_path / "*.UNRST")]) == 0
     assert (tmp_path / "M_keywords.txt").exists()
+
+
+def test_connections_follow_restart_step(tmp_path, monkeypatch):
+    """Ячейки вскрытия берутся на каждом шаге: скважина перфорирована только со второго шага."""
+    import tnav_results.well_gwc as wg
+    m = _model(tmp_path)
+    ur = _unrst(tmp_path / "M.UNRST", [SG, SG], [PORV, PORV], with_wells=True)
+    real = wg.read_well_connections
+
+    def per_step(path, step=None):
+        conn = real(path)                       # OBS1 на обоих шагах
+        return conn if step is not None and step.date == dt.datetime(2026, 2, 1) else {}
+    monkeypatch.setattr(wg, "read_well_connections", per_step)
+    rows, info = wg.wells_gwc_over_time(m, None, ur, 0.3)
+    assert [r.date for r in rows] == [dt.datetime(2026, 2, 1)] and info["wells"] == ["OBS1"]
