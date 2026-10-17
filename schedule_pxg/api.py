@@ -979,6 +979,22 @@ async def results_indicators(request: Request):
     return JSONResponse({"rows": rows, "notes": notes})
 
 
+async def results_well_gwc(request: Request):
+    p = _project()
+    name = request.query_params.get("scenario") or ""
+    path = p.results.get(name)
+    if not path:
+        return _err("К сценарию «%s» не привязаны результаты расчёта" % name, 404)
+    try:
+        dates = [dt.datetime.strptime(d, "%Y-%m-%d") for d in (request.query_params.get("dates") or "").split("|") if d]
+        sgr = request.query_params.get("sgr")
+        wells = [w.strip() for w in (request.query_params.get("wells") or "").split("|") if w.strip()]
+        rows, info = await run_in_threadpool(results.well_gwc, path, dates, float(sgr) if sgr else None, wells)
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось посчитать ГВК по скважинам: %s" % e)
+    return JSONResponse({"rows": rows, **info})
+
+
 async def adapt_get(request: Request):
     return JSONResponse(await run_in_threadpool(lambda: adapt_view.view(_project())))
 
@@ -1111,6 +1127,7 @@ def build_app() -> Starlette:
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
+        Route("/api/results/wellgwc", results_well_gwc),
         *fs_browse.routes(),
         Route("/api/sources/sample", sources_sample),
         Route("/api/quality", quality_get),

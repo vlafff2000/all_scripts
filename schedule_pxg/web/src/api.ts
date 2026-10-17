@@ -191,6 +191,9 @@ export const getResultSeries = (scenario: string, keyword: string, objects: stri
   call<{ keyword: string; series: Record<string, { dates: string[]; values: number[] }> }>('/api/results/series?' + new URLSearchParams({ scenario, keyword, objects: objects.join('|') }))
 export const getIndicators = (scenario: string, sg: string, dates: string[]) =>
   call<{ rows: IndicatorRow[]; notes: string[] }>('/api/results/indicators?' + new URLSearchParams({ scenario, sg, dates: dates.join('|') }))
+export interface WellGwcRow { well: string; date: string; columns: number; cell_top_down: number | null; interp_top_down: number | null; cell_lowest: number | null; interp_lowest: number | null; torn: boolean; at_grid_edge: boolean }
+export const getWellGwc = (scenario: string, sgr: string, dates: string[], wells: string[]) =>
+  call<{ rows: WellGwcRow[]; notes: string[]; sgr_source: string; wells: string[] }>('/api/results/wellgwc?' + new URLSearchParams({ scenario, sgr, dates: dates.join('|'), wells: wells.join('|') }))
 
 export interface QualityRow { id: string; dataset: string; well: string; date: string; kind: string; check: string; level: string; value: string; details: string; excluded: boolean }
 export interface QualityView {

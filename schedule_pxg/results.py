@@ -124,3 +124,44 @@ def indicators(path: str, dates: Optional[Sequence[dt.datetime]] = None, thresho
         out.append({"date": str(d.date()) if d else "", "gas_pore_volume": v.total, "cells": v.cells, "columns": g.columns,
                     "gwc_min": g.min, "gwc_mean": g.mean, "gwc_mean_area": g.mean_area, "gwc_max": g.max})
     return out, list(model.notes)
+
+
+def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Optional[float] = None,
+             wells: Optional[Sequence[str]] = None) -> Tuple[List[dict], dict]:
+    """ГВК по скважинам (колонка ячеек вскрытия, газ = Sg выше Sgr) двумя способами и двумя глубинами, TVDSS.
+
+    Sgr — SGCR из INIT, иначе число ``sgr`` (по умолчанию 0,01). Ячейки вскрытия читаются из рестарта.
+    """
+    from tnav_results.indicators import DEFAULT_SG_THRESHOLD, load_model, pick_step
+    from tnav_results.well_gwc import wells_gwc_over_time
+    from tnav_results import iter_restart_steps
+
+    f = find_files(path)
+    miss = [k for k in ("EGRID", "UNRST") if k not in f]
+    if miss:
+        raise ValueError("Для ГВК по скважинам нужны файлы EGRID и UNRST (не найдены: %s)" % ", ".join(miss))
+    th = DEFAULT_SG_THRESHOLD if sgr is None else float(sgr)
+    if not 0 <= th < 1:
+        raise ValueError("Sgr должна быть от 0 до 1")
+    model = load_model(f["EGRID"])
+    steps = None
+    if dates:
+        all_steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
+        picked = {pick_step(all_steps, d).seqnum: pick_step(all_steps, d) for d in dates}
+        steps = [picked[k] for k in sorted(picked)]
+    rows, info = wells_gwc_over_time(model, f.get("INIT"), f["UNRST"], th, wells, steps)
+    if not info["wells"]:
+        raise ValueError("В рестарте не найдены ячейки вскрытия скважин (или имена не совпали)")
+    if not rows:
+        raise ValueError("В UNRST нет SGAS: газонасыщенность не записана")
+    out = [{"well": r.well, "date": str(r.date.date()) if r.date else "", "columns": r.columns,
+            "cell_top_down": r.cell_top_down, "interp_top_down": r.interp_top_down,
+            "cell_lowest": r.cell_lowest, "interp_lowest": r.interp_lowest, "torn": r.torn, "at_grid_edge": r.at_grid_edge}
+           for r in rows]
+    notes = list(model.notes)
+    if info["sgr_source"] != "SGCR":
+        notes.append("В INIT нет SGCR: критическая газонасыщенность взята числом %g" % th)
+    if info["missing"]:
+        notes.append("Нет ячеек вскрытия для скважин: " + ", ".join(info["missing"]))
+    notes.append("Ячейки вскрытия прочитаны из рестарта (раскладка проверена на синтетике): сверьте одну скважину с профилем в tNavigator")
+    return out, {"notes": notes, "sgr_source": info["sgr_source"], "wells": info["wells"]}
