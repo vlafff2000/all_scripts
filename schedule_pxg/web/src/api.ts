@@ -209,3 +209,57 @@ export interface GroupMapRow { key: string; techmaps: string[]; volume: number; 
 export interface GroupMap { rows: GroupMapRow[]; groups: { group: string; wells: number }[]; unused: string[] }
 export const getGroupMap = () => call<GroupMap>('/api/groupmap')
 export const setGroupMap = (key: string, group: string) => call<GroupMap>('/api/groupmap/set', post({ key, group }))
+
+// ───── Адаптация по ГДИ ─────
+export interface AdaptConfig {
+  strategy: string; inflow: string; objective: string; pi_mult_bounds: [number, number]; dfac_bounds: [number, number]
+  r2_ok: number; min_regimes: number; bad_gdi_policy: string; qc_enabled: boolean; n_starts: number; include_only_ok: boolean; all_dates?: boolean; include_sequential?: boolean
+  well_bounds?: Record<string, { pi_mult_bounds?: [number, number]; dfac_bounds?: [number, number] }> | null
+  [k: string]: unknown
+}
+export interface AdaptSettings { p_units: string; q_units: string; min_status: string; max_age_years: number | null; from_date: string | null }
+export interface AdaptState {
+  config: AdaptConfig; settings: AdaptSettings; p_units: string[]; q_units: string[]
+  db: string; sheet: string; cols: Record<string, string>; saved_settings: Partial<AdaptSettings>; saved_config: Partial<AdaptConfig>
+  overrides: Record<string, boolean>; scenario: string; kit: string; scenarios: { name: string; path: string }[]
+}
+export interface AdaptColumns { columns: string[]; detected: Record<string, string>; rows: number }
+export interface AdaptRow {
+  well: string; model: string; n_studies: number; n_usable: number; date: string; status: string; age_years: number | null
+  a: number | null; b: number | null; n_regimes: number; note: string; include: boolean; auto: boolean
+}
+export interface AdaptSelection {
+  rows: AdaptRow[]; model_only: string[]; notes: string[]; cols: Record<string, string>
+  counts: { wells_db: number; included: number; no_model: number; all_bad: number; old: number; model_only: number }
+}
+export interface AdaptRequest {
+  db: string; sheet?: string; cols?: Record<string, string>; settings: Partial<AdaptSettings>; config: Partial<AdaptConfig>
+  overrides: Record<string, boolean>; scenario: string
+}
+export const getAdapt = () => call<AdaptState>('/api/adapt')
+export const getAdaptColumns = (path: string, sheet = '') => call<AdaptColumns>('/api/adapt/columns?' + new URLSearchParams({ path, sheet }))
+export const adaptSelect = (b: AdaptRequest) => call<AdaptSelection>('/api/adapt/select', post(b))
+export const adaptKit = (b: AdaptRequest & { out: string }) => call<{ folder: string; wells: string[]; files: string[] }>('/api/adapt/kit', post(b))
+
+export interface AdaptResultRow {
+  well: string; date: string; source: string; qc: string; n_regimes: number
+  pi_mult: number | null; pi_lo: number | null; pi_hi: number | null; d: number | null; old_d: number | null
+  r2_old: number | null; r2: number | null; mape_old: number | null; mape: number | null
+  a_gdi: number | null; b_gdi: number | null; a_model: number | null; b_model: number | null
+  wbp_model: number | null; q_op: number | null; q_ratio: number | null; dp2_err_before: number | null; dp2_err_after: number | null
+  ok: boolean; problems: string[]; notes: string[]; substituted: boolean; t_name: string
+  q_gdi: (number | null)[]; q_before: (number | null)[]; q_after: (number | null)[]; dp2_gdi: (number | null)[]
+  curve_q: (number | null)[]; curve_before: (number | null)[]; curve_after: (number | null)[]; at_bound: boolean
+}
+export interface AdaptGroupRow { group: string; wells: number; q_gdi: number; q_before: number; q_after: number; err_before: number | null; err_after: number | null }
+export interface AdaptView {
+  run_dir: string; made: string; rows: AdaptResultRow[]; failures: { well: string; reason: string }[]
+  summary: { wells: number; ok: number; with_problems: number; skipped: number; at_bound: number; unstable: number; r2_old: number | null; r2: number | null
+    mape_old: number | null; mape: number | null; pi_mult: number | null; d: number | null; improved: number }
+  groups: AdaptGroupRow[]
+}
+export interface AdaptRun { dir: string; name: string; has_snapshots: boolean; has_results: boolean; has_inc: boolean }
+export const adaptRecompute = (kit: string, snapshots: string, config: Partial<AdaptConfig>) => call<AdaptView>('/api/adapt/recompute', post({ kit, snapshots, config }))
+export const adaptRuns = (kit: string) => call<{ runs: AdaptRun[] }>('/api/adapt/runs?' + new URLSearchParams({ kit }))
+export const adaptRun = (dir: string) => call<AdaptView>('/api/adapt/run?' + new URLSearchParams({ dir }))
+export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv') => '/api/adapt/file?' + new URLSearchParams({ dir, kind })

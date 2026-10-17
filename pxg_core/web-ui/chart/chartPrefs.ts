@@ -1,7 +1,8 @@
-// Копия gas_atlas web/src/chartPrefs.ts @ f985d4e. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartPrefs.ts @ ab133ef. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Общие настройки вида, запоминаются в браузере: подсказка графиков, события на оси, тема, свёрнутые панели.
 import { useSyncExternalStore } from 'react'
 import type { HoverMode } from './chartHover'
+import type { Look } from './chartStyle'
 
 export interface Pref<T> { get: () => T; set: (next: T) => void; subscribe: (f: () => void) => () => void }
 
@@ -28,6 +29,12 @@ export function usePref<T>(p: Pref<T>): T {
 export const hoverMode = pref<HoverMode>('atlas.chart.hover', 'smooth', raw => (raw === 'facts' ? 'facts' : 'smooth'))
 export const setHoverMode = (next: HoverMode) => hoverMode.set(next)
 export const useHoverMode = () => usePref(hoverMode)
+
+/** Прореживание линий на экране (М4 на сервере, LTTB в ECharts). Выключено — все точки: графики целостнее, но на больших данных медленнее. */
+export const thinCharts = pref<boolean>('atlas.chart.thin', true, raw => raw !== 'false')
+
+/** Сплошная кривая: плотные ряды замеров (давление, уровень) рисуются сглаженной линией — среднее по подряд идущим замерам. */
+export const smoothLines = pref<boolean>('atlas.chart.smooth', false, raw => raw === 'true')
 
 /** Виды событий, скрытые на всех графиках (щелчок по пункту «События» в легенде). */
 export const hiddenEvents = pref<string[]>('atlas.chart.hiddenEvents', [])
@@ -65,6 +72,8 @@ export const zoomSync = pref<boolean>('atlas.chart.zoomSync', true)
 
 /** Ручные границы шкал Y по графикам (ключ — заголовок и подписи осей): помнятся между запусками. */
 export const savedRanges = pref<Record<string, { y: [number, number] | null; y2: [number, number] | null }>>('atlas.chart.ranges', {})
+/** Личный вид рядов по графикам («Настройка»): ключ графика → ключ ряда → вид. Помнится между запусками. */
+export const chartLooks = pref<Record<string, Record<string, Look>>>('atlas.chart.looks', {})
 /** Границы Y, разосланные всем графикам раздела с той же подписью и единицей оси (не хранится). */
 export const sharedRange = pref<{ key: string; range: [number, number]; n: number } | null>('', null)
 

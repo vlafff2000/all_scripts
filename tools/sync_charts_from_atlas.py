@@ -14,12 +14,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 DEST = HERE / "pxg_core" / "web-ui" / "chart"
-FILES = ["ChartView.tsx", "chartHover.ts", "chartTheme.ts", "chartAxes.ts", "chartPrefs.ts", "chartSync.ts", "chart.css"]
+FILES = ["ChartView.tsx", "ChartSettings.tsx", "chartStyle.ts", "chartHover.ts", "chartTheme.ts", "chartAxes.ts", "chartPrefs.ts", "chartSync.ts", "chart.css"]
 
 # (файл, что заменить, на что): без серверного рендера кнопка «Скачать» заменяется сохранением PNG из ECharts
 PATCHES = [
     ("ChartView.tsx", "from './api'", "from './chartTypes'"),
     ("chartHover.ts", "from './api'", "from './chartTypes'"),
+    ("ChartSettings.tsx", "from './api'", "from './chartTypes'"),
+    ("chartStyle.ts", "from './api'", "from './chartTypes'"),
     ("ChartView.tsx", "  onDownload: (format: string, dpi: number) => Promise<void>\n",
      "  onDownload?: (format: string, dpi: number) => Promise<void>\n"),
     ("ChartView.tsx", "          <DownloadMenu onDownload={onDownload} />\n",

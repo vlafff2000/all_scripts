@@ -1,0 +1,40 @@
+#пишите здесь ваш код
+# =====================================================================================
+#  Адаптация WPIMULT / WDFAC по ГДИ. Запускать в python-секции тНавигатора.
+#  Все настройки - в config.json (рядом с этим файлом). Результаты - в папке runs/<дата_время>/.
+# =====================================================================================
+import os
+import sys
+
+# Папка проекта: рядом с этим скриптом; если в тНавигаторе __file__ не определён - текущая папка.
+# Если ни то, ни другое не подходит, впишите путь сюда:  PROJECT_DIR = r"C:\...\pi_dfac_adaptation"
+PROJECT_DIR = globals().get('PROJECT_DIR') or None
+if PROJECT_DIR is None:
+    for cand in (os.path.dirname(os.path.abspath(globals().get('__file__', ''))) if '__file__' in globals() else None,
+                 os.getcwd()):
+        if cand and os.path.isdir(os.path.join(cand, 'pi_dfac')):
+            PROJECT_DIR = cand
+            break
+if PROJECT_DIR is None:
+    raise RuntimeError('Не найдена папка проекта (с подпапкой pi_dfac). Задайте PROJECT_DIR в начале code.py.')
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
+# при повторном запуске в одной сессии тНавигатора подхватываем правки модулей
+for _m in [m for m in sys.modules if m == 'pi_dfac' or m.startswith('pi_dfac.')]:
+    del sys.modules[_m]
+
+from pi_dfac.config import Config
+from pi_dfac import tnav_api
+from pi_dfac.runner import run
+
+cfg = Config.load(os.path.join(PROJECT_DIR, 'config.json'))
+
+# --- быстрые переопределения без правки config.json (раскомментируйте нужное) ---
+# cfg.wells = ['33', '35']          # только эти скважины
+# cfg.strategy = 'dp'               # 'dp' | 'andrey' | 'pzab'
+# cfg.make_png = False
+cfg.validate()
+
+tnav_api.bind(globals(), cfg.model_index)
+result = run(cfg, PROJECT_DIR, tnav_api.TnavProvider())
