@@ -1047,6 +1047,31 @@ async def adapt_recompute(request: Request):
     return JSONResponse(v)
 
 
+async def adapt_code(request: Request):
+    """Код для python-секции тНавигатора (путь к комплекту вписан)."""
+    kit_dir = _clean(request.query_params.get("kit"))
+    if not kit_dir or not os.path.isfile(os.path.join(kit_dir, "code.py")):
+        return _err("Комплект не найден. Сначала нажмите «Создать комплект».")
+    return JSONResponse(await run_in_threadpool(adapt_view.kit_code, kit_dir))
+
+
+async def adapt_columns_check(request: Request):
+    body = await request.json()
+    try:
+        def go():
+            res = adapt_view.check_columns(_clean(body.get("db")), str(body.get("sheet") or ""), body.get("cols") or {})
+            if res["ok"]:
+                p = _project()
+                a = dict(p.adapt or {})
+                a.update(db=_clean(body.get("db")), sheet=str(body.get("sheet") or ""), cols={k: v for k, v in (body.get("cols") or {}).items() if v})
+                p.adapt = a
+                p.save(FOLDER)
+            return res
+        return JSONResponse(await run_in_threadpool(go))
+    except (ValueError, OSError) as e:
+        return _err(str(e))
+
+
 async def adapt_runs(request: Request):
     return JSONResponse({"runs": await run_in_threadpool(adapt_view.runs.list_runs, _clean(request.query_params.get("kit")))})
 
@@ -1129,6 +1154,8 @@ def build_app() -> Starlette:
         Route("/api/adapt/select", adapt_select, methods=["POST"]),
         Route("/api/adapt/kit", adapt_kit, methods=["POST"]),
         Route("/api/adapt/recompute", adapt_recompute, methods=["POST"]),
+        Route("/api/adapt/code", adapt_code),
+        Route("/api/adapt/columns/check", adapt_columns_check, methods=["POST"]),
         Route("/api/adapt/runs", adapt_runs),
         Route("/api/adapt/run", adapt_run),
         Route("/api/adapt/file", adapt_file),

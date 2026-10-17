@@ -81,8 +81,8 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
 
   return (
     <section className="card">
-      <div className="step-head"><span className="step-n">5</span><h2>Результаты</h2></div>
-      <p className="lead">Запустите <code>code.py</code> из комплекта в python-секции тНавигатора, затем укажите созданный им <code>snapshots.pkl</code> (или папку <code>runs</code>). Дальше настройки сверху можно менять и пересчитывать здесь, без тНавигатора.</p>
+      <div className="step-head"><span className="step-n">6</span><h2>Результаты</h2></div>
+      <p className="lead">Когда код отработал в тНавигаторе (шаг 5), укажите созданный им <code>snapshots.pkl</code> или папку <code>runs</code>; по умолчанию берётся самый свежий. Дальше настройки сверху можно менять и пересчитывать здесь, без тНавигатора.</p>
       <div className="row">
         <label className="grow">Снимки модели<input value={snap} onChange={e => setSnap(e.target.value)} placeholder={kit ? kit + ' (самый свежий snapshots.pkl)' : 'Сначала подготовьте комплект'} /></label>
         <button onClick={pick} disabled={busy || !kit}>Выбрать файл</button>

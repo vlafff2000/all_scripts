@@ -228,3 +228,44 @@ def test_all_dates_sequential_include(tmp_path):
     assert len(w33) == 2 and abs(mult[0] - w33[0]["pi_mult"]) < 1e-6 * w33[0]["pi_mult"] + 1e-9
     assert abs(mult[1] - w33[1]["pi_mult"] / w33[0]["pi_mult"]) < 1e-5 * mult[1] + 1e-9
     assert [x["group"] for x in v["groups"]] == ["без группы"] and v["groups"][0]["wells"] == 2   # 33 считается один раз (свежее ГДИ)
+
+
+def test_code_runs_as_pasted_and_results_load(tmp_path, monkeypatch):
+    """Код из кнопки «Копировать код» выполняется без правок (путь вписан), снимки читает Скедул (класс из pi_dfac)."""
+    sys.path.insert(0, os.path.dirname(__file__))
+    import gdi_adapt_mock_tnav as mock
+    from schedule_pxg.gdi_adapt import runs
+    sel = selection.select(_studies()[0], Config.load(None), selection.Settings(), model=["33", "35"])
+    kitdir = str(tmp_path / "комплект")
+    res = kit.write_kit(kitdir, selection.chosen_for_kit(sel), {"strategy": "dp", "ci_jackknife": False})
+    assert os.path.abspath(kitdir) in res["code"] and "__PROJECT_DIR__" not in res["code"]
+    from schedule_pxg import adapt_view
+    assert adapt_view.kit_code(kitdir)["code"] == res["code"]
+    for m in [m for m in sys.modules if m == "pi_dfac" or m.startswith("pi_dfac.")]:
+        del sys.modules[m]
+    g = dict(mock.make_tnav({"33": 91.0, "35": 91.0}), __name__="__main__")
+    monkeypatch.chdir(tmp_path)
+    exec(compile(res["code"], "code.py", "exec"), g)
+    sys.path[:] = [p for p in sys.path if p != os.path.abspath(kitdir)]
+    out = [d for d in os.listdir(os.path.join(kitdir, "runs"))]
+    assert len(out) == 1 and os.path.isfile(os.path.join(kitdir, "runs", out[0], "snapshots.pkl"))
+    for m in [m for m in sys.modules if m == "pi_dfac" or m.startswith("pi_dfac.")]:
+        del sys.modules[m]
+    v = runs.recompute(kitdir, kitdir, {"strategy": "dp", "ci_jackknife": False})
+    assert v["summary"]["wells"] == 2
+
+
+def test_check_columns_manual_and_comma_decimals(tmp_path):
+    from schedule_pxg import adapt_view
+    df = pd.DataFrame({"№скв": [33, 33], "дата": ["2022-04-01"] * 2, "Qгаза, тыс.м3/сут": ["100,5", "200"],
+                       "Рзаб": ["80,0", "70"], "Пластовое, кгс/см2": ["90,0", "90"]})
+    f = str(tmp_path / "db.xlsx")
+    df.to_excel(f, index=False)
+    det = selection.detect_columns(df.columns)
+    assert "wbp" not in det
+    cols = dict(det, wbp="Пластовое, кгс/см2")
+    r = adapt_view.check_columns(f, "", cols)
+    assert r["ok"] and not r["problems"], r
+    assert any("Не выбран" in x for x in adapt_view.check_columns(f, "", dict(cols, wbp=""))["problems"])
+    studies, _ = selection.build_studies(pd.read_excel(f), cols, selection.Settings())
+    assert len(studies) == 1 and len(studies[0].q) == 2 and abs(studies[0].q[0] - 100500.0) < 1e-6

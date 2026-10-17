@@ -97,6 +97,14 @@ def _dates(col: pd.Series) -> pd.Series:
     return col.map(one)
 
 
+def _numbers(col: pd.Series) -> pd.Series:
+    """Числа Excel как есть; текст с запятой и пробелами («1 234,5») тоже разбирается."""
+    if pd.api.types.is_numeric_dtype(col):
+        return pd.to_numeric(col, errors="coerce")
+    txt = col.astype(str).str.replace("\u00a0", "", regex=False).str.replace(" ", "", regex=False).str.replace(",", ".", regex=False)
+    return pd.to_numeric(txt, errors="coerce").where(col.notna())
+
+
 def build_studies(df: pd.DataFrame, cols: Dict[str, str], st: Settings) -> Tuple[List[GDI], List[str]]:
     """Исследования = группа (скважина, дата). a и b считаются МНК по режимам (Pпл²−Pз² = A·Q + B·Q²), а не берутся из файла."""
     st.validate()
@@ -107,7 +115,7 @@ def build_studies(df: pd.DataFrame, cols: Dict[str, str], st: Settings) -> Tuple
     d = df[need].copy()
     d.columns = ["w", "d", "wbp", "bhp", "q"]
     n0 = len(d)
-    d["wbp"], d["bhp"], d["q"] = (pd.to_numeric(d[c], errors="coerce") for c in ("wbp", "bhp", "q"))
+    d["wbp"], d["bhp"], d["q"] = (_numbers(d[c]) for c in ("wbp", "bhp", "q"))
     d["d"] = _dates(d["d"])
     d = d.dropna()
     notes: List[str] = []

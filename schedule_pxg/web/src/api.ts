@@ -242,7 +242,7 @@ export interface AdaptRequest {
 export const getAdapt = () => call<AdaptState>('/api/adapt')
 export const getAdaptColumns = (path: string, sheet = '') => call<AdaptColumns>('/api/adapt/columns?' + new URLSearchParams({ path, sheet }))
 export const adaptSelect = (b: AdaptRequest) => call<AdaptSelection>('/api/adapt/select', post(b))
-export const adaptKit = (b: AdaptRequest & { out: string }) => call<{ folder: string; wells: string[]; files: string[] }>('/api/adapt/kit', post(b))
+export const adaptKit = (b: AdaptRequest & { out: string }) => call<{ folder: string; wells: string[]; files: string[]; code: string }>('/api/adapt/kit', post(b))
 
 export interface AdaptResultRow {
   well: string; date: string; source: string; qc: string; n_regimes: number
@@ -265,4 +265,7 @@ export interface AdaptRun { dir: string; name: string; has_snapshots: boolean; h
 export const adaptRecompute = (kit: string, snapshots: string, config: Partial<AdaptConfig>) => call<AdaptView>('/api/adapt/recompute', post({ kit, snapshots, config }))
 export const adaptRuns = (kit: string) => call<{ runs: AdaptRun[] }>('/api/adapt/runs?' + new URLSearchParams({ kit }))
 export const adaptRun = (dir: string) => call<AdaptView>('/api/adapt/run?' + new URLSearchParams({ dir }))
+export interface AdaptColCheck { ok: boolean; rows: number; problems: string[]; roles: { role: string; title: string; col: string; total: number; valid: number; examples: string[] }[] }
+export const adaptCheckColumns = (b: { db: string; sheet?: string; cols: Record<string, string> }) => call<AdaptColCheck>('/api/adapt/columns/check', post(b))
+export const adaptCode = (kit: string) => call<{ code: string; path: string }>('/api/adapt/code?' + new URLSearchParams({ kit }))
 export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv') => '/api/adapt/file?' + new URLSearchParams({ dir, kind })
