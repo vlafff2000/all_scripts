@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
-import { AppState, IndicatorRow, ResultsInfo, attachResults, getIndicators, getResultSeries, getResults, getState, pickFile } from './api'
+import { AppState, IndicatorRow, ResultsInfo, attachResults, getIndicators, getResultSeries, getWellGwc, WellGwcRow, getResults, getState, pickFile } from './api'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
@@ -27,6 +27,11 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
   const [kw, setKw] = useState('WBHP')
   const [wells, setWells] = useState('')
   const [pr, setPr] = useState<Line[]>([])
+  const [sgr, setSgr] = useState('0.01')
+  const [gw, setGw] = useState('')
+  const [gwDate, setGwDate] = useState('')
+  const [gwRows, setGwRows] = useState<Record<string, WellGwcRow[]>>({})
+  const [gwNotes, setGwNotes] = useState<string[]>([])
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -57,6 +62,22 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
       Object.entries(r.series).forEach(([w, s]) => lines.push({ label: n + ' · ' + w, pts: s.dates.map((d, i) => [d, s.values[i]] as [string, number]) }))
     }
     setPr(lines)
+  })
+
+  const gwcWells = () => guard(async () => {
+    const out: Record<string, WellGwcRow[]> = {}
+    const all: string[] = []
+    for (const n of chosen) {
+      const r = await getWellGwc(n, sgr, gwDate ? [gwDate] : [], gw.split(/[;,|]/).map(x => x.trim()).filter(Boolean))
+      out[n] = r.rows; r.notes.forEach(x => all.push(n + ': ' + x))
+    }
+    setGwRows(out); setGwNotes(all)
+  })
+  const gwShown = chosen.filter(n => gwRows[n])
+  const gwLines: Line[] = gwShown.flatMap(n => {
+    const by: Record<string, WellGwcRow[]> = {}
+    gwRows[n].forEach(r => { if (r.interp_top_down !== null) (by[r.well] = by[r.well] || []).push(r) })
+    return Object.entries(by).slice(0, 20).map(([w, rs]) => ({ label: n + ' · ' + w, pts: rs.map(r => [r.date, r.interp_top_down as number] as [string, number]) }))
   })
 
   const shown = chosen.filter(n => ind[n])
@@ -109,6 +130,25 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
           <button disabled={busy} onClick={press}>Построить</button>
         </div>
         <Plot lines={pr} unit={unit} title={kw + (vec?.label ? ' — ' + vec.label : '')} link="sched-results-p" />
+        <h3 style={{ marginTop: 16 }}>ГВК по скважинам</h3>
+        <p className="muted small">Колонка ячеек (i, j) вскрытия скважины целиком; газ — Sg выше критической Sgr (SGCR из INIT, иначе число ниже).
+          Два способа: «сверху вниз» (первый переход газ → вода от кровли газа) и «нижний газ» (под самой глубокой газовой ячейкой).
+          Две глубины: по границе ячейки и по интерполяции Sg. Глубина — TVDSS, м (со знаком минус).</p>
+        <div className="row">
+          <span className="muted small">Sgr, если нет SGCR:</span><input style={{ width: 70 }} value={sgr} onChange={e => setSgr(e.target.value)} />
+          <span className="muted small">Дата (пусто — все шаги):</span><input type="date" value={gwDate} onChange={e => setGwDate(e.target.value)} />
+          <input style={{ width: 260 }} placeholder="скважины через запятую (пусто — все)" value={gw} onChange={e => setGw(e.target.value)} />
+          <button className="primary" disabled={busy} onClick={gwcWells}>Посчитать ГВК</button>
+        </div>
+        {gwNotes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
+        {gwShown.map(n => { const rs = gwRows[n]; const lastD = rs.reduce((m, r) => (r.date > m ? r.date : m), ''); const cur = rs.filter(r => r.date === lastD)
+          return <div key={n} style={{ overflowX: 'auto' }}>
+            <p className="muted small">{n}: на {lastD}{rs.some(r => r.date !== lastD) ? ' (график — по всем шагам)' : ''}</p>
+            <table className="raw"><thead><tr><th>Скважина</th><th>Колонн с газом</th><th>Сверху вниз: граница, м</th><th>Сверху вниз: интерполяция, м</th><th>Нижний газ: граница, м</th><th>Нижний газ: интерполяция, м</th><th>Пометка</th></tr></thead>
+              <tbody>{cur.map(r => <tr key={r.well}><td>{r.well}</td><td className="num">{r.columns}</td><td className="num">{fmt(r.cell_top_down, 1)}</td><td className="num">{fmt(r.interp_top_down, 1)}</td>
+                <td className="num">{fmt(r.cell_lowest, 1)}</td><td className="num">{fmt(r.interp_lowest, 1)}</td>
+                <td className="small">{r.columns === 0 ? 'газа нет' : [r.torn ? 'разорванный контакт' : '', r.at_grid_edge ? 'газ до низа сетки' : ''].filter(Boolean).join(', ')}</td></tr>)}</tbody></table></div> })}
+        <Plot lines={gwLines} unit="м, TVDSS" title="ГВК по скважинам (сверху вниз, интерполяция)" link="sched-results-g" />
       </section>}
     </main>
   )
