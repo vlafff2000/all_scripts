@@ -63,12 +63,13 @@ WINDOWS_LAUNCHERS = {
                              'if "%FOUND%"=="0" echo Файлы *.UNRST не найдены: положите расчёт в папку %~dp0 и запустите снова.\r\n'
                              ':done\r\n'
                              'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
-    'Opisat_model.bat': 'rem Двойной щелчок: описывает EGRID, INIT, SMSPEC, UNSMRY из этой папки, отчёт <имя>_model.txt рядом.\r\n'
+    'Opisat_model.bat': 'rem Двойной щелчок: описывает EGRID, INIT, SMSPEC, UNSMRY из этой папки (или перетащите любой файл расчёта на значок), отчёт <имя>_model.txt рядом.\r\n'
+                        'if not "%~1"=="" ("%~dp0python\\python.exe" -s -X utf8 -m tnav_results.describe_model --report-next-to "%~1" & goto :done)\r\n'
                         'set FOUND=0\r\n'
                         'for %%F in ("%~dp0*.EGRID" "%~dp0*.INIT" "%~dp0*.SMSPEC" "%~dp0*.UNSMRY") do set FOUND=1\r\n'
                         'if "%FOUND%"=="0" (echo Файлы расчёта не найдены: положите их в папку %~dp0 и запустите снова.) else '
                         '"%~dp0python\\python.exe" -s -X utf8 -m tnav_results.describe_model --report-next-to "%~dp0*.EGRID" "%~dp0*.INIT" "%~dp0*.SMSPEC" "%~dp0*.UNSMRY"\r\n'
-                        'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
+                        ':done\r\necho.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
     'Skedul_PXG.bat': 'rem Скедул ПХГ: окно приложения (или браузер, если окно недоступно).\r\n'
                       '"%~dp0python\\python.exe" -s -X utf8 -m schedule_pxg %*',
     'Sozdat_yarlyki.bat': 'rem Создаёт ярлыки со значками на рабочем столе (Remove: --remove).\r\n'

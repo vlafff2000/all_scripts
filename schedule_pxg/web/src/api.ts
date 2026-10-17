@@ -195,6 +195,9 @@ export interface WellGwcRow { well: string; date: string; columns: number; cell_
 export const getWellGwc = (scenario: string, sgr: string, dates: string[], wells: string[]) =>
   call<{ rows: WellGwcRow[]; notes: string[]; sgr_source: string; wells: string[] }>('/api/results/wellgwc?' + new URLSearchParams({ scenario, sgr, dates: dates.join('|'), wells: wells.join('|') }))
 
+export const getResultsReport = (path: string, kind: 'model' | 'restart') =>
+  call<{ text: string }>('/api/results/report?' + new URLSearchParams({ path, kind }))
+
 export interface QualityRow { id: string; dataset: string; well: string; date: string; kind: string; check: string; level: string; value: string; details: string; excluded: boolean }
 export interface QualityView {
   jump: number; total: number; errors: number; excluded: number; shown: number; datasets: Record<string, string>

@@ -58,3 +58,20 @@ def test_wells_over_time(tmp_path):
     assert info["wells"] == ["OBS1"] and info["sgr_source"] == "число"
     none, info2 = wells_gwc_over_time(m, None, ur, 0.3, wells=["X"])
     assert none == [] and info2["missing"] == ["X"]
+
+
+def test_reports_for_ui_and_cli_globs(tmp_path, capsys):
+    from schedule_pxg import results
+    from tnav_results import describe_model, list_restart
+    _egrid(tmp_path / "M.EGRID")
+    (tmp_path / "M.INIT").write_bytes(_blk("PORV", "REAL", PORV))
+    _unrst(tmp_path / "M.UNRST", [SG], [PORV])
+    assert "размер сетки" in results.report(str(tmp_path / "M.init"), "model")
+    assert "Всего шагов: 1" in results.report(str(tmp_path), "restart")
+    with pytest.raises(ValueError):
+        results.report(str(tmp_path / "nope"), "model")
+    # cmd.exe не раскрывает маски: программа делает это сама, а один файл тянет одноимённые
+    assert describe_model.main(["--report-next-to", str(tmp_path / "*.EGRID")]) == 0
+    assert (tmp_path / "M_model.txt").read_text(encoding="utf-8").count("PORV") >= 1
+    assert list_restart.main(["--report-next-to", str(tmp_path / "*.UNRST")]) == 0
+    assert (tmp_path / "M_keywords.txt").exists()
