@@ -1,5 +1,6 @@
-// Копия gas_atlas web/src/ChartView.tsx @ f985d4e. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/ChartView.tsx @ ab133ef. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import * as echarts from 'echarts/core'
 import { BarChart, BoxplotChart, LineChart, ScatterChart } from 'echarts/charts'
 import { AxisPointerComponent, DataZoomComponent, GridComponent, LegendComponent, ToolboxComponent, TooltipComponent } from 'echarts/components'
@@ -9,7 +10,9 @@ import { axisTitle, escapeHtml, formatDate, formatNumber } from './format'
 import { alpha, chartTokens, FONT, PALETTE, palette, seriesColor, setDarkPalette, type ChartTokens } from './chartTheme'
 import { buildTracks, decimalsFor, hover, placeTip, toNumber, type Hover, type HoverMode, type Track, type View } from './chartHover'
 import { axisAt, formatBound, parseBound, shiftRange, wheelFactor, zoomRange, type AxisName, type Range } from './chartAxes'
-import { hiddenEvents, pinSync, pinSyncKind, savedRanges, setHoverMode, sharedRange, zoomSync, useAppliedTheme, useHoverMode, usePref } from './chartPrefs'
+import { chartLooks, hiddenEvents, smoothLines, thinCharts, pinSync, pinSyncKind, savedRanges, setHoverMode, sharedRange, zoomSync, useAppliedTheme, useHoverMode, usePref } from './chartPrefs'
+import { applyLooks, chartLookKey, markerSymbol, type Look } from './chartStyle'
+import { ChartSettings } from './ChartSettings'
 import { nextSyncId, pinShared, publish, publishZoom, sharedPins, sharedZoom, subscribe, subscribeZoom, synced, unpinShared } from './chartSync'
 import './chart.css'
 
@@ -22,6 +25,8 @@ const DASH: Record<string, string | number[]> = {
   solid: 'solid', dash: [6, 4], dot: [1.5, 3.5], dashdot: [8, 3, 2, 3], longdash: [12, 4],
 }
 const LARGE = 5000          // точек в серии: дальше облако рисуется пакетно, линия — с прореживанием LTTB
+const DENSE = 400           // точек в серии: плотнее — белые обводки отметок закрывают линию, поэтому рисуется сплошная линия без отметок
+const SMOOTH_BINS = 500     // точек сглаженной линии (среднее по подряд идущим замерам) в режиме «Сплошная кривая»
 const BLUR_LIMIT = 200_000  // при наведении остальные кривые приглушаются, пока точек на графике не больше этого
 const NAVIGATOR_SPAN = 180 * 86400e3   // ползунок времени под графиком, если ряды длиннее полугода
 const MAX_PINS = 3                     // закреплённых подсказок на графике
@@ -40,6 +45,8 @@ interface Props {
   onExclude: (dataset: string, id: string) => void
   /** Кроссплот давлений: щелчок по кнопке в закреплённой подсказке открывает динамику скважины. */
   onOpenWell?: (well: string, date: string) => void
+  /** Адрес на Карты ГСП для скважины из подсказки; null — скважины нет в проекте, кнопки нет. */
+  mapLink?: (well: string) => string | null
   onDownload?: (format: string, dpi: number) => Promise<void>
   /** PNG графика для буфера обмена (как при выгрузке): кнопка «Копировать» для вставки в презентацию или письмо. */
   onCopy?: () => Promise<Blob>
@@ -57,7 +64,22 @@ const key = (s: Series) => s.group || s.name
 /** Отметки замеров на линии: заданы модулем, нужны для исключения кликом или включён вид «Замеры».
  *  Расчётные линии (аппроксимация, модель) без ids — не замеры, их отметки не показываются. */
 const hasMarkers = (s: Series, excludeMode: boolean, mode: HoverMode) =>
-  s.markers || (!!s.ids && (excludeMode || (mode === 'facts' && s.x.length <= LARGE)))
+  s.look?.marker ?? (s.markers || (!!s.ids && (excludeMode || (mode === 'facts' && s.x.length <= LARGE))))
+/** Плотный ряд: на экране отметки сливаются (их белая обводка стирает линию). */
+const isDense = (s: Series, n: number) => !!s.markers && n > DENSE
+
+/** Сплошная кривая: среднее по подряд идущим точкам (время и значение), пропуски остаются разрывами. Исходные точки и подсказка не меняются. */
+function binned(rows: unknown[][], bins: number) {
+  const size = Math.ceil(rows.length / bins), out: unknown[][] = []
+  for (let i = 0; i < rows.length; i += size) {
+    let sx = 0, sy = 0, n = 0
+    for (const r of rows.slice(i, i + size)) {
+      if (typeof r[0] === 'number' && typeof r[1] === 'number') { sx += r[0]; sy += r[1]; n++ }
+    }
+    out.push(n ? [sx / n, sy / n] : [rows[i][0], null])
+  }
+  return out
+}
 const dashOf = (s: Series) => DASH[s.dash || (s.dashed ? 'dash' : 'solid')]
 
 function colorOf(chart: Chart) {
@@ -107,6 +129,9 @@ function alignedRange(lo: number, hi: number, minimum?: number | null, maximum?:
   }
 }
 
+/** На оси есть столбцы: их длина читается от нуля, шкала «не от нуля» вводила бы в заблуждение. */
+const hasBars = (chart: Chart, key: 'y' | 'y2') => chart.series.some(s => s.kind === 'bar' && (s.axis ?? 'y') === key)
+
 function alignedYAxes(chart: Chart, base: Chart): Record<'y' | 'y2', { min: number; max: number; step: number }> | null {
   if (!chart.y2 || chart.y.scale !== 'value' || chart.y2.scale !== 'value') return null
   const out = {} as Record<'y' | 'y2', { min: number; max: number; step: number }>
@@ -115,12 +140,19 @@ function alignedYAxes(chart: Chart, base: Chart): Record<'y' | 'y2', { min: numb
   for (const key of ['y', 'y2'] as const) {
     const spec = key === 'y' ? chart.y : chart.y2
     let lo = Infinity, hi = -Infinity
+    const stacks = new Map<string, number[]>()      // стопка складывается по номеру точки: шкала по сумме, а не по одной серии
     for (const s of base.series) {
       if ((s.axis ?? 'y') !== key || s.kind === 'box') continue
       for (const v of s.y) if (typeof v === 'number' && Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v) }
+      if (s.stack && s.kind !== 'points') {
+        const sum = stacks.get(s.stack) ?? []
+        s.y.forEach((v, i) => { if (typeof v === 'number' && Number.isFinite(v)) sum[i] = (sum[i] ?? 0) + v })
+        stacks.set(s.stack, sum)
+      }
     }
+    for (const sum of stacks.values()) for (const v of sum) if (v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v) }
     if (lo > hi) { lo = 0; hi = 1 }      // у оси без данных всё равно те же 5 делений
-    if (spec.from_zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0) }
+    if (spec.from_zero || hasBars(base, key)) { lo = Math.min(lo, 0); hi = Math.max(hi, 0) }
     const { start, step } = alignedRange(lo, hi, spec.minimum, spec.maximum)
     out[key] = { min: start, max: start + TICK_INTERVALS * step, step }
   }
@@ -128,18 +160,19 @@ function alignedYAxes(chart: Chart, base: Chart): Record<'y' | 'y2', { min: numb
 }
 
 /** Размах оси времени в мс по всем сериям (для решения, нужен ли ползунок). */
-function timeSpan(chart: Chart) {
-  if (chart.x.scale !== 'time') return 0
+function xSpan(chart: Chart) {
+  if (chart.x.scale !== 'time' && chart.x.scale !== 'value') return 0
   let lo = Infinity, hi = -Infinity
   for (const s of chart.series) {
     for (const v of [s.x[0], s.x[s.x.length - 1]]) {
-      const n = toNumber(v ?? null, 'time')
+      const n = toNumber(v ?? null, chart.x.scale)
       if (Number.isFinite(n)) { lo = Math.min(lo, n); hi = Math.max(hi, n) }
     }
   }
   return hi > lo ? hi - lo : 0
 }
-export const hasNavigator = (chart: Chart) => timeSpan(chart) > NAVIGATOR_SPAN
+/** Ползунок по оси X: по времени — когда ряды длиннее полугода; у числовой оси — когда точки разнесены по X. */
+export const hasNavigator = (chart: Chart) => xSpan(chart) > (chart.x.scale === 'time' ? NAVIGATOR_SPAN : 0)
 
 /** Холст рисуется минимум в двойном разрешении: на обычных мониторах (масштаб 100%) линии и подписи иначе выходят «мыльными». */
 function pixelRatio() { return Math.max(2, window.devicePixelRatio || 1) }
@@ -166,9 +199,10 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
   }
   const axisBase = (a: Axis, position: 'x' | 'y' | 'y2') => {
     const y = position !== 'x'
+    const zero = a.from_zero || (y && hasBars(chart, position))
     return {
-      type: a.scale, inverse: a.inverse, scale: !a.from_zero,
-      min: a.scale === 'category' ? undefined : a.minimum ?? (a.from_zero ? 0 : undefined),
+      type: a.scale, inverse: a.inverse, scale: !zero,
+      min: a.scale === 'category' ? undefined : a.minimum ?? (zero ? 0 : undefined),
       max: a.scale === 'category' ? undefined : a.maximum ?? undefined,
       interval: a.step && a.scale === 'value' ? a.step : undefined,
       data: a.scale === 'category' ? a.categories ?? [] : undefined,
@@ -239,7 +273,7 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
         moveHandleSize: 5, moveHandleStyle: { color: alpha(tk.accent, 0.45) },
         emphasis: { handleStyle: { borderColor: tk.ink }, moveHandleStyle: { color: tk.accent } },
         textStyle: { color: tk.muted, fontSize: 11 },
-        labelFormatter: (v: number) => formatDate(new Date(v).toISOString().slice(0, 10)),
+        labelFormatter: (v: number) => (time ? formatDate(new Date(v).toISOString().slice(0, 10)) : formatNumber(v)),
       }] : []),
     ],
     // кнопки масштаба — в заголовке графика (ChartView), панель ECharts скрыта и даёт только выделение области
@@ -252,7 +286,8 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
       },
     },
     series: chart.series.map(s => {
-      const c = color(s)
+      const L: Look = s.look ?? {}
+      const c = L.color ?? color(s)
       const blur = total <= BLUR_LIMIT
       const emphasis = { focus: blur ? 'series' : 'none', blurScope: 'coordinateSystem' }
       const blurred = { lineStyle: { opacity: 0.25 }, itemStyle: { opacity: 0.25 } }
@@ -267,28 +302,38 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
       const data = rich
         ? xs.map((x, j) => [x, s.y[j], s.ids?.[j] ?? '', s.labels?.[j] ?? ''])
         : xs.map((x, j) => [x, s.y[j]])
-      const rows = s.kind === 'points' ? data.filter(([x, y]) => x !== null && y !== null) : data
+      let rows = s.kind === 'points' ? data.filter(([x, y]) => x !== null && y !== null) : data
+      if (s.kind === 'line' && time && !excludeMode && isDense(s, rows.length) && smoothLines.get()) rows = binned(rows, SMOOTH_BINS) as typeof rows
       const common = { name: key(s), data: rows, color: c, yAxisIndex: s.axis === 'y2' && chart.y2 ? 1 : 0,
         silent: custom, emphasis, blur: blurred, ...(s.stack ? { stack: s.stack } : {}) }
       if (s.kind === 'bar') {
         return { ...common, type: 'bar', barMaxWidth: 24, barGap: '12%', itemStyle: { color: c, borderRadius: [4, 4, 0, 0] },
           emphasis: { focus: 'none', itemStyle: { color: c } } }
       }
-      const width = s.width || 2
+      const width = L.width ?? (s.width || 2)
       if (s.kind === 'line') {
         // в режиме «Только замеры» на линиях видны сами замеры (перекрывающиеся ECharts скрывает)
-        const markers = hasMarkers(s, excludeMode, mode)
+        const markers = L.marker ?? (hasMarkers(s, excludeMode, mode) && (excludeMode || !isDense(s, rows.length)))
+        const mc = L.markerColor ?? c
         return { ...common, type: 'line', z: s.markers ? 3 : 2, connectNulls: false,
-          sampling: rows.length > LARGE && !markers ? 'lttb' : undefined,
-          showSymbol: markers, showAllSymbol: 'auto', symbol: markers ? SYMBOL[s.symbol] : 'none', symbolSize: rows.length > 150 ? 4 : s.markers ? 7 : 5,
-          itemStyle: s.hollow ? { color: tk.surface, borderColor: c, borderWidth: 1.8 } : { color: c, borderColor: tk.surface, borderWidth: 1.5 },
-          lineStyle: { color: c, width, type: dashOf(s), cap: 'round', join: 'round', ...(s.opacity < 1 ? { opacity: s.opacity } : {}) },
+          sampling: rows.length > LARGE && !markers && thinCharts.get() ? 'lttb' : undefined,
+          showSymbol: markers, showAllSymbol: 'auto', symbol: markers ? markerSymbol(L.shape, SYMBOL[s.symbol]) : 'none', symbolSize: L.size ?? (rows.length > 150 ? 4 : s.markers ? 7 : 5),
+          itemStyle: s.hollow ? { color: tk.surface, borderColor: mc, borderWidth: 1.8 } : { color: mc, borderColor: tk.surface, borderWidth: 1.5 },
+          lineStyle: { color: c, width, type: L.dash ? DASH[L.dash] : dashOf(s), cap: 'round', join: 'round', opacity: L.line === false ? 0 : s.opacity < 1 ? s.opacity : 1 },
           ...(s.stack ? { areaStyle: { color: c, opacity: 0.6 } } : {}),
           emphasis: { ...emphasis, lineStyle: { width: width + 1 } } }
       }
       const big = rows.length > LARGE
-      return { ...common, type: 'scatter', z: s.hollow ? 4 : 3, symbol: SYMBOL[s.symbol], symbolSize: big ? 5 : s.hollow ? 10 : 9,
-        large: big, largeThreshold: LARGE, progressive: 0,
+      // Подписи (например, причина отсутствия замера) — текст над точкой; индекс точки совпадает, т.к. пустых точек нет.
+      const captions = s.captions ?? null
+      const caption = captions ? {
+        show: true, position: 'top' as const, distance: 6, fontSize: 11, color: tk.ink, padding: [2, 5], borderRadius: 4,
+        backgroundColor: tk.surface, borderColor: c, borderWidth: 1,
+        formatter: (p: { dataIndex: number }) => captions[p.dataIndex] ?? '',
+      } : undefined
+      // hideOverlap: соседние подписи не налезают друг на друга — скрытая подпись видна в подсказке точки
+      return { ...common, type: 'scatter', z: s.hollow ? 4 : 3, symbol: L.marker === false ? 'none' : markerSymbol(L.shape, SYMBOL[s.symbol]), symbolSize: L.size ?? (big ? 5 : s.hollow ? 10 : 9),
+        large: big, largeThreshold: LARGE, progressive: 0, ...(caption ? { label: caption, labelLayout: { hideOverlap: true } } : {}),
         itemStyle: {
           ...(s.hollow
             ? { color: 'rgba(255,255,255,0)', borderColor: c, borderWidth: 1.8 }
@@ -330,30 +375,35 @@ interface Plotted { x: number; label: string; kind: ChartEvent['kind'] }
 const syncKey = (chart: Chart) =>
   chart.x.scale === 'category' ? null : chart.x.scale === 'time' ? 'time' : `${chart.x.scale}|${chart.x.label}|${chart.x.unit}`
 
-export function ChartView({ chart: given, excludeMode, onExclude, onOpenWell, onDownload, onCopy, fetchWindow }: Props) {
+export function ChartView({ chart: given, excludeMode, onExclude, onOpenWell, mapLink, onDownload, onCopy, fetchWindow }: Props) {
   const box = useRef<HTMLDivElement>(null)
   const overlay = useRef<HTMLCanvasElement>(null)
   const tip = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const instance = useRef<echarts.ECharts | null>(null)
   const [patch, setPatch] = useState<Patch | null>(null)
-  const chart = useMemo<Chart>(() => {
+  const windowed = useMemo<Chart>(() => {
     if (!patch || patch.base !== given) return given
     return { ...given, series: given.series.map((s, i) => { const w = patch.series[i]; return w ? { ...s, x: w.x, y: w.y, ids: w.ids, labels: w.labels, total: w.total } : s }) }
   }, [given, patch])
+  const looksAll = usePref(chartLooks)
+  const looks = looksAll[chartLookKey(given)]
+  const chart = useMemo(() => applyLooks(windowed, looks), [windowed, looks])
+  const [settings, setSettings] = useState(false)
   const thinned = given.series.map((s, i) => [s, i] as const).filter(([s]) => s.total > s.x.length)
   const state = useRef({
     ranges: { y: null, y2: null } as Manual, setRanges: (() => {}) as (r: Manual) => void, openEditor: (() => {}) as (a: AxisName) => void, fitY: (() => {}) as () => void, lastChart: null as Chart | null,
     chart: given, base: given, fetchWindow, patch: null as Patch | null, pin: null as AxisPin | null, ensure: (() => {}) as () => void,
     edges: (() => null) as () => [number, number] | null,
     applyZoom: (() => {}) as () => void,
-    excludeMode, onExclude, onOpenWell: onOpenWell as Props['onOpenWell'], tracks: [] as Track[], selected: {} as Record<string, boolean>,
+    excludeMode, onExclude, onOpenWell: onOpenWell as Props['onOpenWell'], mapLink, tracks: [] as Track[], selected: {} as Record<string, boolean>,
     current: null as Hover | null, focused: -1, mouse: null as [number, number] | null, down: null as [number, number] | null,
     mode: 'smooth' as HoverMode, map: { x: (v: number) => v, y: [(v: number) => v, (v: number) => v] as [(v: number) => number, (v: number) => number] }, frame: 0, tokens: null as ChartTokens | null, spans: { x: 1, y: 1, y2: 1 }, blur: true, draw: (() => {}) as () => void,
     id: nextSyncId(), sync: syncKey(chart), events: [] as Plotted[], hiddenEvents: new Set<string>(), pins: [] as Pin[],
     renderPins: (() => {}) as () => void, reconcile: (() => {}) as () => void,
   })
   const mode = useHoverMode()
+  const smooth = usePref(smoothLines)
   const theme = useAppliedTheme()
   const offEvents = usePref(hiddenEvents)
   const [boxZoom, setBoxZoom] = useState(false)
@@ -372,6 +422,14 @@ export function ChartView({ chart: given, excludeMode, onExclude, onOpenWell, on
   const rangeKey = `${given.title}|${given.y.label}|${given.y2?.label ?? ''}`
   const yKey = `${given.y.label}|${given.y.unit}`
   const [ranges, setRangesState] = useState<Manual>(() => savedRanges.get()[rangeKey] ?? { y: null, y2: null })      // ручные границы Y: переживают обновление данных и перезапуск
+  const setLooks = (next: Record<string, Look>) => {
+    const all = { ...chartLooks.get() }, key = chartLookKey(given)
+    delete all[key]
+    if (Object.keys(next).length) all[key] = next
+    const keys = Object.keys(all)
+    for (const k of keys.slice(0, Math.max(0, keys.length - 200))) delete all[k]
+    chartLooks.set(all)
+  }
   const [editor, setEditor] = useState<{ axis: AxisName; lo: string; hi: string; at: [number, number]; error: string } | null>(null)
   state.current.ranges = ranges
   state.current.setRanges = (r: Manual) => {
@@ -422,6 +480,7 @@ export function ChartView({ chart: given, excludeMode, onExclude, onOpenWell, on
   state.current.mode = mode
   state.current.onExclude = onExclude
   state.current.onOpenWell = onOpenWell
+  state.current.mapLink = mapLink
   state.current.base = given
   state.current.fetchWindow = fetchWindow
   state.current.hiddenEvents = new Set(offEvents)
@@ -502,6 +561,13 @@ export function ChartView({ chart: given, excludeMode, onExclude, onOpenWell, on
       if (st.onOpenWell && st.chart.id === 'pressure-cross' && where) {
         (copy.lastElementChild ?? copy).insertAdjacentHTML('beforeend',
           `<button type="button" class="tip-go" data-open-well="${escapeHtml(where[1])}|${where[2]}">Динамика скважины</button>`)
+      }
+      // скважина из подсказки есть в проекте — ссылка на Карты ГСП (открывается в новой вкладке)
+      const mapWell = /^Скв\. (\S+)/.exec(pt?.track.series.labels?.[pt.track.src[pt.k]] ?? '')?.[1]
+      const mapHref = st.mapLink && mapWell ? st.mapLink(mapWell) : null
+      if (mapHref) {
+        (copy.lastElementChild ?? copy).insertAdjacentHTML('beforeend',
+          `<a class="tip-go" href="${escapeHtml(mapHref)}" target="_blank" rel="noopener">Показать на карте</a>`)
       }
       const el = document.createElement('div')
       el.className = 'atlas-tip pinned'
@@ -1094,7 +1160,7 @@ export function ChartView({ chart: given, excludeMode, onExclude, onOpenWell, on
     const later = window.setTimeout(st.ensure, 0)
     return () => window.clearTimeout(later)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chart, excludeMode, mode, theme, ranges])
+  }, [chart, excludeMode, mode, theme, ranges, smooth])
 
   // новый расчёт (другие параметры, исключение точки) — подгруженное окно относится к прежнему графику
   useEffect(() => { state.current.patch = null; state.current.pin = null; setPatch(null) }, [given])
@@ -1172,12 +1238,20 @@ export function ChartView({ chart: given, excludeMode, onExclude, onOpenWell, on
                 title="Только фактические замеры, точки видны на линиях">Замеры</button>
             </span>
           </>}
+          <span className="chart-tools">
+            <button type="button" className={'icon' + (settings ? ' on' : '')} aria-pressed={settings} onClick={() => setSettings(v => !v)}
+              title="Настройка графика: цвет, толщина и стиль линии, маркеры (форма, размер, цвет) для каждого ряда — как в Excel">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v1.9M8 12.3v1.9M1.8 8h1.9M12.3 8h1.9M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3" /></svg>
+            </button>
+          </span>
           {onCopy && <CopyButton onCopy={onCopy} />}
           {onDownload ? <DownloadMenu onDownload={onDownload} /> : <button type="button" className="quiet small" title="Сохранить график как PNG"
             onClick={() => { const url = instance.current?.getDataURL({ pixelRatio: 2, backgroundColor: state.current.tokens?.surface }); if (!url) return
               const a = document.createElement('a'); a.href = url; a.download = (chart.title || 'график') + '.png'; a.click() }}>PNG</button>}
         </span>
       </figcaption>
+      {settings && createPortal(<ChartSettings title={chart.title} series={chart.series} colorOf={colorOf(chart)} looks={looks ?? {}}
+        onChange={setLooks} onClose={() => setSettings(false)} />, document.body)}
       {thinned.length > 0 && <ThinNote chart={chart} thinned={thinned.map(([, i]) => i)} windowed={!!patch && patch.base === given} patch={patch} />}
       <div className="chart-stage" ref={stage}>
         <div ref={box} className="chart-canvas" role="img" aria-label={chart.title} />
@@ -1453,14 +1527,14 @@ function DownloadMenu({ onDownload }: { onDownload: (format: string, dpi: number
         <div className="popover right">
           <label className="inline-field">Формат
             <select value={format} onChange={e => setFormat(e.target.value)}>
-              <option value="svg">SVG</option><option value="pdf">PDF</option><option value="png">PNG</option>
+              <option value="svg">SVG</option><option value="pdf">PDF</option><option value="png">PNG</option><option value="xlsx">XLSX (график и данные)</option>
             </select>
           </label>
-          <label className="inline-field">DPI
+          {format !== 'xlsx' && <label className="inline-field">DPI
             <select value={dpi} onChange={e => setDpi(Number(e.target.value))}>
               {[300, 600, 1200].map(d => <option key={d} value={d}>{d}</option>)}
             </select>
-          </label>
+          </label>}
           <button type="button" className="primary" disabled={busy} onClick={go}>{busy ? 'Готовлю файл…' : `Скачать ${format.toUpperCase()}`}</button>
           {failure && <p className="field-error">{failure}</p>}
         </div>
