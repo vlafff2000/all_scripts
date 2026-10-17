@@ -1,3 +1,4 @@
+import type { Look } from './chartStyle'
 // Контракт графика (подмножество atlas/contract.py, копия из web/src/api.ts Атласа): ось, серия, график.
 export type Cell = string | number | boolean | null
 export interface Axis {
@@ -12,6 +13,8 @@ export interface Series {
   markers: boolean; axis: 'y' | 'y2'; stack?: string
   total: number
   facets: Record<string, string> | null
+  captions?: string[] | null
+  look?: Look   // личный вид ряда из окна «Настройка» (только на клиенте)
 }
 export type WindowSeries = Pick<Series, 'x' | 'y' | 'ids' | 'labels' | 'total'> & { window: number }
 export interface WindowReply { chart: string; revision: number; series: Record<string, WindowSeries> }
