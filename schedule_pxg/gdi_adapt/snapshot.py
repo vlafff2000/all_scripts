@@ -48,11 +48,24 @@ class _Unpickler(pickle.Unpickler):
     """Снимки пишет код в тНавигаторе (пакет pi_dfac из комплекта); в Скедуле тот же класс лежит в этом пакете."""
 
     def find_class(self, module, name):
-        if module == 'pi_dfac.snapshot' and name == 'WellSnapshot':
+        if name == 'WellSnapshot':      # любой путь модуля: pi_dfac.snapshot, snapshot, __main__
             return WellSnapshot
-        return super().find_class(module, name)
+        try:
+            return super().find_class(module, name)
+        except ModuleNotFoundError:     # массивы, записанные numpy 2 (numpy._core), читаются numpy 1 и наоборот
+            if module.startswith('numpy._core'):
+                return super().find_class('numpy.core' + module[len('numpy._core'):], name)
+            if module.startswith('numpy.core'):
+                return super().find_class('numpy._core' + module[len('numpy.core'):], name)
+            raise
 
 
 def load_snapshots(path: str) -> Dict[str, WellSnapshot]:
-    with open(path, 'rb') as f:
-        return _Unpickler(f).load()
+    try:
+        with open(path, 'rb') as f:
+            snaps = _Unpickler(f).load()
+    except Exception as e:
+        raise ValueError('Не удалось прочитать снимки «%s»: %s: %s' % (path, type(e).__name__, e))
+    if not isinstance(snaps, dict) or not snaps:
+        raise ValueError('В «%s» нет снимков скважин (файл пуст или другого формата).' % path)
+    return snaps

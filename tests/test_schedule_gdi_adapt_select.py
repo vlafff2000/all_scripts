@@ -1,4 +1,5 @@
 """Адаптация по ГДИ: отбор исследований (качество, самое свежее, расчётные a и b), сопоставление с моделью, комплект, API."""
+import pytest
 import os
 import sys
 
@@ -269,3 +270,26 @@ def test_check_columns_manual_and_comma_decimals(tmp_path):
     assert any("Не выбран" in x for x in adapt_view.check_columns(f, "", dict(cols, wbp=""))["problems"])
     studies, _ = selection.build_studies(pd.read_excel(f), cols, selection.Settings())
     assert len(studies) == 1 and len(studies[0].q) == 2 and abs(studies[0].q[0] - 100500.0) < 1e-6
+
+
+def test_snapshots_foreign_class_path_and_garbage(tmp_path, monkeypatch):
+    import dataclasses
+    import pickle
+    import sys
+    import types
+    import numpy as np
+    from schedule_pxg.gdi_adapt.snapshot import WellSnapshot, load_snapshots
+    mod = types.ModuleType("foreign_snapshot")      # класс в другом модуле, как в комплекте тНавигатора
+    foreign = dataclasses.make_dataclass("WellSnapshot", [(f.name, object) for f in dataclasses.fields(WellSnapshot)])
+    foreign.__module__ = "foreign_snapshot"
+    mod.WellSnapshot = foreign
+    monkeypatch.setitem(sys.modules, "foreign_snapshot", mod)
+    a = np.zeros(1)
+    p = tmp_path / "snapshots.pkl"
+    p.write_bytes(pickle.dumps({"W": foreign("W", "t", "t", False, a, a, a, a, a, a, a, a, 1.0, 1.0, 1.0)}))
+    monkeypatch.delitem(sys.modules, "foreign_snapshot")
+    got = load_snapshots(str(p))
+    assert isinstance(got["W"], WellSnapshot) and got["W"].n_perf == 1
+    p.write_bytes(b"not a pickle")
+    with pytest.raises(ValueError):
+        load_snapshots(str(p))
