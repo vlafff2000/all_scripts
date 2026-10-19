@@ -1,6 +1,7 @@
 """HTTP/JSON для «Скедул ПХГ» (Starlette, как в Атласе 6, Базе ПХГ и Картах ГСП). Мастер импорта (А3) и библиотека тех.карт (А4)."""
 from __future__ import annotations
 
+import logging
 import csv
 import datetime as dt
 import io
@@ -1036,6 +1037,9 @@ async def adapt_kit(request: Request):
         return _err(str(e))
 
 
+log = logging.getLogger(__name__)
+
+
 async def adapt_recompute(request: Request):
     body = await request.json()
     p = _project()
@@ -1044,6 +1048,9 @@ async def adapt_recompute(request: Request):
         p.save(FOLDER)
     except (ValueError, OSError, KeyError) as e:
         return _err(str(e))
+    except Exception as e:
+        log.exception("adapt_recompute")
+        return _err("Пересчёт не удался: %s: %s" % (type(e).__name__, e))
     return JSONResponse(v)
 
 
