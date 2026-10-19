@@ -27,7 +27,9 @@ def bind(g: dict, model_index: int = 0) -> None:
         hint = ('Вы запустили код не в том окне: здесь есть графики по скважинам, но нет графиков по перфорациям. '
                 'Вставляйте код в «калькулятор графиков» (модуль «Шаблоны графиков») в том же шаблоне, где раньше работал скрипт адаптации.'
                 if any(n.startswith('w') for n in have) else 'Код нужно запускать в python-секции тНавигатора.')
-        raise RuntimeError(f'В глобальном пространстве нет объектов тНавигатора: {missing}. {hint}')
+        names = sorted(k for k in g if not k.startswith('_') and k not in ('os', 'sys', 'json', 'time', 'traceback', 'datetime'))
+        raise RuntimeError(f'В глобальном пространстве нет объектов тНавигатора: {missing}. {hint}\n'
+                           f'Какие имена в этом окне есть (пришлите этот список разработчику): {", ".join(names[:150])}')
     _A.clear()
     _A.update({n: g[n] for n in FUNCS + GRAPHS})
     _A['MODEL'] = g['get_all_models']()[model_index]
