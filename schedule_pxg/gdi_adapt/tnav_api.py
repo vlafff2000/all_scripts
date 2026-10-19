@@ -23,8 +23,11 @@ _A: Dict[str, object] = {}
 def bind(g: dict, model_index: int = 0) -> None:
     missing = [n for n in FUNCS + GRAPHS if n not in g]
     if missing:
-        raise RuntimeError(f'В глобальном пространстве нет объектов тНавигатора: {missing}. '
-                           f'Скрипт нужно запускать в python-секции тНавигатора.')
+        have = [n for n in FUNCS + GRAPHS if n in g]
+        hint = ('Вы запустили код не в том окне: здесь есть графики по скважинам, но нет графиков по перфорациям. '
+                'Запустите его в окне python-скрипта, где работал прежний скрипт адаптации (не в «Рассчитанных свойствах»).'
+                if any(n.startswith('w') for n in have) else 'Код нужно запускать в python-секции тНавигатора.')
+        raise RuntimeError(f'В глобальном пространстве нет объектов тНавигатора: {missing}. {hint}')
     _A.clear()
     _A.update({n: g[n] for n in FUNCS + GRAPHS})
     _A['MODEL'] = g['get_all_models']()[model_index]
