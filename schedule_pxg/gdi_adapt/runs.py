@@ -112,7 +112,7 @@ def recompute(kit: str, snapshots: str, settings: Optional[dict] = None, well_gr
             saved = {k: v for k, v in json.load(f).items() if k in ("all_dates",)}
     except (OSError, ValueError):
         pass
-    cfg = kit_config(dict(saved, **(settings or {}), make_png=False, save_snapshots=False))
+    cfg = kit_config({**saved, **(settings or {}), "make_png": False, "save_snapshots": False})
     out = run(cfg, kit, SnapshotProvider(snaps))
     return _finish(out, well_group or {})
 

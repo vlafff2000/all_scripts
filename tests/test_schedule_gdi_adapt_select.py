@@ -181,7 +181,7 @@ def test_recompute_flow_and_api(tmp_path, monkeypatch):
     pkl = os.path.join(kitdir, "runs", "2026-01-01_00-00-00", "snapshots.pkl")
     save_snapshots(snaps, pkl)
 
-    r = c.post("/api/adapt/recompute", json={"kit": kitdir, "snapshots": kitdir, "config": {"strategy": "dp"}})
+    r = c.post("/api/adapt/recompute", json={"kit": kitdir, "snapshots": kitdir, "config": {"strategy": "dp", "make_png": True, "save_snapshots": True}})
     assert r.status_code == 200, r.text
     v = r.json()
     assert v["summary"]["wells"] + v["summary"]["skipped"] == 2
