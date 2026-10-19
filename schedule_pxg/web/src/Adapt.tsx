@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
 import AdaptResults from './AdaptResults'
 import {
-  AdaptColCheck, AdaptColumns, AdaptConfig, adaptCheckColumns, adaptCode, AdaptRequest, AdaptSelection, AdaptSettings, AdaptState, adaptKit, adaptSelect, getAdapt, getAdaptColumns, pickFile,
+  AdaptColCheck, AdaptColumns, AdaptConfig, adaptCheckColumns, adaptCode, AdaptRequest, AdaptSelection, AdaptSettings, AdaptState, adaptKit, adaptSelect, getAdapt, getAdaptColumns, pickFile, pickFolder,
 } from './api'
 
 const ROLES: [string, string][] = [['well', 'Скважина'], ['date', 'Дата'], ['wbp', 'Рпл'], ['bhp', 'Рзаб'], ['q', 'Дебит']]
@@ -72,7 +72,7 @@ export default function Adapt() {
     upd('well_bounds', Object.keys(wb).length ? wb : null)
   }
   const makeKit = () => guard(async () => {
-    const dir = out || (await pickFile(out)).path
+    const dir = out || (await pickFolder(out))
     if (!dir) return
     setOut(dir)
     const r = await adaptKit({ ...req(), out: dir })
@@ -165,8 +165,12 @@ export default function Adapt() {
             <option value="all">все</option><option value="on">включённые</option><option value="off">выключенные</option>
             <option value="bad">все ГДИ забракованы</option><option value="nomodel">нет в модели</option></select></label>
           <button className="primary" onClick={makeKit} disabled={busy || !sel.counts.included}>Подготовить комплект для тНавигатора</button>
-          {out && <span className="muted small">Папка: {out} <button className="link" onClick={() => setOut('')}>сменить</button></span>}
         </div>
+        <div className="row">
+          <label className="grow">Папка для комплекта (создайте или выберите пустую, например D:\PHG\gdi_kit)<input value={out} onChange={e => setOut(e.target.value)} placeholder="Куда сложить файлы для тНавигатора" /></label>
+          <button onClick={() => guard(async () => { const d = await pickFolder(out); if (d) setOut(d) })} disabled={busy}>Выбрать папку…</button>
+        </div>
+        <p className="muted small">Файл выбирать не нужно: программа сама создаст в этой папке код и данные. Если папку не указать, откроется окно выбора папки.</p>
         <div className="scroll" style={{ maxHeight: 520 }}><table className="raw"><thead><tr>
           <th /><th>Скв. БД</th><th>В модели</th><th>ГДИ в БД</th><th>Прошли</th><th>Взято</th><th>Качество</th><th>Возраст, лет</th><th>Режимов</th><th>a</th><th>b</th>
           <th>WPIMULT от</th><th>до</th><th>D до</th><th>Примечание</th></tr></thead>
