@@ -183,7 +183,7 @@ export default function Adapt() {
           })}</tbody></table></div>
         {sel.model_only.length > 0 && <p className="muted small">В модели есть, а исследований нет: {sel.model_only.slice(0, 60).join(', ')}{sel.model_only.length > 60 ? ' …' : ''}</p>}
       </section>}
-      {kit && <section className="card">
+      <section className="card">
         <div className="step-head"><span className="step-n">5</span><h2>Запуск в тНавигаторе</h2></div>
         <p className="lead">Один раз читаем данные модели по отобранным скважинам. Править код не нужно: путь к комплекту уже вписан.</p>
         <ol className="steps">
@@ -191,10 +191,10 @@ export default function Adapt() {
           <li>В тНавигаторе откройте проект модели, python-секцию, вставьте код и запустите.</li>
           <li>Дождитесь строки «Готово» в консоли тНавигатора и вернитесь сюда: результаты читаются на шаге 6.</li>
         </ol>
-        <div className="row"><button className="primary" onClick={copyCode} disabled={busy}>Копировать код</button>
-          <span className="muted small">Комплект: {kit}</span></div>
+        <div className="row"><button className="primary" onClick={copyCode} disabled={busy || !kit}>Копировать код</button>
+          <span className="muted small">{kit ? 'Файл: ' + kit + (kit.includes('\\') ? '\\' : '/') + 'code.py' : 'Кнопка станет активной после шага 4: выберите скважины и нажмите «Подготовить комплект для тНавигатора».'}</span></div>
         {code && <textarea readOnly rows={8} value={code} onFocus={e => e.currentTarget.select()} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }} />}
-      </section>}
+      </section>
       <AdaptResults kit={kit} config={cfg} />
     </main>
   )
