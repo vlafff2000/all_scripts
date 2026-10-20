@@ -67,6 +67,20 @@ def test_latest_good_study_is_chosen_and_bad_latest_skipped():
     assert sel.model_only == ["41"]
 
 
+def test_negative_b_study_rejected_in_selection():
+    """ГДИ с b < 0 - брак с причиной в таблице отбора: свежее отрицательное пропускается, все отрицательные - «забракованы»."""
+    rows = _study(50, "2023-01-01", a=5.0, b=-0.001) + _study(50, "2021-01-01")          # свежее с b<0, старое нормальное
+    rows += _study(51, "2023-01-01", a=5.0, b=-0.001)                                    # единственное ГДИ с b<0
+    df = pd.DataFrame(rows)
+    studies, _ = selection.build_studies(df, selection.detect_columns(df.columns), selection.Settings())
+    sel = selection.select(studies, Config.load(None), selection.Settings(), model=["50", "51"])
+    r = {x.well: x for x in sel.rows}
+    assert r["50"].date.year == 2021 and r["50"].include
+    assert "коэффициент b < 0 (физически невозможно)" in r["50"].note
+    assert not r["51"].include and r["51"].note.startswith("все ГДИ забракованы")
+    assert "коэффициент b < 0 (физически невозможно)" in r["51"].note
+
+
 def test_age_limit_and_manual_overrides():
     studies, _ = _studies()
     st = selection.Settings(max_age_years=2.0)
