@@ -1145,6 +1145,62 @@ async def adapt_export_zip(request: Request):
     return Response(data, media_type=export_charts.MIME["zip"], headers={"Content-Disposition": "attachment; filename=" + name, "X-Charts-Count": str(count)})
 
 
+def _docx_request(body: dict) -> dict:
+    """Тело запроса Word/предпросмотра → проверенные параметры; ошибки - ValueError с текстом для пользователя."""
+    ids = body.get("ids")
+    ids = None if ids is None else [str(i) for i in ids]
+    rows = [r for r in export_charts.load_rows(_clean(body.get("run_dir")), ids) if export_charts.has_curves(r)]
+    if not rows:
+        raise ValueError("Нет исследований с кривыми для выгрузки.")
+    try:
+        start = int(body.get("start") or 1)
+    except (TypeError, ValueError):
+        raise ValueError("Начальный номер рисунка должен быть числом") from None
+    if not 1 <= start <= 9999:
+        raise ValueError("Начальный номер рисунка: от 1 до 9999")
+    project = _clean(body.get("object"))[:200]
+    return dict(rows=rows, style=export_charts.style_from(body.get("style") or {}),
+                layout=export_charts.layout_from_body(body.get("layout") or {}),
+                template=export_charts.check_caption(str(body.get("caption") or export_charts.CAPTION_DEFAULT)),
+                start=start, project=project, well_group=_project().well_group)
+
+
+async def adapt_export_docx(request: Request):
+    """Таблица графиков адаптации в Word: макет (лист, колонки, поля, подписи), как в Газовом атласе."""
+    try:
+        opts = _docx_request(await _export_body(request))
+        data, errors, count = await run_in_threadpool(
+            export_charts.build_adapt_docx, opts["rows"], opts["style"], opts["layout"], opts["template"],
+            project=opts["project"], well_group=opts["well_group"], start=opts["start"])
+    except ValueError as e:
+        return _err(str(e))
+    return Response(data, media_type=export_charts.DOCX, headers={
+        "Content-Disposition": "attachment; filename*=UTF-8''" + quote("indicator_charts.docx"),
+        "X-Charts-Count": str(count), "X-Charts-Errors": str(len(errors))})
+
+
+async def adapt_export_preview(request: Request):
+    """Лист будущего Word-документа как PNG; номер листа - поле ``page`` (с 1). Число листов - в заголовке X-Pages."""
+    try:
+        body = await _export_body(request)
+        try:
+            page = int(body.get("page") or 1)
+        except (TypeError, ValueError):
+            raise ValueError("Номер листа должен быть числом") from None
+        opts = _docx_request(body)
+        png, pages, page = await run_in_threadpool(
+            export_charts.preview_page, opts["rows"], opts["style"], opts["layout"], opts["template"], page,
+            project=opts["project"], well_group=opts["well_group"], start=opts["start"])
+    except ValueError as e:
+        return _err(str(e))
+    return Response(png, media_type="image/png", headers={"X-Pages": str(pages), "X-Page": str(page)})
+
+
+async def adapt_export_options(request: Request):
+    """Допустимые значения и значения по умолчанию для вкладки экспорта (бумага, шрифты, DPI, Layout)."""
+    return JSONResponse(export_charts.options())
+
+
 async def results_report(request: Request):
     q = request.query_params
     try:
@@ -1214,6 +1270,9 @@ def build_app() -> Starlette:
         Route("/api/adapt/file", adapt_file),
         Route("/api/adapt/export/chart", adapt_export_chart, methods=["POST"]),
         Route("/api/adapt/export/zip", adapt_export_zip, methods=["POST"]),
+        Route("/api/adapt/export/docx", adapt_export_docx, methods=["POST"]),
+        Route("/api/adapt/export/preview", adapt_export_preview, methods=["POST"]),
+        Route("/api/adapt/export/options", adapt_export_options),
         Route("/api/results", results_get),
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
