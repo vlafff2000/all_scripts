@@ -24,6 +24,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, historymode, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
+from .gdi_adapt import export_charts
 from .project import Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -1099,6 +1100,51 @@ async def adapt_file(request: Request):
     return FileResponse(path, filename=os.path.basename(path))
 
 
+async def _export_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except ValueError:
+        raise ValueError("Пустой или неверный запрос выгрузки") from None
+    if not isinstance(body, dict):
+        raise ValueError("Пустой или неверный запрос выгрузки")
+    return body
+
+
+async def adapt_export_chart(request: Request):
+    """Одна индикаторная диаграмма исследования (id = «скважина|дата») в PNG / SVG / PDF / XLSX."""
+    try:
+        body = await _export_body(request)
+        style = export_charts.style_from(body)
+        fmt = export_charts.check_format(str(body.get("format") or "png"))
+        rows = export_charts.load_rows(_clean(body.get("run_dir")), [str(body.get("id") or "")])
+        row = rows[0]
+        if not export_charts.has_curves(row):
+            raise ValueError("У исследования нет кривых для графика.")
+        data = export_charts.xlsx_bytes(row, style) if fmt == "xlsx" else await run_in_threadpool(export_charts.render, row, style, fmt)
+    except ValueError as e:
+        return _err(str(e))
+    name = export_charts.file_name(row, style, fmt)
+    return Response(data, media_type=export_charts.MIME[fmt], headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(name)})
+
+
+async def adapt_export_zip(request: Request):
+    """Пакет: все исследования запуска (или выбранные id) в ZIP, по файлу на исследование и формат."""
+    try:
+        body = await _export_body(request)
+        style = export_charts.style_from(body)
+        fmts = [export_charts.check_format(str(f)) for f in (body.get("formats") or ["png"])]
+        ids = body.get("ids")
+        ids = None if ids is None else [str(i) for i in ids]
+        rows = [r for r in export_charts.load_rows(_clean(body.get("run_dir")), ids) if export_charts.has_curves(r)]
+        if not rows:
+            raise ValueError("Нет исследований с кривыми для выгрузки.")
+        data, count = await run_in_threadpool(export_charts.zip_bytes, rows, style, fmts)
+    except ValueError as e:
+        return _err(str(e))
+    name = "indicator_charts_%s.zip" % (style.y.replace("dp2q", "dp2_q"))
+    return Response(data, media_type=export_charts.MIME["zip"], headers={"Content-Disposition": "attachment; filename=" + name, "X-Charts-Count": str(count)})
+
+
 async def results_report(request: Request):
     q = request.query_params
     try:
@@ -1166,6 +1212,8 @@ def build_app() -> Starlette:
         Route("/api/adapt/runs", adapt_runs),
         Route("/api/adapt/run", adapt_run),
         Route("/api/adapt/file", adapt_file),
+        Route("/api/adapt/export/chart", adapt_export_chart, methods=["POST"]),
+        Route("/api/adapt/export/zip", adapt_export_zip, methods=["POST"]),
         Route("/api/results", results_get),
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
