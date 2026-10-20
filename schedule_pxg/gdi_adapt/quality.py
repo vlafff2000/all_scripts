@@ -34,7 +34,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from scipy.optimize import nnls
 
-from .gdi import GDI, CONVERSION, fit_ab
+from .gdi import GDI, CONVERSION, b_negative, fit_ab
 
 WARN_FIT_R2 = 0.95      # R^2 ниже - предупреждение (выше порога брака)
 NEG_CURVATURE = 0.2     # B*Qmax/A < -0.2 -> предупреждение "B < 0"
@@ -128,7 +128,7 @@ def assess(gdi: GDI, cfg) -> QC:
         bad.append(f'разброс Pпл между режимами {pres_spread:.2f} бар сопоставим с депрессией {dp_med:.2f} бар')
     if dropped_frac > cfg.qc_max_dropped_frac:
         bad.append(f'отброшено режимов {gdi.n_dropped} из {n_total} (Pзаб >= Pпл или Q <= 0)')
-    if np.isfinite(gdi.b) and gdi.b < 0:
+    if b_negative(gdi.a, gdi.b, float(np.max(gdi.q)), cfg.ab_q_units):
         bad.append('коэффициент b < 0 (физически невозможно)')
 
     # ---------------- ПРЕДУПРЕЖДЕНИЯ ----------------

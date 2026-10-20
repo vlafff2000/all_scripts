@@ -21,7 +21,7 @@ from scipy.optimize import minimize
 
 from . import physics as ph
 from .errors import AdaptError
-from .gdi import GDI, fit_ab_dp2
+from .gdi import GDI, b_negative, fit_ab_dp2
 
 
 @dataclass
@@ -217,7 +217,7 @@ def adapt_well(gdi: GDI, snap, pvt, cfg) -> AdaptResult:
 
     # A, B модели - из её собственной кривой dP^2(Q) после адаптации (та же МНК-процедура, что для ГДИ)
     a_mod, b_mod = fit_ab_dp2(grid, curve_a, cfg.ab_q_units)
-    if np.isfinite(b_mod) and b_mod < 0:
+    if b_negative(a_mod, b_mod, float(np.max(grid)), cfg.ab_q_units):
         problems.append('b модели < 0')
 
     return AdaptResult(

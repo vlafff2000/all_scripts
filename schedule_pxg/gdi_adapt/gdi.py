@@ -71,6 +71,17 @@ def fit_ab_dp2(q_m3d, dp2, ab_q_units: str = '10^3 m3/day') -> Tuple[float, floa
     return float(coef[0]), float(coef[1])
 
 
+B_NEG_TOL = 0.01      # B<0 считается нарушением, если квадратичный член на максимальном дебите отрицателен и больше 1% линейного
+
+
+def b_negative(a: float, b: float, q_max_m3d: float, ab_q_units: str = '10^3 m3/day') -> bool:
+    """Коэффициент B физически не может быть отрицательным. Допуск: |B|*Qmax больше B_NEG_TOL*|A| (шум вокруг нуля не в счёт)."""
+    if not (np.isfinite(a) and np.isfinite(b)) or b >= 0:
+        return False
+    qm = float(q_max_m3d) / CONVERSION['flow_rate'][ab_q_units]
+    return abs(b) * qm > B_NEG_TOL * abs(a)
+
+
 def fit_ab(q_m3d, wbp, bhp, ab_q_units: str = '10^3 m3/day') -> Tuple[float, float]:
     """МНК: Pпл^2 - Pз^2 = A*Q + B*Q^2 (без свободного члена). Нужно >= 2 различных дебитов."""
     return fit_ab_dp2(q_m3d, np.asarray(wbp, dtype=float) ** 2 - np.asarray(bhp, dtype=float) ** 2, ab_q_units)

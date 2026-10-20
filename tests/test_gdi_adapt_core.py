@@ -256,7 +256,7 @@ class TestNegativeB(unittest.TestCase):
 
     def test_b_from_file_negative_is_bad(self):
         from schedule_pxg.gdi_adapt.quality import assess
-        g = self._gdi(b_file=-1e-4)           # данные нормальные, но в файле отрицательный B
+        g = self._gdi(b_file=-1e-3)           # данные нормальные, но в файле отрицательный B
         qc = assess(g, make_cfg())
         self.assertEqual(qc.status, 'bad')
         self.assertIn(self.REASON, qc.reasons)
