@@ -11,7 +11,11 @@ const P_UNITS: Record<string, string> = { 'kgf/cm2': 'кгс/см² (абс.)', 
 const Q_UNITS: Record<string, string> = { '10^3 m3/day': 'тыс. м³/сут', 'm3/day': 'м³/сут' }
 const num = (s: string): number | undefined => { const v = Number(s.replace(',', '.')); return s.trim() !== '' && Number.isFinite(v) ? v : undefined }
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
-const STATUS: Record<string, string> = { good: 'хорошее', fair: 'удовлетворительное' }
+const STATUS: Record<string, string> = { good: 'хорошее', fair: 'удовлетворительное', bad: 'забраковано' }
+/** Решение по исследованию: 'auto' - как решила программа, 'on' - брать, 'off' - не брать. */
+type Decision = 'auto' | 'on' | 'off'
+const DECISION_TITLE: Record<Decision, string> = { auto: 'Как решила программа', on: 'Брать', off: 'Не брать' }
+const decisionOf = (m: boolean | null | undefined): Decision => (m === null || m === undefined ? 'auto' : m ? 'on' : 'off')
 
 /** Вкладка «Адаптация по ГДИ», шаг 1: подготовка. БД ГДИ → отбор исследований → комплект для тНавигатора. */
 export default function Adapt() {
@@ -23,6 +27,7 @@ export default function Adapt() {
   const [config, setConfig] = useState<Partial<AdaptConfig>>({})
   const [scenario, setScenario] = useState('')
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
+  const [studyOv, setStudyOv] = useState<Record<string, boolean>>({})
   const [sel, setSel] = useState<AdaptSelection | null>(null)
   const [filter, setFilter] = useState('all')
   const [out, setOut] = useState('')
@@ -35,7 +40,7 @@ export default function Adapt() {
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   useEffect(() => {
     getAdapt().then(s => {
-      setSt(s); setKit(s.kit); setOut(s.kit); setDb(s.db); setCols(s.cols); setSettings(s.saved_settings); setConfig(s.saved_config); setOverrides(s.overrides)
+      setSt(s); setKit(s.kit); setOut(s.kit); setDb(s.db); setCols(s.cols); setSettings(s.saved_settings); setConfig(s.saved_config); setOverrides(s.overrides); setStudyOv(s.study_overrides || {})
       setScenario(s.scenario || s.scenarios.find(x => x.path)?.name || '')
       if (s.db) getAdaptColumns(s.db, s.sheet).then(setColsInfo).catch(() => undefined)
     }).catch(e => setMsg((e as Error).message))
@@ -44,7 +49,7 @@ export default function Adapt() {
   const cfg = { ...(st?.config || {}), ...config } as AdaptConfig
   const set = { ...(st?.settings || {}), ...settings } as AdaptSettings
   const upd = <K extends keyof AdaptConfig>(k: K, v: AdaptConfig[K]) => setConfig(c => ({ ...c, [k]: v }))
-  const req = (): AdaptRequest => ({ db, sheet: st?.sheet || '', cols, settings: set, config: cfg, overrides, scenario })
+  const req = (): AdaptRequest => ({ db, sheet: st?.sheet || '', cols, settings: set, config: cfg, overrides, study_overrides: studyOv, scenario })
   const applyCols = () => guard(async () => { setCheck(await adaptCheckColumns({ db, sheet: st?.sheet || '', cols })) })
   const copyCode = () => guard(async () => {
     const r = await adaptCode(kit)
@@ -60,8 +65,15 @@ export default function Adapt() {
     const c = await getAdaptColumns(r.path)
     setColsInfo(c); setCols(c.detected)
   })
-  const run = (o = overrides) => guard(async () => { const r = await adaptSelect({ ...req(), overrides: o }); setSel(r); setCols(r.cols) })
+  const run = (o = overrides, so = studyOv) => guard(async () => { const r = await adaptSelect({ ...req(), overrides: o, study_overrides: so }); setSel(r); setCols(r.cols) })
   const toggle = (well: string, on: boolean) => { const o = { ...overrides, [well]: on }; setOverrides(o); run(o) }
+  /** Ручное решение по исследованию; «Как решила программа» убирает его из сохранённых решений. */
+  const decide = (key: string, d: Decision) => {
+    const so = { ...studyOv }
+    if (d === 'auto') delete so[key]; else so[key] = d === 'on'
+    setStudyOv(so); run(overrides, so)
+  }
+  const resetDecisions = () => { setStudyOv({}); run(overrides, {}) }
   const bound = (well: string, key: 'pi_mult_bounds' | 'dfac_bounds', idx: 0 | 1, s: string) => {
     const wb = { ...(cfg.well_bounds || {}) }
     const cur = { ...(wb[well] || {}) }
@@ -159,6 +171,8 @@ export default function Adapt() {
       {sel && <section className="card">
         <div className="step-head"><span className="step-n">4</span><h2>Скважины и исследования</h2></div>
         <p className="lead">Выбрано <b>{sel.counts.included}</b> из {sel.counts.wells_db} скважин БД ГДИ. Нет в модели: {sel.counts.no_model}; все ГДИ забракованы: {sel.counts.all_bad}; старше допустимого: {sel.counts.old}; в модели есть, а ГДИ нет: {sel.counts.model_only}.</p>
+        <p className="lead">Ручных решений: <b>{sel.counts.manual}</b>{sel.counts.manual > 0 && <> · <button onClick={resetDecisions} disabled={busy}>Сбросить все ручные решения</button></>}</p>
+        <p className="muted small">Программа лишь советует: замечания по качеству показаны в таблице исследований. Окончательное решение по каждому исследованию за инженером.</p>
         {sel.notes.map((n, i) => <p key={i} className="muted small">{n}</p>)}
         <div className="row">
           <label>Показать<select value={filter} onChange={e => setFilter(e.target.value)}>
@@ -184,6 +198,21 @@ export default function Adapt() {
               <td><input style={{ width: 70 }} defaultValue={wb.pi_mult_bounds?.[1] ?? ''} placeholder={String(pm[1])} onBlur={e => bound(r.well, 'pi_mult_bounds', 1, e.target.value)} /></td>
               <td><input style={{ width: 80 }} defaultValue={wb.dfac_bounds?.[1] ?? ''} placeholder={String(dm[1])} onBlur={e => bound(r.well, 'dfac_bounds', 1, e.target.value)} /></td>
               <td className="muted small">{r.note}</td></tr>
+          })}</tbody></table></div>
+        <h3>Исследования ГДИ</h3>
+        <p className="muted small">Что решила программа, и почему. Выберите для каждого исследования: брать, не брать или оставить решение программы. Исследование, которое программа забраковала, можно взять вручную: замечание останется в таблице.</p>
+        <div className="scroll" style={{ maxHeight: 420 }}><table className="raw"><thead><tr>
+          <th>Скв. БД</th><th>В модели</th><th>Дата</th><th>Качество (программа)</th><th>Замечание программы</th><th>Решение инженера</th><th>В расчёте</th><th>Режимов</th><th>a</th><th>b</th></tr></thead>
+          <tbody>{sel.studies.map(s => {
+            const d = decisionOf(s.manual)
+            return <tr key={s.key} className={s.use ? '' : 'dim'}>
+              <td>{s.well}</td><td>{s.model || '—'}</td><td>{s.date}</td><td>{STATUS[s.status] || s.status}</td>
+              <td className="muted small">{[s.reasons, s.warnings].filter(Boolean).join('; ') || '—'}</td>
+              <td><select value={d} disabled={busy} onChange={e => decide(s.key, e.target.value as Decision)} aria-label="Решение по исследованию">
+                {(Object.keys(DECISION_TITLE) as Decision[]).map(k => <option key={k} value={k}>{DECISION_TITLE[k]}</option>)}</select>
+                {d !== 'auto' && <span className="muted small"> вручную</span>}</td>
+              <td className={s.use ? 'ok' : ''}>{s.use ? 'да' : 'нет'}</td>
+              <td>{s.n_regimes}</td><td>{fmt(s.a, 4)}</td><td>{fmt(s.b, 5)}</td></tr>
           })}</tbody></table></div>
         {sel.model_only.length > 0 && <p className="muted small">В модели есть, а исследований нет: {sel.model_only.slice(0, 60).join(', ')}{sel.model_only.length > 60 ? ' …' : ''}</p>}
       </section>}

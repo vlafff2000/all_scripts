@@ -1,7 +1,7 @@
 """Адаптация модели по ГДИ (вкладка «Адаптация по ГДИ»): чтение БД ГДИ, отбор исследований, комплект для тНавигатора.
 
 Настройки лежат в `Project.adapt` (adapt.json): db (путь), sheet, cols, settings (gdi_adapt.selection.Settings),
-config (поля gdi_adapt.config.Config), overrides ({скважина БД: True/False}), scenario (чьи результаты задают скважины модели).
+config (поля gdi_adapt.config.Config), overrides ({скважина БД: True/False}), study_overrides ({скважина|дата: True/False - ручное решение по исследованию}), scenario (чьи результаты задают скважины модели).
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def defaults() -> dict:
 def view(p: Project) -> dict:
     a = p.adapt or {}
     return dict(defaults(), db=a.get("db", ""), sheet=a.get("sheet", ""), cols=a.get("cols") or {}, saved_settings=a.get("settings") or {},
-                saved_config=a.get("config") or {}, kit=a.get("kit", ""), overrides=a.get("overrides") or {}, scenario=a.get("scenario", ""),
+                saved_config=a.get("config") or {}, kit=a.get("kit", ""), overrides=a.get("overrides") or {}, study_overrides=a.get("study_overrides") or {}, scenario=a.get("scenario", ""),
                 scenarios=[dict(name=n, path=p.results.get(n, "")) for n in p.scenarios])
 
 
@@ -75,6 +75,11 @@ def model_wells_for(p: Project, scenario: str) -> Tuple[Optional[List[str]], str
     return None, ""
 
 
+def _study_overrides(raw) -> Dict[str, bool]:
+    """Ручные решения по исследованиям; пустое значение (null) - вернуть решение программе."""
+    return {str(k): bool(v) for k, v in (raw or {}).items() if v is not None}
+
+
 def run_selection(p: Project, body: dict) -> Tuple[selection.Selection, dict, Config, selection.Settings]:
     path = str(body.get("db") or "").strip().strip('"')
     if not os.path.isfile(path):
@@ -87,7 +92,9 @@ def run_selection(p: Project, body: dict) -> Tuple[selection.Selection, dict, Co
     studies, notes = _studies(path, str(body.get("sheet") or ""), cols, st)
     model, src = model_wells_for(p, str(body.get("scenario") or ""))
     overrides = {str(k): bool(v) for k, v in (body.get("overrides") or {}).items()}
-    sel = selection.select(studies, cfg, st, model=model, resolve=p.resolve if p.wells else None, overrides=overrides)
+    study_overrides = _study_overrides(body.get("study_overrides"))
+    sel = selection.select(studies, cfg, st, model=model, resolve=p.resolve if p.wells else None, overrides=overrides,
+                           study_overrides=study_overrides)
     sel.notes = notes + ([("Скважины модели взяты из: %s" % src)] if src else ["Скважины модели неизвестны: привяжите результаты расчёта к сценарию — тогда отбор сверится с моделью."])
     return sel, cols, cfg, st
 
@@ -97,14 +104,16 @@ def selection_view(sel: selection.Selection) -> dict:
     inc = [r for r in sel.rows if r.include]
     counts = dict(wells_db=len(rows), included=len(inc), no_model=sum(1 for r in sel.rows if r.note == "нет в модели"),
                   all_bad=sum(1 for r in sel.rows if r.note.startswith("все ГДИ забракованы")),
-                  old=sum(1 for r in sel.rows if "старше" in r.note), model_only=len(sel.model_only))
-    return {"rows": rows, "counts": counts, "model_only": sel.model_only, "notes": sel.notes}
+                  old=sum(1 for r in sel.rows if "старше" in r.note), model_only=len(sel.model_only), manual=sel.manual)
+    studies = [x.to_dict() for x in sel.studies]
+    return {"rows": rows, "counts": counts, "model_only": sel.model_only, "notes": sel.notes, "studies": studies}
 
 
 def save_state(p: Project, folder: str, body: dict, cols: dict) -> None:
     p.adapt = {"db": str(body.get("db") or "").strip().strip('"'), "sheet": str(body.get("sheet") or ""), "cols": cols,
                "settings": body.get("settings") or {}, "config": body.get("config") or {},
-               "overrides": body.get("overrides") or {}, "scenario": str(body.get("scenario") or ""), "kit": (p.adapt or {}).get("kit", "")}
+               "overrides": body.get("overrides") or {}, "study_overrides": _study_overrides(body.get("study_overrides")),
+               "scenario": str(body.get("scenario") or ""), "kit": (p.adapt or {}).get("kit", "")}
     p.save(folder)
 
 

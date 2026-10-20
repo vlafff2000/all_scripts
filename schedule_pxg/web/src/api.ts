@@ -224,20 +224,25 @@ export interface AdaptSettings { p_units: string; q_units: string; min_status: s
 export interface AdaptState {
   config: AdaptConfig; settings: AdaptSettings; p_units: string[]; q_units: string[]
   db: string; sheet: string; cols: Record<string, string>; saved_settings: Partial<AdaptSettings>; saved_config: Partial<AdaptConfig>
-  overrides: Record<string, boolean>; scenario: string; kit: string; scenarios: { name: string; path: string }[]
+  overrides: Record<string, boolean>; study_overrides: Record<string, boolean>; scenario: string; kit: string; scenarios: { name: string; path: string }[]
 }
 export interface AdaptColumns { columns: string[]; detected: Record<string, string>; rows: number }
 export interface AdaptRow {
   well: string; model: string; n_studies: number; n_usable: number; date: string; status: string; age_years: number | null
-  a: number | null; b: number | null; n_regimes: number; note: string; include: boolean; auto: boolean
+  a: number | null; b: number | null; n_regimes: number; note: string; include: boolean; auto: boolean; manual: number
+}
+/** Исследование ГДИ: заключение программы и решение инженера (manual: null - не трогали, true - взять, false - не брать). */
+export interface AdaptStudy {
+  well: string; model: string; date: string; key: string; status: string; reasons: string; warnings: string; n_regimes: number
+  a: number | null; b: number | null; auto: boolean; manual: boolean | null; use: boolean
 }
 export interface AdaptSelection {
-  rows: AdaptRow[]; model_only: string[]; notes: string[]; cols: Record<string, string>
-  counts: { wells_db: number; included: number; no_model: number; all_bad: number; old: number; model_only: number }
+  rows: AdaptRow[]; model_only: string[]; notes: string[]; cols: Record<string, string>; studies: AdaptStudy[]
+  counts: { wells_db: number; included: number; no_model: number; all_bad: number; old: number; model_only: number; manual: number }
 }
 export interface AdaptRequest {
   db: string; sheet?: string; cols?: Record<string, string>; settings: Partial<AdaptSettings>; config: Partial<AdaptConfig>
-  overrides: Record<string, boolean>; scenario: string
+  overrides: Record<string, boolean>; study_overrides: Record<string, boolean>; scenario: string
 }
 export const getAdapt = () => call<AdaptState>('/api/adapt')
 export const getAdaptColumns = (path: string, sheet = '') => call<AdaptColumns>('/api/adapt/columns?' + new URLSearchParams({ path, sheet }))

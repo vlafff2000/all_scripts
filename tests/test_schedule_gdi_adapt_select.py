@@ -313,3 +313,29 @@ def test_snapshots_foreign_class_path_and_garbage(tmp_path, monkeypatch):
     p.write_bytes(b"not a pickle")
     with pytest.raises(ValueError):
         load_snapshots(str(p))
+
+
+def test_manual_study_decisions_override_qc():
+    """Инженер сам решает по каждому исследованию: взять забракованное (подсказка остаётся), не брать годное."""
+    studies, _ = _studies()
+    so = {"33|2024-05-01": True, "35|2023-02-01": False}
+    sel = selection.select(studies, Config.load(None), selection.Settings(), model=["33", "35", "36"], study_overrides=so)
+    rows = {r.well: r for r in sel.rows}
+    assert rows["33"].date.year == 2024 and rows["33"].include and rows["33"].manual == 1
+    assert "взято вручную, программа забраковала" in rows["33"].note
+    assert not rows["35"].include and rows["35"].note == "все взятые ГДИ исключены вручную"
+    assert sel.manual == 2
+    st = {x.key: x for x in sel.studies}
+    assert st["33|2024-05-01"].status == "bad" and st["33|2024-05-01"].reasons and st["33|2024-05-01"].manual is True
+    assert st["33|2022-04-01"].use and st["33|2022-04-01"].manual is None
+    assert not st["35|2023-02-01"].use and st["35|2023-02-01"].auto
+    assert [n for n, _ in selection.chosen_for_kit(sel)] == ["33", "36"]
+
+
+def test_manual_study_history_for_all_dates():
+    studies, _ = _studies()
+    so = {"33|2024-05-01": True}
+    sel = selection.select(studies, Config.load(None), selection.Settings(), model=["33"], study_overrides=so)
+    dates = [g.date.year for _, g in selection.chosen_for_kit(sel, all_dates=True)]
+    assert dates == [2019, 2022, 2024]
+    assert selection.select(studies, Config.load(None), selection.Settings(), model=["33"]).manual == 0
