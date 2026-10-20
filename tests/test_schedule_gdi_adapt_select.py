@@ -1,5 +1,6 @@
 """Адаптация по ГДИ: отбор исследований (качество, самое свежее, расчётные a и b), сопоставление с моделью, комплект, API."""
 import pytest
+import json
 import os
 import sys
 
@@ -217,6 +218,8 @@ def test_all_dates_sequential_include(tmp_path):
     cfg = Config.load(os.path.join(kitdir, "config.json"))
     gs, _ = load_gdi(cfg, os.path.join(kitdir, "all_gdi.xlsx"))
     assert sorted(g.key for g in gs) == ["33@2019-03-01", "33@2022-04-01", "35@2023-02-01"]
+    with open(os.path.join(kitdir, "studies.json"), encoding="utf-8") as f:      # код в тНавигаторе пишет снимки по этим ключам
+        assert sorted(x["key"] for x in json.load(f)) == sorted(g.key for g in gs)
     tnav_api.bind(mock.make_tnav({"33": 91.0, "35": 91.0}), 0)
     snaps = {g.key: tnav_api.extract_snapshot(g.wname, g.date) for g in gs}
     os.makedirs(os.path.join(kitdir, "runs", "x"))
@@ -280,7 +283,9 @@ def test_snapshots_foreign_class_path_and_garbage(tmp_path, monkeypatch):
     import numpy as np
     from schedule_pxg.gdi_adapt.snapshot import WellSnapshot, load_snapshots
     mod = types.ModuleType("foreign_snapshot")      # класс в другом модуле, как в комплекте тНавигатора
-    foreign = dataclasses.make_dataclass("WellSnapshot", [(f.name, object) for f in dataclasses.fields(WellSnapshot)])
+    # старый формат без полей shift_days/t_date (старые снимки); новые поля с умолчанием читаются как значения по умолчанию
+    foreign = dataclasses.make_dataclass("WellSnapshot", [(f.name, object) for f in dataclasses.fields(WellSnapshot)
+                                                          if f.name not in ("shift_days", "t_date")])
     foreign.__module__ = "foreign_snapshot"
     mod.WellSnapshot = foreign
     monkeypatch.setitem(sys.modules, "foreign_snapshot", mod)

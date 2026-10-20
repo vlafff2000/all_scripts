@@ -6,8 +6,8 @@
 """
 from __future__ import annotations
 
-from datetime import timedelta
-from typing import Dict
+from datetime import date, datetime
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -16,6 +16,9 @@ from .snapshot import WellSnapshot
 
 FUNCS = ('get_well_by_name', 'get_all_timesteps', 'get_timestep_from_datetime', 'get_all_models')
 GRAPHS = ('cbp', 'cdrd', 'cgpr', 'cdfac', 'cekh', 'cdiam', 'cefr', 'ctfac', 'wbp', 'wgpr', 'wbhp')
+PERF_GRAPHS = ('cbp', 'cdrd', 'cgpr', 'cdfac', 'cekh', 'cdiam', 'cefr', 'ctfac')
+# графики по перфорациям, которые должны быть посчитаны (конечны) на шаге, чтобы шаг считался пригодным
+PERF_REQUIRED = ('cbp', 'cdrd', 'cgpr', 'cekh', 'cdiam', 'cefr')
 
 _A: Dict[str, object] = {}
 
@@ -51,22 +54,64 @@ def _perf_pok(well, t, name):
     return np.array([float(_A[name][M, c, t]) for c in well.connections if c.is_opened()[M, t]], dtype=float)
 
 
-def _working(well, t) -> bool:
-    return _well_pok(well, t, 'wgpr') > 0
+def _to_dt(x) -> Optional[datetime]:
+    """Дата как datetime без часового пояса; None, если это не дата."""
+    if isinstance(x, datetime):
+        return x.replace(tzinfo=None)
+    if isinstance(x, date):
+        return datetime(x.year, x.month, x.day)
+    return None
 
 
-def _nearest_working(well, t):
-    """Ближайший по времени шаг, на котором скважина работает (сначала вперёд, потом назад)."""
+def _read_step(well, t) -> Optional[dict]:
+    """Данные скважины на шаге, если шаг пригоден для снимка: скважина работает (wgpr>0), wbp конечное и >0,
+    по открытым перфорациям графики конечны, cbp>0. None - шаг непригоден. Исключение при чтении = шаг непригоден."""
+    try:
+        wgpr = _well_pok(well, t, 'wgpr')
+        wbp = _well_pok(well, t, 'wbp')
+        if not (np.isfinite(wgpr) and wgpr > 0):
+            return None
+        if not (np.isfinite(wbp) and wbp > 0):
+            return None
+        perf = {n: _perf_pok(well, t, n) for n in PERF_GRAPHS}
+        if len(perf['cbp']) == 0:
+            return None
+        if not all(np.isfinite(perf[n]).all() for n in PERF_REQUIRED):
+            return None
+        if not (perf['cbp'] > 0).all():
+            return None
+        return dict(perf=perf, wbp=wbp, wgpr=wgpr, wbhp=_well_pok(well, t, 'wbhp'))
+    except Exception:
+        return None
+
+
+def _search_order(steps: list, idx: int, gdi_dt: Optional[datetime]) -> List[int]:
+    """Порядок проверки шагов, кроме шага на дату (idx): по модулю разности дат шага и даты ГДИ (в днях);
+    при равенстве - вперёд. Если у шагов нет даты - по индексу (сначала соседний вперёд, потом назад)."""
+    dates = [_to_dt(getattr(s, 'date', None)) for s in steps]
+    if gdi_dt is not None and all(d is not None for d in dates):
+        key = lambda j: (abs((dates[j] - gdi_dt).total_seconds()), j < idx)
+    else:
+        key = lambda j: (abs(j - idx), j < idx)
+    return sorted((j for j in range(len(steps)) if j != idx), key=key)
+
+
+def _pick_step(well, t_req, gdi_dt: Optional[datetime]) -> Tuple[object, dict, bool]:
+    """Шаг для снимка: сам шаг на дату, если пригоден, иначе ближайший пригодный. Возвращает (шаг, данные, substituted)."""
+    data = _read_step(well, t_req)
+    if data is not None:
+        return t_req, data, False
     steps = list(_A['get_all_timesteps']())
     names = [s.name for s in steps]
-    if t.name not in names:
-        raise ModelDataError(f'шаг {t.name} не найден в списке шагов модели')
-    idx = names.index(t.name)
-    for i in range(1, len(steps)):
-        for j in (idx + i, idx - i):
-            if 0 <= j < len(steps) and _working(well, steps[j]):
-                return steps[j]
-    raise WellNotWorkingError(f'скважина не работает ни на одном шаге модели (искали от {t.name})')
+    if t_req.name not in names:
+        raise ModelDataError(f'шаг {t_req.name} не найден в списке шагов модели')
+    idx = names.index(t_req.name)
+    for j in _search_order(steps, idx, gdi_dt):
+        data = _read_step(well, steps[j])
+        if data is not None:
+            return steps[j], data, True
+    raise WellNotWorkingError(f'скважина не работает (или перфорации не посчитаны) ни на одном шаге модели '
+                              f'(искали от {t_req.name})')
 
 
 def extract_snapshot(wname: str, date) -> WellSnapshot:
@@ -77,16 +122,15 @@ def extract_snapshot(wname: str, date) -> WellSnapshot:
     if well is None:
         raise ModelDataError(f'скважина {wname} не найдена в модели')
     t_req = _timestep(date)
-    t, substituted = t_req, False
-    if not _working(well, t_req):
-        t = _nearest_working(well, t_req)
-        substituted = True
-    perf = {n: _perf_pok(well, t, n) for n in ('cbp', 'cdrd', 'cgpr', 'cdfac', 'cekh', 'cdiam', 'cefr', 'ctfac')}
-    if len(perf['cbp']) == 0:
-        raise ModelDataError(f'у скважины {wname} нет открытых перфораций на шаге {t.name}')
+    gdi_dt = _to_dt(date)
+    t, data, substituted = _pick_step(well, t_req, gdi_dt)
+    t_dt = _to_dt(getattr(t, 'date', None))
+    shift = float((t_dt - gdi_dt).total_seconds() / 86400.0) if (t_dt is not None and gdi_dt is not None) else 0.0
+    perf = data['perf']
     return WellSnapshot(
         wname=wname, t_name=str(t.name), t_requested=str(t_req.name), substituted=substituted, **perf,
-        wbp=_well_pok(well, t, 'wbp'), wgpr=_well_pok(well, t, 'wgpr'), wbhp=_well_pok(well, t, 'wbhp'))
+        wbp=data['wbp'], wgpr=data['wgpr'], wbhp=data['wbhp'],
+        shift_days=shift, t_date=t_dt.strftime('%d.%m.%Y') if t_dt is not None else '')
 
 
 class TnavProvider:

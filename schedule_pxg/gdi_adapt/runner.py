@@ -67,6 +67,14 @@ class RunResult:
         return sum(r.ok for r in self.results)
 
 
+def _snapshot_info(res: AdaptResult, snap: WellSnapshot, cfg) -> None:
+    """Шаг модели, с которого взят снимок: в строку результата и замечание, если сдвиг от даты ГДИ большой."""
+    res.t_requested = str(getattr(snap, 't_requested', '') or res.t_name)
+    res.shift_days = float(getattr(snap, 'shift_days', 0.0) or 0.0)
+    if abs(res.shift_days) > cfg.max_step_shift_days:
+        res.problems.append(f'снимок модели сдвинут на {abs(res.shift_days):.0f} дн. от даты ГДИ')
+
+
 _BLAS_VARS = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS')
 
 
@@ -218,7 +226,7 @@ def run(cfg, project_dir: str, provider, progress: Optional[Callable[[int, int],
                     snap = provider(g0)
                 snaps[g0.key] = snap
                 plan.append(dict(g0=g0, tag=tag, qc=qc, treat=treat, qc_row=False,
-                                 job=(g, snap, _job_pvt(pvt), cfg, bool(cfg.ci_jackknife and g.source == 'gdi'))))
+                                 snap=snap, job=(g, snap, _job_pvt(pvt), cfg, bool(cfg.ci_jackknife and g.source == 'gdi'))))
             except AdaptError as e:
                 plan.append(dict(g0=g0, tag=tag, qc=None, qc_row=False, fail=str(e), log=f'{tag}: ПРОПУЩЕНА - {e}'))
                 tick()
@@ -239,6 +247,7 @@ def run(cfg, project_dir: str, provider, progress: Optional[Callable[[int, int],
                     log(warns[0])
                 if kind == 'ok':
                     res = payload
+                    _snapshot_info(res, it['snap'], cfg)
                     if qc is not None:
                         res.qc_status = qc.status
                         if qc.status == 'bad':

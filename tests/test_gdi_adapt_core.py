@@ -9,6 +9,8 @@ import zipfile
 
 import numpy as np
 import pandas as pd
+from datetime import datetime, timedelta
+
 from scipy import integrate
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize
@@ -207,6 +209,23 @@ class TestAdapt(unittest.TestCase):
         self.assertTrue(np.isfinite(r.pi_mult))
 
 
+    def test_big_step_shift_flagged(self):
+        from schedule_pxg.gdi_adapt.runner import _snapshot_info
+        gdi, snap = self.make_truth(1.7, 3e-5)
+        cfg = make_cfg(strategy='dp')
+        snap.t_requested, snap.t_name, snap.substituted = '1', '2', True
+        snap.shift_days = -120.0
+        r = adapt_well(gdi, snap, self.pvt, cfg)
+        _snapshot_info(r, snap, cfg)
+        self.assertEqual(r.t_requested, '1')
+        self.assertEqual(r.shift_days, -120.0)
+        self.assertTrue(any('снимок модели сдвинут на 120 дн. от даты ГДИ' in p for p in r.problems), r.problems)
+        snap.shift_days = 30.0
+        r2 = adapt_well(gdi, snap, self.pvt, cfg)
+        _snapshot_info(r2, snap, cfg)
+        self.assertFalse(any('сдвинут' in p for p in r2.problems))
+
+
 class TestIO(unittest.TestCase):
     def test_config_typo_hint(self):
         with self.assertRaises(ValueError) as cm:
@@ -403,6 +422,78 @@ class TestInverseAndQC(unittest.TestCase):
             from openpyxl import load_workbook
             wb = load_workbook(os.path.join(res['average'].run_dir, 'report.xlsx'))
             self.assertIn('Качество ГДИ', wb.sheetnames)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _old_snapshot():
+    """Снимок в формате до появления shift_days и t_date (как в старых pickle)."""
+    s = synthetic_snapshot(85.0)
+    for k in ('shift_days', 't_date'):
+        s.__dict__.pop(k, None)
+    return s
+
+
+class TestStepSelection(unittest.TestCase):
+    """Выбор шага модели для снимка: пригодность (работает, перфорации посчитаны), порядок поиска, сдвиг от даты ГДИ."""
+
+    def tearDown(self):
+        tnav_api.bind(mock_tnav.make_tnav({'33': 85.0}))     # не оставлять мок с NaN другим тестам
+
+    def test_nan_step_skipped_no_dates(self):
+        from schedule_pxg.gdi_adapt.errors import WellNotWorkingError
+        tnav_api.bind(mock_tnav.make_tnav({'33': 85.0}, nan_steps={'33': ['2']}))
+        s = tnav_api.extract_snapshot('33', datetime(2025, 1, 1))
+        self.assertEqual((s.t_requested, s.t_name, s.substituted), ('2', '3', True))   # без дат - соседний вперёд
+        self.assertEqual(s.shift_days, 0.0)
+        self.assertEqual(s.t_date, '')
+        self.assertTrue(np.isfinite(s.cbp).all() and (s.cbp > 0).all())
+        tnav_api.bind(mock_tnav.make_tnav({'33': 85.0}, nan_steps={'33': ['2', '3']}))
+        s = tnav_api.extract_snapshot('33', datetime(2025, 1, 1))
+        self.assertEqual(s.t_name, '1')                                                # вперёд не годится - назад
+        tnav_api.bind(mock_tnav.make_tnav({'33': 85.0}, nan_steps={'33': [str(i) for i in range(5)]}))
+        with self.assertRaises(WellNotWorkingError):
+            tnav_api.extract_snapshot('33', datetime(2025, 1, 1))
+
+    def test_nearest_by_days_not_index(self):
+        base = datetime(2020, 3, 1)
+        offs = [0, 80, 100, 130, 200]                    # на дату ГДИ (+90 дн) nearest_after - шаг 2 (+100)
+        dates = [base + timedelta(days=o) for o in offs]
+        gdi = base + timedelta(days=90)
+        # шаг 2 не посчитан: по дням ближе шаг 1 (|80-90|=10), а не шаг 3 (|130-90|=40), хотя по индексу шаг 3 раньше
+        tnav_api.bind(mock_tnav.make_tnav({'33': 85.0}, dates=dates, nan_steps={'33': ['2']}))
+        s = tnav_api.extract_snapshot('33', gdi)
+        self.assertEqual((s.t_requested, s.t_name, s.substituted), ('2', '1', True))
+        self.assertEqual(s.shift_days, -10.0)
+        self.assertEqual(s.t_date, dates[1].strftime('%d.%m.%Y'))
+        # шаг 1 тоже не посчитан: следующий по дням - шаг 3 (+40 дн)
+        tnav_api.bind(mock_tnav.make_tnav({'33': 85.0}, dates=dates, nan_steps={'33': ['2', '1']}))
+        s = tnav_api.extract_snapshot('33', gdi)
+        self.assertEqual(s.t_name, '3')
+        self.assertEqual(s.shift_days, 40.0)
+        # шаг на дату пригоден - берём его, сдвиг 10 дн. (со знаком: шаг 2 - ГДИ = +10)
+        tnav_api.bind(mock_tnav.make_tnav({'33': 85.0}, dates=dates))
+        s = tnav_api.extract_snapshot('33', gdi)
+        self.assertEqual((s.t_name, s.substituted, s.shift_days), ('2', False, 10.0))
+
+    def test_snapshot_without_new_fields_reads(self):
+        import pickle
+        from schedule_pxg.gdi_adapt.runner import _snapshot_info
+        from schedule_pxg.gdi_adapt.snapshot import save_snapshots
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, 'old.pkl')
+            with open(path, 'wb') as f:          # pickle старого вида: без shift_days и t_date
+                pickle.dump({'33': _old_snapshot()}, f)
+            snaps = load_snapshots(path)
+            s = snaps['33']
+            self.assertNotIn('shift_days', s.__dict__)
+            self.assertEqual(getattr(s, 'shift_days', 0.0), 0.0)
+            self.assertEqual(s.shift_days, 0.0)
+            self.assertEqual(getattr(s, 't_date', ''), '')
+            self.assertEqual(s.n_perf, 3)
+            save_snapshots(snaps, os.path.join(tmp, 'new.pkl'))
+            self.assertIn('33', load_snapshots(os.path.join(tmp, 'new.pkl')))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

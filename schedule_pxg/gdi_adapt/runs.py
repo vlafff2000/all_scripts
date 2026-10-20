@@ -39,6 +39,7 @@ def result_dict(r: AdaptResult, qc: str = "") -> dict:
         wbp_model=_f(r.wbp_model), q_op=_f(r.q_op / Q_SHOW), q_ratio=_f(r.q_ratio),
         dp2_err_before=_f(r.dp2_err_before), dp2_err_after=_f(r.dp2_err_after),
         ok=r.ok, problems=list(r.problems), notes=list(r.notes), substituted=bool(r.substituted), t_name=r.t_name,
+        t_requested=r.t_requested, shift_days=_f(r.shift_days),
         q_gdi=_arr(r.q_gdi, Q_SHOW), q_before=_arr(r.q_before, Q_SHOW), q_after=_arr(r.q_after, Q_SHOW), dp2_gdi=_arr(r.dp2_gdi),
         curve_q=_arr(r.curve_q, Q_SHOW), curve_before=_arr(r.curve_dp2_before), curve_after=_arr(r.curve_dp2_after),
         at_bound=any("границе" in p for p in r.problems))
