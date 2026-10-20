@@ -23,7 +23,7 @@ sys.path.insert(0, HERE)
 from schedule_pxg.gdi_adapt import physics as ph, tnav_api                       # noqa: E402
 from schedule_pxg.gdi_adapt.adapt import adapt_well                              # noqa: E402
 from schedule_pxg.gdi_adapt.config import Config                                 # noqa: E402
-from schedule_pxg.gdi_adapt.gdi import GDI, load_gdi                             # noqa: E402
+from schedule_pxg.gdi_adapt.gdi import GDI, fit_ab, load_gdi                     # noqa: E402
 from schedule_pxg.gdi_adapt.outputs import write_include                         # noqa: E402
 from schedule_pxg.gdi_adapt.pvt import PVT                                       # noqa: E402
 from schedule_pxg.gdi_adapt.runner import run                                    # noqa: E402
@@ -226,6 +226,79 @@ class TestAdapt(unittest.TestCase):
         self.assertFalse(any('сдвинут' in p for p in r2.problems))
 
 
+class TestNegativeB(unittest.TestCase):
+    """Коэффициент B < 0 физически невозможен: ГДИ бракуется, итоговая модель помечается."""
+    REASON = 'коэффициент b < 0 (физически невозможно)'
+
+    def setUp(self):
+        self.pvt = PVT.from_csv(PVT_FILE)
+
+    def _gdi(self, b_file=None):
+        # dP^2 почти вогнут по дебиту (B < 0 по МНК); qu = Q/1000 м3/сут
+        q = np.array([4e4, 8e4, 1.2e5, 1.6e5, 2.0e5])
+        qu = q / 1000.0
+        dp2 = 2.0 * qu - 0.012 * qu ** 2
+        wbp = np.full(5, 90.0)
+        bhp = np.sqrt(wbp ** 2 - dp2)
+        g = GDI('N', pd.Timestamp('2024-01-01').to_pydatetime(), wbp, bhp, q, float('nan'), float('nan'))
+        g.a, g.b = fit_ab(q, wbp, bhp)
+        if b_file is not None:               # B из файла ГДИ (cfg.b_col), а не МНК
+            g.b = b_file
+        return g
+
+    def test_fit_ab_negative_b_is_bad(self):
+        from schedule_pxg.gdi_adapt.quality import assess
+        g = self._gdi()
+        self.assertLess(g.b, 0)
+        qc = assess(g, make_cfg())
+        self.assertEqual(qc.status, 'bad')
+        self.assertIn(self.REASON, qc.reasons)
+
+    def test_b_from_file_negative_is_bad(self):
+        from schedule_pxg.gdi_adapt.quality import assess
+        g = self._gdi(b_file=-1e-4)           # данные нормальные, но в файле отрицательный B
+        qc = assess(g, make_cfg())
+        self.assertEqual(qc.status, 'bad')
+        self.assertIn(self.REASON, qc.reasons)
+        self.assertIn('b_gdi', qc.metrics)
+        self.assertLess(qc.metrics['b_gdi'], 0)
+
+    def test_positive_b_not_flagged(self):
+        from schedule_pxg.gdi_adapt.quality import assess
+        q = np.array([4e4, 8e4, 1.2e5, 1.6e5, 2.0e5])
+        qu = q / 1000.0
+        wbp = np.full(5, 90.0)
+        bhp = np.sqrt(wbp ** 2 - (2.0 * qu + 0.012 * qu ** 2))
+        g = GDI('P', pd.Timestamp('2024-01-01').to_pydatetime(), wbp, bhp, q, float('nan'), float('nan'))
+        g.a, g.b = fit_ab(q, wbp, bhp)
+        qc = assess(g, make_cfg())
+        self.assertNotIn(self.REASON, qc.reasons)
+        self.assertGreater(g.b, 0)
+
+    def test_model_negative_b_marks_result(self):
+        from unittest import mock
+        from schedule_pxg.gdi_adapt.runs import result_dict
+        gdi, snap = TestAdapt.make_truth(self, 1.5, 2e-5)
+        cfg = make_cfg(strategy='dp')
+        real = adapt_well(gdi, snap, self.pvt, cfg)
+        self.assertTrue(real.ok, real.problems)
+        with mock.patch('schedule_pxg.gdi_adapt.adapt.fit_ab_dp2', return_value=(2.0, -3e-4)):
+            r = adapt_well(gdi, snap, self.pvt, cfg)
+        self.assertIn('b модели < 0', r.problems)
+        self.assertFalse(r.ok)
+        d = result_dict(r)
+        self.assertLess(d['b_model'], 0)
+        self.assertIn('b_gdi', d)
+        self.assertFalse(d['ok'])
+        self.assertIn('pi_mult', d)                        # старые ключи на месте
+
+    def test_model_b_positive_on_truth(self):
+        gdi, snap = TestAdapt.make_truth(self, 1.5, 2e-5)
+        r = adapt_well(gdi, snap, self.pvt, make_cfg(strategy='dp'))
+        self.assertTrue(np.isfinite(r.b_model) and r.b_model >= 0)
+        self.assertFalse(any('b модели' in p for p in r.problems))
+
+
 class TestIO(unittest.TestCase):
     def test_config_typo_hint(self):
         with self.assertRaises(ValueError) as cm:
@@ -409,7 +482,7 @@ class TestInverseAndQC(unittest.TestCase):
             for pol in ('skip', 'average', 'adapt'):
                 cfg = make_cfg(output_dir=tmp, qc_enabled=True, bad_gdi_policy=pol)
                 res[pol] = run(cfg, ROOT, TnavProvider())
-            n_bad = 21
+            n_bad = 29           # было 21; +8 - правило «коэффициент b < 0» (B по МНК у этих ГДИ отрицательный)
             self.assertEqual(len(res['skip'].results), 75 - n_bad)
             self.assertTrue(all('забраковано' in w for _, w in res['skip'].failures if True) or True)
             self.assertEqual(len(res['average'].results), 75)

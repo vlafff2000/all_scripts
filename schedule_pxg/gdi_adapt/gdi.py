@@ -58,14 +58,22 @@ class GDI:
         return f'ГДИ скв. {self.wname} от {self.date:%d.%m.%Y}, режимов: {self.n_points}'
 
 
-def fit_ab(q_m3d, wbp, bhp, ab_q_units: str = '10^3 m3/day') -> Tuple[float, float]:
-    """МНК: Pпл^2 - Pз^2 = A*Q + B*Q^2 (без свободного члена). Нужно >= 2 различных дебитов."""
+def fit_ab_dp2(q_m3d, dp2, ab_q_units: str = '10^3 m3/day') -> Tuple[float, float]:
+    """МНК: dP^2 = A*Q + B*Q^2 (без свободного члена) по готовым dP^2 (бар^2); точки с NaN пропускаются.
+    Нужно >= 2 различных дебитов. Общая часть для ГДИ (fit_ab) и для модельной кривой после адаптации."""
     q = np.asarray(q_m3d, dtype=float) / CONVERSION['flow_rate'][ab_q_units]
+    dp2 = np.asarray(dp2, dtype=float)
+    ok = np.isfinite(q) & np.isfinite(dp2)
+    q, dp2 = q[ok], dp2[ok]
     if len(np.unique(np.round(q, 9))) < 2:
         return float('nan'), float('nan')
-    sq_dp = np.asarray(wbp, dtype=float) ** 2 - np.asarray(bhp, dtype=float) ** 2
-    coef, *_ = np.linalg.lstsq(np.vstack((q, q ** 2)).T, sq_dp, rcond=None)
+    coef, *_ = np.linalg.lstsq(np.vstack((q, q ** 2)).T, dp2, rcond=None)
     return float(coef[0]), float(coef[1])
+
+
+def fit_ab(q_m3d, wbp, bhp, ab_q_units: str = '10^3 m3/day') -> Tuple[float, float]:
+    """МНК: Pпл^2 - Pз^2 = A*Q + B*Q^2 (без свободного члена). Нужно >= 2 различных дебитов."""
+    return fit_ab_dp2(q_m3d, np.asarray(wbp, dtype=float) ** 2 - np.asarray(bhp, dtype=float) ** 2, ab_q_units)
 
 
 def _clean_name(x) -> str:

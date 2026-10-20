@@ -10,10 +10,12 @@
       в т.ч. когда dP^2 не растёт с дебитом;
     * медианная депрессия меньше qc_min_dp_bar (в пределах погрешности замера давления);
     * разброс Pпл между режимами больше qc_max_pres_spread от медианной депрессии (dP^2 тонет в шуме);
-    * слишком много режимов отброшено при загрузке (Pзаб >= Pпл или Q <= 0).
+    * слишком много режимов отброшено при загрузке (Pзаб >= Pпл или Q <= 0);
+    * коэффициент B по ГДИ (МНК без ограничений, либо из файла) < 0 - физически невозможно.
   ПРЕДУПРЕЖДЕНИЕ (исследование используется, но отмечено):
     * единичные нарушения монотонности; повторные режимы с разными dP^2 (повторяемость хуже qc_repeat_tol);
-    * свободный МНК даёт A < 0 или B < 0 (кривая нефизична, но допустимая её версия данные описывает);
+    * свободный МНК даёт A < 0 (кривая нефизична, но допустимая её версия данные описывает);
+      B < 0 по МНК - брак (см. выше), здесь остаётся предупреждение по кривизне;
       выброс на кривой (остаток > 30%).
 
 Политика для брака (bad_gdi_policy): 'skip' - не настраивать; 'average' - настроить на «среднюю скважину»;
@@ -126,6 +128,8 @@ def assess(gdi: GDI, cfg) -> QC:
         bad.append(f'разброс Pпл между режимами {pres_spread:.2f} бар сопоставим с депрессией {dp_med:.2f} бар')
     if dropped_frac > cfg.qc_max_dropped_frac:
         bad.append(f'отброшено режимов {gdi.n_dropped} из {n_total} (Pзаб >= Pпл или Q <= 0)')
+    if np.isfinite(gdi.b) and gdi.b < 0:
+        bad.append('коэффициент b < 0 (физически невозможно)')
 
     # ---------------- ПРЕДУПРЕЖДЕНИЯ ----------------
     if np.isfinite(fit_r2) and n_dist >= 3 and cfg.qc_min_fit_r2 <= fit_r2 < WARN_FIT_R2:
@@ -145,7 +149,7 @@ def assess(gdi: GDI, cfg) -> QC:
     metrics = dict(n_regimes=gdi.n_points, n_distinct=n_dist, rate_ratio=rate_ratio, dp_min=float(dp.min()),
                    dp_med=dp_med, dp_max=float(dp.max()), pres_spread=pres_spread, spread_rel=spread_rel,
                    nonmono=viol, repeat_spread=repeat_spread, fit_r2=fit_r2, max_resid=max_resid, a=a, b=b,
-                   a_raw=a_raw, b_raw=b_raw)
+                   a_raw=a_raw, b_raw=b_raw, b_gdi=float(gdi.b))
     return QC(status, bad, warn, metrics)
 
 

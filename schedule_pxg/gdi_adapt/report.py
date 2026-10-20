@@ -64,17 +64,17 @@ def _qc_sheet(ws, qc_rows) -> None:
     ws.append(['Скв.', 'Дата ГДИ', 'Качество ГДИ', 'Что сделано', 'Режимов', 'Различных дебитов', 'Qmax/Qmin',
                'Депрессия мин, бар', 'Депрессия медиана', 'Депрессия макс', 'Разброс Pпл, бар',
                'Нарушений монотонности', 'R² индикаторной кривой', 'A (A,B ≥ 0)', 'B (A,B ≥ 0)',
-               'Причины брака', 'Предупреждения'])
+               'B по ГДИ (МНК без ограничений)', 'Причины брака', 'Предупреждения'])
     _header(ws)
     for r in qc_rows:
         q, m = r['qc'], r['qc'].metrics
         ws.append([r['wname'], f"{r['date']:%d.%m.%Y}", STATUS_RU[q.status], r['treatment'], m['n_regimes'],
                    m['n_distinct'], _v(m['rate_ratio']), _v(m['dp_min']), _v(m['dp_med']), _v(m['dp_max']),
-                   _v(m['pres_spread']), m['nonmono'], _v(m['fit_r2']), _v(m['a']), _v(m['b']), q.reasons, q.warnings])
+                   _v(m['pres_spread']), m['nonmono'], _v(m['fit_r2']), _v(m['a']), _v(m['b']), _v(m['b_gdi']), q.reasons, q.warnings])
         n = ws.max_row
         ws.cell(n, 3).fill = _fill(STATUS_FILL[q.status])
         for col, fmt in ((7, '0.00'), (8, '0.000'), (9, '0.000'), (10, '0.000'), (11, '0.00'), (13, '0.000'),
-                         (14, '0.00E+00'), (15, '0.00E+00')):
+                         (14, '0.00E+00'), (15, '0.00E+00'), (16, '0.00E+00')):
             ws.cell(n, col).number_format = fmt
     ws.freeze_panes = 'B2'
     ws.auto_filter.ref = ws.dimensions

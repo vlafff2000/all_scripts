@@ -21,7 +21,7 @@ from scipy.optimize import minimize
 
 from . import physics as ph
 from .errors import AdaptError
-from .gdi import GDI, fit_ab
+from .gdi import GDI, fit_ab_dp2
 
 
 @dataclass
@@ -215,7 +215,10 @@ def adapt_well(gdi: GDI, snap, pvt, cfg) -> AdaptResult:
         problems.append(f'дебит модели на дату ГДИ ({q_op:,.0f} м³/сут) в {k:.1f} раз {word} дебитов ГДИ '
                         f'(модель на эту дату не соответствует режиму исследования?)'.replace(',', ' '))
 
-    a_mod, b_mod = fit_ab(q_after, p_res, pbhp, cfg.ab_q_units)
+    # A, B модели - из её собственной кривой dP^2(Q) после адаптации (та же МНК-процедура, что для ГДИ)
+    a_mod, b_mod = fit_ab_dp2(grid, curve_a, cfg.ab_q_units)
+    if np.isfinite(b_mod) and b_mod < 0:
+        problems.append('b модели < 0')
 
     return AdaptResult(
         wname=gdi.wname, date=gdi.date, strategy=cfg.strategy, t_name=snap.t_name, substituted=snap.substituted,
