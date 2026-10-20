@@ -63,6 +63,7 @@ class Config:
     rate_mismatch_tol: float = 0.05       # |сумма дебитов перфораций - дебит скважины| / дебит > tol -> замечание
 
     model_rate_ratio_tol: float = 3.0     # дебит модели на дату ГДИ отличается от дебитов ГДИ более чем в N раз -> замечание
+    max_step_shift_days: float = 90.0     # снимок взят с шага модели, сдвинутого от даты ГДИ больше чем на N дней -> замечание
 
     # ---------------- входной контроль качества ГДИ (см. pi_dfac/quality.py) ----------------
     qc_enabled: bool = True
@@ -122,6 +123,8 @@ class Config:
                 raise ValueError(f'well_bounds[{w}].dfac_bounds={df}: нужно 0 <= min < max')
             wb[str(w)] = {'pi_mult_bounds': list(pm), 'dfac_bounds': list(df)}
         self.well_bounds = wb or None
+        if self.max_step_shift_days < 0:
+            raise ValueError('max_step_shift_days должно быть >= 0')
         if self.n_starts < 1:
             raise ValueError('n_starts должно быть >= 1')
         if self.wells is not None:
