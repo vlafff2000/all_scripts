@@ -269,3 +269,11 @@ export interface AdaptColCheck { ok: boolean; rows: number; problems: string[]; 
 export const adaptCheckColumns = (b: { db: string; sheet?: string; cols: Record<string, string> }) => call<AdaptColCheck>('/api/adapt/columns/check', post(b))
 export const adaptCode = (kit: string) => call<{ code: string; path: string }>('/api/adapt/code?' + new URLSearchParams({ kit }))
 export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv') => '/api/adapt/file?' + new URLSearchParams({ dir, kind })
+/** Настройки индикаторной диаграммы для выгрузки: ось Y, какие кривые, оформление, ширина графика (мм). */
+export interface AdaptChartStyle { y: 'dp2' | 'dp2q'; variant: 'both' | 'before' | 'after'; look: 'default' | 'excel'; width: number; dpi: number }
+/** Одна диаграмма исследования (id = «скважина|дата»): скачивается файлом PNG / SVG / PDF / XLSX. */
+export const adaptExportChart = (b: AdaptChartStyle & { run_dir: string; id: string; format: string }, fallback: string) =>
+  download('/api/adapt/export/chart', b, fallback)
+/** Пакет диаграмм в ZIP: ids = null - все исследования запуска, иначе выбранные. */
+export const adaptExportZip = (b: AdaptChartStyle & { run_dir: string; ids: string[] | null; formats: string[] }) =>
+  download('/api/adapt/export/zip', b, 'indicator_charts_' + b.y + '.zip')
