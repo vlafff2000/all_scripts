@@ -19,6 +19,10 @@ table.raw tbody tr { cursor: pointer; }
 table.raw tr.hdr { background: var(--accent-soft); font-weight: 700; }
 table.raw thead th { background: var(--head-bg); position: sticky; top: 0; }
 .tpl-item { display: flex; justify-content: space-between; align-items: center; }
+/* Шаг 6 «Адаптация по ГДИ»: графики по 2 в ряд; название одной строкой (кнопки уходят на свою строку, длинное название обрезается с многоточием). */
+.adapt-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(480px, 100%), 1fr)); gap: 12px; margin: 8px 0 14px; }
+.adapt-charts .chart figcaption { flex-wrap: wrap; }
+.adapt-charts .chart figcaption > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; min-width: 0; }
 .link { background: none; border: 0; color: var(--accent-strong); text-decoration: underline; padding: 3px 0; }
 .x { background: none; border: 0; color: var(--muted); }
 .issues { padding-left: 18px; font-size: 13px; }
