@@ -67,7 +67,9 @@ def write_kit(folder: str, chosen: List[Tuple[str, GDI]], settings: Dict = None,
             shutil.copy2(os.path.join(HERE, name), pkg)
     selected_table(chosen).to_excel(os.path.join(folder, "all_gdi.xlsx"), index=False)
     shutil.copy2(pvt_path or os.path.join(HERE, "pvt_default.csv"), os.path.join(folder, "pvt_data.csv"))
-    studies = [{"key": g.key, "well": n, "date": g.date.strftime("%Y-%m-%d")} for n, g in chosen]
+    # ключ как у GDI.key при чтении all_gdi.xlsx: имя скважины, а при нескольких датах - имя@дата (иначе снимки затирают друг друга)
+    studies = [{"key": "%s@%s" % (n, g.date.strftime("%Y-%m-%d")) if cfg.all_dates else n, "well": n, "date": g.date.strftime("%Y-%m-%d")}
+               for n, g in chosen]
     with open(os.path.join(folder, "studies.json"), "w", encoding="utf-8") as f:
         json.dump(studies, f, ensure_ascii=False, indent=1)
     code = code_text(folder)
