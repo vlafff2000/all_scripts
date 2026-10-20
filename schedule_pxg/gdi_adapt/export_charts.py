@@ -6,16 +6,21 @@
 """
 from __future__ import annotations
 
+import dataclasses
+import datetime as dt
 import io
 import json
 import os
 import re
+import string
 import threading
 import zipfile
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Iterable, List, Mapping, Optional, Tuple
 
 import numpy as np
+
+from pxg_core import word_export as wx
 
 PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#8a5a14']
 SLOT_AFTER, SLOT_GDI, SLOT_BEFORE = PALETTE[0], PALETTE[3], PALETTE[5]
@@ -25,6 +30,7 @@ LOOKS = ('default', 'excel')
 PNG_DPI = (300, 600, 1200)
 FORMATS = ('png', 'svg', 'pdf', 'xlsx')
 XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 MIME = {'png': 'image/png', 'svg': 'image/svg+xml', 'pdf': 'application/pdf', 'xlsx': XLSX, 'zip': 'application/zip'}
 _LOCK = threading.Lock()                               # rc_context глобальный: рисуем по одному
 
@@ -111,17 +117,28 @@ def _pct(v) -> Optional[str]:
 
 def render(row: Mapping[str, Any], style: Style, fmt: str) -> bytes:
     """Один график (PNG / SVG / PDF). Стиль - как у графиков Атласа: сетка, легенда, цвета слотов."""
-    try:
-        from matplotlib import rc_context
-        from matplotlib.figure import Figure
-    except ImportError:
-        raise ValueError('Для PNG, SVG и PDF нужен пакет matplotlib (его нет в этой сборке). Таблица XLSX доступна без него.') from None
     if fmt not in ('png', 'svg', 'pdf'):
         raise ValueError('Для графика форматы: png, svg, pdf')
     width = style.width_mm
     height = style.height_mm or round(width * 0.7)
     if fmt == 'png' and width * height * (style.dpi / 25.4) ** 2 > 90_000_000:
         raise ValueError('Слишком большой PNG. Уменьшите ширину или DPI.')
+    return _draw(row, style, width, height, lambda fig: _save(fig, fmt, style.dpi))
+
+
+def _save(fig, fmt: str, dpi: int) -> bytes:
+    buf = io.BytesIO()
+    fig.savefig(buf, format=fmt, dpi=dpi)
+    return buf.getvalue()
+
+
+def _draw(row: Mapping[str, Any], style: Style, width: float, height: float, save) -> bytes:
+    """Рисует график размером ``width`` x ``height`` мм и отдаёт его ``save(fig)``. Общая часть для файла и для Word."""
+    try:
+        from matplotlib import rc_context
+        from matplotlib.figure import Figure
+    except ImportError:
+        raise ValueError('Для PNG, SVG и PDF нужен пакет matplotlib (его нет в этой сборке). Таблица XLSX доступна без него.') from None
     excel = style.look == 'excel'
     fam = ['Calibri', 'Carlito', 'DejaVu Sans'] if excel else ['DejaVu Sans']
     byq = style.y == 'dp2q'
@@ -158,9 +175,7 @@ def render(row: Mapping[str, Any], style: Style, fmt: str) -> bytes:
         else:
             ax.grid(True, ls='--', lw=.5, color='#c9ced6')
             ax.legend(loc='upper left', fontsize=7.5, frameon=True)
-        buf = io.BytesIO()
-        fig.savefig(buf, format=fmt, dpi=style.dpi)
-        return buf.getvalue()
+        return save(fig)
 
 
 def _column(values, style: Style) -> List[Optional[float]]:
@@ -246,3 +261,147 @@ def zip_bytes(rows: List[Mapping[str, Any]], style: Style, fmts: Iterable[str]) 
 
 def _safe(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|\s]+', '_', name).strip('._') or 'chart'
+
+
+# ---------- Word: таблица графиков (макет и подписи как в Газовом атласе) ----------
+
+CAPTION_DEFAULT = 'Рисунок {n} – Индикаторная диаграмма адаптации, скв. {скважина}, ГДИ {дата}'
+CAPTION_FIELDS = ('n', 'номер', 'скважина', 'дата', 'объект', 'группа', 'режимов', 'pi_mult', 'r2', 'r2_old')
+PREVIEW_DPI = 150                                      # предпросмотр листа строится быстрее, чем документ
+DOCX_PIXEL_LIMIT = 90_000_000
+
+
+def check_caption(template: Any) -> str:
+    """Шаблон подписи: неизвестное поле или незакрытая скобка - понятная ошибка до построения графиков."""
+    if not isinstance(template, str):
+        raise ValueError('Шаблон подписи: нужна строка')
+    try:
+        parsed = list(string.Formatter().parse(template))
+    except ValueError:
+        raise ValueError('Шаблон подписи: незакрытая фигурная скобка') from None
+    for _, field, spec, conv in parsed:
+        if field is not None and (field not in CAPTION_FIELDS or spec or conv):
+            raise ValueError('Неизвестное поле подписи: {%s}. Допустимы: %s' % (field, ', '.join('{%s}' % f for f in CAPTION_FIELDS)))
+    return template
+
+
+def _num_text(v, fmt: str) -> str:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return '—'
+    return '—' if not np.isfinite(x) else fmt % x
+
+
+def _date_ru(value) -> str:
+    try:
+        return dt.date.fromisoformat(str(value)[:10]).strftime('%d.%m.%Y')
+    except ValueError:
+        return str(value or '')
+
+
+def caption_of(row: Mapping[str, Any], template: str, number: int, *, project: str = '', well_group: Optional[Mapping[str, str]] = None) -> Tuple[str, Optional[int], str]:
+    """(текст до номера, номер, текст после): номер ставится полем Word «Рисунок» (метка ``wx.NUMBER_MARK``)."""
+    text = template.replace('{n}', wx.NUMBER_MARK).replace('{номер}', wx.NUMBER_MARK)
+    well = str(row.get('well') or '')
+    values = {
+        'скважина': well,
+        'дата': _date_ru(row.get('date')),
+        'объект': project or '',
+        'группа': row.get('group') or (well_group or {}).get(well, '') or '',
+        'режимов': '' if row.get('n_regimes') is None else str(row.get('n_regimes')),
+        'pi_mult': _num_text(row.get('pi_mult'), '%.4g'),
+        'r2': _num_text(row.get('r2'), '%.3f'),
+        'r2_old': _num_text(row.get('r2_old'), '%.3f'),
+    }
+    out = text.format_map(values)
+    before, mark, after = wx.caption_split(out)
+    return before, (None if mark is None else number), after
+
+
+def _aspect(style: Style) -> float:
+    """Высота/ширина графика по стилю (как у файла PNG/SVG/PDF); макет Word может задать свою высоту."""
+    return (style.height_mm or round(style.width_mm * 0.7)) / style.width_mm
+
+
+def _png_at(row: Mapping[str, Any], style: Style, width: float, height: float, dpi: int) -> bytes:
+    if width * height * (dpi / 25.4) ** 2 > DOCX_PIXEL_LIMIT:
+        raise ValueError('Слишком большой рисунок для Word: уменьшите высоту/ширину ячейки или DPI.')
+    return _draw(row, style, width, height, lambda fig: _save(fig, 'png', dpi))
+
+
+def adapt_items(rows: List[Mapping[str, Any]], style: Style, layout: wx.Layout, template: str = CAPTION_DEFAULT, *,
+                project: str = '', well_group: Optional[Mapping[str, str]] = None, start: int = 1, render: bool = True
+                ) -> Tuple[List[wx.Item], List[dict], List[Mapping[str, Any]]]:
+    """Графики для таблицы Word: подписи из шаблона, размер - по макету. ``render=False`` - только размеры (предпросмотр).
+
+    Возвращает (графики, ошибки, исследования в том же порядке, что графики). Ошибка одного исследования не валит документ.
+    """
+    cell = layout.cell()
+    aspect = _aspect(style)
+    items: List[wx.Item] = []
+    used: List[Mapping[str, Any]] = []
+    errors: List[dict] = []
+    for row in rows:
+        name = '%s, %s' % (row.get('well'), row.get('date'))
+        try:
+            if not has_curves(row):
+                raise ValueError('у исследования нет кривых для графика')
+            before, number, after = caption_of(row, template, start + len(items), project=project, well_group=well_group)
+            item = wx.Item(name, before, number, after, module='gdi_adapt')
+            cap_h = wx.caption_height(layout, item.text, cell)
+            if render:
+                item.png, item.w, item.h = wx.render_png(lambda w, h, d, r=row: _png_at(r, style, w, h, d), layout, cap_h, aspect)
+            else:
+                item.w, item.h = wx.fit(layout, aspect, cap_h)
+        except Exception as e:                       # одно исследование не должно срывать весь документ
+            errors.append({'График': name, 'Ошибка': str(e)})
+            continue
+        items.append(item)
+        used.append(row)
+    return items, errors, used
+
+
+def build_adapt_docx(rows: List[Mapping[str, Any]], style: Style, layout: wx.Layout, template: str = CAPTION_DEFAULT, *,
+                     project: str = '', well_group: Optional[Mapping[str, str]] = None, start: int = 1) -> Tuple[bytes, List[dict], int]:
+    """Word-документ: таблица графиков по макету, подписи из шаблона, список рисунков по желанию.
+
+    Возвращает (файл, ошибки по исследованиям, число графиков). Порядок графиков - как в таблице результатов.
+    """
+    check_caption(template)
+    items, errors, _ = adapt_items(rows, style, layout, template, project=project, well_group=well_group, start=start)
+    if not items:
+        raise ValueError('Нет графиков для Word: ни одно исследование не построилось. ' + (errors[0]['Ошибка'] if errors else ''))
+    return wx.build_docx(items, layout, project, errors), errors, len(items)
+
+
+def preview_page(rows: List[Mapping[str, Any]], style: Style, layout: wx.Layout, template: str = CAPTION_DEFAULT, page: int = 1, *,
+                 project: str = '', well_group: Optional[Mapping[str, str]] = None, start: int = 1) -> Tuple[bytes, int, int]:
+    """Лист ``page`` (с 1) будущего документа как PNG: строятся только графики этого листа. Возвращает (PNG, листов, номер листа)."""
+    check_caption(template)
+    lay = dataclasses.replace(layout, dpi=PREVIEW_DPI)
+    items, errors, used = adapt_items(rows, style, lay, template, project=project, well_group=well_group, start=start, render=False)
+    if not items:
+        raise ValueError('Нет графиков для предпросмотра. ' + (errors[0]['Ошибка'] if errors else ''))
+    pages = wx.paginate(lay, items)
+    page = max(1, min(int(page), len(pages)))
+    shown = [i for row in pages[page - 1] for i in row]
+    images = {i: _png_at(used[i], style, items[i].w, items[i].h, PREVIEW_DPI) for i in shown}
+    png, count = wx.preview_png(lay, items, page, images)
+    return png, count, page
+
+
+def layout_from_body(fields: Mapping[str, Any]) -> wx.Layout:
+    """Макет из тела запроса (плоские поля Layout); неизвестные поля и значения - ошибка с текстом для пользователя."""
+    return wx.layout_from_fields(fields)
+
+
+def options() -> dict:
+    """Всё, что нужно интерфейсу для вкладки «Экспорт графиков»: допустимые значения, пределы и значения по умолчанию."""
+    return {
+        'layout': wx.catalog(),
+        'chart': {'y': list(Y_MODES), 'variant': list(VARIANTS), 'look': list(LOOKS), 'dpi_png': list(PNG_DPI),
+                  'width': [80, 300], 'height': [40, 400], 'defaults': dataclasses.asdict(Style())},
+        'caption': {'default': CAPTION_DEFAULT, 'fields': list(CAPTION_FIELDS)},
+        'preview_dpi': PREVIEW_DPI,
+    }
