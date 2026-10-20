@@ -174,14 +174,39 @@ class Row:
     note: str = ""                # почему не выбрано / предупреждения
     include: bool = False         # итог (с учётом ручных переключателей)
     auto: bool = False            # что решил отбор до ручных переключателей
+    manual: int = 0              # сколько исследований скважины решено вручную
 
     def to_dict(self) -> dict:
         d = dict(well=self.well, model=self.model, n_studies=self.n_studies, n_usable=self.n_usable,
                  date=self.date.strftime("%Y-%m-%d") if self.date else "", status=self.status,
                  age_years=None if not np.isfinite(self.age_years) else round(self.age_years, 1),
                  a=None if not np.isfinite(self.a) else self.a, b=None if not np.isfinite(self.b) else self.b,
-                 n_regimes=self.n_regimes, note=self.note, include=self.include, auto=self.auto)
+                 n_regimes=self.n_regimes, note=self.note, include=self.include, auto=self.auto, manual=self.manual)
         return d
+
+
+@dataclass
+class StudyRow:
+    """Одно исследование ГДИ: что показал контроль качества и что решил инженер."""
+    well: str                     # имя в БД ГДИ
+    model: str                    # имя в модели ("" - в модели нет)
+    date: dt.datetime
+    key: str                      # ключ ручного решения: study_key
+    status: str                   # good / fair / bad - заключение программы
+    reasons: str                  # почему брак (подсказка для инженера)
+    warnings: str
+    n_regimes: int
+    a: float
+    b: float
+    auto: bool                    # решение программы: брать (прошло контроль) или нет
+    manual: Optional[bool]        # решение инженера; None - не трогали
+    use: bool                     # итог: берётся в расчёт
+
+    def to_dict(self) -> dict:
+        return dict(well=self.well, model=self.model, date=self.date.strftime("%Y-%m-%d"), key=self.key, status=self.status,
+                    reasons=self.reasons, warnings=self.warnings, n_regimes=self.n_regimes,
+                    a=None if not np.isfinite(self.a) else self.a, b=None if not np.isfinite(self.b) else self.b,
+                    auto=self.auto, manual=self.manual, use=self.use)
 
 
 @dataclass
@@ -189,20 +214,32 @@ class Selection:
     rows: List[Row] = field(default_factory=list)
     chosen: Dict[str, GDI] = field(default_factory=dict)     # имя в модели -> выбранное исследование
     qcs: Dict[str, quality.QC] = field(default_factory=dict)  # те же ключи
-    history: Dict[str, List[GDI]] = field(default_factory=dict)  # все прошедшие контроль исследования (по возрастанию даты)
+    history: Dict[str, List[GDI]] = field(default_factory=dict)  # все взятые в расчёт исследования (по возрастанию даты)
     notes: List[str] = field(default_factory=list)
     model_only: List[str] = field(default_factory=list)       # скважины модели без ГДИ
+    studies: List[StudyRow] = field(default_factory=list)     # все исследования БД с решениями
+    manual: int = 0                                           # ручных решений всего: по исследованиям и по скважинам
+
+
+def study_key(well: str, date: dt.datetime) -> str:
+    """Ключ исследования для ручных решений: «скважина|ГГГГ-ММ-ДД»."""
+    return "%s|%s" % (well, date.strftime("%Y-%m-%d"))
 
 
 def select(studies: Sequence[GDI], cfg, st: Settings, model: Optional[Sequence[str]] = None,
-           resolve=None, overrides: Optional[Dict[str, bool]] = None, today: Optional[dt.datetime] = None) -> Selection:
-    """Для каждой скважины БД ГДИ: контроль качества всех исследований и выбор самого свежего из прошедших.
+           resolve=None, overrides: Optional[Dict[str, bool]] = None, today: Optional[dt.datetime] = None,
+           study_overrides: Optional[Dict[str, bool]] = None) -> Selection:
+    """Для каждой скважины БД ГДИ: контроль качества всех исследований и выбор самого свежего из взятых в расчёт.
 
     model - скважины модели (None: сопоставление не делается); resolve(имя) -> имя в модели или None (синонимы проекта);
-    overrides - ручные включения/выключения {имя в БД: bool}; today - точка отсчёта возраста (по умолчанию дата последнего ГДИ в БД).
+    overrides - ручное включение скважины {имя в БД: bool};
+    study_overrides - ручное решение по исследованию {study_key: True (взять, даже если программа забраковала) /
+    False (не брать)}. Ручное решение приоритетнее контроля качества; без него исследование берётся, если прошло контроль.
+    today - точка отсчёта возраста (по умолчанию дата последнего ГДИ в БД).
     """
     st.validate()
     overrides = overrides or {}
+    so = study_overrides or {}
     by_well: Dict[str, List[GDI]] = {}
     for g in studies:
         by_well.setdefault(g.wname, []).append(g)
@@ -219,30 +256,46 @@ def select(studies: Sequence[GDI], cfg, st: Settings, model: Optional[Sequence[s
         else:
             row.model = w
         qcs = [(g, quality.assess(g, cfg)) for g in lst]
-        usable = [(g, q) for g, q in qcs if q.status in allowed]
-        row.n_usable = len(usable)
+        manual = [so.get(study_key(w, g.date)) for g, _ in qcs]
+        use = [q.status in allowed if m is None else m for (_, q), m in zip(qcs, manual)]
+        row.n_usable = sum(1 for _, q in qcs if q.status in allowed)
+        row.manual = sum(1 for m in manual if m is not None)
+        sel.manual += row.manual + (1 if w in overrides else 0)
+        for (g, q), m, u in zip(qcs, manual, use):
+            sel.studies.append(StudyRow(well=w, model=row.model, date=g.date, key=study_key(w, g.date), status=q.status,
+                                        reasons=q.reasons, warnings=q.warnings, n_regimes=len(g.q), a=g.a, b=g.b,
+                                        auto=q.status in allowed, manual=m, use=u))
+        chosen = [(g, q, m) for (g, q), m, u in zip(qcs, manual, use) if u]
         if model is not None and not row.model:
             row.note = "нет в модели"
-        elif not usable:
+        elif not chosen and any(m is False for m in manual):
+            row.note = "все взятые ГДИ исключены вручную"
+        elif not chosen:
             last_g, last_q = qcs[0]
             row.note = "все ГДИ забракованы; последнее от %s: %s" % (last_g.date.strftime("%d.%m.%Y"), last_q.reasons or "—")
         else:
-            g, q = usable[0]
+            g, q, m = chosen[0]
             row.date, row.status = g.date, q.status
             row.age_years = (ref - g.date).days / 365.25
             row.a, row.b, row.n_regimes = g.a, g.b, len(g.q)
             warn = [q.warnings] if q.warn else []
-            if st.max_age_years is not None and row.age_years > st.max_age_years:
+            if m is None and st.max_age_years is not None and row.age_years > st.max_age_years:
                 row.note = "ГДИ старше %g лет (%.1f)" % (st.max_age_years, row.age_years)
             else:
                 row.auto = True
-            if row.auto and qcs[0][0] is not g:
-                warn.append("свежее ГДИ от %s забраковано: %s" % (qcs[0][0].date.strftime("%d.%m.%Y"), qcs[0][1].reasons or "—"))
+            if m:
+                warn.append("взято вручную, программа забраковала: %s" % (q.reasons or "—"))
+            newest_g, newest_q = qcs[0]
+            if row.auto and newest_g is not g:
+                if manual[0] is False:
+                    warn.append("свежее ГДИ от %s исключено вручную" % newest_g.date.strftime("%d.%m.%Y"))
+                elif manual[0] is None:
+                    warn.append("свежее ГДИ от %s забраковано: %s" % (newest_g.date.strftime("%d.%m.%Y"), newest_q.reasons or "—"))
             if warn:
                 row.note = "; ".join(x for x in [row.note] + warn if x)
             sel.qcs[row.model or w] = q
             sel.chosen[row.model or w] = g
-            sel.history[row.model or w] = sorted((u for u, _ in usable), key=lambda u: u.date)
+            sel.history[row.model or w] = sorted((c[0] for c in chosen), key=lambda u: u.date)
         row.include = bool(overrides.get(w, row.auto)) and row.date is not None and bool(row.model)
         sel.rows.append(row)
     if model is not None:
