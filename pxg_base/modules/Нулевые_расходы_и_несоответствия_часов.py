@@ -45,7 +45,7 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
         if df is None:
             return None, None
             
-        df = df.fillna(0)
+        # пустая ячейка — «нет данных», а не простой: в ноль не превращаем
         
         # Берем нужные столбцы
         max_columns = min(32, len(df.columns) - start_col)
@@ -68,6 +68,7 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
         # Для таблицы времени не удаляем строку с датами, так как она уже обработана
         
         # Преобразуем столбец скважин в строковый тип
+        df = df[df['Скважины'].notna()]     # строка без номера скважины — не скважина
         df['Скважины'] = df['Скважины'].astype(str).str.strip()
         # строки итогов под таблицей («Итого», «Всего») не скважины
         df = df[~df['Скважины'].str.lower().str.startswith(('итого', 'всего', 'total'))]
@@ -85,10 +86,10 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
         # Переименовываем столбец значения в зависимости от типа таблицы
         if table_type == "gas":
             df_long = df_long.rename(columns={'Значение': 'Часовой расход газа'})
-            df_long['Часовой расход газа'] = pd.to_numeric(df_long['Часовой расход газа'], errors='coerce').fillna(0)
+            df_long['Часовой расход газа'] = pd.to_numeric(df_long['Часовой расход газа'], errors='coerce')
         else:  # time
             df_long = df_long.rename(columns={'Значение': 'Время работы'})
-            df_long['Время работы'] = pd.to_numeric(df_long['Время работы'], errors='coerce').fillna(0)
+            df_long['Время работы'] = pd.to_numeric(df_long['Время работы'], errors='coerce')
         
         return df_long, date_mapping if table_type == "gas" else None
         
