@@ -283,7 +283,9 @@ def test_snapshots_foreign_class_path_and_garbage(tmp_path, monkeypatch):
     import numpy as np
     from schedule_pxg.gdi_adapt.snapshot import WellSnapshot, load_snapshots
     mod = types.ModuleType("foreign_snapshot")      # класс в другом модуле, как в комплекте тНавигатора
-    foreign = dataclasses.make_dataclass("WellSnapshot", [(f.name, object) for f in dataclasses.fields(WellSnapshot)])
+    # старый формат без полей shift_days/t_date (старые снимки); новые поля с умолчанием читаются как значения по умолчанию
+    foreign = dataclasses.make_dataclass("WellSnapshot", [(f.name, object) for f in dataclasses.fields(WellSnapshot)
+                                                          if f.name not in ("shift_days", "t_date")])
     foreign.__module__ = "foreign_snapshot"
     mod.WellSnapshot = foreign
     monkeypatch.setitem(sys.modules, "foreign_snapshot", mod)

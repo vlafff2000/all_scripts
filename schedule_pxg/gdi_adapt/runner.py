@@ -55,6 +55,14 @@ class RunResult:
         return sum(r.ok for r in self.results)
 
 
+def _snapshot_info(res: AdaptResult, snap: WellSnapshot, cfg) -> None:
+    """Шаг модели, с которого взят снимок: в строку результата и замечание, если сдвиг от даты ГДИ большой."""
+    res.t_requested = str(getattr(snap, 't_requested', '') or res.t_name)
+    res.shift_days = float(getattr(snap, 'shift_days', 0.0) or 0.0)
+    if abs(res.shift_days) > cfg.max_step_shift_days:
+        res.problems.append(f'снимок модели сдвинут на {abs(res.shift_days):.0f} дн. от даты ГДИ')
+
+
 def run(cfg, project_dir: str, provider) -> RunResult:
     t_start = time.time()
     base = os.path.join(cfg.path('output_dir', project_dir), f'{datetime.now():%Y-%m-%d_%H-%M-%S}')
@@ -122,6 +130,7 @@ def run(cfg, project_dir: str, provider) -> RunResult:
                     snap = provider(g0)
                 snaps[g0.key] = snap
                 res = adapt_well(g, snap, pvt, cfg)
+                _snapshot_info(res, snap, cfg)
                 if cfg.ci_jackknife and g.source == 'gdi':
                     jackknife(g, snap, pvt, cfg, res)
                 if qc is not None:
