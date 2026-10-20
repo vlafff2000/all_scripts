@@ -190,6 +190,7 @@ def test_recompute_flow_and_api(tmp_path, monkeypatch):
     assert v["summary"]["wells"] == 2
     row = v["rows"][0]
     assert row["curve_q"] and len(row["curve_before"]) == len(row["curve_q"]) and row["pi_mult"] > 0
+    assert row["dep_qmax"] is None or row["dep_qmax"] > 0
     assert {g["group"] for g in v["groups"]} == {"ГСП-1"}
     runs_ = c.get("/api/adapt/runs", params={"kit": kitdir}).json()["runs"]
     assert any(x["has_results"] for x in runs_)

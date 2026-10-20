@@ -252,7 +252,7 @@ export interface AdaptResultRow {
   wbp_model: number | null; q_op: number | null; q_ratio: number | null; dp2_err_before: number | null; dp2_err_after: number | null
   ok: boolean; problems: string[]; notes: string[]; substituted: boolean; t_name: string
   q_gdi: (number | null)[]; q_before: (number | null)[]; q_after: (number | null)[]; dp2_gdi: (number | null)[]
-  curve_q: (number | null)[]; curve_before: (number | null)[]; curve_after: (number | null)[]; at_bound: boolean
+  curve_q: (number | null)[]; curve_before: (number | null)[]; curve_after: (number | null)[]; at_bound: boolean; dep_qmax: number | null
 }
 export interface AdaptGroupRow { group: string; wells: number; q_gdi: number; q_before: number; q_after: number; err_before: number | null; err_after: number | null }
 export interface AdaptView {
