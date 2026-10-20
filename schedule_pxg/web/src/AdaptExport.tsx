@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import PageHead from './PageHead'
 import {
-  adaptExportChart, adaptExportDocx, adaptExportOptions, adaptExportPreview, adaptExportZip, adaptRun, adaptRuns, getAdapt,
-  type AdaptChartStyle, type AdaptExportBody, type AdaptExportOptions, type AdaptLayout, type AdaptResultRow, type AdaptRun, type AdaptView,
+  adaptExportAll, adaptExportChart, adaptExportDocx, adaptExportOptions, adaptExportPreview, adaptExportZip, adaptRun, adaptRuns, getAdapt,
+  type AdaptChartDefaults, type AdaptChartStyle, type AdaptExportBody, type AdaptExportError, type AdaptExportOptions, type AdaptLayout,
+  type AdaptResultRow, type AdaptRun, type AdaptView,
 } from './api'
 import { lastAdaptRun, pref, usePref } from './prefs'
 
@@ -55,6 +56,7 @@ export default function AdaptExport() {
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
   const [note, setNote] = useState('')
+  const [reasons, setReasons] = useState<AdaptExportError[]>([])
   const [presetName, setPresetName] = useState('')
   const [presetPick, setPresetPick] = useState('')
   const presets = usePref(presetStore)
@@ -81,11 +83,7 @@ export default function AdaptExport() {
     adaptExportOptions().then(o => {
       if (!alive) return
       setOpts(o)
-      setCfg({
-        style: { y: o.chart.defaults.y as Style['y'], variant: o.chart.defaults.variant as Style['variant'], look: o.chart.defaults.look as Style['look'],
-          width: o.chart.defaults.width_mm, height: o.chart.defaults.height_mm, dpi: o.chart.defaults.dpi },
-        layout: { ...o.layout.defaults }, caption: o.caption.default, start: 1, object: '',
-      })
+      setCfg({ style: styleFrom(o.chart.defaults), layout: { ...o.layout.defaults }, caption: o.caption.default, start: 1, object: '' })
     }).catch(e => alive && setMsg((e as Error).message))
     getAdapt().then(async st => {
       if (!alive) return
@@ -144,6 +142,9 @@ export default function AdaptExport() {
   const L = cfg.layout
   const lim = (k: string) => opts.layout.limits[k]
   const bounds = (k: string) => ({ min: lim(k).min, max: lim(k).max })
+  const F = opts.chart.format
+  const fbounds = (k: string) => ({ min: F.limits[k][0], max: F.limits[k][1] })
+  const resetFormat = () => setCfg(c => c && { ...c, style: { ...c.style, ...formatFrom(opts.chart.defaults) } })
   const setL = (k: string, v: string | number | boolean) => setCfg(c => c && { ...c, layout: { ...c.layout, [k]: v } })
   const setS = (p: Partial<Style>) => setCfg(c => c && { ...c, style: { ...c.style, ...p } })
   const setAll = (ids: string[]) => setChecked(new Set(ids))
@@ -153,11 +154,14 @@ export default function AdaptExport() {
   const sheet = L.orientation === 'landscape' ? [ph, pw] : [pw, ph]
   const shownWithCurves = shownRows.filter(hasCurves)
 
-  const guard = async (k: string, f: () => Promise<void>) => { setBusy(k); setMsg(''); setNote(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy('') } }
-  const makeWord = () => body && guard('word', async () => {
-    const r = await adaptExportDocx(body)
-    setNote(`Word готов: графиков ${r.count}` + (r.errors ? `. Не построено исследований: ${r.errors}; их нет в документе.` : '.'))
-  })
+  const guard = async (k: string, f: () => Promise<void>) => { setBusy(k); setMsg(''); setNote(''); setReasons([]); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy('') } }
+  /** Итог выгрузки: число графиков и, если что-то не построилось, таблица «исследование - причина». */
+  const report = (what: string, r: { count: number; errors: number; reasons: AdaptExportError[] }) => {
+    setNote(`${what} готов: графиков ${r.count}` + (r.errors ? `. Не построено исследований: ${r.errors}; их нет в файлах, причины ниже.` : '.'))
+    setReasons(r.reasons)
+  }
+  const makeWord = () => body && guard('word', async () => report('Word', await adaptExportDocx(body)))
+  const makeAll = () => body && guard('all', async () => report('Пакет', await adaptExportAll({ ...body, formats: zipFmts })))
   const makeZip = () => body && guard('zip', async () => { await adaptExportZip({ ...body.style, run_dir: body.run_dir, ids: chosen, formats: zipFmts }) })
   const makeOne = () => view && curRow && guard('one', async () => {
     await adaptExportChart({ ...cfg.style, run_dir: view.run_dir, id: cur, format: oneFmt }, 'Скв_' + safe(curRow.well + '_' + curRow.date + '_' + cfg.style.y) + '.' + oneFmt)
@@ -261,6 +265,32 @@ export default function AdaptExport() {
           </div>
 
           <div className="exp-bar">
+            <Sec title="Оформление графика">
+              <Sel label="Шрифт" value={cfg.style.font} options={F.fonts} onCommit={v => setS({ font: String(v) })} />
+              <Num label="Размер шрифта, пт" value={cfg.style.font_size} {...fbounds('font_size')} empty onCommit={v => setS({ font_size: v })} />
+              <Txt label="Подпись оси X" value={cfg.style.x_label ?? F.labels.x} wide max={200} onCommit={v => setS({ x_label: v })} />
+              <Txt label="Подпись оси Y" value={cfg.style.y_label ?? F.labels.y[cfg.style.y] ?? ''} wide max={200} onCommit={v => setS({ y_label: v })} />
+              <Chk label="Заголовок графика" checked={cfg.style.title_on} onChange={v => setS({ title_on: v })} />
+              {cfg.style.title_on && <Txt label="Текст заголовка" value={cfg.style.title ?? F.labels.title} wide max={200} onCommit={v => setS({ title: v })} />}
+              <Chk label="Легенда" checked={cfg.style.legend} onChange={v => setS({ legend: v })} />
+              {cfg.style.legend && <Sel label="Положение легенды" value={cfg.style.legend_pos} options={F.legend_pos} onCommit={v => setS({ legend_pos: String(v) })} />}
+              <Num label="Толщина линии, пт" value={cfg.style.line_width} {...fbounds('line_width')} empty onCommit={v => setS({ line_width: v })} />
+              <Sel label="Точки ГДИ: форма" value={cfg.style.marker} options={F.markers} onCommit={v => setS({ marker: String(v) })} />
+              <Num label="Размер точек, пт" value={cfg.style.marker_size} {...fbounds('marker_size')} empty onCommit={v => setS({ marker_size: v })} />
+              <Chk label="Сетка" checked={cfg.style.grid} onChange={v => setS({ grid: v })} />
+              <Num label="Ось X: от" value={cfg.style.x_min} empty onCommit={v => setS({ x_min: v })} />
+              <Num label="Ось X: до" value={cfg.style.x_max} empty onCommit={v => setS({ x_max: v })} />
+              <Num label="Ось Y: от" value={cfg.style.y_min} empty onCommit={v => setS({ y_min: v })} />
+              <Num label="Ось Y: до" value={cfg.style.y_max} empty onCommit={v => setS({ y_max: v })} />
+              <div className="exp-field wide"><button type="button" className="quiet" onClick={resetFormat}>Вернуть оформление по умолчанию</button></div>
+            </Sec>
+            <div className="exp-hint muted small">
+              <p>Пустое поле - авто. Пустая подпись оси - без подписи. Заголовок - шаблон: <code>{'{скважина}'}</code>, <code>{'{дата}'}</code>.</p>
+              <p>Шрифт берётся из системы: Times New Roman, Arial Narrow, Calibri. Если его нет, подставляется аналог.</p>
+            </div>
+          </div>
+
+          <div className="exp-bar">
             <Sec title="Лист">
               <Sel label="Ориентация" value={String(L.orientation)} options={pairs(opts.layout.orientations, lbl)} onCommit={v => setL('orientation', String(v))} />
               <Sel label="Формат" value={String(L.paper)} options={Object.entries(opts.layout.papers).map(([p, [w, h]]): [string, string] => [p, `${p} (${w} × ${h} мм)`])} onCommit={v => setL('paper', String(v))} />
@@ -341,17 +371,37 @@ export default function AdaptExport() {
           <button onClick={makeZip} disabled={!body || !chosen.length || !zipFmts.length || busy !== ''}>Скачать картинки (ZIP)</button>
         </div>
         <div className="row">
+          <button className="primary" onClick={makeAll} disabled={!body || !chosen.length || busy !== ''}>Скачать всё одним архивом (ZIP)</button>
+          <span className="muted small">Word, картинки по отмеченным форматам, XLSX с точками графиков, настройки (json) и errors.txt.</span>
+        </div>
+        <div className="row">
           <span className="muted small">Один график: {curRow ? `скв. ${curRow.well}, ГДИ ${curRow.date}` : 'не выбран'}</span>
           <Sel label="Формат" value={oneFmt} options={[['png', 'PNG'], ['svg', 'SVG'], ['pdf', 'PDF'], ['xlsx', 'XLSX (график и данные)']] as [string, string][]} onCommit={v => setOneFmt(String(v))} />
           <button onClick={makeOne} disabled={!curRow || !hasCurves(curRow) || busy !== ''}>Скачать выбранный график</button>
         </div>
-        {busy && <span className="pulse">{{ word: 'Создание Word…', zip: 'Создание архива…', one: 'Создание графика…', open: 'Открываем запуск…' }[busy] ?? 'Выполняется…'}</span>}
+        {busy && <span className="pulse">{{ word: 'Создание Word…', zip: 'Создание архива…', all: 'Сборка пакета…', one: 'Создание графика…', open: 'Открываем запуск…' }[busy] ?? 'Выполняется…'}</span>}
         {!chosen.length && view && <p className="note">Нет исследований с кривыми для выгрузки.</p>}
         {note && <p className="note">{note}</p>}
+        {reasons.length > 0 && <div className="exp-reasons">
+          <table className="raw"><thead><tr><th>Исследование (скважина, дата)</th><th>Причина</th></tr></thead>
+            <tbody>{reasons.map((e, i) => <tr key={i}><td>{e['График']}</td><td>{e['Ошибка']}</td></tr>)}</tbody></table>
+        </div>}
         {msg && view && <p className="note warn">{msg}</p>}
       </section>
     </main>
   )
+}
+
+/** Значения по умолчанию с сервера → состояние вкладки: размеры макета называются width/height, как в запросе. */
+function styleFrom(d: AdaptChartDefaults): Style {
+  const { width_mm, height_mm, ...rest } = d
+  return { ...rest, width: width_mm, height: height_mm } as Style
+}
+/** Только поля оформления (без вида графика и размера) - для кнопки «по умолчанию». */
+function formatFrom(d: AdaptChartDefaults): Partial<Style> {
+  return { font: d.font, font_size: d.font_size, x_label: d.x_label, y_label: d.y_label, title_on: d.title_on, title: d.title,
+    legend: d.legend, legend_pos: d.legend_pos, line_width: d.line_width, marker: d.marker, marker_size: d.marker_size, grid: d.grid,
+    x_min: d.x_min, x_max: d.x_max, y_min: d.y_min, y_max: d.y_max }
 }
 
 /** Пары «значение, подпись» для выпадающих списков. */

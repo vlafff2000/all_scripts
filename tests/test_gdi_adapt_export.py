@@ -153,7 +153,7 @@ def test_docx_is_zip_with_chart_per_study_and_layout_applied():
     assert xml.count("<w:tbl>") == 1 and xml.count("<w:gridCol ") == 2          # 2 колонки
     assert "– Индикаторная диаграмма адаптации, скв. 33, ГДИ 01.05.2024" in xml   # порядок - как в таблице
     assert xml.index("скв. 33") < xml.index("скв. 35")
-    assert "Ошибки формирования: 1" in xml and "36, 2020-02-01: у исследования нет кривых для графика" in xml
+    assert "Не удалось построить (1)" in xml and "36, 2020-02-01: у исследования нет кривых для графика" in xml
     cell_w_mm = (297 - 25 - 15) / 2 - 4
     with Image.open(io.BytesIO(parts[media[0]])) as im:
         assert abs(im.size[0] - cell_w_mm / 25.4 * 150) <= 2                 # график построен в размер ячейки, не сжат
@@ -236,3 +236,177 @@ def test_api_docx_preview_and_options(tmp_path):
     assert c.post("/api/adapt/export/preview", json={"run_dir": run, "layout": {"margin_top": 500}}).status_code == 400
     r = c.get("/api/adapt/export/options")
     assert r.status_code == 200 and r.json()["layout"]["defaults"]["paper"] == "A4"
+
+
+# ---------- оформление графика: шрифт, подписи, легенда, серии, сетка, пределы осей ----------
+
+def _axes_state(style, row=None):
+    """Состояние осей, которое получилось после _draw (save отдаёт его, пока фигура открыта)."""
+    def grab(fig):
+        ax = fig.axes[0]
+        return {"xlim": ax.get_xlim(), "ylim": ax.get_ylim(), "xlabel": ax.get_xlabel(), "ylabel": ax.get_ylabel(),
+                "title": ax.get_title(loc="left"), "legend": ax.get_legend(), "xfam": ax.xaxis.label.get_fontfamily(),
+                "xfs": ax.xaxis.label.get_fontsize(), "tfs": ax._left_title.get_fontsize(), "grid": any(g.get_visible() for g in ax.get_xgridlines()),
+                "lines": ax.get_lines()}
+    return ec._draw(row or _row(), style, 160, 112, grab)
+
+
+def test_default_style_keeps_previous_look():
+    st = ec.Style()
+    assert (st.font, st.font_size, st.legend, st.legend_pos, st.grid, st.marker) == ("default", None, True, "auto", True, "circle")
+    s = _axes_state(st)
+    assert s["xlim"][0] == 0 and s["xlim"][1] > 600 and s["xlabel"] == "Дебит, тыс. м³/сут" and s["title"].startswith("Скв. 33, ГДИ 2024-05-01")
+    assert s["xfs"] == 8.5 and s["tfs"] == 10 and s["legend"] is not None
+    assert b"DejaVu Sans" in ec.render(_row(), st, "svg") and b"Times New Roman" not in ec.render(_row(), st, "svg")
+
+
+def test_font_and_sizes_change_svg_and_text():
+    base = ec.render(_row(), ec.Style(), "svg")
+    times = ec.render(_row(), ec.Style(font="times"), "svg")
+    fam = ec.font_family("times")[0]                    # оригинал или метрический аналог из системы
+    assert fam in ("Times New Roman", "Liberation Serif") and fam.encode("ascii") in times
+    assert times != base
+    big = _axes_state(ec.Style(font="times", font_size=14))
+    assert big["xfs"] == 14 and big["tfs"] == 15.5
+    assert big["xfam"][0] == fam and big["xfam"][-1] == "DejaVu Sans"
+    assert _axes_state(ec.Style(font="calibri"))["xfam"][0] == ec.font_family("calibri")[0] in ("Calibri", "Carlito", "DejaVu Sans")   # без шрифтов в системе (CI) - запасной
+    assert _axes_state(ec.Style(font="arial_narrow"))["xfam"][0] == ec.font_family("arial_narrow")[0]
+    assert ec.render(_row(), ec.Style(font="times", font_size=14), "svg") != times
+
+
+def test_labels_title_and_legend_switches():
+    st = ec.Style(x_label="Расход, м³/сут", y_label="", title="Кривая {скважина} от {дата}", legend=False)
+    s = _axes_state(st)
+    assert s["xlabel"] == "Расход, м³/сут" and s["ylabel"] == "" and s["title"] == "Кривая 33 от 2024-05-01"
+    assert s["legend"] is None
+    off = _axes_state(ec.Style(title_on=False))
+    assert off["title"] == ""
+    assert _axes_state(ec.Style(legend_pos="right"))["legend"] is not None
+    svg = ec.render(_row(), ec.Style(x_label="Свой текст X", legend=False), "svg")
+    assert "Свой текст X".encode("utf-8") in svg
+    assert "Модель до адаптации".encode("utf-8") not in svg
+    assert _axes_state(ec.Style(y="dp2q"))["ylabel"].startswith("ΔP²/Q")
+
+
+def test_series_grid_and_axis_limits():
+    s = _axes_state(ec.Style(line_width=3.5, marker="square", marker_size=9, grid=False))
+    gdi = [ln for ln in s["lines"] if ln.get_marker() == "s"][0]
+    assert gdi.get_markersize() == 9
+    curves = [ln for ln in s["lines"] if ln.get_marker() in ("None", None)]
+    assert len(curves) == 2 and all(ln.get_linewidth() == 3.5 for ln in curves)
+    assert not s["grid"]
+    lim = _axes_state(ec.Style(x_min=10, x_max=300, y_min=-5, y_max=900))
+    assert lim["xlim"] == (10, 300) and lim["ylim"] == (-5, 900)
+    with pytest.raises(ValueError, match="Диапазон оси X"):
+        ec.render(_row(), ec.Style(x_min=400, x_max=100), "png")
+    with pytest.raises(ValueError, match="Диапазон оси Y"):
+        _axes_state(ec.Style(y_min=5, y_max=5))
+
+
+def test_style_from_parses_and_refuses_bad_values():
+    st = ec.style_from({"font": "times", "font_size": "12,5", "x_label": "X", "title_on": False, "legend": "false",
+                        "legend_pos": "below", "line_width": 2, "marker": "diamond", "marker_size": None, "grid": True,
+                        "x_min": "", "x_max": 250, "y_min": -1, "y_max": None})
+    assert (st.font, st.font_size, st.x_label, st.title_on, st.legend, st.legend_pos) == ("times", 12.5, "X", False, False, "below")
+    assert (st.line_width, st.marker, st.marker_size, st.x_min, st.x_max, st.y_min, st.y_max) == (2.0, "diamond", None, None, 250.0, -1.0, None)
+    for bad, text in (({"font": "Comic"}, "font"), ({"font_size": 30}, "Размер шрифта"), ({"font_size": "много"}, "Размер шрифта"),
+                      ({"line_width": 0.1}, "Толщина"), ({"marker": "star"}, "marker"), ({"legend_pos": "left"}, "legend_pos"),
+                      ({"x_label": "x" * 201}, "Подпись оси X"), ({"y_max": "inf"}, "Ось Y")):
+        with pytest.raises(ValueError, match=text):
+            ec.style_from(bad)
+
+
+def test_options_expose_format_choices_without_duplicates():
+    fmt = ec.options()["chart"]["format"]
+    assert [k for k, _ in fmt["fonts"]] == ["default", "times", "arial_narrow", "calibri"]
+    assert fmt["limits"]["font_size"] == [5.0, 20.0] and fmt["labels"]["x"] == "Дебит, тыс. м³/сут"
+    assert {k for k, _ in fmt["legend_pos"]} == set(ec.LEGEND_POS) and {k for k, _ in fmt["markers"]} == set(ec.MARKERS)
+
+
+# ---------- пакет результата ZIP, точки и причины ошибок ----------
+
+def test_points_xlsx_lists_every_point_and_series():
+    from openpyxl import load_workbook
+    rows = [_row("33", "2024-05-01"), _row("35", "2023-02-01")]
+    wb = load_workbook(io.BytesIO(ec.points_xlsx(rows, ec.Style(variant="after"))))
+    ws = wb["Точки"]
+    values = [[c.value for c in r] for r in ws.iter_rows(min_row=2)]
+    assert ws["A1"].value == "Скважина" and {v[2] for v in values} == {"ГДИ", "модель после адаптации"}
+    assert sum(1 for v in values if v[0] == "33") == 5 + 12 and sum(1 for v in values if v[0] == "35") == 5 + 12
+    wb2 = load_workbook(io.BytesIO(ec.points_xlsx(rows, ec.Style(y="dp2q", variant="both"))))
+    assert "ΔP²/Q" in wb2["Точки"]["E1"].value and len(list(wb2["Точки"].iter_rows(min_row=2))) == 2 * (5 + 12 * 2)
+
+
+def test_package_zip_has_docx_pictures_points_settings_and_errors():
+    import json as _json
+    rows = [_row("33", "2024-05-01"), _row("35", "2023-02-01"), {**_row("36", "2020-02-01"), "curve_q": []}]
+    settings = ec.settings_json(ec.Style(font="times"), wx.Layout(), caption=ec.CAPTION_DEFAULT, start=1, project="Объект А",
+                                formats=["png", "svg"], run_name="2026-01-01_10-00", studies=3)
+    data, errors, count = ec.package_bytes(rows, ec.Style(font="times"), wx.Layout(), project="Объект А", formats=["png", "svg"], settings=settings)
+    assert count == 2 and [e["График"] for e in errors] == ["36, 2020-02-01"]
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        names = z.namelist()
+        assert "indicator_charts.docx" in names and "data_points.xlsx" in names and "settings.json" in names and "errors.txt" in names
+        assert sum(n.startswith("charts/") and n.endswith(".png") for n in names) == 2
+        assert sum(n.startswith("charts/") and n.endswith(".svg") for n in names) == 2
+        assert z.read("indicator_charts.docx")[:2] == b"PK"
+        cfg = _json.loads(z.read("settings.json").decode("utf-8"))
+        assert cfg["style"]["font"] == "times" and cfg["picture_formats"] == ["png", "svg"] and cfg["studies"] == 3
+        assert "36, 2020-02-01" in z.read("errors.txt").decode("utf-8")
+    with pytest.raises(ValueError):
+        ec.package_bytes(rows, ec.Style(), wx.Layout(), formats=["xlsx"], settings=b"{}")
+
+
+def test_package_without_errors_says_so():
+    data, errors, _ = ec.package_bytes([_row("33", "2024-05-01")], ec.Style(), wx.Layout(), formats=[], settings=b"{}")
+    assert errors == []
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        assert "Ошибок нет" in z.read("errors.txt").decode("utf-8")
+        assert not [n for n in z.namelist() if n.startswith("charts/")]
+
+
+def test_errors_header_is_url_encoded_json_and_truncated():
+    import json as _json
+    from urllib.parse import unquote
+    small = [{"График": "33, 2024-05-01", "Ошибка": "нет кривых"}]
+    assert _json.loads(unquote(ec.errors_header(small))) == small
+    many = [{"График": "скв. %d, 2024-05-01" % i, "Ошибка": "очень длинная причина " * 10} for i in range(400)]
+    header = ec.errors_header(many)
+    assert len(header) <= ec.ERRORS_HEADER_LIMIT and header.isascii()
+    shown = _json.loads(unquote(header))
+    assert shown[-1]["График"] == "…" and "и ещё" in shown[-1]["Ошибка"]
+    assert ec.errors_header([]) == "%5B%5D"
+
+
+def test_api_all_package_and_errors_list(tmp_path):
+    from starlette.testclient import TestClient
+    from schedule_pxg import api
+    from urllib.parse import unquote
+    broken = {**_row("36", "2020-02-01"), "curve_q": [50.0, "нет", 150.0]}     # испорченная строка: кривые есть, но не читаются
+    run = _run_dir(tmp_path, [_row("33", "2024-05-01"), _row("35", "2023-02-01"), broken])
+    c = TestClient(api.build_app())
+    body = {"run_dir": run, "ids": None, "layout": {"columns": 2, "dpi": 150}, "caption": "Рис. {n} {скважина}", "start": 1,
+            "object": "Объект А", "style": {"font": "times", "font_size": 11}, "formats": ["png"]}
+    r = c.post("/api/adapt/export/all", json=body)
+    assert r.status_code == 200, r.text
+    assert r.headers["x-charts-count"] == "2" and r.headers["x-charts-errors"] == "1"
+    assert "attachment" in r.headers["content-disposition"] and r.headers["content-disposition"].endswith(".zip")
+    reasons = json.loads(unquote(r.headers["x-charts-errors-list"]))
+    assert reasons == [{"График": "36, 2020-02-01", "Ошибка": reasons[0]["Ошибка"]}] and "нечисловые" in reasons[0]["Ошибка"]
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        names = z.namelist()
+        assert {"indicator_charts.docx", "data_points.xlsx", "settings.json", "errors.txt"} <= set(names)
+        assert sum(n.startswith("charts/") for n in names) == 2
+        assert "36, 2020-02-01" in z.read("errors.txt").decode("utf-8")
+        assert '"font": "times"' in z.read("settings.json").decode("utf-8")
+    assert c.post("/api/adapt/export/all", json={**body, "formats": ["gif"]}).status_code == 400
+    assert c.post("/api/adapt/export/all", json={**body, "style": {"font_size": 99}}).status_code == 400
+    assert c.post("/api/adapt/export/all", json={**body, "ids": ["36|2020-02-01"]}).status_code == 400          # одна строка - нечего строить
+    r = c.post("/api/adapt/export/all", json={**body, "formats": []})
+    assert r.status_code == 200 and r.headers["x-charts-count"] == "2"
+    r = c.post("/api/adapt/export/docx", json={**body, "style": {"font": "arial_narrow", "legend": False}})
+    assert r.status_code == 200 and "36, 2020-02-01" in unquote(r.headers["x-charts-errors-list"])
+    r = c.post("/api/adapt/export/chart", json={"run_dir": run, "id": "33|2024-05-01", "format": "svg", "font": "calibri",
+                                                 "legend": False, "x_label": "Q", "x_min": 0, "x_max": 400, "marker": "cross"})
+    assert r.status_code == 200 and (b"Calibri" in r.content or b"Carlito" in r.content or b"DejaVu Sans" in r.content) and b"Q" in r.content
+    assert c.post("/api/adapt/export/chart", json={"run_dir": run, "id": "33|2024-05-01", "format": "png", "x_min": 9, "x_max": 1}).status_code == 400

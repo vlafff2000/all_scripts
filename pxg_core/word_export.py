@@ -459,8 +459,8 @@ def build_docx(items: Sequence[Item], layout: Layout, project: str = '', errors:
             b.body.append(b.table(trs))
         if progress:
             progress(done / len(items))
-    if errors:
-        b.body.append(b.para('Ошибки формирования: %d' % len(errors)))
+    if errors:                                         # раздел в конце: что и почему не построилось
+        b.body.append(b.para('Не удалось построить (%d)' % len(errors), 'ListHeading'))
         b.body.extend(b.para(_error_text(e)) for e in errors)
 
     ns = ('xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '

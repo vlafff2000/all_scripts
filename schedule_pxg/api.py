@@ -1176,7 +1176,29 @@ async def adapt_export_docx(request: Request):
         return _err(str(e))
     return Response(data, media_type=export_charts.DOCX, headers={
         "Content-Disposition": "attachment; filename*=UTF-8''" + quote("indicator_charts.docx"),
-        "X-Charts-Count": str(count), "X-Charts-Errors": str(len(errors))})
+        "X-Charts-Count": str(count), "X-Charts-Errors": str(len(errors)),
+        "X-Charts-Errors-List": export_charts.errors_header(errors)})
+
+
+async def adapt_export_all(request: Request):
+    """Пакет результата одним ZIP: Word, картинки по выбранным форматам, XLSX с точками, settings.json и errors.txt."""
+    try:
+        body = await _export_body(request)
+        opts = _docx_request(body)
+        formats = [str(f) for f in (body.get("formats") or [])]
+        run_dir = _clean(body.get("run_dir"))
+        settings = export_charts.settings_json(opts["style"], opts["layout"], caption=opts["template"], start=opts["start"],
+                                               project=opts["project"], formats=formats, run_name=os.path.basename(os.path.normpath(run_dir or "")),
+                                               studies=len(opts["rows"]))
+        data, errors, count = await run_in_threadpool(
+            export_charts.package_bytes, opts["rows"], opts["style"], opts["layout"], opts["template"],
+            project=opts["project"], well_group=opts["well_group"], start=opts["start"], formats=formats, settings=settings)
+    except ValueError as e:
+        return _err(str(e))
+    name = "indicator_package_%s.zip" % (opts["style"].y.replace("dp2q", "dp2_q"))
+    return Response(data, media_type=export_charts.MIME["zip"], headers={
+        "Content-Disposition": "attachment; filename=" + name, "X-Charts-Count": str(count), "X-Charts-Errors": str(len(errors)),
+        "X-Charts-Errors-List": export_charts.errors_header(errors)})
 
 
 async def adapt_export_preview(request: Request):
@@ -1271,6 +1293,7 @@ def build_app() -> Starlette:
         Route("/api/adapt/export/chart", adapt_export_chart, methods=["POST"]),
         Route("/api/adapt/export/zip", adapt_export_zip, methods=["POST"]),
         Route("/api/adapt/export/docx", adapt_export_docx, methods=["POST"]),
+        Route("/api/adapt/export/all", adapt_export_all, methods=["POST"]),
         Route("/api/adapt/export/preview", adapt_export_preview, methods=["POST"]),
         Route("/api/adapt/export/options", adapt_export_options),
         Route("/api/results", results_get),
