@@ -129,7 +129,8 @@ def test_build_docx_fields_and_margins_applied():
 def test_build_docx_errors_are_readable_and_empty_refused():
     lay = wx.Layout()
     _, xml, _, _ = _doc(_items(1, lay), lay, errors=[{"График": "скв. 5", "Ошибка": "нет кривых"}])
-    assert "Ошибки формирования: 1" in xml and "скв. 5: нет кривых" in xml
+    assert "Не удалось построить (1)" in xml and "скв. 5: нет кривых" in xml
+    assert xml.rindex("<w:drawing>") < xml.index("Не удалось построить")       # раздел - в конце документа
     with pytest.raises(ValueError):
         wx.build_docx([], lay)
 

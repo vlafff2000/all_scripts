@@ -279,14 +279,37 @@ export interface AdaptColCheck { ok: boolean; rows: number; problems: string[]; 
 export const adaptCheckColumns = (b: { db: string; sheet?: string; cols: Record<string, string> }) => call<AdaptColCheck>('/api/adapt/columns/check', post(b))
 export const adaptCode = (kit: string) => call<{ code: string; path: string }>('/api/adapt/code?' + new URLSearchParams({ kit }))
 export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv') => '/api/adapt/file?' + new URLSearchParams({ dir, kind })
-/** Настройки индикаторной диаграммы для выгрузки: ось Y, какие кривые, оформление, ширина графика (мм). */
-export interface AdaptChartStyle { y: 'dp2' | 'dp2q'; variant: 'both' | 'before' | 'after'; look: 'default' | 'excel'; width: number; height?: number | null; dpi: number }
+/** Оформление графика: значения по умолчанию, пределы и подписи приходят с сервера (/api/adapt/export/options); null - авто. */
+export interface AdaptChartFormat {
+  font: string; font_size: number | null; x_label: string | null; y_label: string | null; title_on: boolean; title: string | null
+  legend: boolean; legend_pos: string; line_width: number | null; marker: string; marker_size: number | null; grid: boolean
+  x_min: number | null; x_max: number | null; y_min: number | null; y_max: number | null
+}
+/** Настройки индикаторной диаграммы для выгрузки: ось Y, какие кривые, оформление, ширина графика (мм), оформление. */
+export interface AdaptChartStyle extends AdaptChartFormat { y: 'dp2' | 'dp2q'; variant: 'both' | 'before' | 'after'; look: 'default' | 'excel'; width: number; height?: number | null; dpi: number }
+/** Значения по умолчанию вида и оформления графика (как их отдаёт сервер: размеры в мм). */
+export type AdaptChartDefaults = { y: string; variant: string; look: string; dpi: number; width_mm: number; height_mm: number | null } & AdaptChartFormat
+/** Причина по исследованию: «График» - скважина и дата, «Ошибка» - текст для пользователя. */
+export interface AdaptExportError { 'График': string; 'Ошибка': string }
 /** Одна диаграмма исследования (id = «скважина|дата»): скачивается файлом PNG / SVG / PDF / XLSX. */
 export const adaptExportChart = (b: AdaptChartStyle & { run_dir: string; id: string; format: string }, fallback: string) =>
   download('/api/adapt/export/chart', b, fallback)
 /** Пакет диаграмм в ZIP: ids = null - все исследования запуска, иначе выбранные. */
 export const adaptExportZip = (b: AdaptChartStyle & { run_dir: string; ids: string[] | null; formats: string[] }) =>
   download('/api/adapt/export/zip', b, 'indicator_charts_' + b.y + '.zip')
+/** Причины из заголовка X-Charts-Errors-List (URL-кодированный JSON); при сбое разбора - пусто. */
+function reasonsOf(r: Response): AdaptExportError[] {
+  const raw = r.headers.get('X-Charts-Errors-List')
+  if (!raw) return []
+  try { return JSON.parse(decodeURIComponent(raw)) as AdaptExportError[] } catch { return [] }
+}
+/** Скачивание файла из ответа и итоги: число графиков, число неудачных исследований, их причины. */
+async function saveResponse(r: Response, name: string) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click()
+  URL.revokeObjectURL(a.href)
+  return { count: Number(r.headers.get('X-Charts-Count') || 0), errors: Number(r.headers.get('X-Charts-Errors') || 0), reasons: reasonsOf(r) }
+}
 /** Макет Word: плоский словарь Layout (pxg_core/word_export.py). Значения, пределы и умолчания приходят с сервера. */
 export type AdaptLayout = Record<string, string | number | boolean>
 export interface AdaptExportOptions {
@@ -296,7 +319,11 @@ export interface AdaptExportOptions {
     limits: Record<string, { min: number; max: number; label: string }>
   }
   chart: { y: string[]; variant: string[]; look: string[]; dpi_png: number[]; width: [number, number]; height: [number, number]
-    defaults: { y: string; variant: string; look: string; dpi: number; width_mm: number; height_mm: number | null } }
+    defaults: AdaptChartDefaults
+    format: {
+      fonts: [string, string][]; legend_pos: [string, string][]; markers: [string, string][]; limits: Record<string, [number, number]>
+      labels: { x: string; y: Record<string, string>; title: string }; title_fields: string[]
+    } }
   caption: { default: string; fields: string[] }
   preview_dpi: number
 }
@@ -305,13 +332,13 @@ export interface AdaptExportBody {
   run_dir: string; ids: string[] | null; style: AdaptChartStyle; layout: AdaptLayout; caption: string; start: number; object: string
 }
 export const adaptExportOptions = () => call<AdaptExportOptions>('/api/adapt/export/options')
-/** Word скачивается файлом; в заголовках ответа - число графиков и число исследований, которые не построились. */
-export async function adaptExportDocx(b: AdaptExportBody): Promise<{ count: number; errors: number }> {
-  const r = await fetchFile('/api/adapt/export/docx', b)
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(await r.blob()); a.download = 'indicator_charts.docx'; a.click()
-  URL.revokeObjectURL(a.href)
-  return { count: Number(r.headers.get('X-Charts-Count') || 0), errors: Number(r.headers.get('X-Charts-Errors') || 0) }
+/** Word скачивается файлом; в заголовках ответа - число графиков, число неудачных исследований и их причины. */
+export async function adaptExportDocx(b: AdaptExportBody) {
+  return saveResponse(await fetchFile('/api/adapt/export/docx', b), 'indicator_charts.docx')
+}
+/** Пакет результата одним ZIP: Word, картинки по форматам (png / svg / pdf), XLSX с точками, settings.json, errors.txt. */
+export async function adaptExportAll(b: AdaptExportBody & { formats: string[] }) {
+  return saveResponse(await fetchFile('/api/adapt/export/all', b), 'indicator_package_' + (b.style.y === 'dp2q' ? 'dp2_q' : 'dp2') + '.zip')
 }
 /** Лист Word как PNG: page - номер листа с 1, сервер ограничивает его числом листов (заголовки X-Pages, X-Page). */
 export async function adaptExportPreview(b: AdaptExportBody & { page: number }): Promise<{ blob: Blob; pages: number; page: number }> {

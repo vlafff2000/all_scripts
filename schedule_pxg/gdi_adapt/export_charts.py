@@ -17,6 +17,7 @@ import threading
 import zipfile
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, List, Mapping, Optional, Tuple
+from urllib.parse import quote
 
 import numpy as np
 
@@ -34,6 +35,24 @@ DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 MIME = {'png': 'image/png', 'svg': 'image/svg+xml', 'pdf': 'application/pdf', 'xlsx': XLSX, 'zip': 'application/zip'}
 _LOCK = threading.Lock()                               # rc_context глобальный: рисуем по одному
 
+# Оформление графика: шрифты как в Газовом атласе (atlas/engine/core/fonts.py): ключ → (подпись, оригинал, аналог).
+# Аналог - метрически совместимый шрифт Linux (Liberation, Carlito); DejaVu Sans - запасной.
+FONTS = {
+    'default': ('Стандартный (DejaVu Sans)', 'DejaVu Sans', None),
+    'times': ('Times New Roman', 'Times New Roman', 'Liberation Serif'),
+    'arial_narrow': ('Arial Narrow', 'Arial Narrow', 'Liberation Sans Narrow'),
+    'calibri': ('Calibri (как в Excel)', 'Calibri', 'Carlito'),
+}
+LEGEND_POS = {'auto': 'Автоматически', 'inside': 'Внутри, слева вверху', 'below': 'Под графиком', 'right': 'Справа', 'above': 'Над графиком'}
+MARKERS = {'circle': ('Кружок', 'o'), 'square': ('Квадрат', 's'), 'diamond': ('Ромб', 'D'), 'triangle': ('Треугольник', '^'),
+           'cross': ('Крест', 'x'), 'plus': ('Плюс', '+')}
+LIMITS = {'font_size': (5.0, 20.0), 'line_width': (0.5, 6.0), 'marker_size': (1.0, 15.0)}     # пт
+LABEL_X = 'Дебит, тыс. м³/сут'
+LABEL_Y = {'dp2': 'ΔP² = Pпл² − Pз², бар²', 'dp2q': 'ΔP²/Q, бар²/(тыс. м³/сут)'}
+TITLE = 'Скв. {скважина}, ГДИ {дата}'
+TITLE_FIELDS = ('скважина', 'дата')
+AXIS_LIMIT = 1e9                                       # пределы осей - в пределах ±AXIS_LIMIT
+
 
 @dataclass(frozen=True)
 class Style:
@@ -43,6 +62,55 @@ class Style:
     dpi: int = 300
     width_mm: int = 160
     height_mm: Optional[int] = None
+    # оформление: None в полях - значение по умолчанию (прежний вид графика)
+    font: str = 'default'
+    font_size: Optional[float] = None                  # пт: подписи осей и делений; заголовок +1.5, легенда -1
+    x_label: Optional[str] = None                      # None - стандартная подпись, '' - без подписи
+    y_label: Optional[str] = None
+    title_on: bool = True
+    title: Optional[str] = None                        # шаблон: {скважина}, {дата}
+    legend: bool = True
+    legend_pos: str = 'auto'
+    line_width: Optional[float] = None                 # пт, обе кривые модели
+    marker: str = 'circle'
+    marker_size: Optional[float] = None                # пт, точки ГДИ
+    grid: bool = True
+    x_min: Optional[float] = None
+    x_max: Optional[float] = None
+    y_min: Optional[float] = None
+    y_max: Optional[float] = None
+
+
+def _flag(form: Mapping[str, Any], name: str, default: bool) -> bool:
+    v = form.get(name)
+    if v is None:
+        return default
+    return v if isinstance(v, bool) else str(v).strip().lower() not in ('', '0', 'false', 'нет')
+
+
+def _opt_float(form: Mapping[str, Any], name: str, label: str, lo: float, hi: float) -> Optional[float]:
+    """Число или пусто (None - по умолчанию); вне пределов - понятная ошибка."""
+    v = form.get(name)
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        x = float(str(v).replace(',', '.'))
+    except (TypeError, ValueError):
+        raise ValueError('%s: нужно число' % label) from None
+    if not np.isfinite(x) or not lo <= x <= hi:
+        raise ValueError('%s: от %g до %g' % (label, lo, hi))
+    return x
+
+
+def _opt_text(form: Mapping[str, Any], name: str, label: str, max_len: int = 200) -> Optional[str]:
+    v = form.get(name)
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        raise ValueError('%s: нужна строка' % label)
+    if len(v) > max_len:
+        raise ValueError('%s: не длиннее %d знаков' % (label, max_len))
+    return v
 
 
 def style_from(form: Mapping[str, Any]) -> Style:
@@ -64,8 +132,22 @@ def style_from(form: Mapping[str, Any]) -> Style:
         raise ValueError('Ширина графика: от 80 до 300 мм')
     if height is not None and not 40 <= height <= 400:
         raise ValueError('Высота графика: от 40 до 400 мм')
+    lim = LIMITS
     return Style(y=pick('y', Y_MODES, 'dp2'), variant=pick('variant', VARIANTS, 'both'), look=pick('look', LOOKS, 'default'),
-                 dpi=dpi, width_mm=width, height_mm=height)
+                 dpi=dpi, width_mm=width, height_mm=height,
+                 font=pick('font', FONTS, 'default'),
+                 font_size=_opt_float(form, 'font_size', 'Размер шрифта, пт', *lim['font_size']),
+                 x_label=_opt_text(form, 'x_label', 'Подпись оси X'), y_label=_opt_text(form, 'y_label', 'Подпись оси Y'),
+                 title_on=_flag(form, 'title_on', True), title=_opt_text(form, 'title', 'Заголовок графика'),
+                 legend=_flag(form, 'legend', True), legend_pos=pick('legend_pos', LEGEND_POS, 'auto'),
+                 line_width=_opt_float(form, 'line_width', 'Толщина линии, пт', *lim['line_width']),
+                 marker=pick('marker', MARKERS, 'circle'),
+                 marker_size=_opt_float(form, 'marker_size', 'Размер точек, пт', *lim['marker_size']),
+                 grid=_flag(form, 'grid', True),
+                 x_min=_opt_float(form, 'x_min', 'Ось X, минимум', -AXIS_LIMIT, AXIS_LIMIT),
+                 x_max=_opt_float(form, 'x_max', 'Ось X, максимум', -AXIS_LIMIT, AXIS_LIMIT),
+                 y_min=_opt_float(form, 'y_min', 'Ось Y, минимум', -AXIS_LIMIT, AXIS_LIMIT),
+                 y_max=_opt_float(form, 'y_max', 'Ось Y, максимум', -AXIS_LIMIT, AXIS_LIMIT))
 
 
 def check_format(fmt: str) -> str:
@@ -99,9 +181,12 @@ def load_rows(run_dir: str, ids: Optional[Iterable[str]] = None) -> List[dict]:
 
 def _xy(row: Mapping[str, Any], key: str, style: Style):
     """Точки серии: дебит и ΔP² (или ΔP²/Q); пропуски и Q=0 отбрасываются."""
-    x = np.array([np.nan if v is None else v for v in row.get('q_gdi' if key == 'gdi' else 'curve_q') or []], dtype=float)
     yk = {'gdi': 'dp2_gdi', 'before': 'curve_before', 'after': 'curve_after'}[key]
-    y = np.array([np.nan if v is None else v for v in row.get(yk) or []], dtype=float)
+    try:
+        x = np.array([np.nan if v is None else v for v in row.get('q_gdi' if key == 'gdi' else 'curve_q') or []], dtype=float)
+        y = np.array([np.nan if v is None else v for v in row.get(yk) or []], dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError('в данных исследования есть нечисловые значения (дебит или ΔP²)') from None
     n = min(len(x), len(y))
     x, y = x[:n], y[:n]
     if style.y == 'dp2q':
@@ -132,6 +217,35 @@ def _save(fig, fmt: str, dpi: int) -> bytes:
     return buf.getvalue()
 
 
+def _installed(family: str) -> bool:
+    from matplotlib import font_manager
+    try:
+        font_manager.findfont(font_manager.FontProperties(family=family), fallback_to_default=False)
+        return True
+    except ValueError:
+        return False
+
+
+def font_family(key: str) -> List[str]:
+    """Семейство для matplotlib, как в Атласе: оригинал, если установлен (Windows, Word), иначе аналог, иначе DejaVu Sans."""
+    _, original, analog = FONTS[key]
+    for name in (original, analog):
+        if name and _installed(name):
+            return [name, 'DejaVu Sans']
+    return ['DejaVu Sans']
+
+
+def _labels(row: Mapping[str, Any], style: Style) -> Tuple[str, str, str]:
+    """(заголовок, подпись X, подпись Y). Пустая подпись - без подписи; заголовок - шаблон с {скважина} и {дата}."""
+    byq = style.y == 'dp2q'
+    tag = '  (по средней скважине)' if row.get('source') == 'average' else ''
+    title = (style.title if style.title is not None else TITLE)
+    title = title.replace('{скважина}', str(row.get('well'))).replace('{дата}', str(row.get('date'))) + tag
+    xl = LABEL_X if style.x_label is None else style.x_label
+    yl = LABEL_Y['dp2q' if byq else 'dp2'] if style.y_label is None else style.y_label
+    return title, xl, yl
+
+
 def _draw(row: Mapping[str, Any], style: Style, width: float, height: float, save) -> bytes:
     """Рисует график размером ``width`` x ``height`` мм и отдаёт его ``save(fig)``. Общая часть для файла и для Word."""
     try:
@@ -140,9 +254,16 @@ def _draw(row: Mapping[str, Any], style: Style, width: float, height: float, sav
     except ImportError:
         raise ValueError('Для PNG, SVG и PDF нужен пакет matplotlib (его нет в этой сборке). Таблица XLSX доступна без него.') from None
     excel = style.look == 'excel'
-    fam = ['Calibri', 'Carlito', 'DejaVu Sans'] if excel else ['DejaVu Sans']
+    # без выбранного шрифта «как в Excel» - Calibri (прежний вид); размеры по умолчанию - прежние
+    fkey = style.font if style.font != 'default' else ('calibri' if excel else 'default')
+    base = style.font_size or 8.5
+    title_size = base + 1.5 if style.font_size else 10
+    legend_size = base - 1 if style.font_size else (8 if excel else 7.5)
+    lw_model = style.line_width
     byq = style.y == 'dp2q'
-    with _LOCK, rc_context({'font.family': fam, 'font.size': 8.5, 'svg.fonttype': 'none', 'pdf.fonttype': 42}):
+    marker = MARKERS[style.marker][1]
+    msize = style.marker_size or 4.5
+    with _LOCK, rc_context({'font.family': font_family(fkey), 'font.size': base, 'svg.fonttype': 'none', 'pdf.fonttype': 42}):
         fig = Figure(figsize=(width / 25.4, height / 25.4), layout='constrained')
         ax = fig.add_subplot()
         gx, gy = _xy(row, 'gdi', style)
@@ -150,31 +271,54 @@ def _draw(row: Mapping[str, Any], style: Style, width: float, height: float, sav
         if style.variant in ('both', 'before'):
             bx, by = _xy(row, 'before', style)
             e = _pct(row.get('dp2_err_before'))
-            ax.plot(bx, by, color=SLOT_BEFORE, ls='--', lw=1.4, alpha=.8,
+            ax.plot(bx, by, color=SLOT_BEFORE, ls='--', lw=lw_model or 1.4, alpha=.8,
                     label='Модель до адаптации' + (' (откл. ΔP² %s)' % e if e else ''))
             ys_x.append(bx); ys_y.append(by)
         if style.variant in ('both', 'after'):
             ax_, ay_ = _xy(row, 'after', style)
             e = _pct(row.get('dp2_err_after'))
-            ax.plot(ax_, ay_, color=SLOT_AFTER, lw=2, label='Модель после адаптации' + (' (откл. ΔP² %s)' % e if e else ''))
+            ax.plot(ax_, ay_, color=SLOT_AFTER, lw=lw_model or 2, label='Модель после адаптации' + (' (откл. ΔP² %s)' % e if e else ''))
             ys_x.append(ax_); ys_y.append(ay_)
-        ax.plot(gx, gy, 'o', color=SLOT_GDI, ms=4.5, label='ГДИ' if row.get('source') != 'average' else 'расчётное ГДИ средней скважины')
+        ax.plot(gx, gy, linestyle='none', marker=marker, color=SLOT_GDI, ms=msize,
+                label='ГДИ' if row.get('source') != 'average' else 'расчётное ГДИ средней скважины')
         xmax = max([float(np.max(v)) for v in ys_x if v.size] or [1.0])
         ytop = max([float(np.max(v)) for v in ys_y if v.size] or [1.0])
-        ax.set_xlim(0, xmax * 1.02 if xmax > 0 else 1)
-        ax.set_ylim(0, ytop * 1.25 if ytop > 0 else 1)
-        ax.set_xlabel('Дебит, тыс. м³/сут')
-        ax.set_ylabel('ΔP²/Q, бар²/(тыс. м³/сут)' if byq else 'ΔP² = Pпл² − Pз², бар²')
-        tag = '  (по средней скважине)' if row.get('source') == 'average' else ''
-        ax.set_title('Скв. %s, ГДИ %s%s' % (row.get('well'), row.get('date'), tag), fontsize=10, loc='left')
+        left = 0 if style.x_min is None else style.x_min
+        right = (xmax * 1.02 if xmax > 0 else 1) if style.x_max is None else style.x_max
+        if not left < right:
+            raise ValueError('Диапазон оси X: минимум должен быть меньше максимума')
+        ax.set_xlim(left, right)
+        bottom = 0 if style.y_min is None else style.y_min
+        top = (ytop * 1.25 if ytop > 0 else 1) if style.y_max is None else style.y_max
+        if not bottom < top:
+            raise ValueError('Диапазон оси Y: минимум должен быть меньше максимума')
+        ax.set_ylim(bottom, top)
+        title, xl, yl = _labels(row, style)
+        if xl:
+            ax.set_xlabel(xl, fontsize=base)
+        if yl:
+            ax.set_ylabel(yl, fontsize=base)
+        if style.title_on and title.strip():
+            ax.set_title(title, fontsize=title_size, loc='left')
         if excel:
-            ax.grid(True, axis='y', color='#d9d9d9', lw=.6)
+            if style.grid:
+                ax.grid(True, axis='y', color='#d9d9d9', lw=.6)
             for side in ('top', 'right'):
                 ax.spines[side].set_visible(False)
-            ax.legend(loc='upper center', bbox_to_anchor=(.5, -.16), ncol=2, frameon=False, fontsize=8)
-        else:
+        elif style.grid:
             ax.grid(True, ls='--', lw=.5, color='#c9ced6')
-            ax.legend(loc='upper left', fontsize=7.5, frameon=True)
+        if style.legend:
+            pos = style.legend_pos
+            if pos == 'auto':
+                pos = 'below' if excel else 'inside'
+            if pos == 'below':
+                ax.legend(loc='upper center', bbox_to_anchor=(.5, -.16), ncol=2, frameon=False, fontsize=legend_size)
+            elif pos == 'above':
+                ax.legend(loc='lower center', bbox_to_anchor=(.5, 1.0), ncol=2, frameon=False, fontsize=legend_size)
+            elif pos == 'right':
+                ax.legend(loc='center left', bbox_to_anchor=(1.01, .5), frameon=False, fontsize=legend_size)
+            else:
+                ax.legend(loc='upper left', fontsize=legend_size, frameon=True)
         return save(fig)
 
 
@@ -214,9 +358,25 @@ def xlsx_bytes(row: Mapping[str, Any], style: Style) -> bytes:
         ws.append([gx[i] if i < len(gx) else None, gy[i] if i < len(gy) else None, cx[i] if i < len(cx) else None,
                    by[i] if i < len(by) else None, ay[i] if i < len(ay) else None])
     chart = ScatterChart()
-    chart.title = 'Скв. %s, ГДИ %s' % (row.get('well'), row.get('date'))
-    chart.x_axis.title = 'Дебит, тыс. м³/сут'
-    chart.y_axis.title = 'ΔP²/Q, бар²/(тыс. м³/сут)' if byq else 'ΔP², бар²'
+    title, xl, yl = _labels(row, style)
+    chart.title = title if style.title_on else None
+    chart.x_axis.title = xl or None
+    chart.y_axis.title = yl or None
+    if not style.grid:
+        chart.y_axis.majorGridlines = None
+    for axis, lo, hi in ((chart.x_axis, style.x_min, style.x_max), (chart.y_axis, style.y_min, style.y_max)):
+        if lo is not None:
+            axis.scaling.min = lo
+        if hi is not None:
+            axis.scaling.max = hi
+    if not style.legend:
+        chart.legend = None
+    elif style.legend_pos in ('below', 'above'):
+        chart.legend.position = 'b' if style.legend_pos == 'below' else 't'
+    elif style.legend_pos in ('right', 'auto'):
+        chart.legend.position = 'r'
+    elif style.legend_pos == 'inside':
+        chart.legend.position = 'tr'
     series = []
     if style.variant in ('both', 'before'):
         series.append((Reference(ws, min_col=3, min_row=2, max_row=n + 1), Reference(ws, min_col=4, min_row=2, max_row=n + 1), 'модель до адаптации', False))
@@ -235,6 +395,35 @@ def xlsx_bytes(row: Mapping[str, Any], style: Style) -> bytes:
     ws.add_chart(chart, 'G2')
     for letter in 'ABCDE':
         ws.column_dimensions[letter].width = 20
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def points_xlsx(rows: List[Mapping[str, Any]], style: Style) -> bytes:
+    """XLSX «данные графиков»: одна таблица на все исследования, по строке на точку (скважина, дата, серия, дебит, Y)."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Точки'
+    byq = style.y == 'dp2q'
+    ylab = 'ΔP²/Q' if byq else 'ΔP²'
+    ws.append(['Скважина', 'Дата ГДИ', 'Серия', 'Дебит, тыс. м³/сут', ylab + ', бар²' + ('/(тыс. м³/сут)' if byq else '')])
+    for row in rows:
+        gx = _column(row.get('q_gdi'), style)
+        cx = _column(row.get('curve_q'), style)
+        series = [('ГДИ', gx, _ratio_column(gx, row.get('dp2_gdi'), style))]          # серии - как на графике
+        if style.variant in ('both', 'before'):
+            series.append(('модель до адаптации', cx, _ratio_column(cx, row.get('curve_before'), style)))
+        if style.variant in ('both', 'after'):
+            series.append(('модель после адаптации', cx, _ratio_column(cx, row.get('curve_after'), style)))
+        for name, xs, ys in series:
+            for x, y in zip(xs, ys):
+                if x is None or y is None:
+                    continue
+                ws.append([str(row.get('well')), _date_ru(row.get('date')), name, x, y])
+    for letter, width in zip('ABCDE', (12, 14, 26, 18, 24)):
+        ws.column_dimensions[letter].width = width
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
@@ -391,6 +580,72 @@ def preview_page(rows: List[Mapping[str, Any]], style: Style, layout: wx.Layout,
     return png, count, page
 
 
+PACKAGE_FORMATS = ('png', 'svg', 'pdf')               # картинки в пакете; таблица точек - всегда XLSX
+ERRORS_HEADER_LIMIT = 6000                             # знаков в заголовке X-Charts-Errors-List (после кодирования)
+
+
+def errors_header(errors: Iterable[Mapping[str, Any]]) -> str:
+    """Причины по исследованиям для заголовка: JSON, URL-кодированный; при нехватке места лишние заменяются строкой «и ещё N»."""
+    items = [{'График': str(e.get('График', '')), 'Ошибка': str(e.get('Ошибка', ''))} for e in errors]
+    n = len(items)
+
+    def enc(xs):
+        return quote(json.dumps(xs, ensure_ascii=False), safe='')
+    for k in range(n, -1, -1):
+        tail = [] if k == n else [{'График': '…', 'Ошибка': 'и ещё %d' % (n - k)}]
+        text = enc(items[:k] + tail)
+        if len(text) <= ERRORS_HEADER_LIMIT:
+            return text
+    return enc([])
+
+
+def errors_text(errors: Iterable[Mapping[str, Any]]) -> str:
+    """Текстовый файл errors.txt: по строке на исследование."""
+    errors = list(errors)
+    if not errors:
+        return 'Ошибок нет: все выбранные графики построены.\n'
+    lines = ['Не удалось построить: %d' % len(errors), '']
+    lines += ['%s: %s' % (e.get('График', ''), e.get('Ошибка', '')) for e in errors]
+    return '\n'.join(lines) + '\n'
+
+
+def settings_json(style: Style, layout: Any, *, caption: str, start: int, project: str, formats: Iterable[str], run_name: str, studies: int) -> bytes:
+    """Файл настроек экспорта (json): всё, с чем собран пакет, - чтобы повторить выгрузку."""
+    data = {'version': 1, 'run': run_name, 'object': project, 'caption': caption, 'start': start, 'studies': studies,
+            'picture_formats': list(formats), 'style': dataclasses.asdict(style), 'layout': dataclasses.asdict(layout)}
+    return json.dumps(data, ensure_ascii=False, indent=2, default=str).encode('utf-8')
+
+
+def package_bytes(rows: List[Mapping[str, Any]], style: Style, layout: wx.Layout, template: str = CAPTION_DEFAULT, *,
+                  project: str = '', well_group: Optional[Mapping[str, str]] = None, start: int = 1,
+                  formats: Iterable[str] = ('png',), settings: bytes = b'{}') -> Tuple[bytes, List[dict], int]:
+    """Пакет результата одним ZIP: indicator_charts.docx, charts/ (картинки по форматам), data_points.xlsx (точки всех графиков),
+    settings.json и errors.txt. Возвращает (архив, причины по исследованиям, число графиков в Word)."""
+    fmts = list(formats)
+    bad = [f for f in fmts if f not in PACKAGE_FORMATS]
+    if bad:
+        raise ValueError('Картинки в пакете: png, svg или pdf')
+    docx, errors, count = build_adapt_docx(rows, style, layout, template, project=project, well_group=well_group, start=start)
+    failed = {e['График'] for e in errors}
+    ok_rows = [r for r in rows if '%s, %s' % (r.get('well'), r.get('date')) not in failed]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('indicator_charts.docx', docx)
+        for i, row in enumerate(ok_rows, 1):
+            for fmt in fmts:
+                try:
+                    data = render(row, style, fmt)
+                except ValueError as e:
+                    errors.append({'График': '%s, %s (%s)' % (row.get('well'), row.get('date'), fmt.upper()), 'Ошибка': str(e)})
+                    continue
+                z.writestr('charts/%03d_%s' % (i, file_name(row, style, fmt)), data)
+        if ok_rows:
+            z.writestr('data_points.xlsx', points_xlsx(ok_rows, style))
+        z.writestr('settings.json', settings)
+        z.writestr('errors.txt', errors_text(errors))
+    return buf.getvalue(), errors, count
+
+
 def layout_from_body(fields: Mapping[str, Any]) -> wx.Layout:
     """Макет из тела запроса (плоские поля Layout); неизвестные поля и значения - ошибка с текстом для пользователя."""
     return wx.layout_from_fields(fields)
@@ -401,7 +656,10 @@ def options() -> dict:
     return {
         'layout': wx.catalog(),
         'chart': {'y': list(Y_MODES), 'variant': list(VARIANTS), 'look': list(LOOKS), 'dpi_png': list(PNG_DPI),
-                  'width': [80, 300], 'height': [40, 400], 'defaults': dataclasses.asdict(Style())},
+                  'width': [80, 300], 'height': [40, 400], 'defaults': dataclasses.asdict(Style()),
+                  'format': {'fonts': [[k, v[0]] for k, v in FONTS.items()], 'legend_pos': [[k, v] for k, v in LEGEND_POS.items()],
+                             'markers': [[k, v[0]] for k, v in MARKERS.items()], 'limits': {k: list(v) for k, v in LIMITS.items()},
+                             'labels': {'x': LABEL_X, 'y': LABEL_Y, 'title': TITLE}, 'title_fields': list(TITLE_FIELDS)}},
         'caption': {'default': CAPTION_DEFAULT, 'fields': list(CAPTION_FIELDS)},
         'preview_dpi': PREVIEW_DPI,
     }
