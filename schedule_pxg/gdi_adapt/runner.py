@@ -12,12 +12,16 @@
 """
 from __future__ import annotations
 
+import contextlib
+import copy
 import os
 import time
 import traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from . import outputs, report
 from .adapt import AdaptResult, adapt_well, jackknife
@@ -26,6 +30,14 @@ from .gdi import load_gdi
 from .pvt import PVT
 from . import quality
 from .snapshot import WellSnapshot, save_snapshots
+
+MAX_WORKERS = 8                 # верхняя граница числа процессов для параллельного расчёта
+MIN_PARALLEL_JOBS = 8           # меньше исследований - считаем в этом же процессе (запуск пула дороже расчёта)
+
+
+def default_workers() -> int:
+    """Число процессов для расчёта: min(число ядер, 8)."""
+    return max(1, min(os.cpu_count() or 1, MAX_WORKERS))
 
 
 class _Log:
@@ -63,7 +75,79 @@ def _snapshot_info(res: AdaptResult, snap: WellSnapshot, cfg) -> None:
         res.problems.append(f'снимок модели сдвинут на {abs(res.shift_days):.0f} дн. от даты ГДИ')
 
 
-def run(cfg, project_dir: str, provider) -> RunResult:
+_BLAS_VARS = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS')
+
+
+@contextlib.contextmanager
+def _single_thread_blas():
+    """Процессы пула стартуют с одной нитью BLAS: иначе каждый процесс со своими нитями мешает остальным
+    (замер на 4 ядрах: 4 процесса с многонитевым BLAS 86 с, с одной нитью 3.5 с против 12 с последовательно)."""
+    saved = {k: os.environ.get(k) for k in _BLAS_VARS}
+    os.environ.update({k: '1' for k in _BLAS_VARS})
+    try:
+        yield
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def _job_pvt(pvt):
+    """Копия PVT для задачи без журнала (он держит открытый файл и не переносится в процесс).
+    Предупреждение PVT пишется в список задачи; в журнал его выводит прогон один раз, как и раньше."""
+    p = copy.copy(pvt)
+    p._warn, p._warned = None, False
+    return p
+
+
+def _solve(job) -> tuple:
+    """Адаптация и jackknife одной скважины. Функция верхнего уровня, чтобы уходить в процесс (pickle).
+    Возвращает (исход, данные, предупреждения PVT): ('ok', AdaptResult) | ('adapt', текст) | ('error', (текст, traceback))."""
+    g, snap, pvt, cfg, jack = job
+    warns: List[str] = []
+    pvt._warn, pvt._warned = warns.append, False
+    try:
+        res = adapt_well(g, snap, pvt, cfg)
+        if jack:
+            jackknife(g, snap, pvt, cfg, res)
+        return ('ok', res, warns)
+    except AdaptError as e:
+        return ('adapt', str(e), warns)
+    except Exception as e:      # непредвиденная ошибка по одной скважине не должна ронять весь прогон
+        return ('error', (f'{type(e).__name__}: {e}', traceback.format_exc()), warns)
+
+
+def _solve_all(jobs: list, workers: int, on_done: Callable[[], None]) -> List[tuple]:
+    """Результаты в порядке jobs. Параллельно в пуле процессов; если пул не запустился или задача не дошла
+    до процесса, она считается здесь же (расчёт детерминированный, результат тот же)."""
+    outs: List[Optional[tuple]] = [None] * len(jobs)
+    if workers > 1 and len(jobs) >= MIN_PARALLEL_JOBS:
+        try:
+            # spawn - одинаково на Linux и Windows; процессы стартуют при submit, поэтому переменные окружения задаём на это время
+            with ProcessPoolExecutor(max_workers=min(workers, len(jobs)), mp_context=get_context('spawn')) as ex:
+                with _single_thread_blas():
+                    futs = {ex.submit(_solve, job): i for i, job in enumerate(jobs)}
+                for f in as_completed(futs):
+                    try:
+                        outs[futs[f]] = f.result()
+                    except Exception:       # пул сломан или задача не передалась - досчитаем ниже
+                        continue
+                    on_done()
+        except Exception:                   # пул не запустился
+            pass
+    for i, job in enumerate(jobs):
+        if outs[i] is None:
+            outs[i] = _solve(job)
+            on_done()
+    return outs
+
+
+def run(cfg, project_dir: str, provider, progress: Optional[Callable[[int, int], None]] = None,
+        workers: int = 1) -> RunResult:
+    """Прогон. progress(готово, всего) - по каждой скважине; workers > 1 - расчёт скважин в нескольких процессах
+    (тНавигатор читает модель в своём процессе, поэтому снимки берутся здесь, а расчёт уходит в пул)."""
     t_start = time.time()
     base = os.path.join(cfg.path('output_dir', project_dir), f'{datetime.now():%Y-%m-%d_%H-%M-%S}')
     run_dir, k = base, 1
@@ -99,7 +183,18 @@ def run(cfg, project_dir: str, provider) -> RunResult:
                         f'{" (включая удовлетворительные)" if avg.used_fair else ""}')
                     out.avg = avg
 
+        # Сначала по порядку ГДИ собираем план: снимки и решения о пропуске (тНавигатор - только в этом процессе),
+        # затем расчёт адаптации по скважинам (можно параллельно), затем журнал и результаты в исходном порядке.
+        total = len(gdis)
+        done = [0]
+
+        def tick() -> None:
+            done[0] += 1
+            if progress is not None:
+                progress(done[0], total)
+
         snaps: Dict[str, WellSnapshot] = {}
+        plan: List[dict] = []
         for i, g0 in enumerate(gdis, 1):
             g, qc, treat = g0, qcs.get(g0.key), 'настроена по ГДИ'
             tag = f'[{i}/{len(gdis)}] {g0.wname} {g0.date:%d.%m.%Y}' if cfg.all_dates else f'[{i}/{len(gdis)}] {g0.wname}'
@@ -109,19 +204,20 @@ def run(cfg, project_dir: str, provider) -> RunResult:
                     if pol == 'average' and avg is None:
                         pol = 'skip'
                     if pol == 'skip':
-                        treat = 'пропущена (ГДИ забраковано)'
-                        out.qc_rows.append(dict(wname=g0.wname, date=g0.date, qc=qc, treatment=treat))
-                        out.failures.append((g0.wname, f'ГДИ забраковано: {qc.reasons}'))
-                        log(f'{tag}: ПРОПУЩЕНА - ГДИ забраковано: {qc.reasons}')
+                        plan.append(dict(g0=g0, tag=tag, qc=qc, treat='пропущена (ГДИ забраковано)', qc_row=True,
+                                         fail=f'ГДИ забраковано: {qc.reasons}',
+                                         log=f'{tag}: ПРОПУЩЕНА - ГДИ забраковано: {qc.reasons}'))
+                        tick()
                         continue
                     snap = provider(g0)
                     if pol == 'average':
                         g = quality.synthetic_gdi(g0, avg, cfg, q_fallback=float(snap.wgpr))
                         if g is None:
-                            treat = 'пропущена (не удалось построить ГДИ средней скважины)'
-                            out.qc_rows.append(dict(wname=g0.wname, date=g0.date, qc=qc, treatment=treat))
-                            out.failures.append((g0.wname, f'ГДИ забраковано ({qc.reasons}); средняя скважина не применима'))
-                            log(f'{tag}: ПРОПУЩЕНА - нет данных для средней скважины')
+                            plan.append(dict(g0=g0, tag=tag, qc=qc, treat='пропущена (не удалось построить ГДИ средней скважины)',
+                                             qc_row=True,
+                                             fail=f'ГДИ забраковано ({qc.reasons}); средняя скважина не применима',
+                                             log=f'{tag}: ПРОПУЩЕНА - нет данных для средней скважины'))
+                            tick()
                             continue
                         treat = 'настроена по СРЕДНЕЙ скважине объекта'
                     else:
@@ -129,27 +225,51 @@ def run(cfg, project_dir: str, provider) -> RunResult:
                 else:
                     snap = provider(g0)
                 snaps[g0.key] = snap
-                res = adapt_well(g, snap, pvt, cfg)
-                _snapshot_info(res, snap, cfg)
-                if cfg.ci_jackknife and g.source == 'gdi':
-                    jackknife(g, snap, pvt, cfg, res)
-                if qc is not None:
-                    res.qc_status = qc.status
-                    if qc.status == 'bad':
-                        res.problems.insert(0, f'ГДИ забраковано: {qc.reasons}')
-                    if qc.warn:
-                        res.notes.append('качество ГДИ: ' + qc.warnings)
-                    out.qc_rows.append(dict(wname=g0.wname, date=g0.date, qc=qc, treatment=treat))
-                out.results.append(res)
-                flag = '' if res.ok else '  !! ' + '; '.join(res.problems)
-                log(f'{tag}: r2 {res.old_r2:.3f} -> {res.r2:.3f}, '
-                    f'WPIMULT={res.pi_mult:.4g}, D={res.d:.3e}{flag}')
+                plan.append(dict(g0=g0, tag=tag, qc=qc, treat=treat, qc_row=False,
+                                 snap=snap, job=(g, snap, _job_pvt(pvt), cfg, bool(cfg.ci_jackknife and g.source == 'gdi'))))
             except AdaptError as e:
-                out.failures.append((g0.wname, str(e)))
-                log(f'{tag}: ПРОПУЩЕНА - {e}')
+                plan.append(dict(g0=g0, tag=tag, qc=None, qc_row=False, fail=str(e), log=f'{tag}: ПРОПУЩЕНА - {e}'))
+                tick()
             except Exception as e:      # непредвиденная ошибка по одной скважине не должна ронять весь прогон
-                out.failures.append((g0.wname, f'{type(e).__name__}: {e}'))
-                log(f'{tag}: ОШИБКА\n{traceback.format_exc()}')
+                plan.append(dict(g0=g0, tag=tag, qc=None, qc_row=False, fail=f'{type(e).__name__}: {e}',
+                                 log=f'{tag}: ОШИБКА\n{traceback.format_exc()}'))
+                tick()
+
+        jobs = [it['job'] for it in plan if 'job' in it]
+        outs = iter(_solve_all(jobs, workers, tick) if jobs else [])
+        pvt_warned = False      # PVT предупреждает об экстраполяции один раз за прогон (как при последовательном расчёте)
+        for it in plan:
+            g0, tag, qc, treat = it['g0'], it['tag'], it['qc'], it.get('treat', '')
+            if 'job' in it:
+                kind, payload, warns = next(outs)
+                if warns and not pvt_warned:
+                    pvt_warned = True
+                    log(warns[0])
+                if kind == 'ok':
+                    res = payload
+                    _snapshot_info(res, it['snap'], cfg)
+                    if qc is not None:
+                        res.qc_status = qc.status
+                        if qc.status == 'bad':
+                            res.problems.insert(0, f'ГДИ забраковано: {qc.reasons}')
+                        if qc.warn:
+                            res.notes.append('качество ГДИ: ' + qc.warnings)
+                        out.qc_rows.append(dict(wname=g0.wname, date=g0.date, qc=qc, treatment=treat))
+                    out.results.append(res)
+                    flag = '' if res.ok else '  !! ' + '; '.join(res.problems)
+                    log(f'{tag}: r2 {res.old_r2:.3f} -> {res.r2:.3f}, '
+                        f'WPIMULT={res.pi_mult:.4g}, D={res.d:.3e}{flag}')
+                elif kind == 'adapt':
+                    out.failures.append((g0.wname, payload))
+                    log(f'{tag}: ПРОПУЩЕНА - {payload}')
+                else:
+                    out.failures.append((g0.wname, payload[0]))
+                    log(f'{tag}: ОШИБКА\n{payload[1]}')
+            else:
+                if it['qc_row']:
+                    out.qc_rows.append(dict(wname=g0.wname, date=g0.date, qc=qc, treatment=treat))
+                out.failures.append((g0.wname, it['fail']))
+                log(it['log'])
 
         if cfg.save_snapshots and getattr(provider, 'live', False) and snaps:
             save_snapshots(snaps, os.path.join(run_dir, 'snapshots.pkl'))
