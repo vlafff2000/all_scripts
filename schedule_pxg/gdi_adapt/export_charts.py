@@ -111,8 +111,11 @@ def _pct(v) -> Optional[str]:
 
 def render(row: Mapping[str, Any], style: Style, fmt: str) -> bytes:
     """Один график (PNG / SVG / PDF). Стиль - как у графиков Атласа: сетка, легенда, цвета слотов."""
-    from matplotlib import rc_context
-    from matplotlib.figure import Figure
+    try:
+        from matplotlib import rc_context
+        from matplotlib.figure import Figure
+    except ImportError:
+        raise ValueError('Для PNG, SVG и PDF нужен пакет matplotlib (его нет в этой сборке). Таблица XLSX доступна без него.') from None
     if fmt not in ('png', 'svg', 'pdf'):
         raise ValueError('Для графика форматы: png, svg, pdf')
     width = style.width_mm

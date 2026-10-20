@@ -4,6 +4,7 @@ numpy
 openpyxl
 scipy
 xlsxwriter
+matplotlib
 xlrd
 python-calamine
 odfpy
