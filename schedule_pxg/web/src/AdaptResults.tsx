@@ -25,6 +25,7 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
   const [runs, setRuns] = useState<AdaptRun[]>([])
   const [view, setView] = useState<AdaptView | null>(null)
   const [well, setWell] = useState('')
+  const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState<{ k: Key; dir: 1 | -1 }>({ k: 'well', dir: 1 })
   const [msg, setMsg] = useState('')
@@ -46,12 +47,33 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
     return [...f].sort(cmp)
   }, [view, filter, sort])
   const cur = view?.rows.find(r => id(r) === well)
+  const pos = rows.findIndex(r => id(r) === well)
+  // Все исследования выбранной скважины по дате; список скважин — из текущего отфильтрованного списка.
+  const wellDates = useMemo(() => cur ? (view?.rows || []).filter(r => r.well === cur.well).sort((a, b) => a.date < b.date ? -1 : 1) : [], [view, cur])
+  const wellNames = useMemo(() => [...new Set(rows.map(r => r.well))].filter(w => w.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, 'ru', { numeric: true })), [rows, q])
+  // Выбор скважины открывает её самое свежее исследование.
+  const pickWell = (w: string) => { const last = (view?.rows || []).filter(r => r.well === w).sort((a, b) => a.date < b.date ? -1 : 1).pop(); if (last) setWell(id(last)) }
+  const step = (d: 1 | -1) => {
+    if (!rows.length) return
+    const j = pos < 0 ? (d > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, pos + d))
+    setWell(id(rows[j]))
+  }
+  const stepInfo = (() => {
+    const ex = cur as (AdaptResultRow & { t_requested?: string; shift_days?: number | null }) | undefined
+    if (!ex) return ''
+    const parts = []
+    if (ex.t_name) parts.push('шаг модели ' + ex.t_name + (ex.t_requested && ex.t_requested !== ex.t_name ? ' (на дату ГДИ стояла ' + ex.t_requested + ')' : ''))
+    if (typeof ex.shift_days === 'number') parts.push('сдвиг ' + ex.shift_days + ' дн.')
+    return parts.join(', ')
+  })()
+
   const dyn = useMemo(() => {
-    const pts = cur ? (view?.rows || []).filter(r => r.well === cur.well && r.pi_mult !== null).sort((a, b) => a.date < b.date ? -1 : 1) : []
+    const pts = wellDates.filter(r => r.pi_mult !== null)
     return pts.length < 2 ? null : mkChart('adapt-dyn', 'Динамика WPIMULT по датам ГДИ, скв. ' + cur!.well, mkAxis('Дата ГДИ', '', 'time'), mkAxis('WPIMULT (итого от базовой модели)', '', 'value'), [
       mkSeries({ name: 'WPIMULT', kind: 'points', slot: 0, x: pts.map(r => Date.parse(r.date)), y: pts.map(r => r.pi_mult!) }),
       mkSeries({ name: 'линия', slot: 0, x: pts.map(r => Date.parse(r.date)), y: pts.map(r => r.pi_mult!) })])
-  }, [view, cur])
+  }, [wellDates, cur])
 
   const curve = useMemo(() => cur && mkChart('adapt-ip', 'Индикаторная кривая, скв. ' + cur.well + ' от ' + cur.date, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('ΔP² = Pпл² − Pз²', 'бар²', 'value', { from_zero: true }), [
     mkSeries({ name: 'ГДИ', kind: 'points', slot: 3, x: nn(cur.q_gdi), y: nn(cur.dp2_gdi) }),
@@ -119,9 +141,25 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
         {view.failures.length > 0 && <details><summary className="muted small">Пропущено скважин: {view.failures.length}</summary>
           <ul className="issues">{view.failures.map(f => <li key={f.well}><b>{f.well}</b>: {f.reason}</li>)}</ul></details>}
 
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', marginTop: 12 }}>
+        <h3>Графики выбранного исследования</h3>
+        {cur && <div className="row adapt-pick">
+          <label>Поиск скважины<input value={q} onChange={e => setQ(e.target.value)} placeholder="номер" style={{ width: 120 }} /></label>
+          <label>Скважина<select value={wellNames.includes(cur.well) ? cur.well : ''} onChange={e => pickWell(e.target.value)}>
+            {!wellNames.includes(cur.well) && <option value="">— нет в поиске —</option>}{wellNames.map(w => <option key={w} value={w}>{w}</option>)}</select></label>
+          <label>Исследование ГДИ<select value={well} onChange={e => setWell(e.target.value)}>{wellDates.map(r => <option key={id(r)} value={id(r)}>{r.date}</option>)}</select></label>
+          <button onClick={() => step(-1)} disabled={!rows.length || pos === 0}>◀ предыдущая</button>
+          <button onClick={() => step(1)} disabled={!rows.length || pos === rows.length - 1}>следующая ▶</button>
+          <span className="muted small">{pos >= 0 ? `${pos + 1} из ${rows.length} в текущем списке` : 'выбранного исследования нет в текущем списке'}</span>
+        </div>}
+        {stepInfo && <p className="muted small" style={{ margin: '4px 0 8px' }}>{stepInfo}</p>}
+        <div className="adapt-charts">
           {curve && <div><ChartView chart={curve} excludeMode={false} onExclude={() => {}} /></div>}
           {dyn && <div><ChartView chart={dyn} excludeMode={false} onExclude={() => {}} /></div>}
+        </div>
+        {cur && !dyn && <p className="muted small">Динамика WPIMULT строится, когда у скважины не меньше двух исследований с расчётом.</p>}
+
+        <h3>Общие графики по всем скважинам</h3>
+        <div className="adapt-charts">
           {hist && <div><ChartView chart={hist} excludeMode={false} onExclude={() => {}} /></div>}
           {r2c && <div><ChartView chart={r2c} excludeMode={false} onExclude={() => {}} /></div>}
         </div>
