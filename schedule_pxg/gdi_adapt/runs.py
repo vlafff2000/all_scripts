@@ -7,14 +7,14 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
 from .adapt import AdaptResult
 from .config import Config
 from .kit import kit_config
-from .runner import RunResult, run
+from .runner import RunResult, default_workers, run
 from .snapshot import load_snapshots
 from .tnav_api import SnapshotProvider
 
@@ -101,8 +101,10 @@ def find_snapshots(path: str) -> str:
     return best
 
 
-def recompute(kit: str, snapshots: str, settings: Optional[dict] = None, well_group: Optional[Dict[str, str]] = None) -> dict:
-    """Пересчёт по снимкам модели без тНавигатора; результат пишется в <комплект>/runs/<дата_время>/results.json."""
+def recompute(kit: str, snapshots: str, settings: Optional[dict] = None, well_group: Optional[Dict[str, str]] = None,
+              progress: Optional[Callable[[int, int], None]] = None, workers: Optional[int] = None) -> dict:
+    """Пересчёт по снимкам модели без тНавигатора; результат пишется в <комплект>/runs/<дата_время>/results.json.
+    progress(готово, всего) - по скважинам; workers по умолчанию min(ядра, 8)."""
     if not os.path.isfile(os.path.join(kit or "", "all_gdi.xlsx")):
         raise ValueError("«%s» не похоже на комплект (нет all_gdi.xlsx). Подготовьте комплект кнопкой выше." % kit)
     snaps = load_snapshots(find_snapshots(snapshots))
@@ -113,7 +115,8 @@ def recompute(kit: str, snapshots: str, settings: Optional[dict] = None, well_gr
     except (OSError, ValueError):
         pass
     cfg = kit_config({**saved, **(settings or {}), "make_png": False, "save_snapshots": False})
-    out = run(cfg, kit, SnapshotProvider(snaps))
+    out = run(cfg, kit, SnapshotProvider(snaps), progress=progress,
+              workers=default_workers() if workers is None else max(1, int(workers)))
     return _finish(out, well_group or {})
 
 
