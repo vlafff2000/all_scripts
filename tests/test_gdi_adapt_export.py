@@ -269,7 +269,7 @@ def test_font_and_sizes_change_svg_and_text():
     big = _axes_state(ec.Style(font="times", font_size=14))
     assert big["xfs"] == 14 and big["tfs"] == 15.5
     assert big["xfam"][0] == fam and big["xfam"][-1] == "DejaVu Sans"
-    assert _axes_state(ec.Style(font="calibri"))["xfam"][0] == ec.font_family("calibri")[0] in ("Calibri", "Carlito")
+    assert _axes_state(ec.Style(font="calibri"))["xfam"][0] == ec.font_family("calibri")[0] in ("Calibri", "Carlito", "DejaVu Sans")   # без шрифтов в системе (CI) - запасной
     assert _axes_state(ec.Style(font="arial_narrow"))["xfam"][0] == ec.font_family("arial_narrow")[0]
     assert ec.render(_row(), ec.Style(font="times", font_size=14), "svg") != times
 
@@ -408,5 +408,5 @@ def test_api_all_package_and_errors_list(tmp_path):
     assert r.status_code == 200 and "36, 2020-02-01" in unquote(r.headers["x-charts-errors-list"])
     r = c.post("/api/adapt/export/chart", json={"run_dir": run, "id": "33|2024-05-01", "format": "svg", "font": "calibri",
                                                  "legend": False, "x_label": "Q", "x_min": 0, "x_max": 400, "marker": "cross"})
-    assert r.status_code == 200 and (b"Calibri" in r.content or b"Carlito" in r.content) and b"Q" in r.content
+    assert r.status_code == 200 and (b"Calibri" in r.content or b"Carlito" in r.content or b"DejaVu Sans" in r.content) and b"Q" in r.content
     assert c.post("/api/adapt/export/chart", json={"run_dir": run, "id": "33|2024-05-01", "format": "png", "x_min": 9, "x_max": 1}).status_code == 400
