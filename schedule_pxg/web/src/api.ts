@@ -134,9 +134,14 @@ export interface HistoryView {
   log: HistoryLogRow[]; stitch: string[]; table: [string, string, string, number, number, number][]; volumes: Record<string, number>
 }
 export const runHistory = (b: HistoryBody) => call<HistoryView>('/api/history', post(b))
-async function download(url: string, b: object, fallback: string) {
+/** Запрос файла: при ошибке сервера - текст из его ответа (JSON с полем error). */
+async function fetchFile(url: string, b: object): Promise<Response> {
   const r = await fetch(url, post(b))
   if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error || 'Ошибка сервера (' + r.status + ')')
+  return r
+}
+async function download(url: string, b: object, fallback: string) {
+  const r = await fetchFile(url, b)
   const a = document.createElement('a')
   a.href = URL.createObjectURL(await r.blob()); a.download = fallback; a.click()
   URL.revokeObjectURL(a.href)
@@ -275,10 +280,41 @@ export const adaptCheckColumns = (b: { db: string; sheet?: string; cols: Record<
 export const adaptCode = (kit: string) => call<{ code: string; path: string }>('/api/adapt/code?' + new URLSearchParams({ kit }))
 export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv') => '/api/adapt/file?' + new URLSearchParams({ dir, kind })
 /** Настройки индикаторной диаграммы для выгрузки: ось Y, какие кривые, оформление, ширина графика (мм). */
-export interface AdaptChartStyle { y: 'dp2' | 'dp2q'; variant: 'both' | 'before' | 'after'; look: 'default' | 'excel'; width: number; dpi: number }
+export interface AdaptChartStyle { y: 'dp2' | 'dp2q'; variant: 'both' | 'before' | 'after'; look: 'default' | 'excel'; width: number; height?: number | null; dpi: number }
 /** Одна диаграмма исследования (id = «скважина|дата»): скачивается файлом PNG / SVG / PDF / XLSX. */
 export const adaptExportChart = (b: AdaptChartStyle & { run_dir: string; id: string; format: string }, fallback: string) =>
   download('/api/adapt/export/chart', b, fallback)
 /** Пакет диаграмм в ZIP: ids = null - все исследования запуска, иначе выбранные. */
 export const adaptExportZip = (b: AdaptChartStyle & { run_dir: string; ids: string[] | null; formats: string[] }) =>
   download('/api/adapt/export/zip', b, 'indicator_charts_' + b.y + '.zip')
+/** Макет Word: плоский словарь Layout (pxg_core/word_export.py). Значения, пределы и умолчания приходят с сервера. */
+export type AdaptLayout = Record<string, string | number | boolean>
+export interface AdaptExportOptions {
+  layout: {
+    defaults: AdaptLayout; papers: Record<string, [number, number]>; fonts: string[]; aligns: string[]; dpis: number[]
+    orientations: string[]; caption_pos: string[]; caption_modes: string[]; borders: string[]; width_modes: string[]
+    limits: Record<string, { min: number; max: number; label: string }>
+  }
+  chart: { y: string[]; variant: string[]; look: string[]; dpi_png: number[]; width: [number, number]; height: [number, number]
+    defaults: { y: string; variant: string; look: string; dpi: number; width_mm: number; height_mm: number | null } }
+  caption: { default: string; fields: string[] }
+  preview_dpi: number
+}
+/** Тело выгрузки Word и предпросмотра: исследования (null - все), вид графика, макет листа, подпись и первый номер. */
+export interface AdaptExportBody {
+  run_dir: string; ids: string[] | null; style: AdaptChartStyle; layout: AdaptLayout; caption: string; start: number; object: string
+}
+export const adaptExportOptions = () => call<AdaptExportOptions>('/api/adapt/export/options')
+/** Word скачивается файлом; в заголовках ответа - число графиков и число исследований, которые не построились. */
+export async function adaptExportDocx(b: AdaptExportBody): Promise<{ count: number; errors: number }> {
+  const r = await fetchFile('/api/adapt/export/docx', b)
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(await r.blob()); a.download = 'indicator_charts.docx'; a.click()
+  URL.revokeObjectURL(a.href)
+  return { count: Number(r.headers.get('X-Charts-Count') || 0), errors: Number(r.headers.get('X-Charts-Errors') || 0) }
+}
+/** Лист Word как PNG: page - номер листа с 1, сервер ограничивает его числом листов (заголовки X-Pages, X-Page). */
+export async function adaptExportPreview(b: AdaptExportBody & { page: number }): Promise<{ blob: Blob; pages: number; page: number }> {
+  const r = await fetchFile('/api/adapt/export/preview', b)
+  return { blob: await r.blob(), pages: Number(r.headers.get('X-Pages') || 1), page: Number(r.headers.get('X-Page') || 1) }
+}
