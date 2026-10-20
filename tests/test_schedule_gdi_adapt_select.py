@@ -1,5 +1,6 @@
 """Адаптация по ГДИ: отбор исследований (качество, самое свежее, расчётные a и b), сопоставление с моделью, комплект, API."""
 import pytest
+import json
 import os
 import sys
 
@@ -217,6 +218,8 @@ def test_all_dates_sequential_include(tmp_path):
     cfg = Config.load(os.path.join(kitdir, "config.json"))
     gs, _ = load_gdi(cfg, os.path.join(kitdir, "all_gdi.xlsx"))
     assert sorted(g.key for g in gs) == ["33@2019-03-01", "33@2022-04-01", "35@2023-02-01"]
+    with open(os.path.join(kitdir, "studies.json"), encoding="utf-8") as f:      # код в тНавигаторе пишет снимки по этим ключам
+        assert sorted(x["key"] for x in json.load(f)) == sorted(g.key for g in gs)
     tnav_api.bind(mock.make_tnav({"33": 91.0, "35": 91.0}), 0)
     snaps = {g.key: tnav_api.extract_snapshot(g.wname, g.date) for g in gs}
     os.makedirs(os.path.join(kitdir, "runs", "x"))
