@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AdaptChartStyle, AdaptConfig, AdaptResultRow, AdaptRun, AdaptView, adaptExportChart, adaptExportZip, adaptFileUrl, adaptRecompute, adaptRun, adaptRuns, pickFile } from './api'
+import { AdaptConfig, AdaptResultRow, AdaptRun, AdaptView, adaptFileUrl, adaptRecompute, adaptRun, adaptRuns, pickFile } from './api'
+import { lastAdaptRun } from './prefs'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 import type { Chart } from '../../../pxg_core/web-ui/chart/chartTypes'
@@ -90,34 +91,11 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
   const [tPer, setTPer] = useState<Period>(PERIOD0)
   const [hMetric, setHMetric] = useState<Metric>('pi')
   const [hPer, setHPer] = useState<Period>(PERIOD0)
-  // Выгрузка индикаторных диаграмм: одна (формат и DPI в меню графика) и пакетно (ZIP)
-  const [xVar, setXVar] = useState<AdaptChartStyle['variant']>('both')
-  const [xLook, setXLook] = useState<AdaptChartStyle['look']>('default')
-  const [xWidth, setXWidth] = useState(160)
-  const [xDpi, setXDpi] = useState(300)
-  const [xFmt, setXFmt] = useState('png')
-  const [xFmts, setXFmts] = useState<string[]>(['png'])
-  const [xScope, setXScope] = useState<'filtered' | 'all' | 'well'>('filtered')
-
-  const styleNow = (): AdaptChartStyle => ({ y: yMode === 'dp2q' ? 'dp2q' : 'dp2', variant: xVar, look: xLook, width: xWidth, dpi: xDpi })
-  /** Одна диаграмма выбранного исследования. */
-  const exportOne = async (format: string, dpi: number) => {
-    if (!view || !cur) return
-    const st = { ...styleNow(), dpi }
-    await adaptExportChart({ ...st, run_dir: view.run_dir, id: id(cur), format }, 'Скв_' + cur.well + '_' + cur.date + '_' + yMode + '.' + format)
-  }
-  /** Пакет: текущий список, все исследования запуска или все исследования выбранной скважины. */
-  const exportZip = async () => {
-    if (!view) return
-    const ids = xScope === 'all' ? null : xScope === 'filtered' ? rows.map(id) : wellDates.map(id)
-    if (ids && !ids.length) throw new Error('Нет исследований для выгрузки.')
-    await adaptExportZip({ ...styleNow(), run_dir: view.run_dir, ids, formats: xFmts })
-  }
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   const reload = () => kit ? adaptRuns(kit).then(r => setRuns(r.runs)).catch(() => setRuns([])) : Promise.resolve()
   useEffect(() => { reload() }, [kit])
   const id = (r: AdaptResultRow) => r.well + '|' + r.date
-  const show = (v: AdaptView) => { setView(v); setWell(v.rows[0] ? id(v.rows[0]) : '') }
+  const show = (v: AdaptView) => { setView(v); setWell(v.rows[0] ? id(v.rows[0]) : ''); lastAdaptRun.set(v.run_dir) }
 
   const pick = () => guard(async () => { const r = await pickFile(snap || kit); if (r.path) setSnap(r.path) })
   const calc = () => guard(async () => { show(await adaptRecompute(kit, snap || kit, config)); await reload() })
@@ -216,6 +194,7 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
           <a href={adaptFileUrl(view.run_dir, 'inc')} download><button>Скачать wpimult_wdfac.inc</button></a>
           <a href={adaptFileUrl(view.run_dir, 'xlsx')} download><button>Excel-отчёт</button></a>
           <a href={adaptFileUrl(view.run_dir, 'csv')} download><button>results.csv</button></a>
+          <a className="btn" href="#/adapt-export" title="Word с таблицей графиков, картинки, отдельные файлы">Экспорт графиков →</a>
           <span className="muted small">Запуск: {view.run_dir}</span>
         </div>
 
@@ -248,7 +227,7 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
           <PeriodSel value={tPer} onChange={setTPer} anchor={anchor} />
         </div>}
         <div className="adapt-charts">
-          {curve && <div><ChartView chart={curve} excludeMode={false} onExclude={() => {}} onDownload={(f, d) => exportOne(f, d)} /></div>}
+          {curve && <div><ChartView chart={curve} excludeMode={false} onExclude={() => {}} /></div>}
           {dyn && <div><ChartView chart={dyn} excludeMode={false} onExclude={() => {}} /></div>}
           {dfac && <div><ChartView chart={dfac} excludeMode={false} onExclude={() => {}} /></div>}
           {dep && <div><ChartView chart={dep} excludeMode={false} onExclude={() => {}} /></div>}
@@ -256,35 +235,6 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
         {cur && !dyn && !dfac && !dep && <p className="muted small">Тренды строятся, когда у скважины в выбранном периоде не меньше двух исследований с расчётом.</p>}
         {cur && <p className="muted small">Депрессия Pпл − Pзаб: измеренные на ГДИ пластовое и забойное давления в режиме с максимальным дебитом (бар).
           Период по умолчанию - последние 3 года от последней даты исследований в результатах.</p>}
-
-        {cur && <>
-          <h3>Экспорт индикаторных диаграмм</h3>
-          <div className="row adapt-pick">
-            <label>Кривые<select value={xVar} onChange={e => setXVar(e.target.value as AdaptChartStyle['variant'])}>
-              <option value="both">до и после адаптации</option><option value="before">только до</option><option value="after">только после</option></select></label>
-            <label>Оформление<select value={xLook} onChange={e => setXLook(e.target.value as AdaptChartStyle['look'])}>
-              <option value="default">обычное</option><option value="excel">как в Excel</option></select></label>
-            <label>Ширина<select value={xWidth} onChange={e => setXWidth(Number(e.target.value))}>
-              {[120, 160, 220, 280].map(w => <option key={w} value={w}>{w} мм</option>)}</select></label>
-            <label>DPI (PNG)<select value={xDpi} onChange={e => setXDpi(Number(e.target.value))}>
-              {[300, 600, 1200].map(d => <option key={d} value={d}>{d}</option>)}</select></label>
-          </div>
-          <div className="row adapt-pick">
-            <label>Формат<select value={xFmt} onChange={e => setXFmt(e.target.value)}>
-              <option value="png">PNG</option><option value="svg">SVG</option><option value="pdf">PDF</option><option value="xlsx">XLSX (график и данные)</option></select></label>
-            <button onClick={() => guard(() => exportOne(xFmt, xDpi))} disabled={busy}>Скачать выбранную</button>
-          </div>
-          <div className="row adapt-pick">
-            <label>Пакет<select value={xScope} onChange={e => setXScope(e.target.value as typeof xScope)}>
-              <option value="filtered">текущий список ({rows.length})</option><option value="all">все исследования запуска</option>
-              <option value="well">все исследования скважины {cur.well} ({wellDates.length})</option></select></label>
-            {(['png', 'svg', 'pdf'] as const).map(f => <label key={f} className="inline-field">
-              <input type="checkbox" checked={xFmts.includes(f)} onChange={e => setXFmts(v => e.target.checked ? [...v, f] : v.filter(x => x !== f))} /> {f.toUpperCase()}</label>)}
-            <button className="primary" onClick={() => guard(exportZip)} disabled={busy || !xFmts.length}>Скачать все (ZIP)</button>
-          </div>
-          <p className="muted small">Файлы берутся с текущими осью Y, видом кривых, оформлением и шириной; PNG - с выбранным DPI. Пакет - по одному файлу на исследование и формат,
-            исследования без кривых пропускаются. Кнопка «Скачать» на самом графике выгружает его в том же виде.</p>
-        </>}
 
         <h3>Общие графики по всем скважинам</h3>
         <div className="row adapt-pick">
