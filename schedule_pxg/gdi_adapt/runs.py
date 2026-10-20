@@ -30,6 +30,16 @@ def _arr(a, k: float = 1.0) -> List[Optional[float]]:
     return [] if a is None else [_f(v / k) for v in np.asarray(a, dtype=float)]
 
 
+def _dep_qmax(r: AdaptResult) -> Optional[float]:
+    """Депрессия Pпл - Pзаб (бар) по режиму ГДИ с максимальным дебитом; None, если такого режима нет."""
+    q = np.asarray(r.q_gdi, dtype=float)
+    dep = np.asarray(r.p_res_gdi, dtype=float) - np.asarray(r.bhp_gdi, dtype=float)
+    ok = np.isfinite(q) & np.isfinite(dep)
+    if not ok.any():
+        return None
+    return _f(dep[np.flatnonzero(ok)[np.argmax(q[ok])]])
+
+
 def result_dict(r: AdaptResult, qc: str = "") -> dict:
     return dict(
         well=r.wname, date=r.date.strftime("%Y-%m-%d"), source=r.source, qc=r.qc_status or qc, n_regimes=r.n_regimes,
@@ -42,7 +52,7 @@ def result_dict(r: AdaptResult, qc: str = "") -> dict:
         t_requested=r.t_requested, shift_days=_f(r.shift_days),
         q_gdi=_arr(r.q_gdi, Q_SHOW), q_before=_arr(r.q_before, Q_SHOW), q_after=_arr(r.q_after, Q_SHOW), dp2_gdi=_arr(r.dp2_gdi),
         curve_q=_arr(r.curve_q, Q_SHOW), curve_before=_arr(r.curve_dp2_before), curve_after=_arr(r.curve_dp2_after),
-        at_bound=any("границе" in p for p in r.problems))
+        at_bound=any("границе" in p for p in r.problems), dep_qmax=_dep_qmax(r))
 
 
 def _med(v):

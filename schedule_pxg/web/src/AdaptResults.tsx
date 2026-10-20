@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AdaptConfig, AdaptResultRow, AdaptRun, AdaptView, adaptFileUrl, adaptRecompute, adaptRun, adaptRuns, pickFile } from './api'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
+import type { Chart } from '../../../pxg_core/web-ui/chart/chartTypes'
 
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const sci = (x: number | null | undefined) => (x === null || x === undefined ? '—' : x === 0 ? '0' : x.toExponential(2))
@@ -19,6 +20,61 @@ const COLS: [Key, string, (r: AdaptResultRow) => string][] = [
   ['q_ratio', 'Q модели / Q ГДИ', r => fmt(r.q_ratio, 2)],
 ]
 
+/** Период выборки: последние 3 или 5 лет от последней даты в результатах, всё, либо свои даты «с» и «по». */
+type Period = { per: '3' | '5' | 'all' | 'custom'; from: string; to: string }
+const PERIOD0: Period = { per: '3', from: '', to: '' }
+const shiftYears = (iso: string, n: number) => (Number(iso.slice(0, 4)) - n) + iso.slice(4)
+/** Границы [с, по] в ISO-датах; пустая строка - без границы. */
+const rangeOf = (p: Period, anchor: string): [string, string] =>
+  p.per === 'all' ? ['', ''] : p.per === 'custom' ? [p.from, p.to] : !anchor ? ['', ''] : [shiftYears(anchor, Number(p.per)), anchor]
+const inRange = (d: string, [lo, hi]: [string, string]) => (!lo || d >= lo) && (!hi || d <= hi)
+
+/** Показатели для гистограммы: логарифмические корзины для WPIMULT и WDFAC, линейные для депрессии. */
+type Metric = 'pi' | 'd' | 'dep'
+const METRIC: Record<Metric, { label: string; log: boolean; get: (r: AdaptResultRow) => number | null; fmt: (x: number) => string }> = {
+  pi: { label: 'WPIMULT', log: true, get: r => r.pi_mult, fmt: x => fmt(x, 3) },
+  d: { label: 'WDFAC', log: true, get: r => r.d, fmt: x => sci(x) },
+  dep: { label: 'Депрессия Pпл − Pзаб, бар', log: false, get: r => r.dep_qmax, fmt: x => fmt(x, 1) },
+}
+
+/** Корзины гистограммы: log10 с шагом 0.5 декады либо 10 равных интервалов. */
+function bins(vals: number[], m: (typeof METRIC)[Metric]) {
+  if (m.log) {
+    const v = vals.map(Math.log10)
+    const lo = Math.floor(Math.min(...v) * 2) / 2, hi = Math.max(Math.ceil(Math.max(...v) * 2) / 2, lo + 0.5)
+    const n = Math.round((hi - lo) / 0.5), cnt: number[] = Array(n).fill(0)
+    v.forEach(x => { cnt[Math.min(n - 1, Math.floor((x - lo) / 0.5))]++ })
+    const edge = (i: number) => Math.pow(10, lo + i * 0.5)
+    return { cats: cnt.map((_, i) => m.fmt(edge(i)) + '–' + m.fmt(edge(i + 1))), cnt }
+  }
+  const lo = Math.min(...vals), hi = Math.max(...vals, lo + 1), n = 10, step = (hi - lo) / n
+  const cnt: number[] = Array(n).fill(0)
+  vals.forEach(x => { cnt[Math.min(n - 1, Math.floor((x - lo) / step))]++ })
+  return { cats: cnt.map((_, i) => m.fmt(lo + i * step) + '–' + m.fmt(lo + (i + 1) * step)), cnt }
+}
+
+/** Тренд показателя по датам исследований одной скважины: точки и линия. */
+function trendChart({ id, title, rows, get, name, yLabel, unit }: { id: string; title: string; rows: AdaptResultRow[]; get: (r: AdaptResultRow) => number | null; name: string; yLabel: string; unit: string }): Chart | null {
+  const pts = rows.filter(r => get(r) !== null)
+  if (pts.length < 2) return null
+  const x = pts.map(r => Date.parse(r.date)), y = pts.map(r => get(r) as number)
+  return mkChart(id, title, mkAxis('Дата ГДИ', '', 'time'), mkAxis(yLabel, unit, 'value'), [
+    mkSeries({ name, kind: 'points', slot: 0, x, y }),
+    { ...mkSeries({ name: 'линия', slot: 0, x, y }), legend: false }])
+}
+
+/** Выбор периода: переключатель и, для «свои даты», два поля дат. */
+function PeriodSel({ value, onChange, anchor }: { value: Period; onChange: (p: Period) => void; anchor: string }) {
+  const [lo, hi] = rangeOf(value, anchor)
+  return <>
+    <label>Период<select value={value.per} onChange={e => { const per = e.target.value as Period['per']; onChange(per === 'custom' ? { per, from: lo, to: hi } : { ...value, per }) }}>
+      <option value="3">последние 3 года</option><option value="5">последние 5 лет</option><option value="all">всё</option><option value="custom">свои даты</option></select></label>
+    {value.per === 'custom' && <>
+      <label>с<input type="date" value={value.from} onChange={e => onChange({ ...value, from: e.target.value })} /></label>
+      <label>по<input type="date" value={value.to} onChange={e => onChange({ ...value, to: e.target.value })} /></label></>}
+  </>
+}
+
 /** Шаг 5 вкладки «Адаптация по ГДИ»: результаты прогона. Снимки из тНавигатора → пересчёт без него → таблица, графики, группы. */
 export default function AdaptResults({ kit, config }: { kit: string; config: Partial<AdaptConfig> }) {
   const [snap, setSnap] = useState('')
@@ -30,6 +86,10 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
   const [sort, setSort] = useState<{ k: Key; dir: 1 | -1 }>({ k: 'well', dir: 1 })
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [yMode, setYMode] = useState<'dp2' | 'dp2q'>('dp2')
+  const [tPer, setTPer] = useState<Period>(PERIOD0)
+  const [hMetric, setHMetric] = useState<Metric>('pi')
+  const [hPer, setHPer] = useState<Period>(PERIOD0)
 
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   const reload = () => kit ? adaptRuns(kit).then(r => setRuns(r.runs)).catch(() => setRuns([])) : Promise.resolve()
@@ -47,6 +107,8 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
     return [...f].sort(cmp)
   }, [view, filter, sort])
   const cur = view?.rows.find(r => id(r) === well)
+  // Последняя дата исследований всего списка: от неё отсчитываются периоды «последние N лет».
+  const anchor = useMemo(() => (view?.rows || []).reduce((m, r) => (r.date > m ? r.date : m), ''), [view])
   const pos = rows.findIndex(r => id(r) === well)
   // Все исследования выбранной скважины по дате; список скважин — из текущего отфильтрованного списка.
   const wellDates = useMemo(() => cur ? (view?.rows || []).filter(r => r.well === cur.well).sort((a, b) => a.date < b.date ? -1 : 1) : [], [view, cur])
@@ -68,28 +130,34 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
     return parts.join(', ')
   })()
 
-  const dyn = useMemo(() => {
-    const pts = wellDates.filter(r => r.pi_mult !== null)
-    return pts.length < 2 ? null : mkChart('adapt-dyn', 'Динамика WPIMULT по датам ГДИ, скв. ' + cur!.well, mkAxis('Дата ГДИ', '', 'time'), mkAxis('WPIMULT (итого от базовой модели)', '', 'value'), [
-      mkSeries({ name: 'WPIMULT', kind: 'points', slot: 0, x: pts.map(r => Date.parse(r.date)), y: pts.map(r => r.pi_mult!) }),
-      mkSeries({ name: 'линия', slot: 0, x: pts.map(r => Date.parse(r.date)), y: pts.map(r => r.pi_mult!) })])
-  }, [wellDates, cur])
+  const wellDatesT = useMemo(() => { const tr = rangeOf(tPer, anchor); return wellDates.filter(r => inRange(r.date, tr)) }, [wellDates, tPer, anchor])
+  const dyn = useMemo(() => cur ? trendChart({ id: 'adapt-dyn', title: 'Динамика WPIMULT по датам ГДИ, скв. ' + cur.well, rows: wellDatesT, get: r => r.pi_mult, name: 'WPIMULT', yLabel: 'WPIMULT (итого от базовой модели)', unit: '' }) : null, [wellDatesT, cur])
+  const dfac = useMemo(() => cur ? trendChart({ id: 'adapt-dfac', title: 'Динамика WDFAC по датам ГДИ, скв. ' + cur.well, rows: wellDatesT, get: r => r.d, name: 'WDFAC', yLabel: 'WDFAC (D-фактор)', unit: '' }) : null, [wellDatesT, cur])
+  const dep = useMemo(() => cur ? trendChart({ id: 'adapt-dep', title: 'Депрессия Pпл − Pзаб по датам ГДИ, скв. ' + cur.well, rows: wellDatesT, get: r => r.dep_qmax, name: 'Pпл − Pзаб', yLabel: 'Депрессия Pпл − Pзаб (режим макс. дебита)', unit: 'бар' }) : null, [wellDatesT, cur])
 
-  const curve = useMemo(() => cur && mkChart('adapt-ip', 'Индикаторная кривая, скв. ' + cur.well + ' от ' + cur.date, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('ΔP² = Pпл² − Pз²', 'бар²', 'value', { from_zero: true }), [
-    mkSeries({ name: 'ГДИ', kind: 'points', slot: 3, x: nn(cur.q_gdi), y: nn(cur.dp2_gdi) }),
-    mkSeries({ name: 'модель до', slot: 5, dashed: true, x: nn(cur.curve_q), y: cur.curve_before as number[] }),
-    mkSeries({ name: 'модель после', slot: 0, x: nn(cur.curve_q), y: cur.curve_after as number[] }),
-  ]), [cur])
+  const curve = useMemo(() => {
+    if (!cur) return null
+    const byQ = yMode === 'dp2q'
+    // ΔP²/Q: где Q=0 или нет данных, точка пропускается; ось X - Q в обоих режимах
+    const yv = (xs: (number | null)[], ys: (number | null)[]) => byQ ? ys.map((y, i) => { const x = xs[i]; return y === null || x === null || x === 0 ? null : y / x }) : ys
+    return mkChart('adapt-ip', 'Индикаторная кривая, скв. ' + cur.well + ' от ' + cur.date, mkAxis('Дебит', 'тыс. м³/сут'),
+      byQ ? mkAxis('ΔP² / Q', 'бар²/(тыс. м³/сут)', 'value', { from_zero: true }) : mkAxis('ΔP² = Pпл² − Pз²', 'бар²', 'value', { from_zero: true }), [
+      mkSeries({ name: 'ГДИ', kind: 'points', slot: 3, x: nn(cur.q_gdi), y: yv(cur.q_gdi, cur.dp2_gdi) }),
+      mkSeries({ name: 'модель до', slot: 5, dashed: true, x: nn(cur.curve_q), y: yv(cur.curve_q, cur.curve_before) }),
+      mkSeries({ name: 'модель после', slot: 0, x: nn(cur.curve_q), y: yv(cur.curve_q, cur.curve_after) }),
+    ])
+  }, [cur, yMode])
   const hist = useMemo(() => {
-    const v = (view?.rows || []).map(r => r.pi_mult).filter((x): x is number => x !== null && x > 0).map(Math.log10)
-    if (!v.length) return null
-    const lo = Math.floor(Math.min(...v) * 2) / 2, hi = Math.max(Math.ceil(Math.max(...v) * 2) / 2, lo + 0.5)
-    const n = Math.round((hi - lo) / 0.5), cnt = Array(n).fill(0)
-    v.forEach(x => { cnt[Math.min(n - 1, Math.floor((x - lo) / 0.5))]++ })
-    const cats = cnt.map((_, i) => fmt(Math.pow(10, lo + i * 0.5), 3) + '–' + fmt(Math.pow(10, lo + (i + 1) * 0.5), 3))
-    return mkChart('adapt-hist', 'Распределение WPIMULT', mkAxis('WPIMULT', '', 'category', { categories: cats }), mkAxis('Скважин', '', 'value', { from_zero: true }),
+    const m = METRIC[hMetric], hr = rangeOf(hPer, anchor)
+    // по каждой скважине - её самое свежее исследование в периоде
+    const latest = new Map<string, AdaptResultRow>()
+    ;(view?.rows || []).filter(r => inRange(r.date, hr)).forEach(r => { const c = latest.get(r.well); if (!c || r.date > c.date) latest.set(r.well, r) })
+    const vals = [...latest.values()].map(m.get).filter((x): x is number => x !== null && (!m.log || x > 0))
+    if (!vals.length) return null
+    const { cats, cnt } = bins(vals, m)
+    return mkChart('adapt-hist', 'Распределение ' + m.label + ', скважин: ' + vals.length, mkAxis(m.label, '', 'category', { categories: cats }), mkAxis('Скважин', '', 'value', { from_zero: true }),
       [mkSeries({ name: 'скважин', kind: 'bar', slot: 0, x: cats, y: cnt })])
-  }, [view])
+  }, [view, hMetric, hPer, anchor])
   const r2c = useMemo(() => {
     const p = (view?.rows || []).filter(r => r.r2 !== null && r.r2_old !== null)
     if (!p.length) return null
@@ -152,13 +220,29 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
           <span className="muted small">{pos >= 0 ? `${pos + 1} из ${rows.length} в текущем списке` : 'выбранного исследования нет в текущем списке'}</span>
         </div>}
         {stepInfo && <p className="muted small" style={{ margin: '4px 0 8px' }}>{stepInfo}</p>}
+        {cur && <div className="row adapt-pick">
+          <label>Ось Y индикаторной<select value={yMode} onChange={e => setYMode(e.target.value as 'dp2' | 'dp2q')}>
+            <option value="dp2">ΔP²</option><option value="dp2q">ΔP²/Q</option></select></label>
+          <PeriodSel value={tPer} onChange={setTPer} anchor={anchor} />
+        </div>}
         <div className="adapt-charts">
           {curve && <div><ChartView chart={curve} excludeMode={false} onExclude={() => {}} /></div>}
           {dyn && <div><ChartView chart={dyn} excludeMode={false} onExclude={() => {}} /></div>}
+          {dfac && <div><ChartView chart={dfac} excludeMode={false} onExclude={() => {}} /></div>}
+          {dep && <div><ChartView chart={dep} excludeMode={false} onExclude={() => {}} /></div>}
         </div>
-        {cur && !dyn && <p className="muted small">Динамика WPIMULT строится, когда у скважины не меньше двух исследований с расчётом.</p>}
+        {cur && !dyn && !dfac && !dep && <p className="muted small">Тренды строятся, когда у скважины в выбранном периоде не меньше двух исследований с расчётом.</p>}
+        {cur && <p className="muted small">Депрессия Pпл − Pзаб: измеренные на ГДИ пластовое и забойное давления в режиме с максимальным дебитом (бар).
+          Период по умолчанию - последние 3 года от последней даты исследований в результатах.</p>}
 
         <h3>Общие графики по всем скважинам</h3>
+        <div className="row adapt-pick">
+          <label>Показатель<select value={hMetric} onChange={e => setHMetric(e.target.value as Metric)}>
+            {(Object.keys(METRIC) as Metric[]).map(k => <option key={k} value={k}>{METRIC[k].label}</option>)}</select></label>
+          <PeriodSel value={hPer} onChange={setHPer} anchor={anchor} />
+        </div>
+        <p className="muted small">Гистограмма по всем скважинам периода: для каждой скважины берётся её самое свежее исследование в периоде, поэтому скважина считается один раз.
+          Для WPIMULT и WDFAC корзины логарифмические, для депрессии - 10 равных интервалов.</p>
         <div className="adapt-charts">
           {hist && <div><ChartView chart={hist} excludeMode={false} onExclude={() => {}} /></div>}
           {r2c && <div><ChartView chart={r2c} excludeMode={false} onExclude={() => {}} /></div>}
