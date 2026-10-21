@@ -257,6 +257,7 @@ def test_trends_flow_slope_matches_old(old, db, tmp_path, monkeypatch):
 
 
 def test_api_flow(db, tmp_path, monkeypatch):
+    pytest.importorskip("pyarrow")
     monkeypatch.setenv("GSP_MAPS_CACHE", str(tmp_path / "cache"))
     monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
     import importlib
