@@ -1,5 +1,6 @@
 # Последние версии библиотек, существующие для CPython 3.13 (Windows 10+ и РЕД ОС 7.3, manylinux2014). Python 3.14 не берём: для него нет колёс manylinux2014 у numpy, pandas, pyarrow.
 pandas
+pyarrow
 numpy
 openpyxl
 scipy

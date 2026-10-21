@@ -1,6 +1,7 @@
 """HTTP/JSON для «Карт ГСП» (Starlette, как в Атласе 6 и Базе ПХГ)."""
 from __future__ import annotations
 
+import json
 import os
 
 from pxg_core import fs_browse
@@ -17,7 +18,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from .project import PATH_KEYS, Project, detect_files, detect_project_files
+from .project import PATH_KEYS, Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
 PROJECT = Project()
@@ -27,10 +28,22 @@ def _err(text: str, code: int = 400) -> JSONResponse:
     return JSONResponse({"error": text}, status_code=code)
 
 
+def _atlas_url() -> str:
+    """Адрес Газового Атласа в едином запуске (меню кладёт его в PXG_APP_URLS); пусто, если запущено отдельно."""
+    try:
+        return str(json.loads(os.environ.get("PXG_APP_URLS", "{}")).get("atlas", ""))
+    except ValueError:
+        return ""
+
+
 def _state() -> dict:
     p = PROJECT
+    root = p.storage()
+    pid = p.project_id()
     return {"state": p.state, "log": p.log, "paths": p.paths, "checks": p.check(), "resultsDir": p.results_dir or str(p.out_dir()),
-            "gsps": p.store.gsp_list() if p.store else [], "gspMeta": p.gsp_meta()}
+            "gsps": p.store.gsp_list() if p.store else [], "gspMeta": p.gsp_meta(),
+            "atlas": {"storage": str(root) if root else "", "fromEnv": not p.paths["atlas_storage"] and bool(root),
+                      "project": pid, "chosen": bool(p.paths["atlas_project"]), "url": _atlas_url(), "projects": p.atlas_projects()}}
 
 
 async def state(request: Request):
@@ -48,18 +61,6 @@ async def config(request: Request):
     return JSONResponse(await run_in_threadpool(_state))
 
 
-async def scan(request: Request):
-    body = await request.json()
-    folder = str(body.get("folder") or "").strip().strip('"')
-    # без папки берём файлы выбранного проекта (готовые и выгрузки Базы ПХГ)
-    found = detect_files(folder) if folder else detect_project_files()
-    if not found:
-        return _err("В папке не нашлось знакомых файлов (ожидается БД_расходы.xlsx и другие). Выберите папку проекта или папку с файлами.")
-    PROJECT.set_paths(found)
-    PROJECT.start_loading()
-    return JSONResponse(await run_in_threadpool(_state))
-
-
 async def load(request: Request):
     PROJECT.start_loading()
     return JSONResponse(await run_in_threadpool(_state))
@@ -68,7 +69,7 @@ async def load(request: Request):
 async def locate(request: Request):
     """Адрес карты: по записи группы и скважины — настоящее имя группы и все группы, где есть скважина."""
     if PROJECT.store is None:
-        return _err("База расходов ещё не загружена.", 409)
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
     try:
         well = int(request.query_params.get("well") or "")
     except ValueError:
@@ -80,7 +81,7 @@ async def locate(request: Request):
 
 async def gsp(request: Request):
     if PROJECT.store is None:
-        return _err("База расходов ещё не загружена.", 409)
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
     name = request.query_params.get("name") or ""
     if name not in PROJECT.store.gsp_names:
         return _err("Нет такого ГСП: %s" % name, 404)
@@ -90,7 +91,7 @@ async def gsp(request: Request):
 
 async def work(request: Request):
     if PROJECT.store is None:
-        return _err("База расходов ещё не загружена.", 409)
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
     name = request.query_params.get("name") or ""
     if name not in PROJECT.store.gsp_names:
         return _err("Нет такого ГСП: %s" % name, 404)
@@ -99,7 +100,7 @@ async def work(request: Request):
 
 async def summary(request: Request):
     if PROJECT.store is None:
-        return _err("База расходов ещё не загружена.", 409)
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
     q = request.query_params
     name = q.get("gsp") or ""
     if name not in PROJECT.store.gsp_names:
@@ -109,14 +110,14 @@ async def summary(request: Request):
 
 async def season(request: Request):
     if PROJECT.store is None:
-        return _err("База расходов ещё не загружена.", 409)
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
     q = request.query_params
     return JSONResponse(await run_in_threadpool(PROJECT.season_payload, q.get("gsp") or "", q.get("kind") or "Отбор", q.get("season") or ""))
 
 
 async def export(request: Request):
     if PROJECT.store is None:
-        return _err("База расходов ещё не загружена.", 409)
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
     body = await request.json()
     try:
         path = await run_in_threadpool(PROJECT.export_excel, str(body.get("gsp") or ""), str(body.get("mode") or "auto"))
@@ -156,7 +157,6 @@ def build_app() -> Starlette:
     routes = [
         Route("/api/state", state),
         Route("/api/config", config, methods=["POST"]),
-        Route("/api/scan", scan, methods=["POST"]),
         Route("/api/load", load, methods=["POST"]),
         Route("/api/gsp", gsp),
         Route("/api/locate", locate),

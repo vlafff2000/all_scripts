@@ -1,6 +1,8 @@
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 export interface FileCheck { id: string; label: string; path: string; ok: boolean; info: string }
-export interface AppState { state: 'idle' | 'loading' | 'ready' | 'error'; log: string[]; paths: Record<string, string>; checks: FileCheck[]; resultsDir: string; gsps: string[]; gspMeta: Record<string, { grid: boolean; xy: boolean }> }
+export interface AtlasProject { id: string; name: string; updated: string; demo: boolean; tables: Record<string, number> }
+export interface AtlasInfo { storage: string; fromEnv: boolean; project: string; chosen: boolean; url: string; projects: AtlasProject[] }
+export interface AppState { state: 'idle' | 'loading' | 'ready' | 'error'; log: string[]; paths: Record<string, string>; checks: FileCheck[]; resultsDir: string; gsps: string[]; gspMeta: Record<string, { grid: boolean; xy: boolean }>; atlas: AtlasInfo }
 export interface Pos { x: number; y: number; src: 'grid' | 'xy' | 'fit'; dir: string }
 export interface Layout { mode: 'grid' | 'xy'; wells: Record<string, Pos>; missing: number[]; notes: string[]; has_grid: boolean; has_xy: boolean }
 export interface SeasonInfo { key: string; start: number; end: number }
@@ -28,7 +30,6 @@ const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Cont
 export const getState = () => call<AppState>('/api/state')
 export const saveConfig = (paths: Record<string, string>, resultsDir?: string, load = true) =>
   call<AppState>('/api/config', post({ paths, resultsDir, load }))
-export const scanFolder = (folder: string) => call<AppState>('/api/scan', post({ folder }))
 /** Режим «весь объект»: все ГСП на одной карте. Данные собираются из обычных запросов по каждому ГСП. */
 export const ALL_GSP = 'Весь объект'
 let allGroups: string[] = []

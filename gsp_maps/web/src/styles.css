@@ -58,3 +58,6 @@ button.quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--line-
 }
 @media (prefers-reduced-motion: reduce) { .dot { animation: none; } .shell { transition: none; } }
 
+.checklist { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.checklist li.ok span[aria-hidden] { color: var(--ok, #169b62); }
+.checklist li.bad span[aria-hidden] { color: var(--bad, #d55e00); }
