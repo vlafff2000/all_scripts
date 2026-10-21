@@ -227,13 +227,13 @@ export default function App() {
     if (!app) return <p className="muted">Загрузка…</p>
     if (page === 'data') return <DataPage app={app} setApp={setApp} mode={mode} setMode={posMode.set} gsp={gsp} onReload={refresh} />
     if (app.state === 'loading') return (
-      <section className="card loading"><div className="spinner" aria-hidden="true" /><div><h2>Загружаю базу расходов</h2>
+      <section className="card loading"><div className="spinner" aria-hidden="true" /><div><h2>Загружаю данные из проекта Атласа</h2>
         <pre className="log">{app.log.join('\n') || 'Подготовка…'}</pre>
-        <p className="muted">Первый раз это занимает до минуты: книга большая. Дальше она открывается из кэша меньше чем за секунду.</p></div></section>)
+        <p className="muted">Первый раз это может занять до минуты; дальше данные открываются из кэша быстрее.</p></div></section>)
     if (app.state !== 'ready') return (
       <section className="card"><h2>{app.state === 'error' ? 'База не загрузилась' : 'Сначала подключите данные'}</h2>
         {app.state === 'error' && <pre className="log">{app.log.join('\n')}</pre>}
-        <p className="muted">Откройте раздел «Данные»: выберите папку с файлами или укажите БД_расходы.xlsx.</p>
+        <p className="muted">Откройте раздел «Данные»: выберите проект Газового Атласа (расходы, давления, вода и координаты загружаются в Атласе).</p>
         <p><a className="primary linkbtn" href="#/data">Перейти к данным</a></p></section>)
     if (g && page === 'compare') return (
       <Compare g={g} kind={kind} inspector={insp} options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
