@@ -83,7 +83,7 @@ def _study_overrides(raw) -> Dict[str, bool]:
 def run_selection(p: Project, body: dict) -> Tuple[selection.Selection, dict, Config, selection.Settings]:
     path = str(body.get("db") or "").strip().strip('"')
     if not os.path.isfile(path):
-        raise ValueError("Не нашёл БД ГДИ «%s». Укажите файл базы ГДИ из «Базы ПХГ»." % path)
+        raise ValueError("Не нашёл БД ГДИ «%s». Укажите файл базы ГДИ из «Работы с исходными данными»." % path)
     cols = {k: v for k, v in (body.get("cols") or {}).items() if v}
     if len(cols) < 5:       # недостающее подставляется автоопределением, выбранное вручную не трогаем
         cols = dict(selection.detect_columns(selection.read_db(path, body.get("sheet") or "").columns), **cols)

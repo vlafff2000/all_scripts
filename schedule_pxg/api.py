@@ -562,7 +562,7 @@ def _history_run(body: dict):
         notes.append("База расходов уже нормирована на ПЗРГ (%s): поправка по ПЗРГ повторно не делается" % ", ".join(done))
         rest = [os.path.basename(f) for f in files if f not in done and history.detect_format(f) == history.FORMAT_DB]
         if rest:
-            notes.append("Не нормированы на ПЗРГ и поправки не получат: %s. Нормируйте их в «Базе ПХГ» или не смешивайте с нормированной" % ", ".join(rest))
+            notes.append("Не нормированы на ПЗРГ и поправки не получат: %s. Нормируйте их в «Работе с исходными данными» или не смешивайте с нормированной" % ", ".join(rest))
     split = body.get("split")
     # окно рабочего дебита — настройка объекта: пришло в запросе — запоминаем в проекте, иначе берём из проекта
     if "window_lo" in body or "window_hi" in body:
@@ -780,7 +780,7 @@ async def sources_folder(request: Request):
     p = _project()
     folder = _clean(b.get("folder")) or workspace.folder("exports")   # без папки — выгрузки выбранного проекта
     if not folder:
-        return _err("Выберите папку проекта (на стартовой странице Базы ПХГ) или папку выгрузок")
+        return _err("Выберите папку проекта (на стартовой странице «Работы с исходными данными») или папку выгрузок")
     if not os.path.isdir(folder):
         return _err("Папка выгрузок проекта не найдена: %s. Её создаёт Работа с исходными данными после первого запуска." % folder)
     found = sources.detect_flow_files(folder)
