@@ -24,7 +24,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, historymode, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
+from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, historymode, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .gdi_adapt import export_charts
 from .project import Project
 
@@ -768,10 +768,24 @@ async def sources_set(request: Request):
         if "daily_total" in b:
             d = b["daily_total"] or {}
             sources.set_daily_total(p, _clean(d.get("path")), d.get("unit") or "м3/сут")
+        if "gis" in b:
+            g = b["gis"] or {}
+            planshet.set_settings(p, _clean(g.get("folder")), _clean(g.get("perf_file")))
     except ValueError as e:
         return _err(str(e))
     p.save(FOLDER)
     return JSONResponse(_sources_view(p))
+
+
+async def planshet_fact(request: Request):
+    """Факт ГИС и перфорации для планшета: ?wells=a|b&date=YYYY-MM-DD (пусто — последний замер)."""
+    wells = [w.strip() for w in (request.query_params.get("wells") or "").split("|") if w.strip()]
+    if not wells:
+        return _err("Не выбраны скважины")
+    try:
+        return JSONResponse(await run_in_threadpool(planshet.view, _project(), wells, request.query_params.get("date") or ""))
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать базу ГИС: %s" % e)
 
 
 async def sources_folder(request: Request):
@@ -1330,6 +1344,7 @@ def build_app() -> Starlette:
         Route("/api/sources", sources_get),
         Route("/api/sources/set", sources_set, methods=["POST"]),
         Route("/api/sources/folder", sources_folder, methods=["POST"]),
+        Route("/api/planshet/fact", planshet_fact),
         Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),
