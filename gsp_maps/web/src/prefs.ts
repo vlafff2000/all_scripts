@@ -38,6 +38,11 @@ export const gisPins = pref<string>('gsp.gisPins', '', raw => String(raw || ''))
 /** Изолинии ГИС: включены ли, шаг по значению («» — подобрать), радиус доверия в средних расстояниях между скважинами. */
 /** Что показывать в режиме «ГИС и ГВК»: факт ГИС, ГВК модели из ГДМ или отклонение «модель − факт». */
 export const gisSource = pref<'fact' | 'model' | 'delta'>('gsp.gisSource', 'fact', raw => (raw === 'model' || raw === 'delta' ? raw : 'fact'))
+/** Кровля пласта из модели под изолиниями ГВК: включена ли, файл модели, номер слоя ячеек (0 — верхний активный), шаг изолиний. */
+export const gisRoof = pref<boolean>('gsp.gisRoof', false)
+export const gisRoofModel = pref<string>('gsp.gisRoofModel', '', raw => String(raw || ''))
+export const gisRoofLayer = pref<string>('gsp.gisRoofLayer', '1', raw => String(raw ?? '1'))
+export const gisRoofStep = pref<string>('gsp.gisRoofStep', '', raw => String(raw || ''))
 export const gisIso = pref<boolean>('gsp.gisIso', false)
 export const gisIsoStep = pref<string>('gsp.gisIsoStep', '', raw => String(raw || ''))
 export const gisIsoReach = pref<string>('gsp.gisIsoReach', '1.5', raw => String(raw || '1.5'))

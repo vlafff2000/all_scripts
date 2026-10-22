@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { exportExcel, getGsp, getGis, getGisModel, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getGis, getGisModel, getRoof, type RoofGrid, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
@@ -9,7 +9,7 @@ import SharesPage from './SharesPage'
 import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
-import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, gisPack, gisMetric, gisSeason, gisAgainst, gisPins, gisSource, gisIso, gisIsoStep, gisIsoReach, modelKeyword, modelAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, gisPack, gisMetric, gisSeason, gisAgainst, gisPins, gisSource, gisRoof, gisRoofModel, gisRoofLayer, gisRoofStep, gisIso, gisIsoStep, gisIsoReach, modelKeyword, modelAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
 
 const PAGES = [
@@ -232,11 +232,29 @@ export default function App() {
   const [modelErr, setModelErr] = useState('')
   const modelKw = usePref(modelKeyword), modelAggV = usePref(modelAgg)
   useEffect(() => {
-    if (!ready || paint !== 'model') return
+    if (!ready || (paint !== 'model' && paint !== 'gis')) return
     getModels().then(setModelView).catch(e => setModelErr(String(e.message || e)))
   }, [ready, paint])
   const pair = (modelView?.selected ?? []).slice(0, 2)
   const pairKey = pair.join('|')
+  const roofOn = usePref(gisRoof), roofModel = usePref(gisRoofModel), roofLayer = usePref(gisRoofLayer), roofStep = usePref(gisRoofStep)
+  const [roofGrid, setRoofGrid] = useState<RoofGrid | null>(null)
+  const [roofErr, setRoofErr] = useState('')
+  const roofPath = roofModel || modelView?.selected[0] || ''
+  useEffect(() => {
+    if (!ready || paint !== 'gis' || !roofOn || !roofPath) { setRoofGrid(null); setRoofErr(''); return }
+    let live = true
+    setRoofErr('')
+    getRoof(roofPath, Math.max(0, Math.floor(Number(roofLayer) || 0))).then(r => live && setRoofGrid(r)).catch(e => { if (live) { setRoofGrid(null); setRoofErr(String(e.message || e)) } })
+    return () => { live = false }
+  }, [ready, paint, roofOn, roofPath, roofLayer])
+  // координаты карты идут вниз по Y: строки растра переворачиваются, чтобы изолинии легли на скважины
+  const roofRaster = useMemo(() => {
+    if (!roofGrid || !roofGrid.nx) return null
+    const z = new Float64Array(roofGrid.nx * roofGrid.ny).fill(NaN)
+    roofGrid.z.forEach((row, j) => row.forEach((v, i) => { if (v !== null) z[(roofGrid.ny - 1 - j) * roofGrid.nx + i] = v }))
+    return { z, nx: roofGrid.nx, ny: roofGrid.ny, x0: roofGrid.x0, y0: -(roofGrid.y0 + (roofGrid.ny - 1) * roofGrid.dy), dx: roofGrid.dx, dy: roofGrid.dy }
+  }, [roofGrid])
   useEffect(() => {
     if (!ready || paint !== 'model' || !pairKey) { setModelKws([]); return }
     let live = true
@@ -351,8 +369,8 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} models={{ paint: modelData?.paint ?? null, picker: { view: modelView, keywords: modelKws, keyword: modelKw, agg: modelAggV, note: modelErr || modelData?.note || (pair.length ? '' : 'Отметьте модели, которые нужно показать на карте.'), onKeyword: k => modelKeyword.set(k), onAgg: v => modelAgg.set(v), onSelect: ids => selectModels(ids).then(setModelView).catch(e => setModelErr(String(e.message || e))), onFolders: fs => setModelFolders(fs).then(setModelView).catch(e => setModelErr(String(e.message || e))), onAddFolder: () => pickPath('folder', '').then(r => { if (r.path) setModelFolders([...(modelView?.folders ?? []), r.path]).then(setModelView) }).catch(e => setModelErr(String(e.message || e))) } }} gis={{ catalog: gisCat, pack: gisPackUse, metric: gMetric, season: gisSeasonUse, against: gisAgainstUse, pins: gPins, options: gisVals?.options ?? {}, dates: gisVals?.dates ?? {}, paint: gisData, iso: { on: isoOn, step: isoStep, reach: isoReach }, isoNote: '', source: gSource, modelInfo: gisMod?.info ?? gisMod?.warnings[0] ?? '',
-            onChange: p => { if (p.pack !== undefined) gisPack.set(p.pack); if (p.metric !== undefined) gisMetric.set(p.metric); if (p.season !== undefined) gisSeason.set(p.season); if (p.against !== undefined) gisAgainst.set(p.against); if (p.source !== undefined) gisSource.set(p.source); if (p.iso !== undefined) gisIso.set(p.iso); if (p.isoStep !== undefined) gisIsoStep.set(p.isoStep); if (p.isoReach !== undefined) gisIsoReach.set(p.isoReach); if (p.pins) gisPins.set(Object.entries(p.pins).map(([w, d]) => `${w}:${d}`).join(',')) } }} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
+          <MapView ref={map} models={{ paint: modelData?.paint ?? null, picker: { view: modelView, keywords: modelKws, keyword: modelKw, agg: modelAggV, note: modelErr || modelData?.note || (pair.length ? '' : 'Отметьте модели, которые нужно показать на карте.'), onKeyword: k => modelKeyword.set(k), onAgg: v => modelAgg.set(v), onSelect: ids => selectModels(ids).then(setModelView).catch(e => setModelErr(String(e.message || e))), onFolders: fs => setModelFolders(fs).then(setModelView).catch(e => setModelErr(String(e.message || e))), onAddFolder: () => pickPath('folder', '').then(r => { if (r.path) setModelFolders([...(modelView?.folders ?? []), r.path]).then(setModelView) }).catch(e => setModelErr(String(e.message || e))) } }} gis={{ catalog: gisCat, pack: gisPackUse, metric: gMetric, season: gisSeasonUse, against: gisAgainstUse, pins: gPins, options: gisVals?.options ?? {}, dates: gisVals?.dates ?? {}, paint: gisData, iso: { on: isoOn, step: isoStep, reach: isoReach }, isoNote: '', roof: { on: roofOn, model: roofPath, layer: roofLayer, step: roofStep, models: (modelView?.models ?? []).filter(m => m.files.includes('EGRID')), note: roofErr || roofGrid?.note || '', grid: roofRaster }, source: gSource, modelInfo: gisMod?.info ?? gisMod?.warnings[0] ?? '',
+            onChange: p => { if (p.pack !== undefined) gisPack.set(p.pack); if (p.metric !== undefined) gisMetric.set(p.metric); if (p.season !== undefined) gisSeason.set(p.season); if (p.against !== undefined) gisAgainst.set(p.against); if (p.roofOn !== undefined) gisRoof.set(p.roofOn); if (p.roofModel !== undefined) gisRoofModel.set(p.roofModel); if (p.roofLayer !== undefined) gisRoofLayer.set(p.roofLayer); if (p.roofStep !== undefined) gisRoofStep.set(p.roofStep); if (p.source !== undefined) gisSource.set(p.source); if (p.iso !== undefined) gisIso.set(p.iso); if (p.isoStep !== undefined) gisIsoStep.set(p.isoStep); if (p.isoReach !== undefined) gisIsoReach.set(p.isoReach); if (p.pins) gisPins.set(Object.entries(p.pins).map(([w, d]) => `${w}:${d}`).join(',')) } }} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
