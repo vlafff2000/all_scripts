@@ -601,7 +601,7 @@ def to_frames(results: Dict[str, SheetResult]) -> Dict[str, pd.DataFrame]:
             for r in b.rows:
                 has = r.hi is not None
                 rows.append({
-                    "Скважина": res.well, "Лист": res.sheet, "Строка листа": r.xl_row, "Дата": b.date,
+                    "Скважина": res.well, "Лист": res.sheet, "Строка листа": r.xl_row, "Замер": b.block, "Дата": b.date,
                     "Дата (точная)": b.exact, "Сезон": b.season, "Пачка": r.pack, "Цвет": r.color, "Метка": r.label_raw,
                     "ГВК": r.gvk_label, "От, м": r.frm, "До, м": r.to, "hi, м": r.hi, "Кп": r.kp, "Кг": r.kg,
                     "hэф, м": r.hef if has else None, "Кг·hэф": r.kg_hef if has else None, "ГВК а.о., м": r.gvk_abs,
