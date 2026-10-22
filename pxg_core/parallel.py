@@ -53,3 +53,17 @@ def map_module_function(module_path: str, func: str, arg_list: Sequence[tuple], 
             rf.DATE_ISSUES.extend(issues)
             out.append(res)
     return out
+
+
+def map_jobs(fn, jobs: Sequence[Any], mb_per_worker: float = 0.0, workers: Optional[int] = None) -> List[Any]:
+    """[fn(job) для job из jobs] по порядку на нескольких процессах; fn — функция верхнего уровня модуля (picklable).
+
+    Для независимых расчётов, где процессу нужны одни и те же большие данные: каждый процесс держит свой кэш (сетка модели
+    берётся из дискового кэша). mb_per_worker - оценка памяти процесса для ограничения числа процессов.
+    """
+    jobs = list(jobs)
+    n = min(_workers(mb_per_worker) if workers is None else max(1, workers), len(jobs))
+    if n < 2 or len(jobs) < MIN_PARALLEL_ITEMS:
+        return [fn(j) for j in jobs]
+    with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as ex:
+        return list(ex.map(fn, jobs, chunksize=1))

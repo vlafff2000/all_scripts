@@ -70,3 +70,33 @@ def test_compare_rows_overrides_and_exclusion():
     assert out["all"]["n"] == 1 and out["by"]["pack"]["верхняя"]["n"] == 1             # исключённая и не сравнимые не в статистике
     assert out["skipped"][gc.NO_GAS] == 1 and out["skipped"]["нет модели"] == 1
     assert (D(2024, 11, 5), ("1", "7")) in asked                                         # одна загрузка профилей на дату среза
+
+
+def test_compare_with_profiles_many_equals_per_date():
+    facts = [_fact("1", "2024-11-30", "осень", -921.0), _fact("2", "2025-04-10", "весна", -918.0), _fact("7", "2024-11-30", "осень", -900.0)]
+
+    def profiles(day, ws):
+        return {w: CELLS for w in ws if w != "7"}
+
+    def many(by_date):
+        return {d: profiles(d, ws) for d, ws in reversed(list(by_date.items()))}
+
+    a = gc.compare(facts, _daily(PAUSES), profiles, 0.01)
+    b = gc.compare(facts, _daily(PAUSES), profiles, 0.01, profiles_many=many)
+    assert a == b
+
+
+def test_profiles_for_slices_same_on_several_processes(tmp_path, monkeypatch):
+    """Срезы планшета на нескольких процессах дают те же профили, что подряд (модель с датами по месяцам)."""
+    from pxg_core import parallel
+    from schedule_pxg import planshet
+    from tests.test_tnav_indicators import PORV, SG, _egrid, _unrst
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    _egrid(tmp_path / "M.EGRID")
+    (tmp_path / "M.INIT").write_bytes(b"")
+    sgs = [[min(1.0, v + 0.04 * n) if v else 0.0 for v in SG] for n in range(5)]
+    _unrst(tmp_path / "M.UNRST", sgs, [PORV] * 5, with_wells=True)
+    jobs = [(str(tmp_path), "2026-0%d-01" % (n + 1), ["OBS1"], 0.3) for n in range(5)]
+    one = parallel.map_jobs(planshet._profile_job, jobs, workers=1)
+    many = parallel.map_jobs(planshet._profile_job, jobs, workers=3)
+    assert many == one and all(x.get("OBS1") for x in one)

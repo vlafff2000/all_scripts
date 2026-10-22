@@ -87,7 +87,8 @@ def row_key(well: str, date: str, pack: str) -> str:
 
 def compare(facts: Sequence[dict], daily: Optional[pd.DataFrame], profiles: Callable[[dt.date, List[str]], Dict[str, List[dict]]],
             thr: float = 0.01, slices: Optional[Dict[str, str]] = None, excluded: Sequence[str] = (),
-            groups: Optional[Dict[str, str]] = None) -> dict:
+            groups: Optional[Dict[str, str]] = None,
+            profiles_many: Optional[Callable[[Dict[dt.date, List[str]]], Dict[dt.date, Dict[str, List[dict]]]]] = None) -> dict:
     """Строки сравнения и статистика. `facts` — результат planshet.fact по замеру (одна строка на скважину и дату);
     `profiles(дата, скважины)` отдаёт ячейки колонны по скважинам; `slices` — ручные даты среза по ключу «скв|дата замера»."""
     ps = pauses(daily) if daily is not None else []
@@ -106,7 +107,8 @@ def compare(facts: Sequence[dict], daily: Optional[pd.DataFrame], profiles: Call
     by_date: Dict[dt.date, List[str]] = {}
     for f, d, _ in plan:
         by_date.setdefault(d, []).append(f["well"])
-    got = {d: profiles(d, ws) for d, ws in by_date.items()}
+    # profiles_many отдаёт все даты разом (планшет считает их на нескольких процессах); без него - по одной
+    got = profiles_many(by_date) if profiles_many is not None else {d: profiles(d, ws) for d, ws in by_date.items()}
     rows: List[dict] = []
     for f, d, why in plan:
         cells = (got.get(d) or {}).get(f["well"])

@@ -173,6 +173,19 @@ def _cached_model(egrid: str):
     return load_model(egrid)
 
 
+_STEPS_CACHE: dict = {}
+
+
+def _dated_steps(unrst: str) -> list:
+    """Шаги рестарта с датой: UNRST просматривается один раз на файл (до смены размера или даты), а не при каждом запросе планшета."""
+    st = os.stat(unrst)
+    key = (os.path.abspath(unrst), st.st_size, st.st_mtime_ns)
+    if _STEPS_CACHE.get("key") != key:
+        from tnav_results import iter_restart_steps
+        _STEPS_CACHE["key"], _STEPS_CACHE["steps"] = key, [s for s in iter_restart_steps(unrst) if s.date is not None]
+    return _STEPS_CACHE["steps"]
+
+
 def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Optional[float] = None) -> Tuple[List[dict], dict]:
     """Газонасыщенность вдоль колонны скважин на шаге рестарта, ближайшем к дате (для планшета), TVDSS."""
     from tnav_results.indicators import pick_step
@@ -183,7 +196,7 @@ def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Option
     miss = [k for k in ("EGRID", "UNRST") if k not in f]
     if miss:
         raise ValueError("Для планшета нужны файлы EGRID и UNRST (не найдены: %s)" % ", ".join(miss))
-    steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
+    steps = _dated_steps(f["UNRST"])
     if not steps:
         raise ValueError("В UNRST нет шагов с датой")
     step = pick_step(steps, date)
