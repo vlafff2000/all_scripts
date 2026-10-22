@@ -7,13 +7,17 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
+import time
 from array import array
 from typing import Optional, Tuple
 
 import numpy as np
 
 from .files import Grid, read_egrid
+
+log = logging.getLogger(__name__)
 
 VERSION = 1
 KEEP = 4          # сколько сеток держать на диске (остальные, самые старые, удаляются)
@@ -74,19 +78,24 @@ def _prune() -> None:
 
 def read_egrid_cached(egrid_path: str) -> Grid:
     """Как ``read_egrid``, но с кэшем на диске по размеру и дате файла."""
+    t0 = time.perf_counter()
+    name = os.path.basename(egrid_path)
     try:
         path = _name(file_key(egrid_path))
         if os.path.isfile(path):
             try:
-                return _load(path)
+                g = _load(path)
+                log.info("сетка %s: кэш попал, %.2f с", name, time.perf_counter() - t0)
+                return g
             except Exception:       # битый или чужой кэш: читаем заново и перезаписываем
-                pass
+                log.warning("сетка %s: кэш не читается, читаю файл заново", name)
     except OSError:
         return read_egrid(egrid_path)
     g = read_egrid(egrid_path)
+    log.info("сетка %s: кэша не было, прочитана из файла за %.2f с (%s×%s×%s)", name, time.perf_counter() - t0, g.ni, g.nj, g.nk)
     try:
         _save(path, g)
         _prune()
     except Exception:
-        pass
+        log.warning("сетка %s: кэш на диск записать не удалось", name)
     return g

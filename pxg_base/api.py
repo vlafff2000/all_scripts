@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from pxg_core import fs_browse, workspace_api
+from pxg_core import fs_browse, runlog, workspace_api
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +12,7 @@ from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
+from starlette.middleware import Middleware
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -200,7 +201,9 @@ async def open_folder(request: Request):
 
 
 def build_app() -> Starlette:
+    runlog.setup("Работа с исходными данными")
     routes = [
+        *runlog.routes(),
         Route("/api/modules", modules),
         Route("/api/jobs", start_job, methods=["POST"]),
         Route("/api/jobs", job_list, methods=["GET"]),
@@ -218,7 +221,7 @@ def build_app() -> Starlette:
     ]
     if DIST.is_dir():
         routes.append(Mount("/", StaticFiles(directory=str(DIST), html=True)))
-    return Starlette(routes=routes)
+    return Starlette(routes=routes, middleware=[Middleware(runlog.RequestLog)])
 
 
 app = build_app()

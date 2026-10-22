@@ -6,10 +6,14 @@
 """
 from __future__ import annotations
 
+import logging
 import os
+import time
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from typing import Any, Callable, List, Optional, Sequence
+
+log = logging.getLogger(__name__)
 
 MIN_PARALLEL_STEPS = 4      # меньше шагов — запуск процессов дороже самого расчёта
 
@@ -47,7 +51,14 @@ def map_steps(fn: Callable, model, steps: Sequence, ctx: Any = None, egrid_path:
     """
     steps = list(steps)
     n = min(default_workers(egrid_path) if workers is None else max(1, workers), len(steps))
+    name = getattr(fn, "__name__", "шаг")
+    t0 = time.perf_counter()
     if n < 2 or len(steps) < MIN_PARALLEL_STEPS or not egrid_path:
-        return [fn(model, s, ctx) for s in steps]
+        res = [fn(model, s, ctx) for s in steps]
+        log.info("%s: %d шагов в одном процессе, %.2f с", name, len(steps), time.perf_counter() - t0)
+        return res
+    log.info("%s: %d шагов на %d процессах", name, len(steps), n)
     with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn"), initializer=_init, initargs=(egrid_path, ctx)) as ex:
-        return list(ex.map(_run, [(fn, s) for s in steps], chunksize=1))
+        res = list(ex.map(_run, [(fn, s) for s in steps], chunksize=1))
+    log.info("%s: %d шагов готово за %.2f с (%d процессов)", name, len(steps), time.perf_counter() - t0, n)
+    return res
