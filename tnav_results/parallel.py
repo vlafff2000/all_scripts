@@ -2,7 +2,7 @@
 
 Процессы запускаются способом spawn (безопасно рядом с потоками сервера и одинаково на Windows и РЕД ОС): каждый берёт сетку
 из дискового кэша ``grid_cache`` (см. там), поэтому разбор EGRID в процессах не повторяется. Порядок результатов тот же, что у шагов.
-Число процессов: переменная PXG_WORKERS, иначе число ядер (не больше 16); для малого числа шагов считаем в этом же процессе.
+Число процессов: переменная PXG_WORKERS, иначе число ядер (не больше 16 и не больше, чем влезает в свободную память); для малого числа шагов считаем в этом же процессе.
 """
 from __future__ import annotations
 
@@ -11,18 +11,22 @@ from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from typing import Any, Callable, List, Optional, Sequence
 
-MAX_WORKERS = 16
 MIN_PARALLEL_STEPS = 4      # меньше шагов — запуск процессов дороже самого расчёта
 
 _STATE: dict = {}
 
 
-def default_workers() -> int:
-    try:
-        n = int(os.environ.get("PXG_WORKERS", "") or 0)
-    except ValueError:
-        n = 0
-    return max(1, n if n > 0 else min(os.cpu_count() or 1, MAX_WORKERS))
+def default_workers(egrid_path: Optional[str] = None) -> int:
+    """PXG_WORKERS, иначе ядра (до 16), но не больше, чем влезает в свободную память: процессу нужна своя копия сетки
+    (замер: ~6,5 размеров EGRID и ещё ~150 МБ)."""
+    from pxg_core.workers import default_workers as workers
+    mb = 0.0
+    if egrid_path:
+        try:
+            mb = os.path.getsize(egrid_path) / 1048576.0 * 6.5 + 150.0
+        except OSError:
+            pass
+    return workers(mb)
 
 
 def _init(egrid_path: str, ctx: Any) -> None:
@@ -42,7 +46,7 @@ def map_steps(fn: Callable, model, steps: Sequence, ctx: Any = None, egrid_path:
     Без egrid_path (модель собрана не из файла) или при малом числе шагов считается последовательно.
     """
     steps = list(steps)
-    n = min(default_workers() if workers is None else max(1, workers), len(steps))
+    n = min(default_workers(egrid_path) if workers is None else max(1, workers), len(steps))
     if n < 2 or len(steps) < MIN_PARALLEL_STEPS or not egrid_path:
         return [fn(model, s, ctx) for s in steps]
     with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn"), initializer=_init, initargs=(egrid_path, ctx)) as ex:

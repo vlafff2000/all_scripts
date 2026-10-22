@@ -108,7 +108,9 @@ def test_few_jobs_never_start_pool(monkeypatch):
 
 
 def test_default_workers_bounds(monkeypatch):
+    from pxg_core import workers
     monkeypatch.delenv("PXG_WORKERS", raising=False)
+    monkeypatch.setattr(workers, "available_mb", lambda: None)
     monkeypatch.setattr(os, "cpu_count", lambda: 64)
     assert runner.default_workers() == 16
     monkeypatch.setattr(os, "cpu_count", lambda: 8)

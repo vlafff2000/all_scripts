@@ -2,7 +2,7 @@
 
 Модули базы запускаются как скрипты (runpy), их функции нельзя передать процессам напрямую, поэтому процесс сам загружает файл
 модуля (один раз) и вызывает функцию по имени. Вывод процесса возвращается и печатается в порядке файлов, замечания по датам
-(``DATE_ISSUES``) переносятся в основной процесс. Число процессов: PXG_WORKERS, иначе число ядер (не больше 16); мало файлов — в том же процессе.
+(``DATE_ISSUES``) переносятся в основной процесс. Число процессов: PXG_WORKERS, иначе число ядер (не больше 16 и не больше, чем влезает в свободную память, см. workers.py); мало файлов — в том же процессе.
 """
 from __future__ import annotations
 
@@ -14,18 +14,16 @@ from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from typing import Any, List, Optional, Sequence
 
-MAX_WORKERS = 16
+from .workers import default_workers as _workers
+
+MB_PER_WORKER = 500         # Excel-файл с pandas: порядка полугигабайта на процесс
 MIN_PARALLEL_ITEMS = int(os.environ.get("PXG_PARALLEL_MIN") or 4)      # меньше файлов — запуск процессов дороже расчёта
 
 _MODULES: dict = {}
 
 
 def default_workers() -> int:
-    try:
-        n = int(os.environ.get("PXG_WORKERS", "") or 0)
-    except ValueError:
-        n = 0
-    return max(1, n if n > 0 else min(os.cpu_count() or 1, MAX_WORKERS))
+    return _workers(MB_PER_WORKER)
 
 
 def _call(job):

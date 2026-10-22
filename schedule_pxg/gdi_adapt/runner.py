@@ -36,12 +36,9 @@ MIN_PARALLEL_JOBS = 8           # меньше исследований - счи
 
 
 def default_workers() -> int:
-    """Число процессов для расчёта: PXG_WORKERS, иначе min(число ядер, 16)."""
-    try:
-        n = int(os.environ.get("PXG_WORKERS", "") or 0)
-    except ValueError:
-        n = 0
-    return max(1, n if n > 0 else min(os.cpu_count() or 1, MAX_WORKERS))
+    """Число процессов для расчёта: PXG_WORKERS, иначе min(ядра, 16, свободная память / 500 МБ)."""
+    from pxg_core.workers import default_workers as workers
+    return workers(500.0)
 
 
 class _Log:
