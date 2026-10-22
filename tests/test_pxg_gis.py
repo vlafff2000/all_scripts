@@ -1,8 +1,10 @@
 """Разбор «Базы ГИС-контроль» (pxg_core.gis): даты, блоки, формулы, пачки по заливке, ГВК, сверка с Excel."""
 import datetime as dt
+import json
 import os
 
 import openpyxl
+import pandas as pd
 import pytest
 from openpyxl.styles import PatternFill
 
@@ -266,3 +268,32 @@ def test_tab_color_and_current_bottom(tmp_path):
     b = gis.read_bottom(str(book))
     assert sorted(b["Скважина"] + ":" + b["Вид"] + ":" + b["Глубина, м"].astype(str)) == [
         "7:прохождение прибора:800.0", "7:текущий забой:850.0", "8:текущий забой:821.0"]
+
+
+def test_export_excel_and_atlas_tables(tmp_path):
+    from pxg_core import gis_export
+    book = make_book(tmp_path / "g.xlsx", [
+        ("Октябрь 2020г", "ГВК-1", 100, 103, 0.3, 0.6, None),
+        (None, "ГВК-2", 110, 114, 0.3, 0.7, "FF99CCFF"),
+        ("Апрель 2021г", None, "Пласт-коллетор исследованиями не охвачен", None, None, None, None),
+    ])
+    res = gis.load_book(str(book))
+    out = tmp_path / "out"
+    files = gis_export.export(res, str(out), bottom=pd.DataFrame(
+        [["7", None, 850.0, "текущий забой"]], columns=["Скважина", "Дата", "Глубина, м", "Вид"]), source="g.xlsx")
+    names = {os.path.basename(f) for f in files}
+    assert {"ГИС_свод.xlsx", "gis_observations.parquet", "gis_packs.csv", "gis_intervals.parquet", "gis_db_meta.json",
+            "gis_bottom.parquet"} <= names
+    sheets = openpyxl.load_workbook(out / "ГИС_свод.xlsx").sheetnames
+    assert {"Свод", "Верхняя пачка", "Нижняя пачка", "Замеры", "Легенда", "Проверка", "Тек.забой"} <= set(sheets)
+    obs = pd.read_parquet(out / "gis_observations.parquet")
+    assert list(obs["status"]) == ["выполнено", "пласт не охвачен"]       # замер без данных не пропал
+    packs = pd.read_parquet(out / "gis_packs.parquet")
+    assert list(packs["pack"]) == [gis.VERH, gis.NIZ] and packs["gvk_abs_m"].tolist() == [-3.0, -14.0]
+    meta = gis_export.read_meta(str(out))
+    assert meta["version"] == gis_export.FORMAT_VERSION and meta["tables"]["gis_packs"]["rows"] == 2
+    data = json.loads((out / "gis_db_meta.json").read_text(encoding="utf8"))
+    data["version"] = 99
+    (out / "gis_db_meta.json").write_text(json.dumps(data), encoding="utf8")
+    with pytest.raises(ValueError):
+        gis_export.read_meta(str(out))
