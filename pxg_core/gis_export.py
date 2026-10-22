@@ -16,7 +16,7 @@ import pandas as pd
 
 from . import gis
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2   # 2: в интервалах добавлен номер замера (investigation)
 FORMAT_NAME = "gis_db"
 
 # Русское имя столбца в разборе → ключ в таблицах для Атласа (как принято в Атласе: латиница, метры, а.о.)
@@ -28,7 +28,7 @@ PACKS = {"Скважина": "well", "Дата": "date", "Сезон": "season",
          "ГВК": "gvk_label", "ГВК глубина, м": "gvk_depth_m", "ГВК а.о., м": "gvk_abs_m", "Лишних ГВК": "gvk_extra",
          "Альтитуда, м": "altitude_m", "Альтитуда по листу, м": "altitude_sheet_m", "Перфорация верх, м": "perf_top_m",
          "Перфорация низ, м": "perf_bottom_m", "Лист": "sheet"}
-INTERVALS = {"Скважина": "well", "Дата": "date", "Сезон": "season", "Пачка": "pack", "Цвет": "color", "От, м": "from_m",
+INTERVALS = {"Скважина": "well", "Дата": "date", "Замер": "investigation", "Сезон": "season", "Пачка": "pack", "Цвет": "color", "От, м": "from_m",
              "До, м": "to_m", "hi, м": "hi_m", "Кп": "kp", "Кг": "kg", "hэф, м": "h_eff_m", "ГВК": "gvk_label",
              "ГВК а.о., м": "gvk_abs_m", "ГВК лишний": "gvk_extra", "Статус": "status", "Кг (текст)": "kg_text",
              "Примечание": "note", "Лист": "sheet", "Строка листа": "sheet_row"}
@@ -74,6 +74,9 @@ def export(results: Dict[str, gis.SheetResult], out_dir: str, bottom: Optional[p
         unknown = packs[packs["Пачка"] == ""]
         if len(unknown):
             unknown.to_excel(xw, sheet_name="Пачка не определена", index=False)
+        # подробная сборка: каждый интервал каждого замера (в одном замере бывает до 15 интервалов)
+        frames["Строки"].sort_values(["Скважина", "Дата", "Замер", "От, м"], na_position="last").to_excel(
+            xw, sheet_name="Интервалы", index=False)
         for key in ("Замеры", "Листы", "Легенда", "Проверка"):
             frames[key].to_excel(xw, sheet_name=key, index=False)
         if bottom is not None and len(bottom):

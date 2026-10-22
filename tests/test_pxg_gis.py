@@ -286,6 +286,9 @@ def test_export_excel_and_atlas_tables(tmp_path):
             "gis_bottom.parquet"} <= names
     sheets = openpyxl.load_workbook(out / "ГИС_свод.xlsx").sheetnames
     assert {"Свод", "Верхняя пачка", "Нижняя пачка", "Замеры", "Легенда", "Проверка", "Тек.забой"} <= set(sheets)
+    intervals = pd.read_excel(out / "ГИС_свод.xlsx", sheet_name="Интервалы")
+    assert len(intervals) == 3 and intervals["Замер"].notna().all()     # 2 интервала замера 1 + пустая строка замера 2 («не охвачен»)
+    assert intervals["От, м"].notna().sum() == 2                         # замер без интервалов не пропал, но интервалов у него нет
     obs = pd.read_parquet(out / "gis_observations.parquet")
     assert list(obs["status"]) == ["выполнено", "пласт не охвачен"]       # замер без данных не пропал
     packs = pd.read_parquet(out / "gis_packs.parquet")
