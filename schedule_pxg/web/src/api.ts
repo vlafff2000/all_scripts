@@ -356,8 +356,9 @@ export interface FactWell {
   well: string; date: string; dates: string[]; season?: string; altitude: number | null
   intervals: FactInterval[]; packs: FactPack[]; notes: string[]; perforation: { top: number | null; bottom: number | null } | null
 }
-export const getPlanshetFact = (wells: string[], date: string) =>
-  call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/fact?' + new URLSearchParams({ wells: wells.join('|'), date }))
+export const getPlanshetFact = (wells: string[], date: string, alts: Record<string, string> = {}) =>
+  call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/fact?' + new URLSearchParams({
+    wells: wells.join('|'), date, alts: Object.entries(alts).filter(([, v]) => v.trim() !== '').map(([w, v]) => w + ':' + v.trim()).join('|') }))
 export interface ProfileCell { top: number; bottom: number; sg: number; perforated: boolean }
 export interface WellProfile { well: string; date: string; column: number[]; columns: number; cells: ProfileCell[] }
 export const getWellProfile = (model: string, wells: string[], date: string) =>

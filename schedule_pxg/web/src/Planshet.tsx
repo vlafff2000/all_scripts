@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import PageHead from './PageHead'
 import { FactWell, ModelEntry, WellProfile, getModels, getPlanshetFact, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
 
@@ -51,6 +51,30 @@ function WellLog({ name, tracks, perf, zMin, zMax, h }: { name: string; tracks: 
   )
 }
 
+/** PNG из SVG планшетов: переменные цвета подставляются из текущей темы, планшеты идут в ряд на белом/тёмном фоне темы. */
+function savePng(box: HTMLElement | null, name: string) {
+  const svgs = Array.from(box?.querySelectorAll('svg') || [])
+  if (!svgs.length) return
+  const root = getComputedStyle(document.documentElement)
+  const resolve = (src: string) => src.replace(/var\((--[a-z0-9-]+)\)/g, (_m, v: string) => root.getPropertyValue(v).trim() || '#888')
+  const scale = 2, gap = 12
+  const items = svgs.map(sv => ({ w: Number(sv.getAttribute('width')), h: Number(sv.getAttribute('height')), xml: resolve(new XMLSerializer().serializeToString(sv)) }))
+  const W2 = items.reduce((a, i) => a + i.w + gap, -gap), H2 = Math.max(...items.map(i => i.h))
+  const canvas = document.createElement('canvas'); canvas.width = W2 * scale; canvas.height = H2 * scale
+  const ctx = canvas.getContext('2d')!; ctx.scale(scale, scale)
+  ctx.fillStyle = root.getPropertyValue('--bg').trim() || '#fff'; ctx.fillRect(0, 0, W2, H2)
+  let x = 0, left = items.length
+  items.forEach(i => {
+    const img = new Image(); const px = x
+    img.onload = () => {
+      ctx.drawImage(img, px, 0, i.w, i.h)
+      if (--left === 0) canvas.toBlob(b => { if (!b) return; const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name + '.png'; a.click(); URL.revokeObjectURL(a.href) })
+    }
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(i.xml.includes('xmlns=') ? i.xml : i.xml.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"'))
+    x += i.w + gap
+  })
+}
+
 interface WellOut { fact: FactWell; profiles: { model: ModelEntry; p: WellProfile | null; stepDate: string; err?: string }[] }
 
 export default function Planshet() {
@@ -63,6 +87,10 @@ export default function Planshet() {
   const [wellsOut, setWellsOut] = useState<WellOut[]>([])
   const [zFrom, setZFrom] = useState('')
   const [zTo, setZTo] = useState('')
+  const [alts, setAlts] = useState<Record<string, string>>({})      // альтитуда вручную по скважинам
+  const [hand, setHand] = useState<Record<string, string>>({})      // свой ГВК вручную по скважинам, м а.о.
+  const [hidden, setHidden] = useState<string[]>([])                // скрытые модели
+  const boxRef = useRef<HTMLDivElement>(null)
   const [dates, setDates] = useState<string[]>([])
   const [notes, setNotes] = useState<string[]>([])
   const [msg, setMsg] = useState('')
@@ -80,7 +108,7 @@ export default function Planshet() {
   const build = (d: string) => guard(async () => {
     const ws = Array.from(new Set(well.split(/[;,|\s]+/).map(x => x.trim()).filter(Boolean)))
     if (!ws.length) throw new Error('Введите номера скважин через запятую')
-    const f = await getPlanshetFact(ws, d)
+    const f = await getPlanshetFact(ws, d, alts)
     setNotes([...f.notes, ...f.rows.flatMap(r => r.notes.map(n => 'Скв. ' + r.well + ': ' + n))])
     const all = Array.from(new Set(f.rows.flatMap(r => r.dates))).sort()
     setDates(all)
@@ -100,11 +128,12 @@ export default function Planshet() {
   })
 
   const th = Number(thr.replace(',', '.')) || 0.01
+  const handGwc = (w: string) => { const z = Number((hand[w] || '').replace(',', '.')); return hand[w] && !isNaN(z) ? [{ label: 'ручн.', z }] : [] }
   const tracksOf = ({ fact, profiles }: WellOut): Track[] => {
     const tr: Track[] = [{ title: 'ГИС, факт', sub: 'Кг по интервалам' + (fact.date ? ' · ' + fact.date : ''),
       bars: fact.intervals.filter(i => i.kg !== null).map(i => ({ top: i.top, bottom: i.bottom, v: i.kg as number })),
-      gwc: fact.packs.map(p => ({ label: 'ГВК', z: p.gvk })), note: fact.intervals.length ? undefined : 'нет интервалов' }]
-    profiles.forEach(({ model, p, stepDate, err }) => tr.push({
+      gwc: [...fact.packs.map(p => ({ label: 'ГВК', z: p.gvk })), ...handGwc(fact.well)], note: fact.intervals.length ? undefined : 'нет интервалов' }]
+    profiles.filter(x => !hidden.includes(x.model.id)).forEach(({ model, p, stepDate, err }) => tr.push({
       title: model.name, sub: err ? 'ошибка' : 'Sg · шаг ' + (stepDate || '—'),
       bars: (p?.cells || []).map(c => ({ top: c.top, bottom: c.bottom, v: c.sg })),
       gwc: p ? [{ label: 'ГВК', z: modelGwc(p.cells, th) }] : [], note: err ? err.slice(0, 28) : p ? undefined : 'нет ячеек скважины' }))
@@ -146,12 +175,20 @@ export default function Planshet() {
         {msg && <p className="note warn">{msg}</p>}
         {notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
         {wellsOut.length > 0 && <div style={{ overflowX: 'auto', marginTop: 12 }}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <div className="row small" style={{ flexWrap: 'wrap' }}>
+            <span className="muted">Вручную (последнее слово за инженером):</span>
+            {wellsOut.map(o => <span key={o.fact.well}>Скв. {o.fact.well}: альтитуда <input style={{ width: 70 }} placeholder={fmt(o.fact.altitude)} value={alts[o.fact.well] || ''} onChange={e => setAlts({ ...alts, [o.fact.well]: e.target.value })} />
+              {' '}свой ГВК <input style={{ width: 70 }} placeholder="м а.о." value={hand[o.fact.well] || ''} onChange={e => setHand({ ...hand, [o.fact.well]: e.target.value })} /></span>)}
+            <button disabled={busy} onClick={() => build(date)} title="Пересчитать отметки с заданными альтитудами">Применить альтитуды</button>
+            {models.map(m => <label key={m.id}><input type="checkbox" checked={!hidden.includes(m.id)} onChange={() => setHidden(hidden.includes(m.id) ? hidden.filter(x => x !== m.id) : [...hidden, m.id])} /> {m.name}</label>)}
+            <button onClick={() => savePng(boxRef.current, 'планшет_ГВК')}>Сохранить PNG</button>
+          </div>
+          <div ref={boxRef} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
             {wellsOut.map((o, i) => <WellLog key={o.fact.well} name={o.fact.well} tracks={trackSets[i]} perf={o.fact.perforation} zMin={zMin} zMax={zMax} h={560} />)}
           </div>
           <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус); шкала глубины и шкалы 0…1 одинаковые у всех скважин. Узкая полоса слева — перфорация.
             Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — низ газовой пачки от кровли газа при Sg выше порога.</p>
-          {wellsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
+          {wellsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.filter(m => !hidden.includes(m.id)).map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
             <tbody>{wellsOut.map((o, i) => <tr key={o.fact.well}><td>{o.fact.well}</td><td>{o.fact.date || '—'}</td><td className="num">{fmt(o.fact.altitude)}</td>
               {trackSets[i].map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
         </div>}

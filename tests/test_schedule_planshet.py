@@ -68,3 +68,12 @@ def test_perf_conversion():
     planshet.set_settings(p, "a", "b")
     planshet.set_settings(p, "", "b")
     assert p.sources["gis"] == {"perf_file": "b"}
+
+
+def test_view_manual_altitude_wins(tmp_path):
+    p = Project("x")
+    planshet.set_settings(p, _folder(tmp_path), "")
+    v = planshet.view(p, ["101"], "", {"101": 50.0})["rows"][0]
+    assert v["altitude"] == 50.0 and v["intervals"][0]["top"] == -950.0
+    assert any("вручную" in n for n in v["notes"])
+    assert planshet.view(p, ["101"])["rows"][0]["altitude"] == 100.0
