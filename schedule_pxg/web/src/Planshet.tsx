@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import PageHead from './PageHead'
+import GwcCompare from './GwcCompare'
 import { FactWell, ModelEntry, WellProfile, getModels, getPlanshetFact, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
 
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
@@ -193,6 +194,7 @@ export default function Planshet() {
               {trackSets[i].map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
         </div>}
       </section>
+      <GwcCompare models={models} thr={thr} alts={alts} />
     </main>
   )
 }
