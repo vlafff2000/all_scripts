@@ -777,6 +777,21 @@ async def sources_set(request: Request):
     return JSONResponse(_sources_view(p))
 
 
+async def planshet_compare(request: Request):
+    """Сравнение ГВК факт/модель: {model, wells?, thr?, slices?{«скв|дата замера»: дата среза}, excluded?[ключи], alts?{скв: м}}."""
+    b = await request.json()
+    model = _clean(b.get("model"))
+    if not model:
+        return _err("Модель с результатами не выбрана", 404)
+    try:
+        alts = {str(k): float(str(v).replace(",", ".")) for k, v in (b.get("alts") or {}).items() if str(v).strip()}
+        return JSONResponse(await run_in_threadpool(
+            planshet.compare_view, _project(), model, [str(w) for w in b.get("wells") or []], float(b.get("thr") or 0.01),
+            b.get("slices") or {}, b.get("excluded") or [], alts))
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось сравнить ГВК: %s" % e)
+
+
 async def planshet_fact(request: Request):
     """Факт ГИС и перфорации для планшета: ?wells=a|b&date=YYYY-MM-DD (пусто — последний замер)."""
     wells = [w.strip() for w in (request.query_params.get("wells") or "").split("|") if w.strip()]
@@ -1350,6 +1365,7 @@ def build_app() -> Starlette:
         Route("/api/sources/set", sources_set, methods=["POST"]),
         Route("/api/sources/folder", sources_folder, methods=["POST"]),
         Route("/api/planshet/fact", planshet_fact),
+        Route("/api/planshet/compare", planshet_compare, methods=["POST"]),
         Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),
         Route("/api/averaging/well", averaging_well),

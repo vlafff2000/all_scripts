@@ -167,9 +167,22 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
     return out, {"notes": notes, "sgr_source": info["sgr_source"], "wells": info["wells"]}
 
 
+_MODEL_CACHE: dict = {}
+
+
+def _cached_model(egrid: str):
+    """Сетка читается один раз на файл (до смены файла): сравнение берёт много срезов одной модели."""
+    from tnav_results.indicators import load_model
+    key = (egrid, os.path.getmtime(egrid))
+    if _MODEL_CACHE.get("key") != key:
+        _MODEL_CACHE.clear()
+        _MODEL_CACHE["key"], _MODEL_CACHE["model"] = key, load_model(egrid)
+    return _MODEL_CACHE["model"]
+
+
 def well_profile(path: str, date: dt.datetime, wells: Sequence[str]) -> Tuple[List[dict], dict]:
     """Газонасыщенность вдоль колонны скважин на шаге рестарта, ближайшем к дате (для планшета), TVDSS."""
-    from tnav_results.indicators import load_model, pick_step
+    from tnav_results.indicators import pick_step
     from tnav_results.well_gwc import wells_profile_at
     from tnav_results import iter_restart_steps
 
@@ -181,7 +194,7 @@ def well_profile(path: str, date: dt.datetime, wells: Sequence[str]) -> Tuple[Li
     if not steps:
         raise ValueError("В UNRST нет шагов с датой")
     step = pick_step(steps, date)
-    profiles, missing = wells_profile_at(load_model(f["EGRID"]), f["UNRST"], step, list(wells))
+    profiles, missing = wells_profile_at(_cached_model(f["EGRID"]), f["UNRST"], step, list(wells))
     rows = [{"well": p.well, "date": str(p.date.date()) if p.date else "", "column": list(p.column), "columns": p.columns,
              "cells": [{"top": c.top, "bottom": c.bottom, "sg": c.sg, "perforated": c.perforated} for c in p.cells]}
             for p in profiles]
