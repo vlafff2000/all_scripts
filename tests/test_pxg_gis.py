@@ -205,3 +205,18 @@ def test_etalon_book_parity_and_legends():
     assert legend[("110", "FFCC99")].status == "проверить"
     assert all(b.date for r in res.values() for b in r.blocks if r.sheet != "447" or b.block > 1)
     assert res["18"].alt == 135 and res["23"].alt == 126 and res["124"].alt is None
+
+
+def test_altitude_file_beats_sheet_and_manual_beats_file(tmp_path):
+    book = make_book(tmp_path / "g.xlsx", [("Октябрь 2020г", "ГВК", 100, 103, 0.3, 0.6, None)], alt=100.0)
+    base = gis.load_book(str(book))["7"]
+    assert base.alt == 100.0 and base.rows[0].gvk_abs == pytest.approx(-3.0)
+    res = gis.load_book(str(book), file_alts={"7": 95.0}, perfs={"7": (-20.0, -10.0)})["7"]
+    assert res.alt == 95.0 and res.alt_sheet == 100.0 and res.alt_source == "файл альтитуд"
+    assert res.rows[0].gvk_abs == pytest.approx(-8.0)                       # −(103 − 95)
+    assert [i for i in res.issues if i.code == "alt_mismatch"][0].value == "100 / 95"
+    row = gis.to_frames({"7": res})["Пачки"].iloc[0]
+    assert (row["Перфорация верх, м"], row["Перфорация низ, м"], row["Альтитуда по листу, м"]) == (-20.0, -10.0, 100.0)
+    assert gis.load_book(str(book), alts={"7": 90.0}, file_alts={"7": 95.0})["7"].alt == 90.0
+    same = gis.load_book(str(book), file_alts={"7": 100.0})["7"]
+    assert not any(i.code == "alt_mismatch" for i in same.issues)
