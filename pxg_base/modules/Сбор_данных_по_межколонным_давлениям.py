@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from datetime import datetime
 from pxg_core import параметры
+from pxg_core.parallel import map_module_function
 import re
 import calendar
 
@@ -272,15 +273,13 @@ def main(argv=None):
     processed_files = 0
     
     # Рекурсивно обходим все подпапки
-    for root, dirs, files in os.walk(root_directory):
-        for file in files:
-            if file.lower().endswith(('.xlsx', '.xls')) and 'мк' in file.lower():
-                file_path = os.path.join(root, file)
-                
-                well_data = process_excel_file(file_path)
-                all_well_data.extend(well_data)
-                processed_files += 1
-                print(f"Обработано записей в файле: {len(well_data)}\n")
+    mk_files = [os.path.join(root, file) for root, dirs, files in os.walk(root_directory) for file in files
+                if file.lower().endswith(('.xlsx', '.xls')) and 'мк' in file.lower()]
+    # файлы независимы: считаются параллельно на всех ядрах, результат и вывод идут в порядке файлов
+    for well_data in map_module_function(__file__, "process_excel_file", [(fp,) for fp in mk_files], process_excel_file):
+        all_well_data.extend(well_data)
+        processed_files += 1
+        print(f"Обработано записей в файле: {len(well_data)}\n")
     
     if not all_well_data:
         print("Не найдено данных для обработки.")
