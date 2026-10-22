@@ -33,6 +33,7 @@ REGISTRY: Dict[str, str] = {
     "Сбор_БД_замеров_воды": "water:check_water",
     "Импорт_данных_ЭЛПРО": "elpro:check_elpro",
     "БД_по_учету_газа": "gas_accounting:check_gas_accounting",
+    "База_ГИС": "gis:check_gis",
 }
 
 
