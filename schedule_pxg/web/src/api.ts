@@ -363,3 +363,11 @@ export interface ProfileCell { top: number; bottom: number; sg: number; perforat
 export interface WellProfile { well: string; date: string; column: number[]; columns: number; cells: ProfileCell[] }
 export const getWellProfile = (model: string, wells: string[], date: string) =>
   call<{ rows: WellProfile[]; step_date: string; missing: string[] }>('/api/results/wellprofile?' + new URLSearchParams({ model, wells: wells.join('|'), date }))
+
+export interface CompareRow {
+  key: string; well: string; group: string; date: string; season: string; slice: string; slice_why: string; pack: string; label: string
+  fact: number; model: number | null; delta: number | null; status: string; excluded: boolean
+}
+export interface CompareResult { rows: CompareRow[]; skipped: Record<string, number>; notes: string[] }
+export const comparePlanshet = (body: { model: string; wells: string[]; thr: number; slices: Record<string, string>; alts: Record<string, string> }) =>
+  call<CompareResult>('/api/planshet/compare', post(body))
