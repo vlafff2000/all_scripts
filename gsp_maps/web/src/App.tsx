@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { exportExcel, getGsp, getParam, getParams, getSeason, getState, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getParam, getParams, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
 import MapView, { type MapHandle } from './MapView'
-import { SeasonCalc, atlasPaint, fmtDay, scopeKeys } from './model'
+import { ATLAS_AGGS, SeasonCalc, atlasPaint, dayDate, fmtDay, scopeKeys } from './model'
 import SharesPage from './SharesPage'
 import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
-import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, modelKeyword, modelAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
 
 const PAGES = [
@@ -196,6 +196,58 @@ export default function App() {
 
   const setWindow = useCallback((a: number, b: number) => setWin([a, b]), [])
   const [a, b] = calc ? calc.clampWindow(win[0], win[1]) : [0, 0]
+  // модели tNavigator: общий список папок и отмеченных моделей, вектор и значения по окну дат (раскраска «Модели tNavigator»)
+  const [modelView, setModelView] = useState<ModelsView | null>(null)
+  const [modelKws, setModelKws] = useState<ModelKeyword[]>([])
+  const [modelVals, setModelVals] = useState<ModelValues | null>(null)
+  const [modelErr, setModelErr] = useState('')
+  const modelKw = usePref(modelKeyword), modelAggV = usePref(modelAgg)
+  useEffect(() => {
+    if (!ready || paint !== 'model') return
+    getModels().then(setModelView).catch(e => setModelErr(String(e.message || e)))
+  }, [ready, paint])
+  const pair = (modelView?.selected ?? []).slice(0, 2)
+  const pairKey = pair.join('|')
+  useEffect(() => {
+    if (!ready || paint !== 'model' || !pairKey) { setModelKws([]); return }
+    let live = true
+    getModelKeywords(pairKey.split('|')[0]).then(r => {
+      if (!live) return
+      setModelKws(r.items)
+      if (r.items.length && !r.items.some(k => k.keyword === modelKw.trim())) modelKeyword.set(r.items[0].keyword)
+    }).catch(() => live && setModelKws([]))
+    return () => { live = false }
+  }, [ready, paint, pairKey])
+  const winStart = calc && calc.nd ? dayDate(calc.days[a]).toISOString().slice(0, 10) : ''
+  const winEnd = calc && calc.nd ? dayDate(calc.days[b]).toISOString().slice(0, 10) : ''
+  useEffect(() => {
+    if (!ready || paint !== 'model' || !pairKey || !modelKw.trim() || !winStart) { setModelVals(null); return }
+    let live = true
+    getModelValues(modelKw.trim(), winStart, winEnd, modelAggV, pairKey.split('|')).then(r => {
+      if (live) { setModelVals(r); setModelErr('') }
+    }).catch(e => { if (live) { setModelVals(null); setModelErr(String(e.message || e)) } })
+    return () => { live = false }
+  }, [ready, paint, modelKw, modelAggV, winStart, winEnd, pairKey])
+  const modelName = (id: string) => modelView?.models.find(m => m.id === id)?.name ?? id
+  const modelData = useMemo(() => {
+    if (!modelVals) return null
+    const ids = pairKey.split('|').filter(id => modelVals.models[id])
+    const ok = ids.filter(id => modelVals.models[id].values)
+    const errs = ids.filter(id => modelVals.models[id].error).map(id => modelName(id) + ': ' + modelVals.models[id].error)
+    if (!ok.length) return { paint: null, note: errs.join(' ') }
+    const aggLabel = ATLAS_AGGS.find(([k]) => k === modelVals.agg)?.[1] ?? modelVals.agg
+    const unit = modelVals.models[ok[0]].unit ? ', ' + modelVals.models[ok[0]].unit : ''
+    let values: Record<string, number> = {}, title = modelName(ok[0])
+    if (ok.length === 1) values = modelVals.models[ok[0]].values ?? {}
+    else {
+      const va = modelVals.models[ok[0]].values ?? {}, vb = modelVals.models[ok[1]].values ?? {}
+      for (const w of Object.keys(va)) if (w in vb) values[w] = vb[w] - va[w]
+      title = modelName(ok[1]) + ' − ' + modelName(ok[0])
+    }
+    const note = (ok.length >= 2 ? 'Разность по скважинам, которые есть в обеих моделях.' : '') + (ok.length >= 2 && modelView && modelView.selected.length > 2 ? ' Показаны первые две отмеченные модели.' : '')
+    return { paint: atlasPaint(values, title + ' · ' + modelKw + ' · ' + aggLabel + unit, errs), note: [note, ...errs].filter(Boolean).join(' ') }
+  }, [modelVals, pairKey, modelView, modelKw])
+
   const title = g && calc ? `${g.gsp} · ${kind} ${season} · ${fmtDay(calc.days[a])} — ${fmtDay(calc.days[b])}` : ''
   useEffect(() => { document.title = 'Карты' + (gsp ? ' · ' + gsp : '') }, [gsp])
 
@@ -270,7 +322,7 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
+          <MapView ref={map} models={{ paint: modelData?.paint ?? null, picker: { view: modelView, keywords: modelKws, keyword: modelKw, agg: modelAggV, note: modelErr || modelData?.note || (pair.length ? '' : 'Отметьте модели, которые нужно показать на карте.'), onKeyword: k => modelKeyword.set(k), onAgg: v => modelAgg.set(v), onSelect: ids => selectModels(ids).then(setModelView).catch(e => setModelErr(String(e.message || e))), onFolders: fs => setModelFolders(fs).then(setModelView).catch(e => setModelErr(String(e.message || e))), onAddFolder: () => pickPath('folder', '').then(r => { if (r.path) setModelFolders([...(modelView?.folders ?? []), r.path]).then(setModelView) }).catch(e => setModelErr(String(e.message || e))) } }} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />

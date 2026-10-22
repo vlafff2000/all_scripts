@@ -1,10 +1,12 @@
 """HTTP/JSON для «Карт ГСП» (Starlette, как в Атласе 6 и Базе ПХГ)."""
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 
 from pxg_core import fs_browse
+from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +20,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from . import models as tnav_models
 from .project import PATH_KEYS, Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -108,6 +111,75 @@ async def param(request: Request):
         return _err(str(e), 404)
 
 
+async def models_get(request: Request):
+    """Модели tNavigator: папки из общего списка, найденные модели и отмеченные для карты."""
+    return JSONResponse(await run_in_threadpool(tnav_models.view, PROJECT.models))
+
+
+async def models_folders(request: Request):
+    b = await request.json()
+    folders = []
+    for f in b.get("folders") or []:
+        f = str(f or "").strip().strip('"')
+        if f and f not in folders:
+            folders.append(f)
+    try:
+        await run_in_threadpool(tnav_catalog.save_folders, folders)
+    except OSError as e:
+        return _err("Не удалось сохранить список папок: %s" % e)
+    return JSONResponse(await run_in_threadpool(tnav_models.view, PROJECT.models))
+
+
+async def models_select(request: Request):
+    b = await request.json()
+    ids = []
+    for x in b.get("selected") or []:
+        x = str(x or "").strip()
+        if x and x not in ids:
+            ids.append(x)
+    PROJECT.set_models(ids)
+    return JSONResponse(await run_in_threadpool(tnav_models.view, PROJECT.models))
+
+
+async def model_keywords(request: Request):
+    """Скважинные векторы модели (по первой выбранной, если ?model= не задан)."""
+    path = request.query_params.get("model") or (PROJECT.models[0] if PROJECT.models else "")
+    if not path:
+        return JSONResponse({"model": "", "items": []})
+    try:
+        items = await run_in_threadpool(tnav_models.keywords, path)
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать сводку модели: %s" % e)
+    return JSONResponse({"model": path, "items": items})
+
+
+async def model_values(request: Request):
+    """Значения вектора по скважинам каждой модели за окно дат (ГГГГ-ММ-ДД, границы включительно)."""
+    q = request.query_params
+    agg = q.get("agg") or "mean"
+    if agg not in tnav_models.AGGS:
+        return _err("Агрегация: %s" % ", ".join(tnav_models.AGGS))
+    try:
+        start = dt.date.fromisoformat(q.get("start") or "")
+        end = dt.date.fromisoformat(q.get("end") or "")
+    except ValueError:
+        return _err("Даты окна — в формате ГГГГ-ММ-ДД.")
+    keyword = (q.get("keyword") or "").upper()
+    ids = [x for x in (q.get("models") or "").split("|") if x]
+
+    def go() -> dict:
+        out = {}
+        for mid in ids:
+            try:
+                values, unit = tnav_models.model_values(mid, keyword, start, end, agg)
+                out[mid] = {"values": {str(w): v for w, v in values.items()}, "unit": unit}
+            except (ValueError, OSError, KeyError) as e:
+                out[mid] = {"error": str(e)}
+        return out
+
+    return JSONResponse({"keyword": keyword, "agg": agg, "models": await run_in_threadpool(go)})
+
+
 async def work(request: Request):
     if PROJECT.store is None:
         return _err("Данные ещё не загружены из проекта Атласа.", 409)
@@ -183,6 +255,11 @@ def build_app() -> Starlette:
         Route("/api/work", work),
         Route("/api/params", params),
         Route("/api/param", param),
+        Route("/api/models", models_get),
+        Route("/api/models/folders", models_folders, methods=["POST"]),
+        Route("/api/models/select", models_select, methods=["POST"]),
+        Route("/api/model-keywords", model_keywords),
+        Route("/api/model-values", model_values),
         Route("/api/summary", summary),
         Route("/api/export", export, methods=["POST"]),
         Route("/api/image", save_image, methods=["POST"]),
