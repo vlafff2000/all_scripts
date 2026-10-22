@@ -20,7 +20,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import models as tnav_models
+from . import gis_source, models as tnav_models
 from .project import PATH_KEYS, Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -133,6 +133,13 @@ async def gis_values(request: Request):
                                                     q.get("season") or "", q.get("against") or "", pins))
     except ValueError as e:
         return _err(str(e), 404)
+
+
+async def gis_model(request: Request):
+    """ГВК модели и отклонение от факта из последнего сравнения в ГДМ (пачка и сезон замера)."""
+    from tnav_results import gwc_share
+    q = request.query_params
+    return JSONResponse(await run_in_threadpool(lambda: gis_source.model_values(gwc_share.load(), q.get("pack") or "", q.get("season") or "")))
 
 
 async def models_get(request: Request):
@@ -281,6 +288,7 @@ def build_app() -> Starlette:
         Route("/api/param", param),
         Route("/api/gis", gis_catalog),
         Route("/api/gis/values", gis_values),
+        Route("/api/gis/model", gis_model),
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
         Route("/api/models/select", models_select, methods=["POST"]),

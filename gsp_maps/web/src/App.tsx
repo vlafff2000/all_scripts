@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { exportExcel, getGsp, getGis, getGisValues, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getGis, getGisModel, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
@@ -9,7 +9,7 @@ import SharesPage from './SharesPage'
 import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
-import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, gisPack, gisMetric, gisSeason, gisAgainst, gisPins, gisIso, gisIsoStep, gisIsoReach, modelKeyword, modelAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, gisPack, gisMetric, gisSeason, gisAgainst, gisPins, gisSource, gisIso, gisIsoStep, gisIsoReach, modelKeyword, modelAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
 
 const PAGES = [
@@ -150,7 +150,15 @@ export default function App() {
     getGisValues(gisPackUse, gMetric, gisSeasonUse, gisAgainstUse, gisAgainstUse ? {} : gPins).then(r => live && setGisVals(r)).catch(() => live && setGisVals(null))
     return () => { live = false }
   }, [ready, paint, gisPackUse, gMetric, gisSeasonUse, gisAgainstUse, gPins])
-  const gisData = useMemo(() => (gisVals ? gisPaint(gisVals.values, gisVals.dates, gisVals.title, gisVals.warnings, !!gisAgainstUse) : null), [gisVals, gisAgainstUse])
+  const gSource = usePref(gisSource)
+  const [gisMod, setGisMod] = useState<GisModel | null>(null)
+  useEffect(() => {
+    if (!ready || paint !== 'gis' || gSource === 'fact' || !gisPackUse || !gisSeasonUse) { setGisMod(null); return }
+    let live = true
+    getGisModel(gisPackUse, gisSeasonUse).then(r => live && setGisMod(r)).catch(() => live && setGisMod(null))
+    return () => { live = false }
+  }, [ready, paint, gSource, gisPackUse, gisSeasonUse])
+  const gisData = useMemo(() => (gSource !== 'fact' ? (gisMod ? gisPaint(gSource === 'delta' ? gisMod.delta : gisMod.model, gisMod.dates, (gSource === 'delta' ? 'Δ ГВК модель − факт' : 'ГВК модели') + ' · ' + gisPackUse + ' · ' + gisSeasonUse, gisMod.warnings, gSource === 'delta') : null) : gisVals ? gisPaint(gisVals.values, gisVals.dates, gisVals.title, gisVals.warnings, !!gisAgainstUse) : null), [gisVals, gisAgainstUse, gSource, gisMod, gisPackUse, gisSeasonUse])
 
   // адрес из ссылки: сначала группа и вид/сезон, выбор скважины — когда загрузится нужная группа
   useEffect(() => {
@@ -343,8 +351,8 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} models={{ paint: modelData?.paint ?? null, picker: { view: modelView, keywords: modelKws, keyword: modelKw, agg: modelAggV, note: modelErr || modelData?.note || (pair.length ? '' : 'Отметьте модели, которые нужно показать на карте.'), onKeyword: k => modelKeyword.set(k), onAgg: v => modelAgg.set(v), onSelect: ids => selectModels(ids).then(setModelView).catch(e => setModelErr(String(e.message || e))), onFolders: fs => setModelFolders(fs).then(setModelView).catch(e => setModelErr(String(e.message || e))), onAddFolder: () => pickPath('folder', '').then(r => { if (r.path) setModelFolders([...(modelView?.folders ?? []), r.path]).then(setModelView) }).catch(e => setModelErr(String(e.message || e))) } }} gis={{ catalog: gisCat, pack: gisPackUse, metric: gMetric, season: gisSeasonUse, against: gisAgainstUse, pins: gPins, options: gisVals?.options ?? {}, dates: gisVals?.dates ?? {}, paint: gisData, iso: { on: isoOn, step: isoStep, reach: isoReach }, isoNote: '',
-            onChange: p => { if (p.pack !== undefined) gisPack.set(p.pack); if (p.metric !== undefined) gisMetric.set(p.metric); if (p.season !== undefined) gisSeason.set(p.season); if (p.against !== undefined) gisAgainst.set(p.against); if (p.iso !== undefined) gisIso.set(p.iso); if (p.isoStep !== undefined) gisIsoStep.set(p.isoStep); if (p.isoReach !== undefined) gisIsoReach.set(p.isoReach); if (p.pins) gisPins.set(Object.entries(p.pins).map(([w, d]) => `${w}:${d}`).join(',')) } }} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
+          <MapView ref={map} models={{ paint: modelData?.paint ?? null, picker: { view: modelView, keywords: modelKws, keyword: modelKw, agg: modelAggV, note: modelErr || modelData?.note || (pair.length ? '' : 'Отметьте модели, которые нужно показать на карте.'), onKeyword: k => modelKeyword.set(k), onAgg: v => modelAgg.set(v), onSelect: ids => selectModels(ids).then(setModelView).catch(e => setModelErr(String(e.message || e))), onFolders: fs => setModelFolders(fs).then(setModelView).catch(e => setModelErr(String(e.message || e))), onAddFolder: () => pickPath('folder', '').then(r => { if (r.path) setModelFolders([...(modelView?.folders ?? []), r.path]).then(setModelView) }).catch(e => setModelErr(String(e.message || e))) } }} gis={{ catalog: gisCat, pack: gisPackUse, metric: gMetric, season: gisSeasonUse, against: gisAgainstUse, pins: gPins, options: gisVals?.options ?? {}, dates: gisVals?.dates ?? {}, paint: gisData, iso: { on: isoOn, step: isoStep, reach: isoReach }, isoNote: '', source: gSource, modelInfo: gisMod?.info ?? gisMod?.warnings[0] ?? '',
+            onChange: p => { if (p.pack !== undefined) gisPack.set(p.pack); if (p.metric !== undefined) gisMetric.set(p.metric); if (p.season !== undefined) gisSeason.set(p.season); if (p.against !== undefined) gisAgainst.set(p.against); if (p.source !== undefined) gisSource.set(p.source); if (p.iso !== undefined) gisIso.set(p.iso); if (p.isoStep !== undefined) gisIsoStep.set(p.isoStep); if (p.isoReach !== undefined) gisIsoReach.set(p.isoReach); if (p.pins) gisPins.set(Object.entries(p.pins).map(([w, d]) => `${w}:${d}`).join(',')) } }} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
