@@ -124,8 +124,8 @@ def fact(tables: Dict[str, pd.DataFrame], well: str, date: str = "", alt_overrid
             "altitude": alt, "intervals": intervals, "packs": gvk, "notes": notes}
 
 
-def view(p: Project, wells: Sequence[str], date: str = "") -> dict:
-    """Факт ГИС и перфорации выбранных скважин для планшета."""
+def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[str, float]] = None) -> dict:
+    """Факт ГИС и перфорации выбранных скважин для планшета; alts — альтитуды, заданные вручную (скважина → м), главнее базы."""
     s = settings(p)
     if not s.get("folder"):
         raise ValueError("Не выбрана папка базы ГИС")
@@ -136,12 +136,15 @@ def view(p: Project, wells: Sequence[str], date: str = "") -> dict:
         notes.append("Файл перфораций не выбран: перфорации на планшете не показаны")
     rows = []
     for w in wells:
-        f = fact(tables, w, date)
+        mine = (alts or {}).get(_key(w))
+        f = fact(tables, w, date, mine)
         pf = perf.get(_key(w))
-        if pf and pf.get("altitude") is not None and f["altitude"] is None:
+        if mine is None and pf and pf.get("altitude") is not None and f["altitude"] is None:
             f = fact(tables, w, date, pf["altitude"])
         f["perforation"] = ({"top": abs_depth_perf(pf["top"], f["altitude"]), "bottom": abs_depth_perf(pf["bottom"], f["altitude"])}
                             if pf and pf.get("top") is not None else None)
+        if mine is not None:
+            f["notes"].append("Альтитуда задана вручную: %s м" % mine)
         rows.append(f)
     return {"rows": rows, "notes": notes}
 

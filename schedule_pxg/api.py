@@ -783,7 +783,12 @@ async def planshet_fact(request: Request):
     if not wells:
         return _err("Не выбраны скважины")
     try:
-        return JSONResponse(await run_in_threadpool(planshet.view, _project(), wells, request.query_params.get("date") or ""))
+        alts = {}
+        for item in (request.query_params.get("alts") or "").split("|"):       # 101:150.5|102:148
+            if ":" in item:
+                w, v = item.split(":", 1)
+                alts[w.strip()] = float(v.replace(",", "."))
+        return JSONResponse(await run_in_threadpool(planshet.view, _project(), wells, request.query_params.get("date") or "", alts))
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось прочитать базу ГИС: %s" % e)
 
