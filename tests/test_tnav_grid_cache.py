@@ -300,3 +300,16 @@ def test_vector_depths_equal_scalar_on_irregular_zcorn():
     cells = [(int(x) % g.ni, (int(x) // g.ni) % g.nj, int(x) // (g.ni * g.nj)) for x in gg]
     assert m.bottom_many(gg).tolist() == [m.bottom(c) for c in cells]
     assert m.centre_many(gg).tolist() == [m.centre(c) for c in cells]
+
+
+def test_workers_limited_by_free_memory(monkeypatch):
+    from pxg_core import workers
+    monkeypatch.delenv("PXG_WORKERS", raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 32)
+    assert workers.default_workers() == 16                               # без оценки памяти: только ядра, потолок 16
+    assert workers.default_workers(500, free_mb=100000) == 16
+    assert workers.default_workers(500, free_mb=1024 + 2600) == 5        # 2600 МБ свободно сверх запаса / 500
+    assert workers.default_workers(500, free_mb=100) == 1                # не меньше одного
+    assert workers.default_workers(500, free_mb=None) == 16 or workers.available_mb() is not None
+    monkeypatch.setenv("PXG_WORKERS", "12")
+    assert workers.default_workers(500, free_mb=100) == 12               # ручное число не ограничивается
