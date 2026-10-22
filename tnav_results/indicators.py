@@ -15,6 +15,8 @@ import sys
 from array import array
 from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
+import numpy as np
+
 from .files import Grid, RestartStep, Summary, iter_restart_steps, read_egrid, read_init, read_restart_keyword
 
 DEFAULT_SG_THRESHOLD = 0.01   # доля; значение заказчика (Егор, 2026-10-08)
@@ -43,33 +45,41 @@ class CellModel:
         fine_act = grid.actnumc if (cors is not None and grid.actnumc is not None) else grid.actnum
         self.total = total
         self.coarse = cors is not None
-        self.ijk: List[Cell] = []            # опорная ячейка единицы
-        self.rep: List[int] = []             # её глобальный номер
-        self.unit_of_fine = array("i", [-1]) * total
+        # то же, что прежний цикл по ячейкам, но на numpy: сетка в 1,5 млн ячеек строилась ~4 с, теперь доли секунды
+        act = np.asarray(grid.actnum, dtype=bool)
+        rep = np.flatnonzero(act)
+        self.n_active = len(rep)
+        self._rep = rep                          # глобальный номер опорной ячейки единицы; ijk и rep списками — по требованию
+        self._ijk: Optional[List[Cell]] = None
+        self._rep_list: Optional[List[int]] = None
+        uf = np.full(total, -1, dtype=np.int32)
+        uf[rep] = np.arange(self.n_active, dtype=np.int32)
         block_unit: Dict[int, int] = {}
-        for g, a in enumerate(grid.actnum):
-            if not a:
-                continue
-            n = len(self.ijk)
-            self.ijk.append((g % ni, (g // ni) % nj, g // layer))
-            self.rep.append(g)
-            self.unit_of_fine[g] = n
-            if cors is not None and cors[g]:
-                block_unit[cors[g]] = n
-        self.n_active = len(self.ijk)
         if cors is not None:
-            for g in range(total):
-                if fine_act[g] and cors[g] and not grid.actnum[g] and cors[g] in block_unit:
-                    self.unit_of_fine[g] = block_unit[cors[g]]
-        # колонны мелких ячеек: (i, j) -> (список k, список единиц)
+            cor = np.asarray(cors, dtype=np.int64)
+            on = act & (cor != 0)
+            keys, units = cor[on], uf[on]
+            lut = np.full(int(cor.max()) + 1, -1, dtype=np.int32)
+            lut[keys] = units                    # у блока с несколькими активными ячейками остаётся последняя
+            block_unit = {int(b): int(lut[b]) for b in np.unique(keys)}
+            fine = np.asarray(fine_act, dtype=bool) & (cor != 0) & ~act
+            fine &= lut[np.clip(cor, 0, None)] >= 0
+            uf[fine] = lut[cor[fine]]
+        self.unit_of_fine = array("i")
+        self.unit_of_fine.frombytes(uf.astype(np.dtype("i"), copy=False).tobytes())
+        # колонны мелких ячеек: (i, j) -> (список k, список единиц); внутри колонны ячейки идут сверху вниз
         self.columns: Dict[Tuple[int, int], Tuple[List[int], List[int]]] = {}
-        uf = self.unit_of_fine
-        for g in range(total):
-            u = uf[g]
-            if u >= 0:
-                col = self.columns.setdefault((g % ni, (g // ni) % nj), ([], []))
-                col[0].append(g // layer)
-                col[1].append(u)
+        g = np.flatnonzero(uf >= 0)
+        ci = g % ni + ni * ((g // ni) % nj)
+        order = np.argsort(ci, kind="stable")
+        g, ci = g[order], ci[order]
+        ks, us = (g // layer).tolist(), uf[g].tolist()
+        starts = np.flatnonzero(np.r_[True, ci[1:] != ci[:-1]]) if len(ci) else np.empty(0, dtype=np.int64)
+        bounds = starts.tolist() + [len(ci)]
+        heads = ci[starts].tolist()
+        for q, h in enumerate(heads):
+            a, b = bounds[q], bounds[q + 1]
+            self.columns[(h % ni, h // ni)] = (ks[a:b], us[a:b])
         self.notes: List[str] = []
         if self.coarse:
             self.notes.append("укрупнение ячеек (COARSEN): %d блоков; пласты, регионы и фильтр ячеек берутся по "
@@ -78,6 +88,21 @@ class CellModel:
         if grid.lgr:
             self.notes.append("в модели есть локальные сетки LGR (%s): показатели считаются по глобальной сетке, "
                               "вложенные ячейки не учтены" % ", ".join(grid.lgr))
+
+    @property
+    def ijk(self) -> List[Cell]:
+        """Опорная ячейка (i, j, k) каждой единицы."""
+        if self._ijk is None:
+            r, ni, layer = self._rep, self.grid.ni, self.grid.ni * self.grid.nj
+            self._ijk = list(zip((r % ni).tolist(), ((r // ni) % self.grid.nj).tolist(), (r // layer).tolist()))
+        return self._ijk
+
+    @property
+    def rep(self) -> List[int]:
+        """Глобальный номер опорной ячейки каждой единицы."""
+        if self._rep_list is None:
+            self._rep_list = self._rep.tolist()
+        return self._rep_list
 
     def unit_at(self, c: Cell) -> int:
         """Номер единицы для мелкой ячейки (i, j, k с нуля); -1 — неактивна или вне сетки."""
@@ -154,8 +179,21 @@ class CellModel:
         return abs(s) / 2.0
 
 
-def load_model(egrid_path: str) -> CellModel:
-    return CellModel(read_egrid(egrid_path))
+_MODEL_CACHE: dict = {}
+
+
+def load_model(egrid_path: str, cache: bool = True) -> CellModel:
+    """Модель по EGRID. Сетка у расчётов одна, поэтому она читается один раз: в памяти (пока файл не сменился) и на диске
+    (``grid_cache``, проверка по размеру и дате файла), а не при каждом показателе и каждой скважине."""
+    if not cache:
+        return CellModel(read_egrid(egrid_path))
+    from .grid_cache import file_key, read_egrid_cached
+    key = file_key(egrid_path)
+    if _MODEL_CACHE.get("key") != key:
+        _MODEL_CACHE.clear()
+        _MODEL_CACHE["model"] = CellModel(read_egrid_cached(egrid_path))
+        _MODEL_CACHE["key"] = key
+    return _MODEL_CACHE["model"]
 
 
 # ---------------------------------------------------------------- 1. газонасыщенный поровый объём

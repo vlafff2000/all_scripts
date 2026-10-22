@@ -167,17 +167,10 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
     return out, {"notes": notes, "sgr_source": info["sgr_source"], "wells": info["wells"]}
 
 
-_MODEL_CACHE: dict = {}
-
-
 def _cached_model(egrid: str):
-    """Сетка читается один раз на файл (до смены файла): сравнение берёт много срезов одной модели."""
+    """Сетка читается один раз на файл (в памяти и на диске, см. tnav_results.grid_cache): сравнение берёт много срезов одной модели."""
     from tnav_results.indicators import load_model
-    key = (egrid, os.path.getmtime(egrid))
-    if _MODEL_CACHE.get("key") != key:
-        _MODEL_CACHE.clear()
-        _MODEL_CACHE["key"], _MODEL_CACHE["model"] = key, load_model(egrid)
-    return _MODEL_CACHE["model"]
+    return load_model(egrid)
 
 
 def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Optional[float] = None) -> Tuple[List[dict], dict]:
