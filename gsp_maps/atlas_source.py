@@ -39,6 +39,10 @@ PARAM_TABLES = {"production": "Расходы по скважинам", "respons
                 "pressure_match": "Адаптация давлений", "ggh": "ГГХ", "elpro": "Эльпро", "annulus": "Затрубное давление",
                 "well_geo": "Положение и перфорация"}
 PARAM_SKIP = {"well", "year", "np", "season", "x", "y"}   # номера и координаты — не параметры
+PARAM_LABELS = {"q": "Расход", "pressure": "Давление, кгс/см²", "level": "Уровень", "work_hours": "Время работы, ч",
+                "water_rate": "Расход воды, т/сут", "water_factor_l": "Водный фактор", "bottom_m": "Забой, м", "top_m": "Верх, м",
+                "altitude": "Альтитуда, м", "perf_top": "Перфорация, верх, м", "perf_bottom": "Перфорация, низ, м", "dp2": "Депрессия",
+                "fact": "Факт", "model": "Модель", "hc": "Углеводороды", "gas": "Газ", "p": "Давление", "diameter_mm": "Диаметр, мм"}
 PARAM_AGG = {"mean": "среднее", "sum": "сумма", "last": "последнее", "count": "число записей"}
 SOURCES = [("flow", "Расходы по скважинам"), ("periods", "Периоды работы объекта"), ("press_gsp", "Давление по ГСП"),
            ("press_obj", "Давление по объекту"), ("water", "Вынос воды по скважинам"), ("xy", "Координаты X, Y"),
@@ -292,8 +296,8 @@ class AtlasData:
             for field in pq.read_schema(path):
                 if field.name in PARAM_SKIP or not (pa.types.is_integer(field.type) or pa.types.is_floating(field.type)):
                     continue
-                out.append({"table": table, "column": field.name, "title": title, "rows": int(self.tables[table]),
-                            "perWell": table != "well_geo"})
+                out.append({"table": table, "column": field.name, "title": title, "label": PARAM_LABELS.get(field.name, field.name),
+                            "rows": int(self.tables[table]), "perWell": table != "well_geo"})
         return out
 
     def parameter_values(self, table: str, column: str, agg: str = "mean", start: str = "", end: str = "") -> Tuple[Dict[int, float], List[str]]:

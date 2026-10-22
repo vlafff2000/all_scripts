@@ -25,7 +25,10 @@ export const usePref = <T,>(p: Pref<T>): T => useSyncExternalStore(p.subscribe, 
 
 export type Theme = 'light' | 'dark' | 'system'
 export const theme = pref<Theme>('gsp.theme', 'system', raw => (raw === 'dark' || raw === 'light' ? raw : 'system'))
-export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
+export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf', 'atlas'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
+/** Выбранный параметр Атласа («таблица|колонка») и агрегация; запоминаются между сеансами. */
+export const atlasParam = pref<string>('gsp.atlasParam', '', raw => String(raw || ''))
+export const atlasAgg = pref<string>('gsp.atlasAgg', 'mean', raw => String(raw || 'mean'))
 export const sidebarCollapsed = pref<boolean>('gsp.sidebar.collapsed', false)
 
 const media = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null

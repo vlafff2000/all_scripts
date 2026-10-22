@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { exportExcel, getGsp, getSeason, getState, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getParam, getParams, getSeason, getState, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
 import MapView, { type MapHandle } from './MapView'
-import { SeasonCalc, fmtDay, scopeKeys } from './model'
+import { SeasonCalc, atlasPaint, fmtDay, scopeKeys } from './model'
 import SharesPage from './SharesPage'
 import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
-import { bubbleScale, hideIdle, minValue, labelMode, paintMode, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
 
 const PAGES = [
@@ -109,6 +109,27 @@ export default function App() {
     getGsp(gsp, mode).then(d => { if (live) { setG(d); setSelected(null) } }).catch(e => live && setGErr(String(e.message || e)))
     return () => { live = false }
   }, [ready, gsp, mode])
+
+  // параметры Атласа: каталог — при загрузке проекта; значения — при выборе параметра на карте
+  const [atlasItems, setAtlasItems] = useState<ParamItem[]>([])
+  const [atlasVals, setAtlasVals] = useState<ParamValues | null>(null)
+  const atlasPick = usePref(atlasParam), atlasAggV = usePref(atlasAgg)
+  useEffect(() => {
+    if (!ready) return
+    getParams().then(r => setAtlasItems(r.items)).catch(() => setAtlasItems([]))
+  }, [ready])
+  useEffect(() => {
+    if (!ready || paint !== 'atlas' || !atlasPick.includes('|')) { setAtlasVals(null); return }
+    let live = true
+    const [table, column] = atlasPick.split('|')
+    getParam(table, column, atlasAggV).then(r => live && setAtlasVals(r)).catch(() => live && setAtlasVals(null))
+    return () => { live = false }
+  }, [ready, paint, atlasPick, atlasAggV])
+  const atlasData = useMemo(() => {
+    if (!atlasVals) return null
+    const item = atlasItems.find(i => i.table === atlasVals.table && i.column === atlasVals.column)
+    return atlasPaint(atlasVals.values, (item ? item.title + ' · ' + item.label : atlasVals.column) + ' · ' + (atlasVals.agg === 'mean' ? 'среднее' : atlasVals.agg), atlasVals.warnings)
+  }, [atlasVals, atlasItems])
 
   // адрес из ссылки: сначала группа и вид/сезон, выбор скважины — когда загрузится нужная группа
   useEffect(() => {
@@ -249,7 +270,7 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
+          <MapView ref={map} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
