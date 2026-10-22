@@ -71,3 +71,16 @@ export const addReadyFiles = (paths: string[]) =>
   call<WorkspaceState & { results: WorkspaceCopyResult[] }>('/api/workspace/ready', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths }),
   })
+
+export interface LegendRow {
+  sheet: string; well: string; color: string; pack: string; source: string; status: string; reason: string
+  rows: number; labels: string; confirmed: boolean; hints: string[]
+}
+export const getGisLegend = (file: string) =>
+  call<{ rows: LegendRow[]; packs: string[]; open: number }>('/api/gis/legend', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }),
+  })
+export const saveGisLegend = (file: string, choices: { sheet: string; color: string; pack: string }[]) =>
+  call<{ saved: number }>('/api/gis/legend/save', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file, choices }),
+  })

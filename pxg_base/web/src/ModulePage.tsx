@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import DateIssues from './DateIssues'
+import LegendPanel from './LegendPanel'
 import { checkUrl, fileUrl, getJob, getJobs, openFolder, pickPath, runCheck, startJob, type Job, type ModuleInfo, type Param, type QcReport } from './api'
 import { loadForm, saveForm } from './prefs'
 
@@ -99,6 +100,7 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
   const [error, setError] = useState('')
   const [qc, setQc] = useState<QcReport | null>(null)
   const [checking, setChecking] = useState(false)
+  const [legend, setLegend] = useState(false)
   const [now, setNow] = useState(Date.now() / 1000)
   const [copied, setCopied] = useState('')
   const logRef = useRef<HTMLPreElement>(null)
@@ -205,6 +207,7 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
           </details>
           <div className="actions">
             <button className="primary" type="submit" disabled={running}>{running ? 'Выполняется…' : 'Запустить'}</button>
+            {module.id === 'База_ГИС' && <button type="button" className="quiet" onClick={() => { setTouched(true); if (!(values.file || '').trim()) return; setLegend(l => !l) }}>Легенда пачек</button>}
             {module.check && <button type="button" className="quiet" onClick={check} disabled={checking || running}>{checking ? 'Проверка…' : 'Проверить исходники'}</button>}
             <span className="muted keys">Ctrl+Enter — запустить</span>
             {touched && missing.length > 0 && <span className="field-error">Заполните обязательные поля.</span>}
@@ -213,6 +216,8 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
       )}
 
       {error && <p className="note warning">{error}</p>}
+
+      {legend && (values.file || '').trim() && <LegendPanel key={values.file} file={values.file.trim()} onClose={() => setLegend(false)} />}
 
       {qc && <QcPanel report={qc} />}
 
