@@ -7,8 +7,11 @@ import './prefs'
 import App from './App'
 import '../../../pxg_core/web-ui/base.css'
 import '../../../pxg_core/web-ui/filepicker.css'
+import '../../../pxg_core/web-ui/logbutton.css'
+import { mountLogButton } from '../../../pxg_core/web-ui/LogButton'
 import '../../../pxg_core/web-ui/chart/chart-shell.css'
 import './styles.css'
 import './app.css'
 
 createRoot(document.getElementById('root')!).render(<App />)
+mountLogButton()
