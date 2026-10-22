@@ -128,6 +128,7 @@ class ProfileCell(NamedTuple):
     bottom: float
     sg: float
     perforated: bool  # ячейка вскрыта скважиной в модели
+    thr: float = DEFAULT_SG_THRESHOLD   # критическая Sgr ячейки (SGCR из INIT или число из настроек), как в column_gwc
 
 
 class WellProfile(NamedTuple):
@@ -136,10 +137,11 @@ class WellProfile(NamedTuple):
     column: Tuple[int, int]
     columns: int                 # колонн вскрытия у скважины (профиль — главная, где больше всего ячеек вскрытия)
     cells: List[ProfileCell]     # сверху вниз
+    gwc: Optional[ColumnGwc] = None   # ГВК главной колонны прежней логикой column_gwc (то же, что «ГВК по скважинам»)
 
 
 def well_profile(model: CellModel, sg: Sequence[float], well: str, cells: Sequence[Cell],
-                 date: Optional[dt.datetime] = None) -> Optional[WellProfile]:
+                 date: Optional[dt.datetime] = None, thr: Optional[Sequence[float]] = None) -> Optional[WellProfile]:
     """Газонасыщенность вдоль колонны скважины для планшета; None — ячеек вскрытия в сетке нет."""
     count: Dict[Tuple[int, int], int] = {}
     for c in cells:
@@ -150,23 +152,26 @@ def well_profile(model: CellModel, sg: Sequence[float], well: str, cells: Sequen
     col = max(sorted(count), key=lambda x: count[x])
     opened = {c[2] for c in cells if (c[0], c[1]) == col}
     ks, ns = model.columns[col]
-    out = [ProfileCell(-model.top((col[0], col[1], k)), -model.bottom((col[0], col[1], k)), float(sg[n]), k in opened)
+    t = thr if thr is not None else [DEFAULT_SG_THRESHOLD] * len(sg)
+    out = [ProfileCell(-model.top((col[0], col[1], k)), -model.bottom((col[0], col[1], k)), float(sg[n]), k in opened, float(t[n]))
            for k, n in zip(ks, ns)]
-    return WellProfile(well, date, col, len(count), out)
+    return WellProfile(well, date, col, len(count), out, column_gwc(model, sg, t, col))
 
 
 def wells_profile_at(model: CellModel, unrst_path: str, step: RestartStep, wells: Sequence[str],
-                     sgas: str = "SGAS") -> Tuple[List[WellProfile], List[str]]:
+                     sgas: str = "SGAS", init_path: Optional[str] = None,
+                     fallback_sgr: float = DEFAULT_SG_THRESHOLD) -> Tuple[List[WellProfile], List[str]]:
     """Профили Sg выбранных скважин на одном шаге рестарта и список скважин без ячеек."""
     sg = read_restart_keyword(unrst_path, step, sgas)
     if sg is None:
         return [], list(wells)
     sg = model.to_units(sg, sgas)[0]
+    thr, _src = sgr_by_units(model, init_path, fallback_sgr)
     conn = read_well_connections(unrst_path, step)
     out: List[WellProfile] = []
     missing: List[str] = []
     for w in wells:
-        p = well_profile(model, sg, w, conn.get(w) or [], step.date)
+        p = well_profile(model, sg, w, conn.get(w) or [], step.date, thr)
         if p is None:
             missing.append(w)
         else:

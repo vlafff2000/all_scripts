@@ -180,7 +180,7 @@ def _cached_model(egrid: str):
     return _MODEL_CACHE["model"]
 
 
-def well_profile(path: str, date: dt.datetime, wells: Sequence[str]) -> Tuple[List[dict], dict]:
+def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Optional[float] = None) -> Tuple[List[dict], dict]:
     """Газонасыщенность вдоль колонны скважин на шаге рестарта, ближайшем к дате (для планшета), TVDSS."""
     from tnav_results.indicators import pick_step
     from tnav_results.well_gwc import wells_profile_at
@@ -194,9 +194,14 @@ def well_profile(path: str, date: dt.datetime, wells: Sequence[str]) -> Tuple[Li
     if not steps:
         raise ValueError("В UNRST нет шагов с датой")
     step = pick_step(steps, date)
-    profiles, missing = wells_profile_at(_cached_model(f["EGRID"]), f["UNRST"], step, list(wells))
+    from tnav_results.indicators import DEFAULT_SG_THRESHOLD
+    profiles, missing = wells_profile_at(_cached_model(f["EGRID"]), f["UNRST"], step, list(wells), init_path=f.get("INIT"),
+                                         fallback_sgr=DEFAULT_SG_THRESHOLD if sgr is None else float(sgr))
+    # gwc — прежняя логика column_gwc (сверху вниз, граница ячейки и интерполяция), как в «ГВК по скважинам»
     rows = [{"well": p.well, "date": str(p.date.date()) if p.date else "", "column": list(p.column), "columns": p.columns,
-             "cells": [{"top": c.top, "bottom": c.bottom, "sg": c.sg, "perforated": c.perforated} for c in p.cells]}
+             "gwc": ({"cell": p.gwc.top_down.cell, "interp": p.gwc.top_down.interp, "at_grid_edge": p.gwc.top_down.at_grid_edge,
+                      "lowest_cell": p.gwc.lowest.cell, "torn": p.gwc.torn} if p.gwc else None),
+             "cells": [{"top": c.top, "bottom": c.bottom, "sg": c.sg, "perforated": c.perforated, "thr": c.thr} for c in p.cells]}
             for p in profiles]
     return rows, {"step_date": str(step.date.date()), "missing": missing}
 

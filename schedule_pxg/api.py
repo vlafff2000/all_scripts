@@ -1085,7 +1085,8 @@ async def results_well_profile(request: Request):
         wells = [w.strip() for w in (request.query_params.get("wells") or "").split("|") if w.strip()]
         if not wells:
             return _err("Не выбраны скважины")
-        rows, info = await run_in_threadpool(results.well_profile, path, date, wells)
+        sgr = request.query_params.get("sgr")
+        rows, info = await run_in_threadpool(results.well_profile, path, date, wells, float(sgr) if sgr else None)
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось построить профили скважин: %s" % e)
     return JSONResponse({"rows": rows, **info})

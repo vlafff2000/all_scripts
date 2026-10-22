@@ -6,15 +6,6 @@ import { FactWell, ModelEntry, WellProfile, getModels, getPlanshetFact, getSourc
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
 
-/** ГВК модели по колонне: низ газовой пачки от кровли газа (первый переход газ → не газ), Sg выше порога. */
-export function modelGwc(cells: WellProfile['cells'], thr: number): number | null {
-  const i = cells.findIndex(c => c.sg > thr)
-  if (i < 0) return null
-  let k = i
-  while (k + 1 < cells.length && cells[k + 1].sg > thr && Math.abs(cells[k + 1].top - cells[k].bottom) < 0.5) k++
-  return cells[k].bottom
-}
-
 interface Track { title: string; sub: string; gwc: { label: string; z: number | null }[]; bars: { top: number; bottom: number; v: number }[]; note?: string }
 
 const W = 150, PAD = 8, AXIS = 56, HEAD = 46
@@ -120,7 +111,7 @@ export default function Planshet() {
     for (const m of models) {
       for (const [day, group] of Object.entries(byDate)) {
         try {
-          const r = await getWellProfile(m.id, group.map(g => g.fact.well), day)
+          const r = await getWellProfile(m.id, group.map(g => g.fact.well), day, thr.replace(',', '.'))
           group.forEach(g => g.profiles.push({ model: m, p: r.rows.find(x => x.well === g.fact.well) || null, stepDate: r.step_date }))
         } catch (e) { group.forEach(g => g.profiles.push({ model: m, p: null, stepDate: '', err: (e as Error).message })) }
       }
@@ -128,7 +119,6 @@ export default function Planshet() {
     setWellsOut(out)
   })
 
-  const th = Number(thr.replace(',', '.')) || 0.01
   const handGwc = (w: string) => { const z = Number((hand[w] || '').replace(',', '.')); return hand[w] && !isNaN(z) ? [{ label: 'ручн.', z }] : [] }
   const tracksOf = ({ fact, profiles }: WellOut): Track[] => {
     const tr: Track[] = [{ title: 'ГИС, факт', sub: 'Кг по интервалам' + (fact.date ? ' · ' + fact.date : ''),
@@ -137,7 +127,7 @@ export default function Planshet() {
     profiles.filter(x => !hidden.includes(x.model.id)).forEach(({ model, p, stepDate, err }) => tr.push({
       title: model.name, sub: err ? 'ошибка' : 'Sg · шаг ' + (stepDate || '—'),
       bars: (p?.cells || []).map(c => ({ top: c.top, bottom: c.bottom, v: c.sg })),
-      gwc: p ? [{ label: 'ГВК', z: modelGwc(p.cells, th) }] : [], note: err ? err.slice(0, 28) : p ? undefined : 'нет ячеек скважины' }))
+      gwc: p?.gwc ? [{ label: 'ГВК', z: p.gwc.cell }, { label: 'ГВК инт.', z: p.gwc.interp }] : [], note: err ? err.slice(0, 28) : p ? undefined : 'нет ячеек скважины' }))
     return tr
   }
   const trackSets = wellsOut.map(tracksOf)
@@ -188,7 +178,7 @@ export default function Planshet() {
             {wellsOut.map((o, i) => <WellLog key={o.fact.well} name={o.fact.well} tracks={trackSets[i]} perf={o.fact.perforation} zMin={zMin} zMax={zMax} h={560} />)}
           </div>
           <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус); шкала глубины и шкалы 0…1 одинаковые у всех скважин. Узкая полоса слева — перфорация.
-            Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — низ газовой пачки от кровли газа при Sg выше порога.</p>
+            Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — как в «Результатах расчёта → ГВК по скважинам»: сверху вниз, граница ячейки (сплошная) и интерполяция Sg (пунктир); газ — Sg выше критической SGCR из INIT, иначе порога. Порог применяется при «Построить».</p>
           {wellsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.filter(m => !hidden.includes(m.id)).map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
             <tbody>{wellsOut.map((o, i) => <tr key={o.fact.well}><td>{o.fact.well}</td><td>{o.fact.date || '—'}</td><td className="num">{fmt(o.fact.altitude)}</td>
               {trackSets[i].map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
