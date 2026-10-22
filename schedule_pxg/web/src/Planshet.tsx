@@ -51,6 +51,8 @@ function WellLog({ name, tracks, perf, zMin, zMax, h }: { name: string; tracks: 
   )
 }
 
+interface WellOut { fact: FactWell; profiles: { model: ModelEntry; p: WellProfile | null; stepDate: string; err?: string }[] }
+
 export default function Planshet() {
   const [gisFolder, setGisFolder] = useState('')
   const [perfFile, setPerfFile] = useState('')
@@ -58,10 +60,10 @@ export default function Planshet() {
   const [date, setDate] = useState('')
   const [thr, setThr] = useState('0.01')
   const [models, setModels] = useState<ModelEntry[]>([])
-  const [fact, setFact] = useState<FactWell | null>(null)
-  const [profiles, setProfiles] = useState<{ model: ModelEntry; p: WellProfile | null; stepDate: string; err?: string }[]>([])
+  const [wellsOut, setWellsOut] = useState<WellOut[]>([])
   const [zFrom, setZFrom] = useState('')
   const [zTo, setZTo] = useState('')
+  const [dates, setDates] = useState<string[]>([])
   const [notes, setNotes] = useState<string[]>([])
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -76,38 +78,46 @@ export default function Planshet() {
   const pickPerf = async () => { const r = await pickFile(perfFile); if (r.path) await saveGis(gisFolder, r.path) }
 
   const build = (d: string) => guard(async () => {
-    const w = well.trim()
-    if (!w) throw new Error('Введите номер скважины')
-    const f = await getPlanshetFact([w], d)
-    const row = f.rows[0]
-    setFact(row); setNotes([...f.notes, ...row.notes])
-    if (!d && row.date) setDate(row.date)
-    const out: typeof profiles = []
+    const ws = Array.from(new Set(well.split(/[;,|\s]+/).map(x => x.trim()).filter(Boolean)))
+    if (!ws.length) throw new Error('Введите номера скважин через запятую')
+    const f = await getPlanshetFact(ws, d)
+    setNotes([...f.notes, ...f.rows.flatMap(r => r.notes.map(n => 'Скв. ' + r.well + ': ' + n))])
+    const all = Array.from(new Set(f.rows.flatMap(r => r.dates))).sort()
+    setDates(all)
+    // профили моделей: один запрос на модель и дату среза сразу для всех скважин этой даты (сетка читается один раз)
+    const out: WellOut[] = f.rows.map(row => ({ fact: row, profiles: [] }))
+    const byDate: Record<string, WellOut[]> = {}
+    out.forEach(o => { (byDate[o.fact.date || d] = byDate[o.fact.date || d] || []).push(o) })
     for (const m of models) {
-      try {
-        const r = await getWellProfile(m.id, [w], row.date || d)
-        out.push({ model: m, p: r.rows[0] || null, stepDate: r.step_date })
-      } catch (e) { out.push({ model: m, p: null, stepDate: '', err: (e as Error).message }) }
+      for (const [day, group] of Object.entries(byDate)) {
+        try {
+          const r = await getWellProfile(m.id, group.map(g => g.fact.well), day)
+          group.forEach(g => g.profiles.push({ model: m, p: r.rows.find(x => x.well === g.fact.well) || null, stepDate: r.step_date }))
+        } catch (e) { group.forEach(g => g.profiles.push({ model: m, p: null, stepDate: '', err: (e as Error).message })) }
+      }
     }
-    setProfiles(out)
+    setWellsOut(out)
   })
 
   const th = Number(thr.replace(',', '.')) || 0.01
-  const tracks: Track[] = []
-  if (fact) {
-    tracks.push({ title: 'ГИС, факт', sub: 'Кг по интервалам' + (fact.date ? ' · ' + fact.date : ''),
+  const tracksOf = ({ fact, profiles }: WellOut): Track[] => {
+    const tr: Track[] = [{ title: 'ГИС, факт', sub: 'Кг по интервалам' + (fact.date ? ' · ' + fact.date : ''),
       bars: fact.intervals.filter(i => i.kg !== null).map(i => ({ top: i.top, bottom: i.bottom, v: i.kg as number })),
-      gwc: fact.packs.map(p => ({ label: 'ГВК', z: p.gvk })), note: fact.intervals.length ? undefined : 'нет интервалов' })
+      gwc: fact.packs.map(p => ({ label: 'ГВК', z: p.gvk })), note: fact.intervals.length ? undefined : 'нет интервалов' }]
+    profiles.forEach(({ model, p, stepDate, err }) => tr.push({
+      title: model.name, sub: err ? 'ошибка' : 'Sg · шаг ' + (stepDate || '—'),
+      bars: (p?.cells || []).map(c => ({ top: c.top, bottom: c.bottom, v: c.sg })),
+      gwc: p ? [{ label: 'ГВК', z: modelGwc(p.cells, th) }] : [], note: err ? err.slice(0, 28) : p ? undefined : 'нет ячеек скважины' }))
+    return tr
   }
-  profiles.forEach(({ model, p, stepDate, err }) => tracks.push({
-    title: model.name, sub: err ? 'ошибка' : 'Sg · шаг ' + (stepDate || '—'),
-    bars: (p?.cells || []).map(c => ({ top: c.top, bottom: c.bottom, v: c.sg })),
-    gwc: p ? [{ label: 'ГВК', z: modelGwc(p.cells, th) }] : [], note: err ? err.slice(0, 28) : p ? undefined : 'нет ячеек скважины' }))
-  const zs = tracks.flatMap(t => [...t.bars.flatMap(b => [b.top, b.bottom]), ...t.gwc.map(g => g.z).filter((z): z is number => z !== null)])
-    .concat(fact?.perforation ? [fact.perforation.top, fact.perforation.bottom].filter((z): z is number => z !== null) : [])
+  const trackSets = wellsOut.map(tracksOf)
+  // одна шкала глубины на все скважины: по общему диапазону данных и перфораций, если не задана вручную
+  const zs = trackSets.flatMap(ts => ts.flatMap(t => [...t.bars.flatMap(b => [b.top, b.bottom]), ...t.gwc.map(g => g.z).filter((z): z is number => z !== null)]))
+    .concat(wellsOut.flatMap(o => (o.fact.perforation ? [o.fact.perforation.top, o.fact.perforation.bottom].filter((z): z is number => z !== null) : [])))
   const auto: [number, number] = zs.length ? [Math.floor(Math.min(...zs) / 10) * 10 - 10, Math.ceil(Math.max(...zs) / 10) * 10 + 10] : [-1000, 0]
   const zMin = zFrom !== '' && !isNaN(Number(zFrom)) ? Number(zFrom) : auto[0]
   const zMax = zTo !== '' && !isNaN(Number(zTo)) ? Number(zTo) : auto[1]
+  const gwcOf = (t: Track) => t.gwc.map(g => g.z).filter((z): z is number => z !== null)
 
   return (
     <main className="workspace">
@@ -124,20 +134,26 @@ export default function Planshet() {
       </section>
       <section className="card">
         <div className="row" style={{ flexWrap: 'wrap' }}>
-          <input style={{ width: 140 }} placeholder="скважина" value={well} onChange={e => setWell(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') build('') }} />
+          <input style={{ width: 240 }} placeholder="скважины через запятую" value={well} onChange={e => setWell(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') build('') }} />
           <button className="primary" disabled={busy || !gisFolder} onClick={() => build('')}>Построить</button>
-          {fact && fact.dates.length > 0 && <><span className="muted small">Замер:</span>
-            <select value={date} onChange={e => { setDate(e.target.value); build(e.target.value) }}>{fact.dates.map(d => <option key={d}>{d}</option>)}</select></>}
+          {dates.length > 0 && <><span className="muted small">Замер:</span>
+            <select value={date} onChange={e => { setDate(e.target.value); build(e.target.value) }}>
+              <option value="">последний у каждой скважины</option>{dates.map(d => <option key={d}>{d}</option>)}</select></>}
           <span className="muted small">Порог Sg:</span><input style={{ width: 60 }} value={thr} onChange={e => setThr(e.target.value)} />
           <span className="muted small">Шкала, м от:</span><input style={{ width: 70 }} placeholder="авто" value={zFrom} onChange={e => setZFrom(e.target.value)} />
           <span className="muted small">до:</span><input style={{ width: 70 }} placeholder="авто" value={zTo} onChange={e => setZTo(e.target.value)} />
         </div>
         {msg && <p className="note warn">{msg}</p>}
         {notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
-        {fact && tracks.length > 0 && <div style={{ overflowX: 'auto', marginTop: 12 }}>
-          <WellLog name={fact.well} tracks={tracks} perf={fact.perforation} zMin={zMin} zMax={zMax} h={560} />
-          <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус). Узкая полоса слева — перфорация. Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — низ газовой пачки от кровли газа при Sg выше порога.
-            {fact.altitude !== null ? ' Альтитуда ' + fmt(fact.altitude) + ' м.' : ''}</p>
+        {wellsOut.length > 0 && <div style={{ overflowX: 'auto', marginTop: 12 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            {wellsOut.map((o, i) => <WellLog key={o.fact.well} name={o.fact.well} tracks={trackSets[i]} perf={o.fact.perforation} zMin={zMin} zMax={zMax} h={560} />)}
+          </div>
+          <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус); шкала глубины и шкалы 0…1 одинаковые у всех скважин. Узкая полоса слева — перфорация.
+            Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — низ газовой пачки от кровли газа при Sg выше порога.</p>
+          {wellsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
+            <tbody>{wellsOut.map((o, i) => <tr key={o.fact.well}><td>{o.fact.well}</td><td>{o.fact.date || '—'}</td><td className="num">{fmt(o.fact.altitude)}</td>
+              {trackSets[i].map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
         </div>}
       </section>
     </main>
