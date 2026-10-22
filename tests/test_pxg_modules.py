@@ -224,3 +224,37 @@ def test_office_converter_batch_and_fallback(tmp_path):
     # LibreOffice: Excel → pdf, лист → csv
     res = oc.convert_file(f, "pdf", str(tmp_path / "a.pdf"), soffice)
     assert res["status"] == "ok" and (tmp_path / "a.pdf").stat().st_size > 0
+
+
+def test_flow_db_same_with_parallel_files(tmp_path, monkeypatch):
+    """Файлы расходов обрабатываются параллельно на нескольких процессах: база та же, что при одном процессе."""
+    import shutil
+    tree = make_flow_tree(tmp_path / "data")
+    for f in list(tree.root.rglob("*.xlsx")):                  # по два файла в папке, чтобы работали два процесса
+        shutil.copy(f, f.with_name(f.stem + "_b.xlsx"))
+    params = {"root": str(tree.root), "periods": str(tree.periods_file)}
+    monkeypatch.setenv("PXG_WORKERS", "1")
+    run_module("Создание_базы_данных_расходов", params, tmp_path / "one")
+    monkeypatch.setenv("PXG_WORKERS", "3")
+    monkeypatch.setenv("PXG_PARALLEL_MIN", "1")
+    job = run_module("Создание_базы_данных_расходов", params, tmp_path / "many")
+    name = "Сводка_закачка_отбор_обновленный_скрипт.xlsx"
+    a, b = pd.read_excel(tmp_path / "one" / name, sheet_name=None), pd.read_excel(tmp_path / "many" / name, sheet_name=None)
+    assert list(a) == list(b)
+    for sheet in a:
+        pd.testing.assert_frame_equal(a[sheet], b[sheet])
+    assert any("Обработка файла" in line for line in job["log"])
+    assert len(a["Данные"] if "Данные" in a else next(iter(a.values()))) > 0
+
+
+def test_map_module_function_uses_processes_and_keeps_order(tmp_path, capsys):
+    from pxg_core import parallel
+    from pxg_core.расходы_файлы import DATE_ISSUES, reset_date_issues
+    mod = tmp_path / "m.py"
+    mod.write_text("import os\nfrom pxg_core.расходы_файлы import DATE_ISSUES\n"
+                   "def work(x):\n    print('файл', x)\n    DATE_ISSUES.append(x)\n    return (x * 2, os.getpid())\n", encoding="utf-8")
+    reset_date_issues()
+    res = parallel.map_module_function(str(mod), "work", [(i,) for i in range(6)], None, workers=3)
+    assert [r[0] for r in res] == [0, 2, 4, 6, 8, 10] and os.getpid() not in {r[1] for r in res}
+    assert capsys.readouterr().out.splitlines() == ["файл %d" % i for i in range(6)] and sorted(DATE_ISSUES) == list(range(6))
+    reset_date_issues()

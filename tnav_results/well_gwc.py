@@ -100,26 +100,34 @@ def well_gwc(model: CellModel, sg: Sequence[float], thr: Sequence[float], well: 
                    any(r.torn for r in res), any(r.top_down.at_grid_edge or r.lowest.at_grid_edge for r in res))
 
 
+def _step_wells_gwc(model: CellModel, st: RestartStep, ctx) -> List[WellGwc]:
+    """ГВК выбранных скважин на одном шаге рестарта (пусто — нет SGAS)."""
+    unrst_path, sgas, thr, want = ctx
+    sg = read_restart_keyword(unrst_path, st, sgas)
+    if sg is None:
+        return []
+    sg = model.to_units(sg, sgas)[0]
+    # ячейки вскрытия берутся на том же шаге, что и насыщенность: скважина могла быть пробурена или перфорирована позже
+    conn = read_well_connections(unrst_path, st)
+    return [well_gwc(model, sg, thr, w, cells, st.date) for w, cells in conn.items()
+            if cells and (want is None or w in want)]
+
+
 def wells_gwc_over_time(model: CellModel, init_path: Optional[str], unrst_path: str, fallback_sgr: float = DEFAULT_SG_THRESHOLD,
                         wells: Optional[Sequence[str]] = None, steps: Optional[Sequence[RestartStep]] = None,
-                        sgas: str = "SGAS") -> Tuple[List[WellGwc], Dict[str, object]]:
-    """ГВК выбранных скважин (пусто — все) по датам рестарта. Возвращает строки и сведения: источник Sgr, скважины без ячеек."""
+                        sgas: str = "SGAS", egrid_path: Optional[str] = None,
+                        workers: Optional[int] = None) -> Tuple[List[WellGwc], Dict[str, object]]:
+    """ГВК выбранных скважин (пусто — все) по датам рестарта. Возвращает строки и сведения: источник Sgr, скважины без ячеек.
+
+    С egrid_path шаги считаются параллельно на всех ядрах (``tnav_results.parallel``), результат тот же.
+    """
+    from .parallel import map_steps
     want = set(wells) if wells else None
     thr, src = sgr_by_units(model, init_path, fallback_sgr)
-    out: List[WellGwc] = []
-    used: set = set()
-    for st in (steps if steps is not None else iter_restart_steps(unrst_path)):
-        sg = read_restart_keyword(unrst_path, st, sgas)
-        if sg is None:
-            continue
-        sg = model.to_units(sg, sgas)[0]
-        # ячейки вскрытия берутся на том же шаге, что и насыщенность: скважина могла быть пробурена или перфорирована позже
-        conn = read_well_connections(unrst_path, st)
-        for w, cells in conn.items():
-            if (want is not None and w not in want) or not cells:
-                continue
-            used.add(w)
-            out.append(well_gwc(model, sg, thr, w, cells, st.date))
+    per_step = map_steps(_step_wells_gwc, model, list(steps if steps is not None else iter_restart_steps(unrst_path)),
+                         (unrst_path, sgas, thr, want), egrid_path, workers)
+    out: List[WellGwc] = [r for rows in per_step for r in rows]
+    used = {r.well for r in out}
     return out, {"sgr_source": src, "wells": sorted(used), "missing": sorted(want - used) if want else []}
 
 
