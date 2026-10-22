@@ -41,7 +41,7 @@ function Home({ groups, modules }: { groups: [string, ModuleInfo[]][]; modules: 
   return (
     <>
       <header className="module-head"><div>
-        <h1>База ПХГ</h1>
+        <h1>Работа с исходными данными</h1>
         <p className="lede">Скрипты подготовки и анализа данных ПХГ в одном окне: выберите модуль слева или найдите его по Ctrl+K.
           С веб-формой работают {ready} из {modules.length}. Остальное — скрипты будущих приложений («ГИС и ГВК», «Отчёты и файлы», группа «ГДМ»), они лежат в папке apps и пока запускаются из консоли.</p>
       </div></header>
@@ -87,14 +87,14 @@ export default function App() {
     return Object.entries(g)
   }, [modules])
   const module = modules.find(m => m.id === route)
-  useEffect(() => { document.title = (module ? module.title + ' · ' : '') + 'База ПХГ' }, [module])
+  useEffect(() => { document.title = (module ? module.title + ' · ' : '') + 'Работа с исходными данными' }, [module])
 
-  if (error) return <div className="fatal"><h1>База ПХГ</h1><p>{error}</p></div>
+  if (error) return <div className="fatal"><h1>Работа с исходными данными</h1><p>{error}</p></div>
   return (
     <div className={'shell' + (collapsed ? ' collapsed' : '')}>
       <aside className="sidebar">
         <div className="brand">
-          <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">База ПХГ</span></a>
+          <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">Работа с исходными данными</span></a>
           <button type="button" className="side-toggle" onClick={() => sidebarCollapsed.set(!collapsed)}
             aria-expanded={!collapsed} title={collapsed ? 'Показать меню' : 'Свернуть меню'}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d={collapsed ? 'M6 3.5 10.5 8 6 12.5' : 'M10 3.5 5.5 8 10 12.5'} /></svg>

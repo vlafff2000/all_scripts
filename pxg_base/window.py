@@ -27,7 +27,7 @@ def wait_ready(port: int, timeout: float = 20) -> bool:
     return False
 
 
-def run(browser: bool = False, port: int = 0, title: str = "База ПХГ", app_factory=None) -> int:
+def run(browser: bool = False, port: int = 0, title: str = "Работа с исходными данными", app_factory=None) -> int:
     import uvicorn
 
     if app_factory is None:

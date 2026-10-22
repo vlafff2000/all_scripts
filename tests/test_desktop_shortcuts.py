@@ -18,7 +18,7 @@ def test_every_app_has_png_and_ico():
 
 @pytest.mark.skipif(os.name == 'nt', reason='.desktop-файлы создаются только на Linux')
 def test_creates_desktop_files(tmp_path):
-    root = tmp_path / 'PXG_Base'
+    root = tmp_path / 'Ishodnye_dannye'
     (root / 'icons').mkdir(parents=True)
     for _, _, _, sh in ds.APPS:
         (root / sh).write_text('#!/bin/bash\n')

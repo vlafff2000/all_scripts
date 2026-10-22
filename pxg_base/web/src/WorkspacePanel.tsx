@@ -49,7 +49,7 @@ export function WorkspacePanel() {
   return (
     <section className="group workspace-panel" aria-label="Папка проекта">
       <h2>Папка проекта</h2>
-      <p className="lede">Одна папка на все приложения. Внутри две подпапки: «готовые» (файлы не пересобираются) и «выгрузки» (сюда пишет База ПХГ).</p>
+      <p className="lede">Одна папка на все приложения. Внутри две подпапки: «готовые» (файлы не пересобираются) и «выгрузки» (сюда пишет Работа с исходными данными).</p>
       {state && <div className="folder-row">
         <span className="muted">{state.project || 'Проект не выбран'}</span>
         <button type="button" onClick={chooseProject} disabled={busy}>{state.project ? 'Сменить папку' : 'Выбрать папку проекта'}</button>

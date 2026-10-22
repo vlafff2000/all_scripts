@@ -6,7 +6,7 @@
 
 | Папка | Что это | Состояние |
 |---|---|---|
-| `pxg_base/` | «База ПХГ»: сбор и очистка данных (расходы, уровни и давления, межколонные давления, include для tNavigator). 23 модуля, у каждого веб-форма | работает, `pxg_base/README.md` |
+| `pxg_base/` | «Работа с исходными данными»: сбор и очистка данных (расходы, уровни и давления, межколонные давления, include для tNavigator). 23 модуля, у каждого веб-форма | работает, `pxg_base/README.md` |
 | `pxg_core/` | общий код приложений: чтение Excel с расходами (поиск заголовка, номера скважин, русские месяцы, сезоны) | работает |
 | `gsp_maps/` | «Карты»: живая карта скважин с секторными диаграммами расхода газа и выноса воды, бегунок времени, сравнение сезонов, поскважинный анализ, работа скважин, доли, давление, тренды, выгрузка в Excel | работает, `gsp_maps/README.md`, чек-лист переноса `docs/parity/gsp_maps.md` |
 | `schedule_pxg/` | «ГДМ»: schedule для tNavigator (история, прогноз, сценарии, графики, проверки); заменил «Схедул ТР» (теперь «ГДМ») и скрипты `apps/schedule_tr` | работает |
@@ -23,7 +23,7 @@
 ```
 pip install -r requirements.txt            # Python 3.13, последние версии библиотек
 python -m pxg_base                         # консольное меню модулей
-python -m pxg_base --server                # «База ПХГ» в браузере, http://127.0.0.1:8766
+python -m pxg_base --server                # «Работа с исходными данными» в браузере, http://127.0.0.1:8766
 python -m gsp_maps                         # «Карты», окно приложения
 python -m gsp_maps --browser               # то же в браузере
 python -m gsp_maps --server                # только сервер, порт 8767
@@ -38,8 +38,8 @@ python -m gsp_maps --server                # только сервер, порт
 
 | Система | Архив | Python | Запуск |
 |---|---|---|---|
-| Windows 10 и новее, x64 | `PXG_Base_portable_windows_x64.zip` | 3.13 | `PXG_Base.bat`, `Karty.bat`, `GDM.bat`, `PXG_Base_console.bat`, `Sozdat_yarlyki.bat` |
-| Linux x86_64, glibc 2.17+ (целевая система РЕД ОС 7.3) | `PXG_Base_portable_linux_x64.tar.gz` | 3.13 | `pxg_base.sh`, `karty.sh`, `gdm.sh`, `pxg_base_console.sh`, `sozdat_yarlyki.sh` |
+| Windows 10 и новее, x64 | `Ishodnye_dannye_portable_windows_x64.zip` | 3.13 | `Ishodnye_dannye.bat`, `Karty.bat`, `GDM.bat`, `Ishodnye_dannye_console.bat`, `Sozdat_yarlyki.bat` |
+| Linux x86_64, glibc 2.17+ (целевая система РЕД ОС 7.3) | `Ishodnye_dannye_portable_linux_x64.tar.gz` | 3.13 | `ishodnye_dannye.sh`, `karty.sh`, `gdm.sh`, `ishodnye_dannye_console.sh`, `sozdat_yarlyki.sh` |
 
 Для РЕД ОС 7.3 берутся только колёса manylinux2014, поэтому numpy и pandas там на последних версиях, у которых такие колёса ещё есть (numpy 2.2, pandas 2.3). Результаты «Базы ПХГ» пишутся в папку `pxg_runs` рядом с архивом.
 
@@ -51,4 +51,4 @@ python -m gsp_maps --server                # только сервер, порт
 ## Что дальше
 - «Карты»: html-карта и GIF из старого скрипта не переносятся (PNG и Excel остаются); дальше развивается интерактивная карта и сверка по `docs/parity/gsp_maps.md`.
 - «ГИС и ГВК», «Отчёты»: по одному превращать скрипты в модули с параметрами и веб-формой, как в «Базе ПХГ».
-- «База ПХГ»: вынести общие функции в `pxg_core` и убрать окна tkinter (в расходах и межколонках уже убраны, остался «Include факта из модели»); ускорить модули уровней и давлений, когда будут настоящие файлы.
+- «Работа с исходными данными»: вынести общие функции в `pxg_core` и убрать окна tkinter (в расходах и межколонках уже убраны, остался «Include факта из модели»); ускорить модули уровней и давлений, когда будут настоящие файлы.

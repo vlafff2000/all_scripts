@@ -35,7 +35,7 @@ def background(top, bottom):
 
 
 def database(d):
-    """База ПХГ: стопка дисков."""
+    """Работа с исходными данными: стопка дисков."""
     for i, y in enumerate((250, 430, 610)):
         d.rounded_rectangle((220, y, 804, y + 150), radius=75, fill=WHITE if i == 0 else SOFT if i == 1 else WHITE)
         d.ellipse((290, y + 52, 346, y + 108), fill=(40, 90, 170, 255))
