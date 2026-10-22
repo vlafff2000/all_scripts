@@ -121,3 +121,54 @@ def wells_gwc_over_time(model: CellModel, init_path: Optional[str], unrst_path: 
             used.add(w)
             out.append(well_gwc(model, sg, thr, w, cells, st.date))
     return out, {"sgr_source": src, "wells": sorted(used), "missing": sorted(want - used) if want else []}
+
+
+class ProfileCell(NamedTuple):
+    top: float        # TVDSS (м, отрицательная, как в таблицах ГИС)
+    bottom: float
+    sg: float
+    perforated: bool  # ячейка вскрыта скважиной в модели
+
+
+class WellProfile(NamedTuple):
+    well: str
+    date: Optional[dt.datetime]
+    column: Tuple[int, int]
+    columns: int                 # колонн вскрытия у скважины (профиль — главная, где больше всего ячеек вскрытия)
+    cells: List[ProfileCell]     # сверху вниз
+
+
+def well_profile(model: CellModel, sg: Sequence[float], well: str, cells: Sequence[Cell],
+                 date: Optional[dt.datetime] = None) -> Optional[WellProfile]:
+    """Газонасыщенность вдоль колонны скважины для планшета; None — ячеек вскрытия в сетке нет."""
+    count: Dict[Tuple[int, int], int] = {}
+    for c in cells:
+        if (c[0], c[1]) in model.columns:
+            count[(c[0], c[1])] = count.get((c[0], c[1]), 0) + 1
+    if not count:
+        return None
+    col = max(sorted(count), key=lambda x: count[x])
+    opened = {c[2] for c in cells if (c[0], c[1]) == col}
+    ks, ns = model.columns[col]
+    out = [ProfileCell(-model.top((col[0], col[1], k)), -model.bottom((col[0], col[1], k)), float(sg[n]), k in opened)
+           for k, n in zip(ks, ns)]
+    return WellProfile(well, date, col, len(count), out)
+
+
+def wells_profile_at(model: CellModel, unrst_path: str, step: RestartStep, wells: Sequence[str],
+                     sgas: str = "SGAS") -> Tuple[List[WellProfile], List[str]]:
+    """Профили Sg выбранных скважин на одном шаге рестарта и список скважин без ячеек."""
+    sg = read_restart_keyword(unrst_path, step, sgas)
+    if sg is None:
+        return [], list(wells)
+    sg = model.to_units(sg, sgas)[0]
+    conn = read_well_connections(unrst_path, step)
+    out: List[WellProfile] = []
+    missing: List[str] = []
+    for w in wells:
+        p = well_profile(model, sg, w, conn.get(w) or [], step.date)
+        if p is None:
+            missing.append(w)
+        else:
+            out.append(p)
+    return out, missing
