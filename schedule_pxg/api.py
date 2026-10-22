@@ -7,7 +7,7 @@ import datetime as dt
 import io
 import os
 
-from pxg_core import fs_browse, workspace
+from pxg_core import fs_browse, runlog, workspace
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -1026,6 +1026,7 @@ async def results_attach(request: Request):
     path = _clean(b.get("path"))
     if path and not results.find_files(path):
         return _err("Не нашёл файлов модели (EGRID, INIT, SMSPEC, UNSMRY, UNRST) по пути «%s»" % path)
+    runlog.action("ГДМ: модель сценария «%s»" % name, путь=path or "снята")
     if path:
         p.results[name] = path
     else:
@@ -1328,7 +1329,9 @@ async def results_report(request: Request):
 
 
 def build_app() -> Starlette:
+    runlog.setup("ГДМ")
     routes = [
+        *runlog.routes(),
         Route("/api/state", state),
         Route("/api/preview", preview),
         Route("/api/trial", trial, methods=["POST"]),
@@ -1410,7 +1413,7 @@ def build_app() -> Starlette:
     ]
     if DIST.is_dir():
         routes.append(Mount("/", StaticFiles(directory=str(DIST), html=True)))
-    return Starlette(routes=routes, middleware=[Middleware(GZipMiddleware, minimum_size=1024)])
+    return Starlette(routes=routes, middleware=[Middleware(runlog.RequestLog), Middleware(GZipMiddleware, minimum_size=1024)])
 
 
 app = build_app()

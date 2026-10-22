@@ -1,5 +1,11 @@
 """Общие настройки тестов: общая папка выгрузок «Базы ПХГ» уходит во временную папку, а не в корень репозитория."""
+import os
+import tempfile
+
 import pytest
+
+# приложения пишут лог уже при импорте (build_app), поэтому папка логов задаётся до сбора тестов
+os.environ.setdefault("PXG_LOGS", tempfile.mkdtemp(prefix="pxg_logs_"))
 
 
 @pytest.fixture(autouse=True)

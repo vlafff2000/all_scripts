@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import os
 
-from pxg_core import fs_browse
+from pxg_core import fs_browse, runlog
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -65,6 +65,7 @@ async def config(request: Request):
 
 
 async def load(request: Request):
+    runlog.action("Карты: загрузка данных проекта Атласа")
     PROJECT.start_loading()
     return JSONResponse(await run_in_threadpool(_state))
 
@@ -289,7 +290,9 @@ async def open_folder(request: Request):
 
 
 def build_app() -> Starlette:
+    runlog.setup("Карты")
     routes = [
+        *runlog.routes(),
         Route("/api/state", state),
         Route("/api/config", config, methods=["POST"]),
         Route("/api/load", load, methods=["POST"]),
@@ -317,7 +320,7 @@ def build_app() -> Starlette:
     ]
     if DIST.is_dir():
         routes.append(Mount("/", StaticFiles(directory=str(DIST), html=True)))
-    return Starlette(routes=routes, middleware=[Middleware(GZipMiddleware, minimum_size=1024)])
+    return Starlette(routes=routes, middleware=[Middleware(runlog.RequestLog), Middleware(GZipMiddleware, minimum_size=1024)])
 
 
 PROJECT.start_loading()  # база из прошлого сеанса грузится сразу, пока открывается окно
