@@ -158,6 +158,15 @@ def abs_depth_perf(v: Optional[float], altitude: Optional[float]) -> Optional[fl
     return abs_depth(v, altitude)
 
 
+def _profile_job(job):
+    """Профили скважин на одну дату среза (для процессов): {скважина: ячейки колонны}."""
+    import datetime as dt
+    from . import results
+    model_path, day, wells, thr = job
+    rows, _info = results.well_profile(model_path, dt.datetime.combine(dt.date.fromisoformat(day), dt.time()), wells, thr)
+    return {r["well"]: r["cells"] for r in rows}
+
+
 def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float = 0.01, slices: Optional[Dict[str, str]] = None,
                  excluded: Sequence[str] = (), alts: Optional[Dict[str, float]] = None) -> dict:
     """Сравнение факта ГИС с моделью по всем замерам выбранных скважин (пусто — все скважины базы ГИС)."""
@@ -183,7 +192,19 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
         rows, _info = results.well_profile(model_path, dt.datetime.combine(day, dt.time()), ws, thr)
         return {r["well"]: r["cells"] for r in rows}
 
-    out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names})
+    def profiles_many(by_date):
+        from pxg_core.parallel import map_jobs
+        days = list(by_date)
+        try:
+            mb = os.path.getsize(results.find_files(model_path)["EGRID"]) / 1048576.0 * 6.5 + 150.0
+        except (OSError, KeyError):
+            mb = 500.0
+        # срезы независимы: каждая дата считается в своём процессе (сетка из дискового кэша), порядок и результат те же
+        got = map_jobs(_profile_job, [(model_path, d.isoformat(), list(by_date[d]), thr) for d in days], mb)
+        return dict(zip(days, got))
+
+    out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names},
+                              profiles_many)
     out["notes"] = notes
     try:                                    # «Карты» читают последнее сравнение; нет прав на запись — не помеха расчёту
         from tnav_results import gwc_share
