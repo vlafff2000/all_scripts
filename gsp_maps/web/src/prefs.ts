@@ -36,6 +36,8 @@ export const gisSeason = pref<string>('gsp.gisSeason', '', raw => String(raw || 
 export const gisAgainst = pref<string>('gsp.gisAgainst', '', raw => String(raw || ''))
 export const gisPins = pref<string>('gsp.gisPins', '', raw => String(raw || ''))
 /** Изолинии ГИС: включены ли, шаг по значению («» — подобрать), радиус доверия в средних расстояниях между скважинами. */
+/** Что показывать в режиме «ГИС и ГВК»: факт ГИС, ГВК модели из ГДМ или отклонение «модель − факт». */
+export const gisSource = pref<'fact' | 'model' | 'delta'>('gsp.gisSource', 'fact', raw => (raw === 'model' || raw === 'delta' ? raw : 'fact'))
 export const gisIso = pref<boolean>('gsp.gisIso', false)
 export const gisIsoStep = pref<string>('gsp.gisIsoStep', '', raw => String(raw || ''))
 export const gisIsoReach = pref<string>('gsp.gisIsoReach', '1.5', raw => String(raw || '1.5'))

@@ -123,6 +123,9 @@ export interface ParamValues { table: string; column: string; agg: string; title
 /** ГИС и ГВК из базы ГИС проекта Атласа: что есть (пачки, сезоны, показатели) и значения по скважинам (см. /api/gis). */
 export interface GisCatalog { packs: string[]; seasons: { key: string; wells: number }[]; metrics: { key: string; label: string }[]; note: string }
 export interface GisValues { values: Record<string, number>; dates: Record<string, string>; options: Record<string, string[]>; title: string; warnings: string[] }
+/** ГВК модели и отклонение «модель − факт» из последнего сравнения в ГДМ. */
+export interface GisModel { model: Record<string, number>; delta: Record<string, number>; dates: Record<string, string>; info: string; warnings: string[] }
+export const getGisModel = (pack: string, season: string) => call<GisModel>('/api/gis/model?' + new URLSearchParams({ pack, season }))
 export const getGis = () => call<GisCatalog>('/api/gis')
 export const getGisValues = (pack: string, metric: string, season: string, against: string, pins: Record<string, string>) =>
   call<GisValues>('/api/gis/values?' + new URLSearchParams({ pack, metric, season, against, pins: Object.entries(pins).map(([w, d]) => `${w}:${d}`).join(',') }))

@@ -185,4 +185,9 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
 
     out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names})
     out["notes"] = notes
+    try:                                    # «Карты» читают последнее сравнение; нет прав на запись — не помеха расчёту
+        from tnav_results import gwc_share
+        gwc_share.save(os.path.basename(model_path), thr, out["rows"], not list(wells))
+    except OSError:
+        pass
     return out

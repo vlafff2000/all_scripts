@@ -84,3 +84,34 @@ def test_no_gis_in_project(tmp_path):
     root = write_project(tmp_path / "s", {"well_geo": pd.DataFrame({"well": ["11"]})})
     a = atlas_source.AtlasData(root, "a" * 32)
     assert gis_source.catalog(a)["packs"] == [] and gis_source.values(a, "нижняя", "gvk_abs_m", "осень 2022")["warnings"]
+
+
+def shared():
+    row = lambda w, date, season, fact, model, status="ok", excluded=False: {   # noqa: E731
+        "well": w, "date": date, "season": season, "slice": date, "pack": "нижняя", "fact": fact, "model": model,
+        "delta": None, "status": status, "excluded": excluded}
+    return {"model": "M1.EGRID", "thr": 0.01, "saved": "2026-10-22T16:00:00", "wells_all": True, "rows": [
+        row("11", "2022-11-15", "осень", -1502.0, -1500.0), row("12", "2022-10-20", "осень", -1510.0, -1511.0),
+        row("13", "2022-10-20", "осень", -1520.0, -1500.0, excluded=True), row("14", "2022-10-20", "осень", -1500.0, None, status="газа нет"),
+        row("11", "2023-04-10", "весна", -1498.0, -1497.0)]}
+
+
+def test_model_values_delta_skips_excluded_and_not_ok():
+    r = gis_source.model_values(shared(), "нижняя", "осень 2022")
+    assert r["model"] == {"11": -1500.0, "12": -1511.0}              # исключённая 13 и «газа нет» 14 не попадают
+    assert r["delta"] == {"11": 2.0, "12": -1.0} and "M1.EGRID" in r["info"] and not r["warnings"]
+
+
+def test_model_values_without_shared_comparison_is_a_note():
+    r = gis_source.model_values(None, "нижняя", "осень 2022")
+    assert r["model"] == {} and r["warnings"]
+    assert gis_source.model_values(shared(), "верхняя", "осень 2022")["warnings"]
+
+
+def test_gwc_share_roundtrip(tmp_path, monkeypatch):
+    from tnav_results import gwc_share
+    monkeypatch.setenv("PXG_HOME", str(tmp_path))
+    assert gwc_share.load() is None
+    gwc_share.save("M1.EGRID", 0.01, shared()["rows"], False)
+    got = gwc_share.load()
+    assert got["model"] == "M1.EGRID" and got["wells_all"] is False and len(got["rows"]) == 5

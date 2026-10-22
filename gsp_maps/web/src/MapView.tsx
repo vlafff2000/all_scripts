@@ -15,7 +15,8 @@ export interface GisPicker {
   catalog: GisCatalog | null; pack: string; metric: string; season: string; against: string; pins: Record<string, string>
   options: Record<string, string[]>; dates: Record<string, string>; paint: PaintData | null
   iso: { on: boolean; step: string; reach: string }; isoNote: string
-  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string }) => void
+  source: 'fact' | 'model' | 'delta'; modelInfo: string
+  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta' }) => void
 }
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
@@ -129,7 +130,7 @@ const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: n
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, onChange }: GisPicker) {
+function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, source, modelInfo, onChange }: GisPicker) {
   const [well, setWell] = useState('')
   if (!catalog) return <p className="muted">Читаю базу ГИС…</p>
   if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
@@ -137,15 +138,18 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
   const w = multi.includes(well) ? well : multi[0] ?? ''
   const cur = pins[w] || (dates[w] ?? '')
   return <>
+    <select value={source} onChange={e => onChange({ source: e.target.value as 'fact' | 'model' | 'delta' })} aria-label="Источник значений">
+      <option value="fact">Факт ГИС</option><option value="model">ГВК модели (из ГДМ)</option><option value="delta">Модель − факт (из ГДМ)</option></select>
     <select value={pack} onChange={e => onChange({ pack: e.target.value })} aria-label="Пачка">
       {catalog.packs.map(p => <option key={p} value={p}>Пачка: {p}</option>)}</select>
-    <select value={metric} onChange={e => onChange({ metric: e.target.value })} aria-label="Показатель ГИС">
-      {catalog.metrics.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}</select>
+    {source === 'fact' && <select value={metric} onChange={e => onChange({ metric: e.target.value })} aria-label="Показатель ГИС">
+      {catalog.metrics.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}</select>}
     <select value={season} onChange={e => onChange({ season: e.target.value })} aria-label="Сезон замера">
       {catalog.seasons.map(s => <option key={s.key} value={s.key}>{s.key} · скважин {s.wells}</option>)}</select>
-    <select value={against} onChange={e => onChange({ against: e.target.value })} aria-label="Сравнить с сезоном">
+    {source === 'fact' ? <select value={against} onChange={e => onChange({ against: e.target.value })} aria-label="Сравнить с сезоном">
       <option value="">Без сравнения</option>
       {catalog.seasons.filter(s => s.key !== season).map(s => <option key={s.key} value={s.key}>Изменение к: {s.key}</option>)}</select>
+      : <span className="muted">{modelInfo || 'Берётся последнее сравнение из «Планшета ГВК» в ГДМ.'} Исключённые там пары не показываются.</span>}
     <label className="check"><input type="checkbox" checked={iso.on} onChange={e => onChange({ iso: e.target.checked })} /> Изолинии по скважинам</label>
     {iso.on && <div className="gis-pin">
       <select value={iso.step} onChange={e => onChange({ isoStep: e.target.value })} aria-label="Шаг изолиний">
@@ -154,7 +158,7 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
         {[['1', 'Радиус доверия: 1 расстояние между скважинами'], ['1.5', 'Радиус доверия: 1,5'], ['2.5', 'Радиус доверия: 2,5'], ['4', 'Радиус доверия: 4']].map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
       <span className="muted">За краем области скважин изолинии не строятся; чем дальше от скважин, тем бледнее заливка.{isoNote ? ' ' + isoNote : ''}</span>
     </div>}
-    {multi.length > 0 && !against && <div className="gis-pin">
+    {source === 'fact' && multi.length > 0 && !against && <div className="gis-pin">
       <span className="muted">В сезоне несколько замеров: по умолчанию последний, другой можно выбрать.</span>
       <select value={w} onChange={e => setWell(e.target.value)} aria-label="Скважина с несколькими замерами">
         {multi.map(x => <option key={x} value={x}>Скважина {x}{pins[x] ? ' (выбран вручную)' : ''}</option>)}</select>

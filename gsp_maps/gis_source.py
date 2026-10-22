@@ -120,3 +120,31 @@ def values(atlas: AtlasData, pack: str, metric: str, season: str, against: str =
         warn.append("В сезоне «%s» нет замеров пачки «%s» с показателем «%s»." % (season, pack, METRICS[metric]))
     return {"values": {str(w): v for w, v in now.items()}, "dates": {str(w): d for w, d in dates.items()},
             "options": {str(w): o for w, o in opts.items() if len(o) > 1}, "title": title, "warnings": warn}
+
+
+SOURCES = {"fact": "Факт ГИС", "model": "Модель (ГДМ)", "delta": "Модель − факт"}
+
+
+def model_values(shared: Optional[dict], pack: str, season: str) -> dict:
+    """ГВК модели и отклонение «модель − факт» по скважинам: строки последнего сравнения ГДМ (общий файл `gwc_compare.json`).
+
+    Берутся строки со статусом «ok» и не исключённые инженером в ГДМ; в сезоне у скважины — последний замер.
+    Ответ: model {скважина: ГВК модели}, delta {скважина: модель − факт}, dates {скважина: «замер → срез модели»}.
+    """
+    if not shared:
+        return {"model": {}, "delta": {}, "dates": {}, "info": "", "warnings": ["Сравнения из ГДМ ещё нет: откройте «Планшет ГВК» в ГДМ и выберите модель."]}
+    rows = [r for r in shared["rows"] if r.get("pack") == pack and r.get("status") == "ok" and not r.get("excluded")
+            and r.get("model") is not None and r.get("fact") is not None and r.get("date")]
+    best: Dict[int, dict] = {}
+    for r in sorted(rows, key=lambda r: r["date"]):
+        day = pd.Timestamp(r["date"])
+        w = _well(r["well"])
+        if w is not None and _season_key(str(r.get("season") or ""), day) == season:
+            best[w] = r
+    info = "Модель %s, порог Sg %s, сравнение от %s%s." % (shared.get("model", ""), shared.get("thr", ""), str(shared.get("saved", ""))[:16].replace("T", " "),
+                                                         "" if shared.get("wells_all", True) else " (только выбранные скважины)")
+    warn = [] if best else ["В последнем сравнении ГДМ нет пар «модель — факт» для пачки «%s» в сезоне «%s»." % (pack, season)]
+    return {"model": {str(w): round(float(r["model"]), 2) for w, r in best.items()},
+            "delta": {str(w): round(float(r["model"]) - float(r["fact"]), 2) for w, r in best.items()},
+            "dates": {str(w): "замер %s → срез модели %s" % (r["date"], r.get("slice") or "") for w, r in best.items()},
+            "info": info, "warnings": warn}
