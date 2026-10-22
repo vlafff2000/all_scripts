@@ -156,3 +156,33 @@ def abs_depth_perf(v: Optional[float], altitude: Optional[float]) -> Optional[fl
     if v <= 0:
         return v
     return abs_depth(v, altitude)
+
+
+def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float = 0.01, slices: Optional[Dict[str, str]] = None,
+                 excluded: Sequence[str] = (), alts: Optional[Dict[str, float]] = None) -> dict:
+    """Сравнение факта ГИС с моделью по всем замерам выбранных скважин (пусто — все скважины базы ГИС)."""
+    import datetime as dt
+    from . import gwc_compare, results, sources
+
+    st = settings(p)
+    if not st.get("folder"):
+        raise ValueError("Не выбрана папка базы ГИС")
+    tables = load_tables(st["folder"])
+    names = list(wells) or sorted(set(tables["gis_observations"]["well"].map(_key)))
+    facts = []
+    for w in names:
+        for o in observations(tables, w):
+            if o["date"]:
+                facts.append(fact(tables, w, o["date"], (alts or {}).get(_key(w))))
+    daily = sources.load_daily_total(p)
+    notes: List[str] = []
+    if not len(daily):
+        notes.append("Эталонный суточный объём не задан: срез модели взят на дату замера")
+
+    def profiles(day, ws):
+        rows, _info = results.well_profile(model_path, dt.datetime.combine(day, dt.time()), ws)
+        return {r["well"]: r["cells"] for r in rows}
+
+    out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names})
+    out["notes"] = notes
+    return out
