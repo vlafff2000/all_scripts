@@ -42,8 +42,8 @@ function WellLog({ name, tracks, perf, zMin, zMax, h }: { name: string; tracks: 
           {t.bars.map((b, k) => <rect key={k} x={x0} width={Math.max(0, Math.min(1, b.v)) * W} y={y(b.top)} height={Math.max(1, y(b.bottom) - y(b.top))} fill="var(--map-gas)" opacity={0.8} stroke="var(--chart-surface)" strokeWidth={0.5}>
             <title>{fmt(b.top) + ' … ' + fmt(b.bottom) + ' м: ' + fmt(b.v, 2)}</title></rect>)}
           {t.gwc.map((g, k) => g.z === null ? null : <g key={k}>
-            <line x1={x0} x2={x0 + W} y1={y(g.z)} y2={y(g.z)} stroke="var(--danger)" strokeWidth={2} strokeDasharray={k ? '5 3' : undefined} />
-            <text x={x0 + W - 3} y={y(g.z) - 3} textAnchor="end" fontSize={10} fill="var(--danger-ink)">{g.label + ' ' + fmt(g.z)}</text></g>)}
+            <line x1={x0} x2={x0 + W} y1={y(g.z)} y2={y(g.z)} stroke="var(--map-water)" strokeWidth={2.5} strokeDasharray={k ? '5 3' : undefined} />
+            <text x={x0 + W - 3} y={y(g.z) - 3} textAnchor="end" fontSize={10} fill="var(--chart-ink)">{g.label + ' ' + fmt(g.z)}</text></g>)}
           {t.note && <text x={x0 + 4} y={HEAD + 14} fontSize={10} fill="var(--chart-muted)">{t.note}</text>}
         </g>
       })}
@@ -136,7 +136,7 @@ export default function Planshet() {
         {notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
         {fact && tracks.length > 0 && <div style={{ overflowX: 'auto', marginTop: 12 }}>
           <WellLog name={fact.well} tracks={tracks} perf={fact.perforation} zMin={zMin} zMax={zMax} h={560} />
-          <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус). Узкая полоса слева — перфорация. Красная линия — ГВК: у факта по пачкам из базы ГИС, у модели — низ газовой пачки от кровли газа при Sg выше порога.
+          <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус). Узкая полоса слева — перфорация. Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — низ газовой пачки от кровли газа при Sg выше порога.
             {fact.altitude !== null ? ' Альтитуда ' + fmt(fact.altitude) + ' м.' : ''}</p>
         </div>}
       </section>
