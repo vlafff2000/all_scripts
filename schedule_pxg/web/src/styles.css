@@ -1,4 +1,4 @@
-/* Скедул ПХГ: стили приложения; общая основа лежит в pxg_core/web-ui/base.css */
+/* ГДМ: стили приложения; общая основа лежит в pxg_core/web-ui/base.css */
 /* ---------- рабочая область ---------- */
 .workspace { padding: 22px 28px 48px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .module-head h1 { font-size: 26px; line-height: 1.2; }

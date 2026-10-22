@@ -34,7 +34,7 @@ export default function App() {
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
-  useEffect(() => { document.title = NAV.flatMap(([, i]) => i).find(i => i[0] === tab)![1] + ' · Скедул ПХГ' }, [tab])
+  useEffect(() => { document.title = NAV.flatMap(([, i]) => i).find(i => i[0] === tab)![1] + ' · ГДМ' }, [tab])
   const [st, setSt] = useState<AppState | null>(null)
   useEffect(() => { getState().then(setSt).catch(() => undefined) }, [])
 
@@ -42,7 +42,7 @@ export default function App() {
     <div className={'shell' + (collapsed ? ' collapsed' : '')}>
       <aside className="sidebar">
         <div className="brand">
-          <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">Скедул ПХГ</span></a>
+          <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">ГДМ</span></a>
           <button type="button" className="side-toggle" onClick={() => sidebarCollapsed.set(!collapsed)}
             aria-expanded={!collapsed} title={collapsed ? 'Показать меню' : 'Свернуть меню'}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d={collapsed ? 'M6 3.5 10.5 8 6 12.5' : 'M10 3.5 5.5 8 10 12.5'} /></svg>

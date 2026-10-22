@@ -54,8 +54,8 @@ def maps(d):
     d.ellipse((cx - 56, cy - 56, cx + 56, cy + 56), fill=(18, 110, 112, 255))
 
 
-def schedule(d):
-    """Скедул ПХГ: календарь с диаграммой Ганта."""
+def gdm(d):
+    """ГДМ: календарь с диаграммой Ганта."""
     d.rounded_rectangle((170, 220, 854, 830), radius=70, fill=WHITE)
     d.rounded_rectangle((170, 220, 854, 380), radius=70, fill=(255, 255, 255, 200))
     d.rectangle((170, 330, 854, 380), fill=(255, 255, 255, 200))
@@ -104,7 +104,7 @@ def console(d):
 ICONS = {
     'pxg_base': ((46, 110, 214), (22, 52, 130), database),
     'karty': ((30, 170, 160), (14, 94, 104), maps),
-    'skedul_pxg': ((246, 160, 60), (206, 84, 28), schedule),
+    'gdm': ((246, 160, 60), (206, 84, 28), gdm),
     'perechislit_unrst': ((140, 98, 214), (70, 42, 140), restart),
     'opisat_model': ((86, 110, 138), (36, 52, 74), model),
     'pxg_base_console': ((70, 78, 90), (22, 26, 34), console),

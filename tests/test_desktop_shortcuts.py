@@ -24,6 +24,6 @@ def test_creates_desktop_files(tmp_path):
         (root / sh).write_text('#!/bin/bash\n')
     made = ds.create(tmp_path / 'desk', root)
     assert len(made) == len(ds.APPS)
-    text = (tmp_path / 'desk' / 'Скедул ПХГ.desktop').read_text(encoding='utf-8')
-    assert 'Terminal=true' in text and 'skedul_pxg.sh' in text and 'icons/skedul_pxg.png' in text
+    text = (tmp_path / 'desk' / 'ГДМ.desktop').read_text(encoding='utf-8')
+    assert 'Terminal=true' in text and 'gdm.sh' in text and 'icons/gdm.png' in text
     assert ds.remove(tmp_path / 'desk') == len(ds.APPS)

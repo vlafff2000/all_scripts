@@ -56,7 +56,7 @@ jobs:
           for i in $(seq 60); do curl -sf http://127.0.0.1:8768/api/state > sched.json && ok=1 && break; sleep 1; done
           cat sched.log
           test -n "$ok" && head -c 200 sched.json
-          test -f icons/skedul_pxg.ico && test -f Skedul_PXG.bat -o -f skedul_pxg.sh
+          test -f icons/gdm.ico && test -f GDM.bat -o -f gdm.sh
           mkdir -p ../desk && "$PY" -s -m pxg_core.desktop_shortcuts --dir ../desk
           ls ../desk | grep -c . | grep -qx 6
       - uses: actions/upload-artifact@v4
