@@ -26,6 +26,22 @@ Cell = Tuple[int, int, int]    # (i, j, k) с нуля
 
 # ---------------------------------------------------------------- модель: активные ячейки
 
+def _builtin_sum(terms):
+    """Элементы-массивы складываются так же, как встроенный ``sum`` над числами: с Python 3.12 он суммирует с поправкой
+    (алгоритм Кахана-Бабушки-Неймайера), и скалярный расчёт отличался бы от «наивной» суммы в последнем знаке."""
+    if sys.version_info < (3, 12):
+        acc = 0
+        for x in terms:
+            acc = acc + x
+        return acc
+    total, comp = np.zeros_like(terms[0]), np.zeros_like(terms[0])
+    for x in terms:
+        t = total + x
+        comp = comp + np.where(np.abs(total) >= np.abs(x), (total - t) + x, (x - t) + total)
+        total = t
+    return np.where((comp != 0) & np.isfinite(comp), total + comp, total)
+
+
 class CellModel:
     """Сетка + соответствие «элемент массива INIT/UNRST -> ячейки сетки».
 
@@ -67,19 +83,27 @@ class CellModel:
             uf[fine] = lut[cor[fine]]
         self.unit_of_fine = array("i")
         self.unit_of_fine.frombytes(uf.astype(np.dtype("i"), copy=False).tobytes())
-        # колонны мелких ячеек: (i, j) -> (список k, список единиц); внутри колонны ячейки идут сверху вниз
+        # колонны мелких ячеек: (i, j) -> (список k, список единиц); внутри колонны ячейки идут сверху вниз,
+        # сами колонны — в порядке первого появления при обходе ячеек (как в прежнем построении)
         self.columns: Dict[Tuple[int, int], Tuple[List[int], List[int]]] = {}
         g = np.flatnonzero(uf >= 0)
         ci = g % ni + ni * ((g // ni) % nj)
         order = np.argsort(ci, kind="stable")
         g, ci = g[order], ci[order]
-        ks, us = (g // layer).tolist(), uf[g].tolist()
         starts = np.flatnonzero(np.r_[True, ci[1:] != ci[:-1]]) if len(ci) else np.empty(0, dtype=np.int64)
-        bounds = starts.tolist() + [len(ci)]
+        lens = np.diff(np.r_[starts, len(ci)])
+        first = np.argsort(g[starts], kind="stable")                  # колонны по возрастанию номера первой ячейки
+        starts, lens = starts[first], lens[first]
+        pos = np.repeat(starts - (np.cumsum(lens) - lens), lens) + np.arange(len(ci))
+        g = g[pos]
+        self._fg, self._fu = g, uf[g]                                 # плоско: ячейки колонн подряд, колонны в порядке columns
+        self._fseg = np.repeat(np.arange(len(starts)), lens)
+        ks, us = (g // layer).tolist(), self._fu.tolist()
+        ends = np.cumsum(lens).tolist()
+        begins = (np.cumsum(lens) - lens).tolist()
         heads = ci[starts].tolist()
         for q, h in enumerate(heads):
-            a, b = bounds[q], bounds[q + 1]
-            self.columns[(h % ni, h // ni)] = (ks[a:b], us[a:b])
+            self.columns[(h % ni, h // ni)] = (ks[begins[q]:ends[q]], us[begins[q]:ends[q]])
         self.notes: List[str] = []
         if self.coarse:
             self.notes.append("укрупнение ячеек (COARSEN): %d блоков; пласты, регионы и фильтр ячеек берутся по "
@@ -149,6 +173,34 @@ class CellModel:
         g = self.grid
         return g.zcorn[(2 * k + ck) * 4 * g.ni * g.nj + (2 * j + cj) * 2 * g.ni + 2 * i + ci]
 
+    def _zc_many(self, g, ck: int):
+        """Средние четырёх углов верха (ck=0) или низа (ck=1) для ячеек с глобальными номерами g: те же операции в том же порядке, что top/bottom."""
+        gr = self.grid
+        ni, nj = gr.ni, gr.nj
+        z = np.frombuffer(gr.zcorn, dtype=np.float32)
+        i, j, k = g % ni, (g // ni) % nj, g // (ni * nj)
+        acc = 0.0
+        for cj in (0, 1):
+            for ci in (0, 1):
+                acc = acc + z[(2 * k + ck) * 4 * ni * nj + (2 * j + cj) * 2 * ni + 2 * i + ci].astype(np.float64)
+        return acc / 4.0
+
+    def bottom_many(self, g):
+        return self._zc_many(g, 1)
+
+    def centre_many(self, g):
+        """Глубина центра ячеек (среднее восьми углов), как ``centre``."""
+        gr = self.grid
+        ni, nj = gr.ni, gr.nj
+        z = np.frombuffer(gr.zcorn, dtype=np.float32)
+        i, j, k = g % ni, (g // ni) % nj, g // (ni * nj)
+        acc = 0.0
+        for ck in (0, 1):
+            for cj in (0, 1):
+                base = (2 * k + ck) * 4 * ni * nj + (2 * j + cj) * 2 * ni + 2 * i
+                acc = acc + (z[base].astype(np.float64) + z[base + 1].astype(np.float64))
+        return acc / 8.0
+
     def top(self, c: Cell) -> float:
         return sum(self._zc(*c, cj, ci, 0) for cj in (0, 1) for ci in (0, 1)) / 4.0
 
@@ -168,6 +220,21 @@ class CellModel:
     def column_corners(self, i: int, j: int, z: float) -> List[Tuple[float, float]]:
         return [self.pillar_xy(i, j, z), self.pillar_xy(i + 1, j, z),
                 self.pillar_xy(i + 1, j + 1, z), self.pillar_xy(i, j + 1, z)]
+
+    def column_area_many(self, ii, jj, zz) -> List[float]:
+        """Площади колонн (i, j) на глубинах zz сразу списком: те же операции в том же порядке, что ``column_area``."""
+        ii, jj, zz = (np.asarray(x) for x in (ii, jj, zz))
+        co = np.frombuffer(self.grid.coord, dtype=np.float32)
+        ni1 = self.grid.ni + 1
+        pts = []
+        for pi, pj in ((ii, jj), (ii + 1, jj), (ii + 1, jj + 1), (ii, jj + 1)):
+            o = 6 * (pi + ni1 * pj)
+            x1, y1, z1, x2, y2, z2 = (co[o + q].astype(np.float64) for q in range(6))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                t = np.where(z2 == z1, 0.0, (zz - z1) / (z2 - z1))
+            pts.append((x1 + t * (x2 - x1), y1 + t * (y2 - y1)))
+        terms = [pts[a][0] * pts[(a + 1) % 4][1] - pts[(a + 1) % 4][0] * pts[a][1] for a in range(4)]
+        return (np.abs(_builtin_sum(terms)) / 2.0).tolist()
 
     def column_xy(self, i: int, j: int, z: float) -> Tuple[float, float]:
         pts = self.column_corners(i, j, z)
@@ -221,25 +288,32 @@ def gas_pore_volume(model: CellModel, porv, sg, threshold: float = DEFAULT_SG_TH
     if len(pp) != len(sp):
         raise ValueError("PORV и Sg: разное число частей (двойная пористость есть не в обоих массивах)")
     reg = model.to_units(regions, "регионы")[0] if regions is not None else None
-    total, cells = 0.0, 0
-    by_layer = {name: 0.0 for name in (layers or {})}
-    by_region: Dict[int, float] = {}
+    # сразу по всем ячейкам (numpy); суммы набираются подряд в том же порядке, что в поячеечном цикле, поэтому совпадают до последнего знака
+    rep = model._rep
+    kk = rep // (model.grid.ni * model.grid.nj)
+    regs = np.trunc(np.asarray(reg, dtype=np.float64)).astype(np.int64) if reg is not None else None
+    vs, ks_, rs = [], [], []
     for porv_u, sg_u in zip(pp, sp):
-        for n, (i, j, k) in enumerate(model.ijk):
-            s = sg_u[n]
-            if not s > threshold:
-                continue
-            if cell_filter is not None and not cell_filter(i, j, k):
-                continue
-            v = porv_u[n] * s
-            total += v
-            cells += 1
-            for name, (k1, k2) in (layers or {}).items():
-                if k1 <= k + 1 <= k2:
-                    by_layer[name] += v
-            if reg is not None:
-                r = int(reg[n])
-                by_region[r] = by_region.get(r, 0.0) + v
+        s_ = np.asarray(sg_u, dtype=np.float64)
+        idx = np.flatnonzero(s_ > threshold)
+        if cell_filter is not None and len(idx):
+            ii, jj = rep[idx] % model.grid.ni, (rep[idx] // model.grid.ni) % model.grid.nj
+            idx = idx[[bool(cell_filter(int(a_), int(b_), int(c_))) for a_, b_, c_ in zip(ii, jj, kk[idx])]]
+        vs.append(np.asarray(porv_u, dtype=np.float64)[idx] * s_[idx])
+        ks_.append(kk[idx])
+        if regs is not None:
+            rs.append(regs[idx])
+    v = np.concatenate(vs) if vs else np.empty(0)
+    k_ = np.concatenate(ks_) if ks_ else np.empty(0, dtype=np.int64)
+    seqsum = lambda x: float(np.add.accumulate(x)[-1]) if len(x) else 0.0      # noqa: E731  подряд, не попарно
+    total, cells = seqsum(v), int(len(v))
+    by_layer = {name: seqsum(v[(k_ + 1 >= k1) & (k_ + 1 <= k2)]) for name, (k1, k2) in (layers or {}).items()}
+    by_region: Dict[int, float] = {}
+    if regs is not None and len(v):
+        r_ = np.concatenate(rs)
+        _u, first = np.unique(r_, return_index=True)
+        for q in np.argsort(first):
+            by_region[int(_u[q])] = seqsum(v[r_ == _u[q]])
     return GasPoreVolume(total, by_layer, by_region, cells)
 
 
@@ -259,26 +333,37 @@ def gwc_map(model: CellModel, sg, threshold: float = DEFAULT_SG_THRESHOLD,
     if which not in ("lowest", "highest"):
         raise ValueError("which: 'lowest' или 'highest'")
     out: Dict[Tuple[int, int], float] = {}
-    for col, (ks, ns) in model.columns.items():
-        found: Optional[float] = None
-        for idx, (k, n) in enumerate(zip(ks, ns)):
-            if not sg[n] > threshold:
-                continue
-            has_next = idx + 1 < len(ks) and ks[idx + 1] == k + 1
-            if has_next and sg[ns[idx + 1]] > threshold:
-                continue          # газ продолжается вниз
-            c = (col[0], col[1], k)
-            if has_next:
-                s_a, s_b = sg[n], sg[ns[idx + 1]]
-                z_a, z_b = model.centre(c), model.centre((col[0], col[1], k + 1))
-                z = z_a + (s_a - threshold) / (s_a - s_b) * (z_b - z_a)
-            else:
-                z = model.bottom(c)
-            found = z
-            if which == "highest":
-                break
-        if found is not None:
-            out[col] = found
+    g, u, seg = model._fg, model._fu, model._fseg
+    n = len(g)
+    if not n:
+        return out
+    # то же, что поколонный цикл, но сразу по всем ячейкам колонн (numpy); арифметика та же и в том же порядке
+    sga = np.asarray(sg, dtype=np.float64)
+    s_all = sga[u]
+    gas = s_all > threshold
+    layer = model.grid.ni * model.grid.nj
+    kk = g // layer
+    has_next = np.zeros(n, dtype=bool)
+    has_next[:-1] = (seg[1:] == seg[:-1]) & (kk[1:] == kk[:-1] + 1)
+    gas_next = np.zeros(n, dtype=bool)
+    gas_next[:-1] = gas[1:]
+    idx = np.flatnonzero(gas & ~(has_next & gas_next))              # переходы газ -> не газ (и низ колонки)
+    if not len(idx):
+        return out
+    sel = idx[np.r_[seg[idx][1:] != seg[idx][:-1], True]] if which == "lowest" else idx[np.r_[True, seg[idx][1:] != seg[idx][:-1]]]
+    hn = has_next[sel]
+    z = np.empty(len(sel))
+    if hn.any():
+        a_, b_ = sel[hn], sel[hn] + 1
+        s_a, s_b = s_all[a_], s_all[b_]
+        z_a, z_b = model.centre_many(g[a_]), model.centre_many(g[b_])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            z[hn] = z_a + (s_a - threshold) / (s_a - s_b) * (z_b - z_a)
+    if (~hn).any():
+        z[~hn] = model.bottom_many(g[sel[~hn]])
+    ni = model.grid.ni
+    for gg, zz in zip(g[sel].tolist(), z.tolist()):
+        out[(gg % ni, (gg // ni) % model.grid.nj)] = zz
     return out
 
 
@@ -297,7 +382,7 @@ def gwc_stats(model: CellModel, gwc: Dict[Tuple[int, int], float],
     if not sel:
         return GwcStats(0, None, None, None, None)
     vals = [gwc[c] for c in sel]
-    w = [model.column_area(c[0], c[1], gwc[c]) for c in sel]
+    w = model.column_area_many([c[0] for c in sel], [c[1] for c in sel], vals)
     sw = sum(w)
     mean_area = sum(a * b for a, b in zip(vals, w)) / sw if sw > 0 else sum(vals) / len(vals)
     return GwcStats(len(sel), min(vals), sum(vals) / len(vals), mean_area, max(vals))
