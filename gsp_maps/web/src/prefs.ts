@@ -35,6 +35,10 @@ export const gisMetric = pref<string>('gsp.gisMetric', 'gvk_abs_m', raw => Strin
 export const gisSeason = pref<string>('gsp.gisSeason', '', raw => String(raw || ''))
 export const gisAgainst = pref<string>('gsp.gisAgainst', '', raw => String(raw || ''))
 export const gisPins = pref<string>('gsp.gisPins', '', raw => String(raw || ''))
+/** Изолинии ГИС: включены ли, шаг по значению («» — подобрать), радиус доверия в средних расстояниях между скважинами. */
+export const gisIso = pref<boolean>('gsp.gisIso', false)
+export const gisIsoStep = pref<string>('gsp.gisIsoStep', '', raw => String(raw || ''))
+export const gisIsoReach = pref<string>('gsp.gisIsoReach', '1.5', raw => String(raw || '1.5'))
 export const modelKeyword = pref<string>('gsp.modelKeyword', 'WBHP', raw => String(raw || 'WBHP'))
 export const modelAgg = pref<string>('gsp.modelAgg', 'mean', raw => String(raw || 'mean'))
 export const sidebarCollapsed = pref<boolean>('gsp.sidebar.collapsed', false)

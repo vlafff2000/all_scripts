@@ -370,3 +370,76 @@ export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: strin
     fmt: v => String(Math.round(v)), note: 'число — водный фактор', scopeNote: multi ? scopeTitle(scope, season, kind) : undefined,
   }
 }
+
+/** Изолинии показателя ГИС (например ГВК) по скважинам: взвешенная по обратному квадрату расстояния сетка и марширующие квадраты.
+ *  Скважин мало, поэтому за край не экстраполируем: считаются только клетки внутри выпуклой оболочки скважин и не дальше
+ *  `reach` средних расстояний между соседними скважинами от ближайшей. Уверенность клетки — доля остатка радиуса (1 у скважины, 0 на краю). */
+export interface IsoPoint { x: number; y: number; v: number }
+export interface IsoResult { lines: { level: number; d: string; at: [number, number] }[]; conf: { d: string; a: number }[]; step: number; note: string }
+const hullOf = (ps: [number, number][]): [number, number][] => {
+  const p = [...ps].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+  const half = (list: [number, number][]) => { const h: [number, number][] = []; for (const q of list) { while (h.length > 1 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop(); h.push(q) } return h }
+  const lo = half(p), up = half([...p].reverse())
+  return [...lo.slice(0, -1), ...up.slice(0, -1)]
+}
+const inHull = (h: [number, number][], x: number, y: number) => h.every((a, i) => { const b = h[(i + 1) % h.length]; return (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]) >= -1e-9 })
+export function niceLevelStep(range: number): number {
+  const raw = range / 6, p = Math.pow(10, Math.floor(Math.log10(raw || 1))), f = raw / p
+  return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p
+}
+export function isolines(points: IsoPoint[], spacing: number, step: number, reach: number, n = 70): IsoResult {
+  const empty = (note: string): IsoResult => ({ lines: [], conf: [], step, note })
+  if (points.length < 3) return empty('Для изолиний нужно не меньше трёх скважин со значением.')
+  const hull = hullOf(points.map(p => [p.x, p.y]))
+  if (hull.length < 3) return empty('Скважины лежат на одной линии: изолинии не построить.')
+  const xs = points.map(p => p.x), ys = points.map(p => p.y)
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
+  const dx = (x1 - x0) / (n - 1), dy = (y1 - y0) / (n - 1), rad = Math.max(reach * spacing, 1e-9)
+  const z = new Float64Array(n * n).fill(NaN), cf = new Float64Array(n * n)
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const x = x0 + i * dx, y = y0 + j * dy
+    if (!inHull(hull, x, y)) continue
+    let sw = 0, sv = 0, dm = Infinity
+    for (const p of points) {
+      const d = Math.hypot(p.x - x, p.y - y)
+      if (d < dm) dm = d
+      if (d < 1e-9) { sw = 1; sv = p.v; break }
+      const w = 1 / (d * d); sw += w; sv += w * p.v
+    }
+    if (dm > rad) continue
+    z[j * n + i] = sv / sw; cf[j * n + i] = 1 - dm / rad
+  }
+  const vs = [...z].filter(Number.isFinite)
+  if (!vs.length) return empty('Вокруг скважин нет клеток в радиусе доверия: увеличьте радиус.')
+  const lo = Math.min(...vs), hi = Math.max(...vs)
+  const lines: IsoResult['lines'] = []
+  const f = (v: number) => v.toFixed(1)
+  for (let L = Math.ceil(lo / step) * step; L <= hi + 1e-9; L += step) {
+    const level = Math.round(L / step) * step
+    let d = '', at: [number, number] | null = null
+    const cross = (ax: number, ay: number, av: number, bx: number, by: number, bv: number): [number, number] => { const t = (level - av) / (bv - av); return [ax + t * (bx - ax), ay + t * (by - ay)] }
+    for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+      const a = z[j * n + i], b = z[j * n + i + 1], c = z[(j + 1) * n + i + 1], e = z[(j + 1) * n + i]
+      if (!(Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(e))) continue
+      const k = (a >= level ? 1 : 0) | (b >= level ? 2 : 0) | (c >= level ? 4 : 0) | (e >= level ? 8 : 0)
+      if (k === 0 || k === 15) continue
+      const X = x0 + i * dx, Y = y0 + j * dy
+      const T = () => cross(X, Y, a, X + dx, Y, b), R = () => cross(X + dx, Y, b, X + dx, Y + dy, c), B = () => cross(X, Y + dy, e, X + dx, Y + dy, c), Lf = () => cross(X, Y, a, X, Y + dy, e)
+      const segs: [() => [number, number], () => [number, number]][] = {
+        1: [[Lf, T]], 2: [[T, R]], 3: [[Lf, R]], 4: [[R, B]], 5: [[Lf, T], [B, R]], 6: [[T, B]], 7: [[Lf, B]],
+        8: [[Lf, B]], 9: [[T, B]], 10: [[Lf, B], [T, R]], 11: [[R, B]], 12: [[Lf, R]], 13: [[T, R]], 14: [[Lf, T]],
+      }[k] as [() => [number, number], () => [number, number]][]
+      for (const [p, q] of segs) { const P = p(), Q = q(); d += `M${f(P[0])} ${f(P[1])}L${f(Q[0])} ${f(Q[1])}`; at = at ?? [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2] }
+    }
+    if (d && at) lines.push({ level, d, at })
+  }
+  // уверенность тремя ступенями: чем дальше от скважин, тем прозрачнее заливка
+  const conf: IsoResult['conf'] = [{ d: '', a: 0.16 }, { d: '', a: 0.09 }, { d: '', a: 0.04 }]
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const c = cf[j * n + i]
+    if (!Number.isFinite(z[j * n + i])) continue
+    conf[c > 0.66 ? 0 : c > 0.33 ? 1 : 2].d += `M${f(x0 + (i - 0.5) * dx)} ${f(y0 + (j - 0.5) * dy)}h${f(dx)}v${f(dy)}h${f(-dx)}z`
+  }
+  return { lines, conf, step, note: lines.length ? '' : 'В этой области значения почти не меняются: изолиний с таким шагом нет.' }
+}
