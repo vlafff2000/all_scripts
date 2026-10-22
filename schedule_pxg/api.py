@@ -8,6 +8,7 @@ import io
 import os
 
 from pxg_core import fs_browse, workspace
+from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
 from urllib.parse import quote
@@ -916,20 +917,70 @@ async def averaging_manual(request: Request):
     return await run_in_threadpool(_avg_call, act, _avg_kind(request, b), True)
 
 
+def _model_path(request: Request, p: Project) -> str:
+    """Модель для чтения: путь из ?model= (выбранная в каталоге), иначе старая привязка сценария."""
+    model = _clean(request.query_params.get("model"))
+    if model:
+        return model
+    name = request.query_params.get("scenario") or ""
+    return p.results.get(name, "") if name in p.scenarios else ""
+
+
+def _models_view(p: Project) -> dict:
+    sel = list(p.models.get("selected", []))
+    folders = tnav_catalog.load_folders()
+    found = tnav_catalog.scan(folders)
+    ids = {m["id"] for m in found}
+    # выбранные модели вне папок (старые привязки, файлы из другой папки) тоже показываем
+    extra = [tnav_catalog.model_entry(x, results.find_files(x)) for x in sel if x not in ids and results.find_files(x)]
+    models = found + extra
+    for m in models:
+        m["selected"] = m["id"] in sel
+    return {"folders": folders, "models": models}
+
+
+async def models_get(request: Request):
+    return JSONResponse(await run_in_threadpool(lambda: _models_view(_project())))
+
+
+async def models_folders(request: Request):
+    b = await request.json()
+    folders = []
+    for f in b.get("folders") or []:
+        f = _clean(f)
+        if f and f not in folders:
+            folders.append(f)
+    try:
+        await run_in_threadpool(tnav_catalog.save_folders, folders)
+    except OSError as e:
+        return _err("Не удалось сохранить список папок: %s" % e)
+    return JSONResponse(await run_in_threadpool(lambda: _models_view(_project())))
+
+
+async def models_select(request: Request):
+    b = await request.json()
+    p = _project()
+    sel = []
+    for x in b.get("selected") or []:
+        x = _clean(x)
+        if x and x not in sel:
+            sel.append(x)
+    p.models["selected"] = sel
+    p.save(FOLDER)
+    return JSONResponse(await run_in_threadpool(lambda: _models_view(p)))
+
+
 async def results_get(request: Request):
     p = _project()
-    name = request.query_params.get("scenario") or ""
-    if name not in p.scenarios:
-        return _err("Нет сценария «%s»" % name, 404)
-    path = p.results.get(name, "")
+    path = _model_path(request, p)
     if not path:
-        return JSONResponse({"scenario": name, "path": "", "files": {}, "missing": [], "vectors": []})
+        return JSONResponse({"model": "", "path": "", "files": {}, "missing": [], "vectors": []})
     try:
         info = await run_in_threadpool(results.describe, path)
         vec = await run_in_threadpool(lambda: results.vectors(results.load_summary(path))) if "SMSPEC" in info["files"] and "UNSMRY" in info["files"] else []
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось прочитать результаты: %s" % e)
-    return JSONResponse(dict(info, scenario=name, path=path, vectors=vec))
+    return JSONResponse(dict(info, model=path, path=path, vectors=vec))
 
 
 async def results_attach(request: Request):
@@ -950,11 +1001,9 @@ async def results_attach(request: Request):
 
 
 async def results_series(request: Request):
-    p = _project()
-    name = request.query_params.get("scenario") or ""
-    path = p.results.get(name)
+    path = _model_path(request, _project())
     if not path:
-        return _err("К сценарию «%s» не привязаны результаты расчёта" % name, 404)
+        return _err("Модель с результатами не выбрана", 404)
     kw = (request.query_params.get("keyword") or "").upper()
     objs = [o for o in (request.query_params.get("objects") or "").split("|") if o]
     try:
@@ -967,11 +1016,9 @@ async def results_series(request: Request):
 
 
 async def results_indicators(request: Request):
-    p = _project()
-    name = request.query_params.get("scenario") or ""
-    path = p.results.get(name)
+    path = _model_path(request, _project())
     if not path:
-        return _err("К сценарию «%s» не привязаны результаты расчёта" % name, 404)
+        return _err("Модель с результатами не выбрана", 404)
     try:
         dates = [dt.datetime.strptime(d, "%Y-%m-%d") for d in (request.query_params.get("dates") or "").split("|") if d]
         sg = request.query_params.get("sg")
@@ -982,11 +1029,9 @@ async def results_indicators(request: Request):
 
 
 async def results_well_gwc(request: Request):
-    p = _project()
-    name = request.query_params.get("scenario") or ""
-    path = p.results.get(name)
+    path = _model_path(request, _project())
     if not path:
-        return _err("К сценарию «%s» не привязаны результаты расчёта" % name, 404)
+        return _err("Модель с результатами не выбрана", 404)
     try:
         dates = [dt.datetime.strptime(d, "%Y-%m-%d") for d in (request.query_params.get("dates") or "").split("|") if d]
         sgr = request.query_params.get("sgr")
@@ -1296,6 +1341,9 @@ def build_app() -> Starlette:
         Route("/api/adapt/export/all", adapt_export_all, methods=["POST"]),
         Route("/api/adapt/export/preview", adapt_export_preview, methods=["POST"]),
         Route("/api/adapt/export/options", adapt_export_options),
+        Route("/api/models", models_get),
+        Route("/api/models/folders", models_folders, methods=["POST"]),
+        Route("/api/models/select", models_select, methods=["POST"]),
         Route("/api/results", results_get),
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),

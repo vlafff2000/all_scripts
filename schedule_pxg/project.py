@@ -44,7 +44,8 @@ class Project:
         self.outages: List[dict] = []  # отключения скважин (outages.Outage.to_dict)
         self.control: dict = {}  # режим управления и лимиты (control.Control.to_dict)
         self.scenarios: dict = {}  # сценарии и ветви (scenarios.Scenarios.to_dict)
-        self.results: Dict[str, str] = {}  # сценарий -> путь к модели с результатами расчёта (results.py)
+        self.results: Dict[str, str] = {}  # сценарий -> путь к модели с результатами расчёта (старое; читается для миграции в models)
+        self.models: dict = {}  # выбранные для показа модели (selected, пути файлов модели); папки — общие, tnav_results.catalog.load_folders
         self.averaging: dict = {}  # выбор комбинаций лет, исключения, ручные доли (averaging.Averaging.to_dict)
         self.adapt: dict = {}  # адаптация по ГДИ: db (путь к БД ГДИ), cols, settings (gdi_adapt.selection.Settings), overrides, config (поля gdi_adapt.config.Config), scenario
         self.sources: dict = {}  # источники проекта: flows (база расходов), groups (разбивка на группы), daily_total (эталон); см. sources.py
@@ -129,7 +130,7 @@ class Project:
             "groups.json": {"groups": self.groups, "well_group": self.well_group}, "sets.json": self.sets,
             "templates.json": self.templates, "techmaps.json": self.techmaps, "outages.json": self.outages,
             "control.json": self.control, "scenarios.json": self.scenarios, "averaging.json": self.averaging,
-            "results.json": self.results, "sources.json": self.sources, "adapt.json": self.adapt}
+            "results.json": self.results, "models.json": self.models, "sources.json": self.sources, "adapt.json": self.adapt}
         with _SAVE_LOCK:
             written = []
             try:
@@ -164,6 +165,9 @@ class Project:
         p.scenarios = _read_json(os.path.join(folder, "scenarios.json"), {})
         p.averaging = _read_json(os.path.join(folder, "averaging.json"), {})
         p.results = _read_json(os.path.join(folder, "results.json"), {})
+        p.models = _read_json(os.path.join(folder, "models.json"), None)
+        if p.models is None:  # проект до каталога моделей: привязки сценариев становятся выбранными моделями
+            p.models = {"folders": [], "selected": sorted(set(p.results.values()))}
         p.sources = _read_json(os.path.join(folder, "sources.json"), {})
         p.adapt = _read_json(os.path.join(folder, "adapt.json"), {})
         old = p.averaging.pop("sources", None)  # старые проекты: файлы истории лежали в осреднении
