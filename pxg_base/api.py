@@ -148,6 +148,38 @@ async def date_fixes(request: Request):
     return JSONResponse({"path": str(out), "count": len(rows)})
 
 
+async def gis_legend(request: Request):
+    """Легенда пачек книги ГИС: таблица «лист — цвет — пачка — строк» с подсказками; подтверждённое подставляется."""
+    from pxg_core import gis, gis_legend as store
+    try:
+        body = await request.json()
+    except Exception:
+        return _err("Ожидался JSON.")
+    path = str(body.get("file") or "").strip()
+    if not os.path.isfile(path):
+        return _err("Книга не найдена: %s" % path, 404)
+    saved = store.load_saved(path)
+    try:
+        results = await run_in_threadpool(gis.load_book, path, saved)
+    except Exception as e:
+        return _err("Книга не прочиталась: %s: %s" % (type(e).__name__, e), 500)
+    rows = store.table(results, saved)
+    return JSONResponse({"rows": rows, "packs": list(gis.PACKS),
+                         "open": sum(1 for r in rows if r["status"] != "ок" and not r["confirmed"])})
+
+
+async def gis_legend_save(request: Request):
+    """Запоминает выбор пачек для книги: {file, choices: [{sheet, color, pack}]}; пустая пачка снимает выбор."""
+    from pxg_core import gis_legend as store
+    try:
+        body = await request.json()
+        path = str(body["file"]).strip()
+        count = store.save(path, list(body.get("choices") or []))
+    except (KeyError, TypeError, ValueError) as e:
+        return _err("Не сохранилось: %s" % e)
+    return JSONResponse({"saved": count})
+
+
 async def job_list(request: Request):
     return JSONResponse({"jobs": [j.view(len(j.log)) for j in sorted(jobs.JOBS.values(), key=lambda j: -j.started)]})
 
@@ -175,6 +207,8 @@ def build_app() -> Starlette:
         *fs_browse.routes(),
         *workspace_api.routes(),
         Route("/api/check", run_check, methods=["POST"]),
+        Route("/api/gis/legend", gis_legend, methods=["POST"]),
+        Route("/api/gis/legend/save", gis_legend_save, methods=["POST"]),
         Route("/api/check/{id}.{fmt}", check_download),
         Route("/api/jobs/{id}", job_status),
         Route("/api/jobs/{id}/open", open_folder, methods=["POST"]),

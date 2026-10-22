@@ -42,18 +42,25 @@ def _atlas(frame: pd.DataFrame, names: Dict[str, str]) -> pd.DataFrame:
     return out
 
 
-def atlas_tables(frames: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-    """Три таблицы для Атласа из `gis.to_frames()`: замеры (в том числе без данных), пачки по замерам, интервалы."""
-    return {"gis_observations": _atlas(frames["Замеры"], OBSERVATIONS), "gis_packs": _atlas(frames["Пачки"], PACKS),
-            "gis_intervals": _atlas(frames["Строки"], INTERVALS)}
+def atlas_tables(frames: Dict[str, pd.DataFrame], drop_unassigned: bool = True) -> Dict[str, pd.DataFrame]:
+    """Три таблицы для Атласа из `gis.to_frames()`: замеры (в том числе без данных), пачки по замерам, интервалы.
+
+    Строки без пачки (цвет не в легенде и не подтверждён) в БД не попадают: они остаются в Excel и в «Проверке».
+    """
+    packs, intervals = frames["Пачки"], frames["Строки"]
+    if drop_unassigned:
+        packs = packs[packs["Пачка"] != ""]
+        intervals = intervals[(intervals["Пачка"] != "") | intervals["От, м"].isna()]
+    return {"gis_observations": _atlas(frames["Замеры"], OBSERVATIONS), "gis_packs": _atlas(packs, PACKS),
+            "gis_intervals": _atlas(intervals, INTERVALS)}
 
 
 def export(results: Dict[str, gis.SheetResult], out_dir: str, bottom: Optional[pd.DataFrame] = None,
-           source: str = "") -> List[str]:
+           source: str = "", drop_unassigned: bool = True) -> List[str]:
     """Пишет Excel и файлы для Атласа в out_dir; возвращает пути."""
     os.makedirs(out_dir, exist_ok=True)
     frames = gis.to_frames(results)
-    tables = atlas_tables(frames)
+    tables = atlas_tables(frames, drop_unassigned)
     files: List[str] = []
 
     xlsx = os.path.join(out_dir, "ГИС_свод.xlsx")
