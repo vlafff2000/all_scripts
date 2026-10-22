@@ -186,19 +186,23 @@ export const pickFiles = async (start: string) => ((await openFilePicker({ start
 export const pickFolder = async (start: string) => (await openFilePicker({ start, mode: 'folder' })) || ''
 
 export interface ResultsInfo {
-  scenario: string; path: string; files: Record<string, string>; missing: string[]; start: string | null; end: string | null; steps: number
+  model: string; path: string; files: Record<string, string>; missing: string[]; start: string | null; end: string | null; steps: number
   vectors: { keyword: string; label: string; unit: string; objects: number }[]
 }
+export interface ModelEntry { id: string; name: string; folder: string; files: string[]; summary: boolean; indicators: boolean; missing: string[]; selected: boolean }
+export interface ModelsView { folders: string[]; models: ModelEntry[] }
 export interface IndicatorRow { date: string; gas_pore_volume: number; cells: number; columns: number; gwc_min: number | null; gwc_mean: number | null; gwc_mean_area: number | null; gwc_max: number | null }
-export const getResults = (scenario: string) => call<ResultsInfo>('/api/results?scenario=' + encodeURIComponent(scenario))
-export const attachResults = (scenario: string, path: string) => call<{ scenario: string; path: string }>('/api/results/attach', post({ scenario, path }))
-export const getResultSeries = (scenario: string, keyword: string, objects: string[]) =>
-  call<{ keyword: string; series: Record<string, { dates: string[]; values: number[] }> }>('/api/results/series?' + new URLSearchParams({ scenario, keyword, objects: objects.join('|') }))
-export const getIndicators = (scenario: string, sg: string, dates: string[]) =>
-  call<{ rows: IndicatorRow[]; notes: string[] }>('/api/results/indicators?' + new URLSearchParams({ scenario, sg, dates: dates.join('|') }))
+export const getModels = () => call<ModelsView>('/api/models')
+export const setModelFolders = (folders: string[]) => call<ModelsView>('/api/models/folders', post({ folders }))
+export const setModelSelection = (selected: string[]) => call<ModelsView>('/api/models/select', post({ selected }))
+export const getResults = (model: string) => call<ResultsInfo>('/api/results?' + new URLSearchParams({ model }))
+export const getResultSeries = (model: string, keyword: string, objects: string[]) =>
+  call<{ keyword: string; series: Record<string, { dates: string[]; values: number[] }> }>('/api/results/series?' + new URLSearchParams({ model, keyword, objects: objects.join('|') }))
+export const getIndicators = (model: string, sg: string, dates: string[]) =>
+  call<{ rows: IndicatorRow[]; notes: string[] }>('/api/results/indicators?' + new URLSearchParams({ model, sg, dates: dates.join('|') }))
 export interface WellGwcRow { well: string; date: string; columns: number; cell_top_down: number | null; interp_top_down: number | null; cell_lowest: number | null; interp_lowest: number | null; torn: boolean; at_grid_edge: boolean }
-export const getWellGwc = (scenario: string, sgr: string, dates: string[], wells: string[]) =>
-  call<{ rows: WellGwcRow[]; notes: string[]; sgr_source: string; wells: string[] }>('/api/results/wellgwc?' + new URLSearchParams({ scenario, sgr, dates: dates.join('|'), wells: wells.join('|') }))
+export const getWellGwc = (model: string, sgr: string, dates: string[], wells: string[]) =>
+  call<{ rows: WellGwcRow[]; notes: string[]; sgr_source: string; wells: string[] }>('/api/results/wellgwc?' + new URLSearchParams({ model, sgr, dates: dates.join('|'), wells: wells.join('|') }))
 
 export const getResultsReport = (path: string, kind: 'model' | 'restart') =>
   call<{ text: string }>('/api/results/report?' + new URLSearchParams({ path, kind }))

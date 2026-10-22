@@ -63,7 +63,7 @@ def test_api(tmp_path, monkeypatch):
     mdl.mkdir()
     _model(mdl)
     c = TestClient(api.build_app())
-    assert c.get("/api/results", params={"scenario": "Нет"}).status_code == 404
+    assert c.get("/api/results", params={"scenario": "Нет"}).json()["path"] == ""
     assert c.get("/api/results", params={"scenario": "Базовый"}).json()["vectors"] == []
     assert c.post("/api/results/attach", json={"scenario": "Базовый", "path": str(tmp_path)}).status_code == 400
     assert c.post("/api/results/attach", json={"scenario": "Базовый", "path": str(mdl)}).status_code == 200
@@ -108,3 +108,34 @@ def test_indicators(tmp_path, monkeypatch):
     assert [x["date"] for x in r["rows"]] == ["2026-01-01"]
     assert c.get("/api/results/indicators", params={"scenario": "Базовый", "dates": "не дата"}).status_code == 400
     assert c.get("/api/results/indicators", params={"scenario": "Нет"}).status_code == 404
+
+
+def test_models_catalog_and_select(tmp_path, monkeypatch):
+    pytest.importorskip("starlette")
+    from starlette.testclient import TestClient
+    from schedule_pxg import api
+    from tnav_results import catalog
+    folder = str(tmp_path / "proj")
+    monkeypatch.setattr(api, "FOLDER", folder)
+    root = tmp_path / "runs"
+    for sub in ("a/base", "a/gas_v2", "b"):
+        (root / sub).mkdir(parents=True)
+    _model(root / "a" / "base", base="Base")
+    _model(root / "a" / "gas_v2", base="Gas")
+    (root / "b" / "Gas.EGRID").write_bytes(b"")
+    c = TestClient(api.build_app())
+    assert c.get("/api/models").json()["models"] == []
+    r = c.post("/api/models/folders", json={"folders": [str(root), str(root), ""]}).json()
+    assert r["folders"] == [str(root)]
+    names = {(m["name"], m["folder"].replace(str(root), "")) for m in r["models"]}
+    assert names == {("Base", "/a/base"), ("Gas", "/a/gas_v2"), ("Gas", "/b")}
+    gas = next(m for m in r["models"] if m["name"] == "Gas" and m["summary"])
+    assert gas["indicators"] is False and "EGRID" in gas["missing"] and gas["selected"] is False
+    sel = c.post("/api/models/select", json={"selected": [gas["id"]]}).json()
+    assert [m["id"] for m in sel["models"] if m["selected"]] == [gas["id"]]
+    assert Project.load(folder).models["selected"] == [gas["id"]]
+    # старый путь: показатели по ?model= без сценария
+    assert c.get("/api/results", params={"model": gas["id"]}).json()["steps"] == 2
+    assert c.get("/api/results/series", params={"model": gas["id"], "keyword": "WBHP", "objects": "W1"}).json()["series"]["W1"]["values"] == [100.0, 101.0]
+    assert c.get("/api/results/series", params={"model": ""}).status_code == 404
+    assert catalog.scan([str(tmp_path / "нет")]) == []
