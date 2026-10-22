@@ -176,7 +176,7 @@ export default function App() {
   const setWindow = useCallback((a: number, b: number) => setWin([a, b]), [])
   const [a, b] = calc ? calc.clampWindow(win[0], win[1]) : [0, 0]
   const title = g && calc ? `${g.gsp} · ${kind} ${season} · ${fmtDay(calc.days[a])} — ${fmtDay(calc.days[b])}` : ''
-  useEffect(() => { document.title = 'Карты ГСП' + (gsp ? ' · ' + gsp : '') }, [gsp])
+  useEffect(() => { document.title = 'Карты' + (gsp ? ' · ' + gsp : '') }, [gsp])
 
   const flash = (t: string) => { setNote(t); setTimeout(() => setNote(''), 6000) }
   const png = async () => {
@@ -222,7 +222,7 @@ export default function App() {
   }
 
   const groupedNav = useMemo(() => PAGES, [])
-  if (error) return <div className="fatal"><h1>Карты ГСП</h1><p>{error}</p></div>
+  if (error) return <div className="fatal"><h1>Карты</h1><p>{error}</p></div>
   const body = () => {
     if (!app) return <p className="muted">Загрузка…</p>
     if (page === 'data') return <DataPage app={app} setApp={setApp} mode={mode} setMode={posMode.set} gsp={gsp} onReload={refresh} />
@@ -262,7 +262,7 @@ export default function App() {
     <div className={'shell' + (collapsed ? ' collapsed' : '')}>
       <aside className="sidebar">
         <div className="brand">
-          <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">Карты ГСП</span></a>
+          <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">Карты</span></a>
           <button type="button" className="side-toggle" onClick={() => sidebarCollapsed.set(!collapsed)} aria-expanded={!collapsed} title={collapsed ? 'Показать меню' : 'Свернуть меню'}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d={collapsed ? 'M6 3.5 10.5 8 6 12.5' : 'M10 3.5 5.5 8 10 12.5'} /></svg></button>
         </div>

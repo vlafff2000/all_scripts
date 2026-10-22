@@ -24,7 +24,7 @@ const scaleOf = (fmt: (v: number) => string) => {
   return Number.isFinite(v) && v !== 0 ? v / 1e9 : 1
 }
 
-/** График приложения «Карты ГСП»: общий ChartView из Газового Атласа (подсказки, перекрестие, закрепление, зум, оси, PNG, тёмная тема). */
+/** График приложения «Карты»: общий ChartView из Газового Атласа (подсказки, перекрестие, закрепление, зум, оси, PNG, тёмная тема). */
 export default function Chart({ days = [], labels, series, mode, win, fmt, unit, label, xRange, stack, highlight, gapDays = 45, barColor }: Props) {
   const chart = useMemo(() => {
     const k = scaleOf(fmt)

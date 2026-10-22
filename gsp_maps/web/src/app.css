@@ -1,4 +1,4 @@
-/* Карты ГСП: дополнения к общему стилю Атласа */
+/* Карты: дополнения к общему стилю Атласа */
 .workspace { padding: 16px 20px 24px; max-width: none; }
 .workspace.wide { height: 100vh; overflow: hidden; padding-bottom: 14px; }
 .sidebar nav a { align-items: center; justify-content: flex-start; gap: 10px; }

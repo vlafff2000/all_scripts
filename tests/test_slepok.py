@@ -78,5 +78,5 @@ def test_pxg_base_every_entry_has_file():
 def test_gsp_maps_and_schedule_snapshot():
     gsp = _py_names(os.path.join(ROOT, 'gsp_maps'))
     sched = _py_names(os.path.join(ROOT, 'schedule_pxg'))
-    assert gsp == GSP_MAPS_MODULES, f'Карты ГСП: пропало {sorted(GSP_MAPS_MODULES - gsp)}, новое {sorted(gsp - GSP_MAPS_MODULES)}'
+    assert gsp == GSP_MAPS_MODULES, f'Карты: пропало {sorted(GSP_MAPS_MODULES - gsp)}, новое {sorted(gsp - GSP_MAPS_MODULES)}'
     assert sched == SCHEDULE_MODULES, f'Скедул: пропало {sorted(SCHEDULE_MODULES - sched)}, новое {sorted(sched - SCHEDULE_MODULES)}'
