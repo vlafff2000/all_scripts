@@ -436,7 +436,7 @@ def check_gdm_history(v: Dict[str, str]) -> Report:
         return rep
     if not len(df):
         rep.error("FILE", "В файле истории нет строк с расходом", file=path,
-                  hint="Нужна база расходов «Базы ПХГ», месячные/дневные файлы или schedule WCONHIST/WCONINJH")
+                  hint="Нужна база расходов из «Работы с исходными данными», месячные/дневные файлы или schedule WCONHIST/WCONINJH")
         return rep
     history.check_history(df, None, rep, file=path)
     ppath = (v.get("pzrg") or "").strip()

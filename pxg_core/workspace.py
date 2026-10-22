@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 
 FILE_NAME = "рабочие_папки.json"
 SUBFOLDERS = {"ready": "готовые", "exports": "выгрузки"}
-LABELS = {"ready": "Готовые файлы", "exports": "Данные после Базы ПХГ"}
+LABELS = {"ready": "Готовые файлы", "exports": "Данные после работы с исходными данными"}
 
 
 def settings_path() -> str:

@@ -9,7 +9,7 @@
 | `get_excel_engine`, `read_excel_safe` | ТР | выбор движка и безопасное чтение Excel | 2 | ✅ `history.py` вызывает `pxg_core/расходы_файлы.read_excel_safe` |
 | `normalize_sheet_name`, `find_matching_sheets` | ТР | поиск листов месяцев по названию | 2 | ✅ `normalize_sheet_name` из `pxg_core`, `history._month_sheets` |
 | `find_wells_count`, `extract_table_data`, `find_time_table_intelligent`, `is_empty_sheet` | ТР | таблица расходов и таблица времени работы на месячном листе | 2 | ≈ `history.read_monthly_sheet`: блоки ищутся по заголовкам «Qчас» и «Время работы», столбец скважин — слева от первой даты; тест паритета со старым `process_excel_file_intelligent` на ГСП_9_b и ГСП_8_a |
-| `process_excel_file_intelligent`, `process_year_data`, `create_db_file` | ТР | годовая папка → база расходов | 2 | ≈ одна книга → таблица (`read_monthly_workbook`), несколько файлов → `import_files`; обход годовых папок остаётся в «Базе ПХГ» |
+| `process_excel_file_intelligent`, `process_year_data`, `create_db_file` | ТР | годовая папка → база расходов | 2 | ≈ одна книга → таблица (`read_monthly_workbook`), несколько файлов → `import_files`; обход годовых папок остаётся в «Работе с исходными данными» |
 | `update_data_type_by_periods`, `load_periods_file`, `get_period_for_date`, `get_period_type` | ТР, Сут, Зам | файл периодов закачки/отбора, вид по дате | 2, 8 | ≈ вид берётся из названий листов/файла/столбца «Тип данных»; проверка «дата вне сезона» в `check_history`; файл периодов — шаг 8 |
 | `parse_date` | ТР, Сут, Зам | разбор дат в разных форматах | 2 | ✅ даты через `pd.to_datetime`; нечитаемые отбрасываются, в QC — `qc.parse_date` |
 | `read_pzrg_file(_fixed)`, `transform_combined_wells` | ТР, Сут, Зам | файл ПЗРГ, объединённые скважины | 13 | ✅ А13: `historymode.read_pzrg`, `split_wells` (по умолчанию «54/80», другие пары — параметр) |
@@ -220,7 +220,7 @@
 
 
 ## Старые скрипты удалены
-Удалены `pxg_base/modules/Создание_schedule_файла_технологического_режима.py` (и его проверка/форма в «Базе ПХГ») и `apps/schedule_tr/`. Все строки таблицы выше закрыты (✅ или ≈ с пояснением).
+Удалены `pxg_base/modules/Создание_schedule_файла_технологического_режима.py` (и его проверка/форма в «Работе с исходными данными») и `apps/schedule_tr/`. Все строки таблицы выше закрыты (✅ или ≈ с пояснением).
 Паритет-тесты больше не вызывают старый код: они сверяются с эталонами в `tests/golden/` (результаты старых функций на образцах `schedule-tr-samples` и на синтетических данных тестов, снятые перед удалением; чтение — `tests/golden.py`).
 Последние вызовы старого кода перенесены: `totals.read_approved` (тех.карта вместо `read_approved_volumes`) и `totals.read_percents` (доли скважин по дням вместо `process_injection_file_for_percents`, с допуском 0,011 п.п. из-за округления процентов).
 WELDRAW и WELTARG сверены с руководством tNavigator 26.2 (2026-10-09); `1*` как «снять лимит» не используется.
