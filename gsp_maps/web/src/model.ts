@@ -218,9 +218,9 @@ export function scopeKeys(mode: SeasonScope, picked: string[], seasons: SeasonIn
 export interface Scope { mode: SeasonScope; keys: string[]; calcs: Map<string, SeasonCalc> }
 
 /** Раскраска карты: по умолчанию круги по расходу газа, остальные режимы красят скважины одной шкалой. */
-export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model'
+export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis'
 export const PAINTS: [Paint, string][] = [
-  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'], ['atlas', 'Параметр Атласа'], ['model', 'Модели tNavigator'],
+  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'], ['atlas', 'Параметр Атласа'], ['model', 'Модели tNavigator'], ['gis', 'ГИС и ГВК'],
 ]
 export const ATLAS_AGGS: [string, string][] = [['mean', 'среднее'], ['sum', 'сумма'], ['last', 'последнее'], ['count', 'число записей']]
 export interface PaintVal { v: number; label: string; tip: string }
@@ -250,6 +250,23 @@ const scopeTitle = (sc: Scope | undefined, season: string, kind: string) =>
   !sc || sc.mode === 'one' ? `${kind.toLowerCase()} ${season}` : sc.mode === 'all' ? `среднее по всем сезонам (${sc.keys.length})` : `среднее по ${sc.keys.length} ${seasonsWord(sc.keys.length)}`
 
 /** Значения выбранной раскраски по скважинам сезона. Скважины без значения в карту не попадают (рисуются серыми). */
+/** Шкала изменения: синий — уменьшилось, красный — выросло, светлая середина — без изменений. */
+const DELTA_STOPS = ['#2166ac', '#92c5de', '#f2f2f2', '#f4a582', '#b2182b']
+/** ГИС и ГВК: значения по скважинам; для изменения между сезонами (delta) шкала симметрична вокруг нуля и подписана знаком. */
+export function gisPaint(values: Record<string, number>, dates: Record<string, string>, title: string, note: string[], delta: boolean): PaintData | null {
+  const entries = Object.entries(values)
+  if (!entries.length) return null
+  const nums = entries.map(([, v]) => v)
+  const f = (v: number) => (delta && v > 0 ? '+' : '') + fmt1(v)
+  const vals = new Map<number, PaintVal>(entries.map(([w, v]) => [Number(w), { v, label: f(v), tip: `${title}: ${f(v)}${dates[w] ? ' · замер ' + dates[w] : ''}` }]))
+  if (delta) {
+    const m = Math.max(Math.abs(Math.min(...nums)), Math.abs(Math.max(...nums))) || 1
+    return { vals, lo: -m, hi: m, stops: DELTA_STOPS, title, fmt: f, note: note.join(' '), mid: true }
+  }
+  const lo = Math.min(...nums), hi = Math.max(...nums)
+  return { vals, lo, hi: hi > lo ? hi : lo + 1, stops: SEASON_STOPS, title, fmt: f, note: note.join(' ') }
+}
+
 /** Раскраска по параметру Атласа: шкала от наименьшего до наибольшего значения; без значения — без цвета. */
 export function atlasPaint(values: Record<string, number>, title: string, note: string[]): PaintData | null {
   const entries = Object.entries(values)
@@ -261,7 +278,7 @@ export function atlasPaint(values: Record<string, number>, title: string, note: 
 }
 
 export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: string, season: string, a: number, b: number, scope?: Scope): PaintData | null {
-  if (paint === 'flow' || paint === 'atlas' || paint === 'model') return null   // параметр Атласа и модели считаются в API и передаются отдельно
+  if (paint === 'flow' || paint === 'atlas' || paint === 'model' || paint === 'gis') return null   // параметр Атласа и модели считаются в API и передаются отдельно
   const vals = new Map<number, PaintVal>()
   const multi = !!scope && scope.mode !== 'one' && scope.keys.length > 0
   const keys = multi ? scope!.keys : [season]

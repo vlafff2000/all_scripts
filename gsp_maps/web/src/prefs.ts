@@ -25,10 +25,16 @@ export const usePref = <T,>(p: Pref<T>): T => useSyncExternalStore(p.subscribe, 
 
 export type Theme = 'light' | 'dark' | 'system'
 export const theme = pref<Theme>('gsp.theme', 'system', raw => (raw === 'dark' || raw === 'light' ? raw : 'system'))
-export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf', 'atlas', 'model'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
+export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf', 'atlas', 'model', 'gis'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
 /** Выбранный параметр Атласа («таблица|колонка») и агрегация; запоминаются между сеансами. */
 export const atlasParam = pref<string>('gsp.atlasParam', '', raw => String(raw || ''))
 export const atlasAgg = pref<string>('gsp.atlasAgg', 'mean', raw => String(raw || 'mean'))
+/** ГИС и ГВК на карте: пачка, показатель, сезон, сезон для сравнения («Δ») и закреплённые инженером замеры («скважина:дата,…»). */
+export const gisPack = pref<string>('gsp.gisPack', '', raw => String(raw || ''))
+export const gisMetric = pref<string>('gsp.gisMetric', 'gvk_abs_m', raw => String(raw || 'gvk_abs_m'))
+export const gisSeason = pref<string>('gsp.gisSeason', '', raw => String(raw || ''))
+export const gisAgainst = pref<string>('gsp.gisAgainst', '', raw => String(raw || ''))
+export const gisPins = pref<string>('gsp.gisPins', '', raw => String(raw || ''))
 export const modelKeyword = pref<string>('gsp.modelKeyword', 'WBHP', raw => String(raw || 'WBHP'))
 export const modelAgg = pref<string>('gsp.modelAgg', 'mean', raw => String(raw || 'mean'))
 export const sidebarCollapsed = pref<boolean>('gsp.sidebar.collapsed', false)
