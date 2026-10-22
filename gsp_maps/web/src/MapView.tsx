@@ -4,7 +4,7 @@ import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, grou
 import { createPortal } from 'react-dom'
 import { groupColor, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type IsoResult } from './model'
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
 /** Параметр Атласа на карте: список параметров, выбор и агрегация, готовая раскраска (считает страница). */
@@ -14,7 +14,8 @@ export interface AtlasPicker { items: ParamItem[]; pick: string; agg: string; on
 export interface GisPicker {
   catalog: GisCatalog | null; pack: string; metric: string; season: string; against: string; pins: Record<string, string>
   options: Record<string, string[]>; dates: Record<string, string>; paint: PaintData | null
-  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string> }) => void
+  iso: { on: boolean; step: string; reach: string }; isoNote: string
+  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string }) => void
 }
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
@@ -128,7 +129,7 @@ const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: n
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-function GisControls({ catalog, pack, metric, season, against, pins, options, dates, onChange }: GisPicker) {
+function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, onChange }: GisPicker) {
   const [well, setWell] = useState('')
   if (!catalog) return <p className="muted">Читаю базу ГИС…</p>
   if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
@@ -145,6 +146,14 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
     <select value={against} onChange={e => onChange({ against: e.target.value })} aria-label="Сравнить с сезоном">
       <option value="">Без сравнения</option>
       {catalog.seasons.filter(s => s.key !== season).map(s => <option key={s.key} value={s.key}>Изменение к: {s.key}</option>)}</select>
+    <label className="check"><input type="checkbox" checked={iso.on} onChange={e => onChange({ iso: e.target.checked })} /> Изолинии по скважинам</label>
+    {iso.on && <div className="gis-pin">
+      <select value={iso.step} onChange={e => onChange({ isoStep: e.target.value })} aria-label="Шаг изолиний">
+        <option value="">Шаг: подобрать</option>{['0.1', '0.5', '1', '2', '5', '10', '20'].map(s => <option key={s} value={s}>Шаг {s}</option>)}</select>
+      <select value={iso.reach} onChange={e => onChange({ isoReach: e.target.value })} aria-label="Радиус доверия">
+        {[['1', 'Радиус доверия: 1 расстояние между скважинами'], ['1.5', 'Радиус доверия: 1,5'], ['2.5', 'Радиус доверия: 2,5'], ['4', 'Радиус доверия: 4']].map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+      <span className="muted">За краем области скважин изолинии не строятся; чем дальше от скважин, тем бледнее заливка.{isoNote ? ' ' + isoNote : ''}</span>
+    </div>}
     {multi.length > 0 && !against && <div className="gis-pin">
       <span className="muted">В сезоне несколько замеров: по умолчанию последний, другой можно выбрать.</span>
       <select value={w} onChange={e => setWell(e.target.value)} aria-label="Скважина с несколькими замерами">
@@ -305,6 +314,15 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
 
   const unit = g.layout.mode === 'xy' && !spread ? 'м' : ''
   const K = fit.s * view.k
+  // изолинии показателя ГИС: только на карте в координатах (не на схеме с разнесёнными скважинами)
+  const iso = useMemo(() => {
+    if (options.paint !== 'gis' || !gis?.iso.on || !gis.paint) return null
+    if (spread) return { lines: [], conf: [], step: 0, note: 'На схеме с разнесёнными скважинами изолинии не строятся: выключите «Разнести скважины».' } as IsoResult
+    const pts = placed.filter(p => gis.paint!.vals.has(p.well)).map(p => ({ x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
+    const vs = pts.map(p => p.v)
+    const step = Number(gis.iso.step) || niceLevelStep((Math.max(...vs) - Math.min(...vs)) || 1)
+    return isolines(pts, spacing, step, Number(gis.iso.reach) || 1.5)
+  }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, placed, spacing, spread])
   const sx = (mx: number) => view.k * (fit.s * mx + fit.ox) + view.tx, sy = (my: number) => view.k * (fit.s * my + fit.oy) + view.ty
   const bar = niceStep(140 / K)
   // в режиме группировки круги имеют постоянный размер на экране (как значки на веб-картах), поэтому при приближении близкие скважины расходятся
@@ -537,6 +555,11 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
             <g opacity={0.07} fill={pal.accent}>{placed.map(q => <circle key={q.well} cx={q.x} cy={q.y} r={halo} />)}</g>
+            {iso && <g aria-label="Изолинии">
+              {iso.conf.map((c, i) => <path key={'c' + i} d={c.d} fill={pal.accent} opacity={c.a} stroke="none" />)}
+              {iso.lines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+                <text x={l.at[0]} y={l.at[1]} fontSize={11 / K} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{fmt1(l.level)}</text></g>)}
+            </g>}
             {layer}
           </g>
         </g>
@@ -612,7 +635,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
             </>}
-            {options.paint === 'gis' && gis && <GisControls {...gis} />}
+            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} />}
             {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
             {!paintData && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
