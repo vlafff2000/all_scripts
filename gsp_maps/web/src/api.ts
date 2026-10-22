@@ -125,6 +125,18 @@ export const getParam = (table: string, column: string, agg: string) =>
   call<ParamValues>('/api/param?' + new URLSearchParams({ table, column, agg }))
 export const getWork = (gsp: string) => call<WorkData>('/api/work?name=' + encodeURIComponent(gsp))
 
+/** Модели tNavigator: папки из общего списка (~/.pxg), найденные модели и отмеченные для карты. */
+export interface TnavModel { id: string; name: string; folder: string; files: string[]; summary: boolean; indicators: boolean; missing: string[]; selected: boolean }
+export interface ModelsView { folders: string[]; models: TnavModel[]; selected: string[] }
+export interface ModelKeyword { keyword: string; unit: string; wells: number }
+export interface ModelValues { keyword: string; agg: string; models: Record<string, { values?: Record<string, number>; unit?: string; error?: string }> }
+export const getModels = () => call<ModelsView>('/api/models')
+export const setModelFolders = (folders: string[]) => call<ModelsView>('/api/models/folders', post({ folders }))
+export const selectModels = (selected: string[]) => call<ModelsView>('/api/models/select', post({ selected }))
+export const getModelKeywords = (model: string) => call<{ model: string; items: ModelKeyword[] }>('/api/model-keywords?' + new URLSearchParams({ model }))
+export const getModelValues = (keyword: string, start: string, end: string, agg: string, models: string[]) =>
+  call<ModelValues>('/api/model-values?' + new URLSearchParams({ keyword, start, end, agg, models: models.join('|') }))
+
 export interface SummaryData { columns: string[]; rows: (string | number | null)[][] }
 export const getSummary = (gsp: string, kind: string, season: string, mode: string) =>
   call<SummaryData>('/api/summary?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season) + '&mode=' + mode)

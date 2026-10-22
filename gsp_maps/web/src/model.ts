@@ -218,9 +218,9 @@ export function scopeKeys(mode: SeasonScope, picked: string[], seasons: SeasonIn
 export interface Scope { mode: SeasonScope; keys: string[]; calcs: Map<string, SeasonCalc> }
 
 /** Раскраска карты: по умолчанию круги по расходу газа, остальные режимы красят скважины одной шкалой. */
-export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'atlas'
+export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model'
 export const PAINTS: [Paint, string][] = [
-  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'], ['atlas', 'Параметр Атласа'],
+  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'], ['atlas', 'Параметр Атласа'], ['model', 'Модели tNavigator'],
 ]
 export const ATLAS_AGGS: [string, string][] = [['mean', 'среднее'], ['sum', 'сумма'], ['last', 'последнее'], ['count', 'число записей']]
 export interface PaintVal { v: number; label: string; tip: string }
@@ -261,7 +261,7 @@ export function atlasPaint(values: Record<string, number>, title: string, note: 
 }
 
 export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: string, season: string, a: number, b: number, scope?: Scope): PaintData | null {
-  if (paint === 'flow' || paint === 'atlas') return null   // параметр Атласа считается в API и передаётся отдельно
+  if (paint === 'flow' || paint === 'atlas' || paint === 'model') return null   // параметр Атласа и модели считаются в API и передаются отдельно
   const vals = new Map<number, PaintVal>()
   const multi = !!scope && scope.mode !== 'one' && scope.keys.length > 0
   const keys = multi ? scope!.keys : [season]

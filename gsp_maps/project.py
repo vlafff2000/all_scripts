@@ -35,6 +35,7 @@ class Project:
     def __init__(self) -> None:
         self.paths: Dict[str, str] = {k: "" for k in PATH_KEYS}
         self.results_dir = ""
+        self.models: List[str] = []  # модели tNavigator, отмеченные для карты (пути из общего каталога)
         self.store: Optional[Store] = None
         self.atlas: Optional[atlas_source.AtlasData] = None
         self._tables: Dict[str, object] = {}
@@ -50,16 +51,21 @@ class Project:
             data = json.loads(config_file().read_text(encoding="utf-8"))
             self.paths.update({k: str(v) for k, v in data.get("paths", {}).items() if k in self.paths})
             self.results_dir = str(data.get("results_dir", ""))
+            self.models = [str(x) for x in data.get("models", [])]
         except (OSError, ValueError):
             pass
 
     def _save(self) -> None:
         try:
             config_file().parent.mkdir(parents=True, exist_ok=True)
-            config_file().write_text(json.dumps({"paths": self.paths, "results_dir": self.results_dir}, ensure_ascii=False, indent=1),
+            config_file().write_text(json.dumps({"paths": self.paths, "results_dir": self.results_dir, "models": self.models}, ensure_ascii=False, indent=1),
                                      encoding="utf-8")
         except OSError:
             pass
+
+    def set_models(self, ids: List[str]) -> None:
+        self.models = list(ids)
+        self._save()
 
     def set_paths(self, paths: Dict[str, str], results_dir: Optional[str] = None) -> None:
         with self._lock:

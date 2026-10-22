@@ -45,7 +45,7 @@ PXG_BASE_MODULES = {
 }
 
 # Эталон: Python-модули пакетов Карт ГСП и Скедула (без __init__ и __main__).
-GSP_MAPS_MODULES = {'api', 'atlas_source', 'inputs', 'project', 'store', 'wellmap'}
+GSP_MAPS_MODULES = {'api', 'atlas_source', 'inputs', 'models', 'project', 'store', 'wellmap'}
 SCHEDULE_MODULES = {
     'adapt_view', 'api', 'averaging', 'avg_view', 'charts', 'checks', 'control', 'daily', 'dataquality', 'forecast',
     'history', 'historymode', 'outages', 'project', 'results', 'scenarios', 'sources', 'strategy',

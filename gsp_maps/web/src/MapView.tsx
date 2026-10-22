@@ -3,17 +3,21 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayou
 import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, type GspData, type ParamItem, type SeasonInfo } from './api'
+import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
 /** Параметр Атласа на карте: список параметров, выбор и агрегация, готовая раскраска (считает страница). */
 export interface AtlasPicker { items: ParamItem[]; pick: string; agg: string; onPick: (pick: string, agg: string) => void; paint: PaintData | null }
+/** Раскраска по моделям tNavigator: выбор моделей и вектора (панель) и значения на карте (paint). */
+export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
 interface Props {
   g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number
   options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; title: string
   /** Параметр Атласа: только на странице карты. */
   atlas?: AtlasPicker
+  models?: ModelsPanel
   /** Режим сравнения: общий масштаб кругов и общий вид (зум/сдвиг) у двух карт. */
   /** Куда выводить подсказку: элемент вне карты (тогда она не закрывает скважины) или null — рядом с курсором. */
   tipHost?: HTMLElement | null; tipTag?: string; stickyTip?: boolean
@@ -117,7 +121,7 @@ const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: n
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView, atlas }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView, atlas, models }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
@@ -187,7 +191,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return { mode: keys.length === 1 && keys[0] === season ? 'one' : scopeMode, keys, calcs: multi.calcs }
   }, [multi, scopeMode, picked, season])
   const calcPaint: PaintData | null = useMemo(() => paintFor(options.paint, g, calc, kind, season, a, b, options.paint === 'entry' || options.paint === 'wf' ? scope : undefined), [options.paint, g, calc, kind, season, a, b, scope])
-  const paintData: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : calcPaint
+  const paintData: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : calcPaint
   const wm = useMemo(() => waterMonths(water), [water])
   // кольца воды скважины: один месяц — одно кольцо (замеры месяца сводятся к максимуму)
   const rings = useMemo(() => {
@@ -573,6 +577,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
             </>}
+            {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
             {!paintData && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
               <button type="button" role="radio" aria-checked={options.sectors === 'plain'} onClick={() => onOptions({ sectors: 'plain' })}>Один цвет</button></div>}
