@@ -171,13 +171,13 @@ export const copyStrategy = (name: string, index: number, table: StrategyTable, 
 export const loadStrategy = (name: string, path: string) => call<{ state: AppState; report: string[] }>('/api/strategy/load', post({ name, path }))
 export const downloadStrategy = (name: string) => download('/api/strategy/xlsx', { name }, 'strategy.xlsx')
 export interface SourcesView {
-  sources: { flows?: { paths: string[]; template: string; kind_default: string }; groups?: { mode: 'file' | 'column'; path: string }; daily_total?: { path: string; unit: string } }
+  sources: { flows?: { paths: string[]; template: string; kind_default: string }; groups?: { mode: 'file' | 'column'; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder?: string; perf_file?: string } }
   wells: number; groups: number; withoutGroup: number; techmaps: number
   daily: { days: number; from: string; to: string; error?: string } | null
 }
 export interface SourcesCheck extends SourcesView { summary: string; issues: { level: string; message: string; well: string }[] }
 export const getSources = () => call<SourcesView>('/api/sources')
-export const setSources = (body: { flows?: { paths: string[]; template?: string; kind_default?: string }; groups?: { mode: string; path: string }; daily_total?: { path: string; unit: string } }) =>
+export const setSources = (body: { flows?: { paths: string[]; template?: string; kind_default?: string }; groups?: { mode: string; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder: string; perf_file: string } }) =>
   call<SourcesView>('/api/sources/set', post(body))
 export const buildSources = () => call<SourcesCheck>('/api/sources/build', post({}))
 /** Папка выгрузок Базы ПХГ: сервер находит базу расходов по имени и ставит её источником. */
@@ -349,3 +349,16 @@ export async function adaptExportPreview(b: AdaptExportBody & { page: number }):
   const r = await fetchFile('/api/adapt/export/preview', b)
   return { blob: await r.blob(), pages: Number(r.headers.get('X-Pages') || 1), page: Number(r.headers.get('X-Page') || 1) }
 }
+
+export interface FactInterval { top: number; bottom: number; kg: number | null; kp: number | null; pack: string; status: string }
+export interface FactPack { pack: string; gvk: number | null; label: string; top: number | null; bottom: number | null }
+export interface FactWell {
+  well: string; date: string; dates: string[]; season?: string; altitude: number | null
+  intervals: FactInterval[]; packs: FactPack[]; notes: string[]; perforation: { top: number | null; bottom: number | null } | null
+}
+export const getPlanshetFact = (wells: string[], date: string) =>
+  call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/fact?' + new URLSearchParams({ wells: wells.join('|'), date }))
+export interface ProfileCell { top: number; bottom: number; sg: number; perforated: boolean }
+export interface WellProfile { well: string; date: string; column: number[]; columns: number; cells: ProfileCell[] }
+export const getWellProfile = (model: string, wells: string[], date: string) =>
+  call<{ rows: WellProfile[]; step_date: string; missing: string[] }>('/api/results/wellprofile?' + new URLSearchParams({ model, wells: wells.join('|'), date }))
