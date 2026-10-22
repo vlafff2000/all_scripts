@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
-import { AppState, IndicatorRow, ResultsInfo, attachResults, getIndicators, getResultSeries, getWellGwc, WellGwcRow, getResults, getResultsReport, getState, pickFile } from './api'
+import { IndicatorRow, ModelsView, ResultsInfo, getIndicators, getModels, getResultSeries, getWellGwc, WellGwcRow, getResults, getResultsReport, pickFile, pickFolder, setModelFolders, setModelSelection } from './api'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
@@ -17,9 +17,12 @@ function Plot({ lines, unit, title }: { lines: Line[]; unit: string; title: stri
   return <ChartView chart={chart} excludeMode={false} onExclude={() => {}} />
 }
 
-export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppState) => void }) {
+/** Последние две части пути папки: полный путь — во всплывающей подсказке. */
+const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
+
+export default function Results() {
+  const [view, setView] = useState<ModelsView>({ folders: [], models: [] })
   const [infos, setInfos] = useState<Record<string, ResultsInfo>>({})
-  const [sel, setSel] = useState<string[]>([])
   const [sg, setSg] = useState('0.01')
   const [date, setDate] = useState('')
   const [ind, setInd] = useState<Record<string, IndicatorRow[]>>({})
@@ -38,31 +41,40 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const names = st.scenarios.filter(s => s.results).map(s => s.name)
-  const key = names.join('|')
+  const models = view.models
+  const chosen = models.filter(m => m.selected).map(m => m.id)
+  const chosenKey = chosen.join('|')
+  // подпись модели: имя и хвост папки (одинаковые имена в разных папках различимы)
+  const label = (id: string) => { const m = models.find(x => x.id === id); return m ? m.name + ' (' + tail(m.folder) + ')' : id }
+
+  useEffect(() => {
+    getModels().then(setView).catch(e => setMsg((e as Error).message))
+  }, [])
   useEffect(() => {
     let live = true
-    names.forEach(n => getResults(n).then(r => live && setInfos(c => ({ ...c, [n]: r }))).catch(e => live && setMsg(n + ': ' + (e as Error).message)))
+    chosen.forEach(id => { if (!infos[id]) getResults(id).then(r => live && setInfos(c => ({ ...c, [id]: r }))).catch(e => live && setMsg(id + ': ' + (e as Error).message)) })
     return () => { live = false }
-  }, [key])
+  }, [chosenKey]) // eslint-disable-line
 
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
-  const attach = (n: string, path: string) => guard(async () => { await attachResults(n, path); setSt(await getState()); setInd({}); setPr([]) })
-  const choose = (n: string) => guard(async () => { const r = await pickFile(st.scenarios.find(s => s.name === n)?.results || ''); if (r.path) await attach(n, r.path) })
-  const toggle = (n: string) => setSel(c => (c.includes(n) ? c.filter(x => x !== n) : [...c, n]))
+  const addFolder = () => guard(async () => {
+    const f = await pickFolder(view.folders[view.folders.length - 1] || '')
+    if (f) setView(await setModelFolders([...view.folders.filter(x => x !== f), f]))
+  })
+  const dropFolder = (f: string) => guard(async () => setView(await setModelFolders(view.folders.filter(x => x !== f))))
+  const toggle = (id: string) => guard(async () => setView(await setModelSelection(chosen.includes(id) ? chosen.filter(x => x !== id) : [...chosen, id])))
 
-  const chosen = sel.filter(n => names.includes(n))
   const calc = () => guard(async () => {
     const out: Record<string, IndicatorRow[]> = {}
     const all: string[] = []
-    for (const n of chosen) { const r = await getIndicators(n, sg, date ? [date] : []); out[n] = r.rows; r.notes.forEach(x => all.push(n + ': ' + x)) }
+    for (const n of chosen) { const r = await getIndicators(n, sg, date ? [date] : []); out[n] = r.rows; r.notes.forEach(x => all.push(label(n) + ': ' + x)) }
     setInd(out); setNotes(all)
   })
   const press = () => guard(async () => {
     const lines: Line[] = []
     for (const n of chosen) {
       const r = await getResultSeries(n, kw, wells.split(/[;,|]/).map(x => x.trim()).filter(Boolean))
-      Object.entries(r.series).forEach(([w, s]) => lines.push({ label: n + ' · ' + w, pts: s.dates.map((d, i) => [d, s.values[i]] as [string, number]) }))
+      Object.entries(r.series).forEach(([w, s]) => lines.push({ label: label(n) + ' · ' + w, pts: s.dates.map((d, i) => [d, s.values[i]] as [string, number]) }))
     }
     setPr(lines)
   })
@@ -72,7 +84,7 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
     const all: string[] = []
     for (const n of chosen) {
       const r = await getWellGwc(n, sgr, gwDate ? [gwDate] : [], gw.split(/[;,|]/).map(x => x.trim()).filter(Boolean))
-      out[n] = r.rows; r.notes.forEach(x => all.push(n + ': ' + x))
+      out[n] = r.rows; r.notes.forEach(x => all.push(label(n) + ': ' + x))
     }
     setGwRows(out); setGwNotes(all)
   })
@@ -80,7 +92,7 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
   const gwLines: Line[] = gwShown.flatMap(n => {
     const by: Record<string, WellGwcRow[]> = {}
     gwRows[n].forEach(r => { if (r.interp_top_down !== null) (by[r.well] = by[r.well] || []).push(r) })
-    return Object.entries(by).slice(0, 20).map(([w, rs]) => ({ label: n + ' · ' + w, pts: rs.map(r => [r.date, r.interp_top_down as number] as [string, number]) }))
+    return Object.entries(by).slice(0, 20).map(([w, rs]) => ({ label: label(n) + ' · ' + w, pts: rs.map(r => [r.date, r.interp_top_down as number] as [string, number]) }))
   })
 
   const rpPick = () => guard(async () => { const r = await pickFile(rpPath); if (r.path) setRpPath(r.path) })
@@ -94,7 +106,7 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
   }
 
   const shown = chosen.filter(n => ind[n])
-  const line = (f: (r: IndicatorRow) => number | null): Line[] => shown.map(n => ({ label: n, pts: ind[n].filter(r => f(r) !== null).map(r => [r.date, f(r) as number] as [string, number]) }))
+  const line = (f: (r: IndicatorRow) => number | null): Line[] => shown.map(n => ({ label: label(n), pts: ind[n].filter(r => f(r) !== null).map(r => [r.date, f(r) as number] as [string, number]) }))
   const last = (n: string) => ind[n][ind[n].length - 1]
   const vecs = Array.from(new Set(chosen.flatMap(n => (infos[n]?.vectors || []).map(v => v.keyword))))
   const vec = chosen.flatMap(n => infos[n]?.vectors || []).find(v => v.keyword === kw)
@@ -105,19 +117,23 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
     <main className="workspace">
       <PageHead title="Результаты расчёта" lede="Привяжите результаты модели к сценариям и сравните их по показателям." />
       <section className="card">
-        <h2>Результаты расчёта по сценариям</h2>
-        {st.scenarios.length === 0 ? <p className="muted">Сначала создайте сценарий (вкладка «Сценарии»).</p> : <>
-          <p className="muted small">Укажите любой файл расчёта модели (например, .SMSPEC или .EGRID): остальные файлы с тем же именем найдутся рядом. Для показателей нужны EGRID, INIT и UNRST с SGAS, для давлений — SMSPEC и UNSMRY.</p>
-          <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th></th><th>Сценарий</th><th>Модель</th><th>Период расчёта</th><th>Файлы</th><th></th></tr></thead>
-            <tbody>{st.scenarios.map(s => { const r = infos[s.name]; return <tr key={s.name}>
-              <td>{s.results && <input type="checkbox" checked={sel.includes(s.name)} onChange={() => toggle(s.name)} aria-label={'Выбрать ' + s.name} />}</td>
-              <td>{s.name}</td>
-              <td className="small" title={s.results}>{s.results ? '…/' + s.results.split(/[\\/]/).filter(Boolean).slice(-2).join('/') : <span className="muted">не привязана</span>}</td>
-              <td>{r && r.start ? r.start + ' — ' + r.end + ' (' + r.steps + ' шагов)' : '—'}</td>
-              <td className="small">{r ? Object.keys(r.files).join(', ') + (r.missing.length ? ' · нет: ' + r.missing.join(', ') : '') : ''}</td>
-              <td className="row"><button disabled={busy} onClick={() => choose(s.name)}>{s.results ? 'Сменить' : 'Привязать'}</button>
-                {s.results && <button disabled={busy} onClick={() => attach(s.name, '')}>Отвязать</button>}</td></tr> })}</tbody></table></div>
-        </>}
+        <h2>Модели с результатами</h2>
+        <p className="muted small">Добавьте одну или несколько папок: программа найдёт модели во всех их подпапках (файлы EGRID, INIT, SMSPEC, UNSMRY, UNRST с одним именем).
+          Отметьте модели, которые показывать в таблицах и графиках. Для показателей нужны EGRID, INIT и UNRST с SGAS, для давлений — SMSPEC и UNSMRY.</p>
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          {view.folders.map(f => <span key={f} className="small" title={f} style={{ marginRight: 12 }}>{tail(f)}{' '}
+            <button disabled={busy} onClick={() => dropFolder(f)} aria-label={'Убрать папку ' + f}>×</button></span>)}
+          <button disabled={busy} onClick={addFolder}>Добавить папку…</button>
+        </div>
+        {models.length === 0
+          ? <p className="muted">{view.folders.length ? 'В выбранных папках моделей не найдено.' : 'Папки не добавлены.'}</p>
+          : <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th></th><th>Модель</th><th>Папка</th><th>Период расчёта</th><th>Файлы</th></tr></thead>
+            <tbody>{models.map(m => { const r = infos[m.id]; return <tr key={m.id}>
+              <td><input type="checkbox" checked={m.selected} disabled={busy} onChange={() => toggle(m.id)} aria-label={'Показывать ' + m.name} /></td>
+              <td>{m.name}</td>
+              <td className="small" title={m.folder}>{tail(m.folder)}</td>
+              <td>{r && r.start ? r.start + ' — ' + r.end + ' (' + r.steps + ' шагов)' : m.selected ? '—' : <span className="muted">отметьте модель</span>}</td>
+              <td className="small">{m.files.join(', ')}{m.missing.length ? ' · нет: ' + m.missing.join(', ') : ''}{!m.summary ? ' · без сводки' : ''}</td></tr> })}</tbody></table></div>}
         {msg && <p className="note warn">{msg}</p>}
       </section>
       <section className="card">
@@ -134,7 +150,7 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
         {rpText && <pre className="small" style={{ maxHeight: 420, overflow: 'auto', whiteSpace: 'pre' }}>{rpText}</pre>}
       </section>
       {chosen.length > 0 && <section className="card">
-        <h3>Показатели «сценарий × показатель»</h3>
+        <h3>Показатели по выбранным моделям</h3>
         <div className="row">
           <span className="muted small">Порог Sg:</span><input style={{ width: 70 }} value={sg} onChange={e => setSg(e.target.value)} />
           <span className="muted small">Дата (пусто — все шаги):</span><input type="date" value={date} onChange={e => setDate(e.target.value)} />
@@ -142,9 +158,9 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
         </div>
         {notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
         {shown.length > 0 && <>
-          <table className="raw"><thead><tr><th>Сценарий</th><th>Дата</th><th>Газонас. объём, м³ пор.</th><th>ГВК мин, м</th><th>ГВК среднее, м</th><th>ГВК по площади, м</th><th>ГВК макс, м</th></tr></thead>
-            <tbody>{shown.map(n => { const r = last(n); return r ? <tr key={n}><td>{n}</td><td>{r.date}</td><td className="num">{fmt(r.gas_pore_volume, 0)}</td>
-              <td className="num">{fmt(r.gwc_min, 1)}</td><td className="num">{fmt(r.gwc_mean, 1)}</td><td className="num">{fmt(r.gwc_mean_area, 1)}</td><td className="num">{fmt(r.gwc_max, 1)}</td></tr> : <tr key={n}><td>{n}</td><td colSpan={6} className="muted">нет данных</td></tr> })}</tbody></table>
+          <table className="raw"><thead><tr><th>Модель</th><th>Дата</th><th>Газонас. объём, м³ пор.</th><th>ГВК мин, м</th><th>ГВК среднее, м</th><th>ГВК по площади, м</th><th>ГВК макс, м</th></tr></thead>
+            <tbody>{shown.map(n => { const r = last(n); return r ? <tr key={n}><td>{label(n)}</td><td>{r.date}</td><td className="num">{fmt(r.gas_pore_volume, 0)}</td>
+              <td className="num">{fmt(r.gwc_min, 1)}</td><td className="num">{fmt(r.gwc_mean, 1)}</td><td className="num">{fmt(r.gwc_mean_area, 1)}</td><td className="num">{fmt(r.gwc_max, 1)}</td></tr> : <tr key={n}><td>{label(n)}</td><td colSpan={6} className="muted">нет данных</td></tr> })}</tbody></table>
           <p className="muted small">В таблице последний из посчитанных шагов; с выбранной датой — ближайший к ней шаг рестарта.</p>
           <Plot lines={line(r => r.gas_pore_volume)} unit="м³ пор." title="Газонасыщенный поровый объём" link="sched-results" />
           <Plot lines={line(r => r.gwc_mean_area)} unit="м" title="ГВК, среднее по площади" link="sched-results" />
@@ -169,7 +185,7 @@ export default function Results({ st, setSt }: { st: AppState; setSt: (s: AppSta
         {gwNotes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
         {gwShown.map(n => { const rs = gwRows[n]; const lastD = rs.reduce((m, r) => (r.date > m ? r.date : m), ''); const cur = rs.filter(r => r.date === lastD)
           return <div key={n} style={{ overflowX: 'auto' }}>
-            <p className="muted small">{n}: на {lastD}{rs.some(r => r.date !== lastD) ? ' (график — по всем шагам)' : ''}</p>
+            <p className="muted small">{label(n)}: на {lastD}{rs.some(r => r.date !== lastD) ? ' (график — по всем шагам)' : ''}</p>
             <table className="raw"><thead><tr><th>Скважина</th><th>Колонн с газом</th><th>Сверху вниз: граница, м</th><th>Сверху вниз: интерполяция, м</th><th>Нижний газ: граница, м</th><th>Нижний газ: интерполяция, м</th><th>Пометка</th></tr></thead>
               <tbody>{cur.map(r => <tr key={r.well}><td>{r.well}</td><td className="num">{r.columns}</td><td className="num">{fmt(r.cell_top_down, 1)}</td><td className="num">{fmt(r.interp_top_down, 1)}</td>
                 <td className="num">{fmt(r.cell_lowest, 1)}</td><td className="num">{fmt(r.interp_lowest, 1)}</td>

@@ -1,20 +1,7 @@
-"""Карты ГСП: «БД по учету газа» узнаётся по имени и читается по листу «БД»."""
+"""Карты: разбор листа «БД» книги «БД по учету газа» (сами Карты суточные объёмы берут из проекта Атласа)."""
 import pandas as pd
 
 from gsp_maps import inputs
-from gsp_maps.project import detect_files
-
-
-def test_gas_db_file_is_recognised_by_name(tmp_path):
-    name = "БД_по_учету_газа.xlsx"
-    (tmp_path / name).write_bytes(b"")
-    assert detect_files(str(tmp_path)).get("gas") == str(tmp_path / name)
-
-
-def test_gas_db_name_does_not_collide_with_other_roles(tmp_path):
-    (tmp_path / "БД_по_учету_газа.xlsx").write_bytes(b"")
-    roles = detect_files(str(tmp_path))
-    assert set(roles) == {"gas"}
 
 
 def test_load_gas_db_reads_daily_rows_sorted(tmp_path):

@@ -1,4 +1,4 @@
-/* Карты ГСП: стили приложения; общая основа лежит в pxg_core/web-ui/base.css */
+/* Карты: стили приложения; общая основа лежит в pxg_core/web-ui/base.css */
 /* ---------- рабочая область ---------- */
 .workspace { padding: 22px 28px 48px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .module-head h1 { font-size: 26px; line-height: 1.2; }
@@ -58,3 +58,6 @@ button.quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--line-
 }
 @media (prefers-reduced-motion: reduce) { .dot { animation: none; } .shell { transition: none; } }
 
+.checklist { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.checklist li.ok span[aria-hidden] { color: var(--ok, #169b62); }
+.checklist li.bad span[aria-hidden] { color: var(--bad, #d55e00); }

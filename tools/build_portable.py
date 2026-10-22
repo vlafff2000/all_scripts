@@ -54,7 +54,7 @@ SKIP_TOOLS = set()
 WINDOWS_LAUNCHERS = {
     'PXG_Base.bat': 'rem База ПХГ: окно приложения (или браузер, если окно недоступно).\r\n'
                     '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base --app %*',
-    'Karty_GSP.bat': 'rem Карты ГСП: окно приложения (или браузер, если окно недоступно).\r\n'
+    'Karty.bat': 'rem Карты: окно приложения (или браузер, если окно недоступно).\r\n'
                      '"%~dp0python\\python.exe" -s -X utf8 -m gsp_maps %*',
     'Perechislit_UNRST.bat': 'rem Двойной щелчок: берёт все *.UNRST из этой папки; можно и перетащить файл на этот значок.\r\n'
                              'set FOUND=0\r\n'
@@ -84,7 +84,7 @@ WINDOWS_SUFFIX = '\r\nif errorlevel 1 pause\r\n'
 
 LINUX_LAUNCHERS = {
     'pxg_base.sh': '# База ПХГ в браузере.\nexec "$PY" -s -X utf8 -m pxg_base --browser "$@"',
-    'karty_gsp.sh': '# Карты ГСП в браузере.\nexec "$PY" -s -X utf8 -m gsp_maps --browser "$@"',
+    'karty.sh': '# Карты в браузере.\nexec "$PY" -s -X utf8 -m gsp_maps --browser "$@"',
     'perechislit_unrst.sh': '# Перечислитель UNRST: bash perechislit_unrst.sh (без аргументов берёт все *.UNRST из этой папки и из папки запуска);\n'
                             '# можно указать пути: bash perechislit_unrst.sh /путь/РАСЧЁТ.UNRST. Отчёт <имя>_keywords.txt ложится рядом с файлом.\n'
                             'START="${OLDPWD:-.}"; FOUND=0\n'
@@ -123,7 +123,7 @@ README = '''База ПХГ — переносная версия ({target})
    (например, {example}).
 2. Запустите {six} — окно приложения: выбираете модуль, заполняете форму, запускаете.
    {five} — консольное меню тех же модулей.
-3. {maps} — «Карты ГСП»: секторные диаграммы расходов газа и воды по скважинам на карте с бегунком времени.
+3. {maps} — «Карты»: секторные диаграммы расходов газа и воды по скважинам на карте с бегунком времени.
    Положение скважин берётся из карты-сетки Excel и/или из координат X, Y (tNavigator).
 
 4. {unrst} — «Перечислитель UNRST»: положите файлы расчёта .UNRST в эту папку и запустите (двойной щелчок или `bash {unrst}`);
@@ -136,12 +136,12 @@ README = '''База ПХГ — переносная версия ({target})
    Проект по умолчанию лежит в папке Скедул_ПХГ/Объект вашего профиля (переменная SCHEDULE_PXG_PROJECT меняет место).
 
 7. {shortcuts} — один раз создаёт на рабочем столе ярлыки со своим значком для каждого приложения
-   (База ПХГ, Карты ГСП, ГДМ, Перечислитель UNRST, Описание расчёта, консоль). Папку программы после этого не переносите:
+   (База ПХГ, Карты, ГДМ, Перечислитель UNRST, Описание расчёта, консоль). Папку программы после этого не переносите:
    ярлыки ссылаются на неё; перенесли — запустите {shortcuts} ещё раз. Убрать ярлыки: {shortcuts} --remove.
 
 Результаты запусков «Базы ПХГ» складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
 Другая папка результатов по умолчанию: переменная окружения PXG_RUNS_DIR.
-«Карты ГСП» сохраняют Excel и картинки в папку «Результаты карт ГСП» рядом с БД_расходы.xlsx (меняется на странице «Данные»);
+«Карты» сохраняют Excel и картинки в папку «Результаты карт ГСП» рядом с БД_расходы.xlsx (меняется на странице «Данные»);
 кэш базы расходов лежит в папке .gsp_maps вашего профиля (переменная GSP_MAPS_CACHE меняет место).
 {note}'''
 
@@ -237,7 +237,7 @@ def write_launchers(target, folder):
         for name, body in WINDOWS_LAUNCHERS.items():
             (folder / name).write_bytes((WINDOWS_PREFIX + body + WINDOWS_SUFFIX).encode('utf-8'))
         text = README.format(target='Windows', example='C:\\GasAtlas', six='PXG_Base.bat',
-                             five='PXG_Base_console.bat', maps='Karty_GSP.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', sched='GDM.bat', shortcuts='Sozdat_yarlyki.bat', note=WINDOWS_NOTE)
+                             five='PXG_Base_console.bat', maps='Karty.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', sched='GDM.bat', shortcuts='Sozdat_yarlyki.bat', note=WINDOWS_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_bytes(text.replace('\n', '\r\n').encode('utf-8-sig'))
     else:
         for name, body in LINUX_LAUNCHERS.items():
@@ -245,7 +245,7 @@ def write_launchers(target, folder):
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
-                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty_gsp.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', sched='gdm.sh', shortcuts='sozdat_yarlyki.sh', note=LINUX_NOTE)
+                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', sched='gdm.sh', shortcuts='sozdat_yarlyki.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')
 
 

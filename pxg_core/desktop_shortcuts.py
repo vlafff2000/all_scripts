@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # (имя значка, название ярлыка, запускалка Windows, запускалка Linux, нужен ли терминал)
 APPS = [
     ('pxg_base', 'База ПХГ', 'PXG_Base.bat', 'pxg_base.sh'),
-    ('karty_gsp', 'Карты ГСП', 'Karty_GSP.bat', 'karty_gsp.sh'),
+    ('karty', 'Карты', 'Karty.bat', 'karty.sh'),
     ('gdm', 'ГДМ', 'GDM.bat', 'gdm.sh'),
     ('perechislit_unrst', 'Перечислитель UNRST', 'Perechislit_UNRST.bat', 'perechislit_unrst.sh'),
     ('opisat_model', 'Описание расчёта', 'Opisat_model.bat', 'opisat_model.sh'),

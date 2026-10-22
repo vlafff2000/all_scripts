@@ -13,13 +13,11 @@ import pandas as pd
 
 from pxg_core import workspace
 
-from . import inputs, wellmap
+from . import atlas_source, inputs, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
 
-PATH_KEYS = ["db", "periods", "water", "map", "xy", "press_gsp", "press_obj", "depths", "gas"]
-LABELS = {"db": "База расходов", "periods": "Периоды работы", "water": "Замеры воды", "map": "Карта-сетка (Excel)",
-          "xy": "Координаты XY (tNavigator)", "press_gsp": "Давление по ГСП", "press_obj": "Давление по объекту",
-          "depths": "Глубины и альтитуды", "gas": "БД по учету газа (по суткам)"}
+PATH_KEYS = ["map", "atlas_storage", "atlas_project"]    # карта-сетка Excel — необязательный запасной источник положений
+LABELS = {"map": "Карта-сетка (Excel)", "atlas_storage": "Хранилище Атласа", "atlas_project": "Проект Атласа"}
 
 
 def config_file() -> Path:
@@ -33,79 +31,13 @@ def _mtime(path: str) -> float:
         return 0.0
 
 
-def is_flow_db(name: str) -> bool:
-    """База расходов по имени: «БД_расходы…» или итог «Создание базы данных расходов» Базы ПХГ
-    («Сводка_закачка_отбор_обновленный_скрипт.xlsx»)."""
-    low = name.lower().replace("_", " ")
-    return ("бд" in low and "расход" in low) or "сводка закачка отбор" in low
-
-
-def detect_files(folder: str) -> Dict[str, str]:
-    """Находит файлы в папке данных по именам (как в старом скрипте, плюс координаты XY)."""
-    out: Dict[str, str] = {}
-    if not folder or not os.path.isdir(folder):
-        return out
-    entries = sorted(os.listdir(folder))
-    low = {e: e.lower() for e in entries}
-    for e in entries:
-        path, name, isdir = os.path.join(folder, e), low[e], os.path.isdir(os.path.join(folder, e))
-        if isdir:
-            if "замер" in name or "вод" in name:
-                out.setdefault("water", path)
-            continue
-        ext = os.path.splitext(name)[1]
-        if ext in (".xlsx", ".xlsm", ".xls") and is_flow_db(name):
-            # нормированная на ПЗРГ база — итог Базы ПХГ: она важнее исходной, как в Скедуле и Атласе
-            if "db" not in out or ("нормирован" in name and "нормирован" not in out["db"].lower()):
-                out["db"] = path
-        elif ext == ".txt" and ("period" in name or "период" in name):
-            out.setdefault("periods", path)
-        elif ext == ".txt" and "давление" in name and "гсп" in name:
-            out.setdefault("press_gsp", path)
-        elif ext == ".txt" and "давление" in name and "объект" in name:
-            out.setdefault("press_obj", path)
-        elif ext in (".xlsx", ".xlsm", ".xls") and "бд" in name and "замеров" in name and "вод" in name:
-            out.setdefault("water", path)     # «БД замеров воды» Базы ПХГ — одна таблица на все месяцы
-        elif ext in (".xlsx", ".xlsm", ".xls") and "бд" in name and "давлен" in name:
-            # База давлений по замерам: одна таблица и для ГСП, и для объекта (Рпл по скважинам)
-            out.setdefault("press_gsp", path)
-            out.setdefault("press_obj", path)
-        elif ext in (".xlsx", ".xlsm", ".xls") and "бд" in name and "учету" in name and "газа" in name:
-            out.setdefault("gas", path)       # «БД по учету газа» Базы ПХГ — лист «БД», одна строка на сутки
-        elif ext in (".xlsx", ".xlsm", ".xls") and "карта" in name:
-            out.setdefault("map", path)
-        elif ext in (".xlsx", ".xlsm", ".xls") and ("глубин" in name or "перфор" in name):
-            out.setdefault("depths", path)
-        elif ext in (".txt", ".csv", ".dat", ".xlsx", ".xls", ".inc") and ("xy" in name or "координат" in name or "tnav" in name or "навигатор" in name):
-            out.setdefault("xy", path)
-    return out
-
-
-def detect_project_files() -> Dict[str, str]:
-    """Роли файлов из подпапок выбранного проекта («готовые», затем «выгрузки»); при одинаковой роли побеждает первая."""
-    merged: Dict[str, str] = {}
-    for folder in workspace.project_folders():
-        for role, path in detect_files(folder).items():
-            merged.setdefault(role, path)
-    return merged
-
-
-def water_files(spec: str) -> List[str]:
-    out: List[str] = []
-    for part in [p.strip() for p in (spec or "").splitlines() if p.strip()]:
-        if os.path.isdir(part):
-            out += [os.path.join(part, f) for f in sorted(os.listdir(part))
-                    if f.lower().endswith((".xls", ".xlsx")) and not f.startswith("~$")]
-        elif os.path.isfile(part):
-            out.append(part)
-    return out
-
-
 class Project:
     def __init__(self) -> None:
         self.paths: Dict[str, str] = {k: "" for k in PATH_KEYS}
         self.results_dir = ""
         self.store: Optional[Store] = None
+        self.atlas: Optional[atlas_source.AtlasData] = None
+        self._tables: Dict[str, object] = {}
         self.state = "idle"  # idle | loading | ready | error
         self.log: List[str] = []
         self._cache: Dict[Tuple, object] = {}
@@ -131,45 +63,72 @@ class Project:
 
     def set_paths(self, paths: Dict[str, str], results_dir: Optional[str] = None) -> None:
         with self._lock:
-            old_db = self.paths["db"]
+            old = (self.paths["atlas_storage"], self.paths["atlas_project"])
             for k in PATH_KEYS:
                 if k in paths:
                     self.paths[k] = str(paths[k] or "").strip().strip('"')
             if results_dir is not None:
                 self.results_dir = results_dir.strip()
-            if self.paths["db"] != old_db:
-                self.store, self.state = None, "idle"
+            if (self.paths["atlas_storage"], self.paths["atlas_project"]) != old:
+                self.store, self.atlas, self._tables, self.state = None, None, {}, "idle"
             self._save()
+
+    # ---------- проект Атласа ----------
+    def storage(self) -> Optional[Path]:
+        return atlas_source.storage_root(self.paths["atlas_storage"])
+
+    def atlas_projects(self) -> List[dict]:
+        return atlas_source.list_projects(self.storage())
+
+    def project_id(self) -> str:
+        """Выбранный проект Атласа; если выбора нет — самый свежий не демонстрационный с расходами (подсказка)."""
+        chosen = self.paths["atlas_project"]
+        return chosen or atlas_source.default_project(self.atlas_projects())
 
     def out_dir(self) -> Path:
         if self.results_dir:
             base = Path(self.results_dir)
-        elif self.paths["db"]:
-            base = Path(os.path.abspath(self.paths["db"])).parent / "Результаты карт ГСП"
+        elif workspace.load():
+            base = Path(workspace.load()) / "Результаты карт ГСП"
         else:
             base = Path.home() / "Результаты карт ГСП"
         base.mkdir(parents=True, exist_ok=True)
         return base
 
-    # ---------- загрузка базы ----------
+    # ---------- загрузка данных ----------
     def start_loading(self) -> None:
+        """Читает проект Атласа. Если проект в Атласе изменился (новая ревизия), данные перечитываются."""
         with self._lock:
-            if self.state == "loading" or not self.paths["db"]:
+            if self.state == "loading":
                 return
-            if self.store is not None and self.store.path == self.paths["db"]:
-                self.state = "ready"
+            pid = self.project_id()
+            root = self.storage()
+            if not pid or root is None:
+                self.state, self.log = "idle", []
                 return
+            if self.atlas is not None and self.atlas.pid == pid:
+                try:
+                    fresh = atlas_source.AtlasData(root, pid).key == self.atlas.key
+                except FileNotFoundError:
+                    fresh = False
+                if fresh and self.store is not None:
+                    self.state = "ready"
+                    return
             self.state, self.log = "loading", []
-        threading.Thread(target=self._load_db, daemon=True).start()
+        threading.Thread(target=self._load_db, args=(root, pid), daemon=True).start()
 
-    def _load_db(self) -> None:
-        path = self.paths["db"]
+    def _load_db(self, root: Path, pid: str) -> None:
         try:
-            if not os.path.isfile(path):
-                raise FileNotFoundError("Файл не найден: " + path)
             t0 = time.time()
-            store = Store.open(path, lambda m: self.log.append(m))
-            self.store = store
+            atlas = atlas_source.AtlasData(root, pid)
+            self.log.append("Читаю проект Атласа «%s»…" % atlas.name)
+            store = Store.from_raw(atlas.flow_arrays())
+            store.path = atlas.key
+            tables = {"periods": atlas.periods(), "water": atlas.water(),
+                      "press_gsp": atlas.pressure(True), "press_obj": atlas.pressure(False), "geo": atlas.geo()}
+            with self._lock:
+                self._cache.clear()
+                self.atlas, self.store, self._tables = atlas, store, tables
             self.log.append("Готово: ГСП — %d, строк — %d (%.1f с)" % (len(store.gsp_names), len(store.well), time.time() - t0))
             self.state = "ready"
         except Exception as e:  # показываем человеку, а не роняем сервер
@@ -186,25 +145,22 @@ class Project:
         return val
 
     def periods(self):
-        p = self.paths["periods"]
-        return self._memo(("periods", p), _mtime(p), lambda: inputs.load_periods(p))
+        return self._tables.get("periods", ([], []))
 
     def depths(self):
-        p = self.paths["depths"]
-        return self._memo(("depths", p), _mtime(p), lambda: inputs.load_perforations(p))
+        geo = self._tables.get("geo")
+        return (geo[2], geo[1]) if geo else ({}, {})
 
     def water(self):
-        files = water_files(self.paths["water"])
-        mt = sum(_mtime(f) for f in files) + len(files)
-        return self._memo(("water", tuple(files)), mt, lambda: inputs.load_water(files))
+        return self._tables.get("water", (pd.DataFrame(columns=["Скважина", "Месяц", "Год", "Дата_замера", "Метка_замера",
+                                                                "Водный_фактор", "Расход_воды_лч", "Примечание"]), []))
 
     def pressure(self, which: str):
-        p = self.paths["press_" + which]
-        return self._memo(("press", p), _mtime(p), lambda: inputs.load_pressure(p, which == "gsp"))
+        return self._tables.get("press_" + which, (pd.DataFrame(columns=["Дата", "Давление_бар", "Скважина"]), []))
 
     def gsp_pressure(self, which: str, gsp: str):
-        """Давление для ГСП. Замеры ГСП файла относятся к группе по номеру скважины; несколько замеров
-        за день усредняются. Если номера в файле не совпадают ни с одной скважиной базы, ряд общий."""
+        """Давление для ГСП. Замеры ГСП относятся к группе по номеру скважины; несколько замеров
+        за день усредняются. Если номера в данных не совпадают ни с одной скважиной базы, ряд общий."""
         df, warn = self.pressure(which)
         if which != "gsp" or not len(df) or self.store is None:
             return df, warn
@@ -221,8 +177,8 @@ class Project:
         return self._memo(("grid", p, gsp), _mtime(p), lambda: wellmap.read_grid(p, gsp))
 
     def xy(self):
-        p = self.paths["xy"]
-        return self._memo(("xy", p), _mtime(p), lambda: wellmap.read_xy(p))
+        geo = self._tables.get("geo")
+        return (geo[0], []) if geo else ({}, [])
 
     # ---------- проверка файлов ----------
     def gsp_meta(self) -> Dict[str, dict]:
@@ -235,12 +191,7 @@ class Project:
                 sheets = [x.lower() for x in wellmap.list_sheets(self.paths["map"])]
             except Exception:
                 sheets = []
-        xy: Dict[int, Tuple[float, float]] = {}
-        if self.paths["xy"] and os.path.isfile(self.paths["xy"]):
-            try:
-                xy = self.xy()[0]
-            except Exception:
-                xy = {}
+        xy = self.xy()[0]
         out = {}
         for g in self.store.gsp_names:
             grid = any(g.lower() in sh for sh in sheets)
@@ -249,40 +200,27 @@ class Project:
         return out
 
     def check(self) -> List[dict]:
+        """Чеклист источников: что из нужного есть в проекте Атласа. Недостающее загружается в Атласе, не здесь."""
         out = []
-        for k in PATH_KEYS:
-            p = self.paths[k]
-            item = {"id": k, "label": LABELS[k], "path": p, "ok": False, "info": ""}
-            if not p:
-                item["info"] = "не задан"
-            elif not os.path.exists(p):
-                item["info"] = "не найден"
+        a, t = self.atlas, self._tables
+        geo = t.get("geo")
+        counts = {
+            "flow": (len(self.store.well) if self.store else 0, "строк: %d, ГСП: %d" % (len(self.store.well), len(self.store.gsp_names)) if self.store else ""),
+            "periods": (len(t["periods"][0]) if "periods" in t else 0, ""),
+            "press_gsp": (len(t["press_gsp"][0]) if "press_gsp" in t else 0, ""),
+            "press_obj": (len(t["press_obj"][0]) if "press_obj" in t else 0, ""),
+            "water": (len(t["water"][0]) if "water" in t else 0, ""),
+            "xy": (len(geo[0]) if geo else 0, ""), "altitude": (len(geo[1]) if geo else 0, ""), "perf": (len(geo[2]) if geo else 0, ""),
+        }
+        for key, label in atlas_source.SOURCES:
+            n, info = counts[key]
+            if a is None:
+                out.append({"id": key, "label": label, "path": "", "ok": False, "info": "проект Атласа не открыт"})
+            elif n:
+                out.append({"id": key, "label": label, "path": "", "ok": True, "info": info or ("записей: %d" % n)})
             else:
-                try:
-                    item["ok"], item["info"] = True, self._describe(k)
-                except Exception as e:
-                    item["info"] = "не читается: %s" % e
-            out.append(item)
+                out.append({"id": key, "label": label, "path": "", "ok": False, "info": "в проекте Атласа нет"})
         return out
-
-    def _describe(self, k: str) -> str:
-        if k == "db":
-            return "загружена: %d ГСП" % len(self.store.gsp_names) if self.store else "файл есть"
-        if k == "periods":
-            return "периодов: %d" % len(self.periods()[0])
-        if k == "water":
-            df = self.water()[0]
-            return "замеров: %d, месяцев: %d" % (len(df), df["Метка_замера"].nunique() if len(df) else 0)
-        if k == "map":
-            return "листы: " + ", ".join(wellmap.list_sheets(self.paths["map"])[:6])
-        if k == "xy":
-            xy, warn = self.xy()
-            return "скважин с XY: %d" % len(xy) + ("; " + warn[0] if warn else "")
-        if k in ("press_gsp", "press_obj"):
-            df, _ = self.pressure(k[6:])
-            return "точек: %d" % len(df)
-        d, a = self.depths()
-        return "перфорации: %d, альтитуды: %d" % (len(d), len(a))
 
     # ---------- расчёты для интерфейса ----------
     def season_pressure(self, which: str, gsp: str = "") -> Dict[Tuple[int, str], float]:
@@ -329,13 +267,7 @@ class Project:
                 notes.append(str(e.args[0]))
             except Exception as e:
                 notes.append("Карта-сетка не прочитана: %s" % e)
-        xy: Dict[int, Tuple[float, float]] = {}
-        if self.paths["xy"] and os.path.isfile(self.paths["xy"]) and mode in ("auto", "xy"):
-            try:
-                xy, w = self.xy()
-                notes += w
-            except Exception as e:
-                notes.append("Файл XY не прочитан: %s" % e)
+        xy: Dict[int, Tuple[float, float]] = self.xy()[0] if mode in ("auto", "xy") else {}
         res = wellmap.layout(wells, cells, dims, xy, mode)
         res["notes"] = notes + res["notes"]
         res["has_grid"], res["has_xy"] = bool(cells), any(w in xy for w in wells)
@@ -404,6 +336,15 @@ class Project:
             return {"wells": [], "days": [], "flow": []}
         return {"wells": m["wells"].tolist(), "days": m["days"].tolist(),
                 "flow": np.round(m["flow"], 1).tolist()}
+
+    def parameter_catalog(self) -> List[dict]:
+        return self.atlas.parameters() if self.atlas is not None else []
+
+    def parameter_payload(self, table: str, column: str, agg: str, start: str, end: str) -> dict:
+        assert self.atlas is not None
+        values, warn = self.atlas.parameter_values(table, column, agg, start, end)
+        return {"table": table, "column": column, "agg": agg, "title": atlas_source.PARAM_TABLES[table],
+                "values": {str(w): v for w, v in values.items()}, "warnings": warn}
 
     def work_payload(self, gsp: str) -> dict:
         """Работа скважин по сезонам и месяцам: матрицы «скважина × сезон» и «скважина × месяц», очерёдность ввода."""

@@ -1,4 +1,4 @@
-"""«Карты ГСП»: паритет со старыми функциями скрипта карт (достаются через ast, сам скрипт не импортируется), XY, API."""
+"""«Карты»: паритет со старыми функциями скрипта карт (достаются через ast, сам скрипт не импортируется), XY, API."""
 import json
 import ast
 import os
@@ -247,7 +247,7 @@ def test_trends_flow_slope_matches_old(old, db, tmp_path, monkeypatch):
         both.to_excel(xw, sheet_name="Отборы", index=False)
         z.to_excel(xw, sheet_name="Закачка", index=False)
     pr = Project()
-    pr.set_paths({"db": str(p2)}, str(tmp_path / "out"))
+    pr.set_paths({}, str(tmp_path / "out"))
     pr.store = Store.open(str(p2))
     frames = [pr.season_frame("ГСП 1", OTBOR, s, {}) for s in pr.store.seasons("ГСП 1", OTBOR)]
     new = pr.trends(frames).set_index("Скважина")
@@ -257,6 +257,7 @@ def test_trends_flow_slope_matches_old(old, db, tmp_path, monkeypatch):
 
 
 def test_api_flow(db, tmp_path, monkeypatch):
+    pytest.importorskip("pyarrow")
     monkeypatch.setenv("GSP_MAPS_CACHE", str(tmp_path / "cache"))
     monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
     import importlib
@@ -265,16 +266,24 @@ def test_api_flow(db, tmp_path, monkeypatch):
     from gsp_maps import api, project
     importlib.reload(project)
     importlib.reload(api)
-    path, _o, _z = db
+    from gsp_atlas_storage import production, write_project
+    _path, o, z = db
     data = tmp_path / "data"
     data.mkdir()
     make_map(data / "Карта расположения скважин на ГСП.xlsx", {11: (3, 3), 12: (3, 8), 13: (9, 3), 14: (9, 8)}, sheet="ГСП 1")
-    (data / "xy_tnav.txt").write_text("W11 100 900\nW12 300 900\nW13 100 700\nW14 300 700\n", encoding="utf-8")
-    (data / "давление_по_ГСП.txt").write_text("11\t10.11.2022\t95,4\n12\t10.11.2022\t95,6\n11\t10.01.2023\t90,1\n99\t10.01.2023\t10,0\n", encoding="utf-8")
+    geo = pd.DataFrame({"well": ["11", "12", "13", "14"], "x": [100.0, 300.0, 100.0, 300.0], "y": [900.0, 900.0, 700.0, 700.0],
+                        "altitude": [80.0, float("nan"), 81.0, 82.0], "perf_top": [-1500.0, float("nan"), -1510.0, -1520.0],
+                        "perf_bottom": [-1520.0, float("nan"), -1530.0, -1540.0]})
+    response = pd.DataFrame({"well": ["11", "12", "11", "99"], "date": pd.to_datetime(["2022-11-10", "2022-11-10", "2023-01-10", "2023-01-10"]),
+                             "horizon": "Щигровский", "pressure": [97.3, 97.5, 91.9, 10.0]})
+    storage = write_project(tmp_path / "storage", {"production": production(o, z), "response": response, "well_geo": geo})
+    monkeypatch.setenv("GAS_ATLAS_STORAGE", str(storage))
+    importlib.reload(project)
+    importlib.reload(api)
     c = TestClient(api.app)
-    found = c.post("/api/scan", json={"folder": str(data)})
-    assert found.status_code == 200 and found.json()["paths"]["xy"].endswith("xy_tnav.txt")
-    assert c.post("/api/config", json={"paths": {"db": str(path)}, "resultsDir": str(tmp_path / "out")}).status_code == 200
+    assert c.post("/api/scan", json={"folder": str(data)}).status_code in (404, 405)    # отдельного импорта файлов больше нет
+    cfg = c.post("/api/config", json={"paths": {"map": str(data / "Карта расположения скважин на ГСП.xlsx")}, "resultsDir": str(tmp_path / "out")})
+    assert cfg.status_code == 200 and cfg.json()["atlas"]["project"] == "a" * 32 and not cfg.json()["atlas"]["chosen"]
     for _ in range(100):
         st = c.get("/api/state").json()
         if st["state"] != "loading":
@@ -284,8 +293,8 @@ def test_api_flow(db, tmp_path, monkeypatch):
     assert st["gspMeta"]["ГСП 1"] == {"grid": True, "xy": True} and st["gspMeta"]["ГСП 2"]["grid"] is False
     g = c.get("/api/gsp", params={"name": "ГСП 1", "mode": "auto"}).json()
     assert g["layout"]["mode"] == "xy" and g["layout"]["wells"]["11"] == {"x": 100.0, "y": 900.0, "src": "xy", "dir": "Северо-Запад"}
-    assert [s["key"] for s in g["seasons"]["Отбор"]] == ["2022-2023"] and g["seasonPressure"]["gsp"]["Отбор|2022-2023"] == pytest.approx(92.8)
-    assert g["pressure"]["gsp"]["bar"] == [95.5, 90.1]  # замеры скважин 11 и 12 за день усреднены, скважина 99 чужая
+    assert [s["key"] for s in g["seasons"]["Отбор"]] == ["2022-2023"] and g["seasonPressure"]["gsp"]["Отбор|2022-2023"] == pytest.approx(((97.4 + 91.9) / 2) * 0.980665, abs=0.01)
+    assert g["pressure"]["gsp"]["bar"] == [round(97.4 * 0.980665, 2), round(91.9 * 0.980665, 2)]  # замеры 11 и 12 за день усреднены, 99 чужая, кгс/см² → бар
     gg = c.get("/api/gsp", params={"name": "ГСП 1", "mode": "grid"}).json()
     assert gg["layout"]["mode"] == "grid"
     s = c.get("/api/season", params={"gsp": "ГСП 1", "kind": "Отбор", "season": "2022-2023"}).json()
@@ -318,7 +327,6 @@ def test_share_tables_match_old(old, db, tmp_path, monkeypatch, with_water):
     monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
     from gsp_maps.project import Project
     path, o, z = db
-    paths = {"db": str(path)}
     df_water = None
     if with_water:
         wd = tmp_path / "вода"
@@ -326,11 +334,13 @@ def test_share_tables_match_old(old, db, tmp_path, monkeypatch, with_water):
         for name, k in (("ноябрь 2022", 1), ("январь 2023", 2)):
             rows = [["№", "Вынос", "Расход газа", "Вода, л/ч"]] + [[w, "%d/1000" % (10 * k + w % 5), 20000, 100.0 * k] for w in (11, 12, 13)]
             pd.DataFrame(rows).to_excel(str(wd / ("ГСП замеры %s.xlsx" % name)), index=False, header=False)
-        paths["water"] = str(wd)
-        df_water = old["load_water_files"]([str(f) for f in sorted(wd.iterdir())])
+        files = [str(f) for f in sorted(wd.iterdir())]
+        df_water = old["load_water_files"](files)
     pr = Project()
-    pr.set_paths(paths, str(tmp_path / "out"))
+    pr.set_paths({}, str(tmp_path / "out"))
     pr.store = Store.open(str(path))
+    if with_water:
+        pr._tables["water"] = inputs.load_water(files)      # разбор старых форматов замеров проверяется на старом скрипте
     dirs = {11: "Север", 12: "Юг", 13: "Север", 14: "Восток"}
     mine = pr.share_tables("ГСП 1", dirs)
     old_o, old_z = old["process_main_data"](o.copy(), z.copy(), "ГСП 1")
@@ -358,7 +368,7 @@ def _project(tmp_path, monkeypatch, path):
     monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
     from gsp_maps.project import Project
     pr = Project()
-    pr.set_paths({"db": str(path)}, str(tmp_path / "out"))
+    pr.set_paths({}, str(tmp_path / "out"))
     pr.store = Store.open(str(path))
     return pr
 
@@ -417,7 +427,6 @@ def test_gsp_key_scheme():
 def test_base_pressure_xlsx_is_read_as_rpl_in_bar(tmp_path):
     """База давлений по замерам (xlsx): Рпл переводится из кгс/см² в бары, пустые и битые строки пропускаются."""
     import pandas as pd
-    from gsp_maps.project import detect_files
 
     path = tmp_path / "БД_давлений_по_замерам.xlsx"
     pd.DataFrame({
@@ -432,9 +441,6 @@ def test_base_pressure_xlsx_is_read_as_rpl_in_bar(tmp_path):
     assert df["Давление_бар"].tolist() == [round(100.0 * 0.980665, 2), round(90.0 * 0.980665, 2)]
     assert df["Скважина"].tolist() == [11, 11]
     assert warn
-
-    found = detect_files(str(tmp_path))
-    assert found["press_gsp"] == str(path) and found["press_obj"] == str(path)
 
 
 def test_object_pressure_from_base_is_daily_mean_of_production_wells(tmp_path):
@@ -455,22 +461,9 @@ def test_object_pressure_from_base_is_daily_mean_of_production_wells(tmp_path):
     assert sorted(gsp["Скважина"].tolist()) == [4, 10, 56, 83]
 
 
-def test_flow_db_by_base_name_and_normalized_wins(tmp_path):
-    """Итог «Создание базы данных расходов» Базы ПХГ узнаётся по имени; нормированная база важнее исходной."""
-    from gsp_maps.project import detect_files
-
-    for name in ("Сводка_закачка_отбор_обновленный_скрипт.xlsx", "Часы_ненулевые_расход_нулевой.xlsx"):
-        (tmp_path / name).write_bytes(b"x")
-    assert detect_files(str(tmp_path))["db"].endswith("Сводка_закачка_отбор_обновленный_скрипт.xlsx")
-    (tmp_path / "БД_расходы.xlsx").write_bytes(b"x")
-    (tmp_path / "БД_расходы_нормированная_ПЗРГ.xlsx").write_bytes(b"x")
-    assert detect_files(str(tmp_path))["db"].endswith("БД_расходы_нормированная_ПЗРГ.xlsx")
-
-
 def test_base_water_xlsx_is_read_as_monthly_flow_in_lh(tmp_path):
     """«БД замеров воды» Базы ПХГ: расход м³/сут переходит в л/ч; «Неизвестно» без примечания — без нуля."""
     import pandas as pd
-    from gsp_maps.project import detect_files
 
     path = tmp_path / "БД_замеров_воды.xlsx"
     pd.DataFrame({
@@ -491,4 +484,3 @@ def test_base_water_xlsx_is_read_as_monthly_flow_in_lh(tmp_path):
     assert first["Водный_фактор"] == 0.5
     unknown = df.iloc[1]
     assert unknown["Примечание"] == "песок" and pd.isna(unknown["Расход_воды_лч"])
-    assert detect_files(str(tmp_path))["water"] == str(path)
