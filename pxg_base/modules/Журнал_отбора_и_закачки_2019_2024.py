@@ -332,12 +332,21 @@ def check_calculations(df):
         print(f"Финальное накопление за месяц: {final_monthly:.3f} млн м³")
         print(f"Совпадение: {abs(monthly_total - final_monthly) < 0.001}")
 
+def parse_one_file(file_path, year, month):
+    """Разбор одного файла; ошибка по файлу не останавливает остальные (как раньше)."""
+    try:
+        return parse_excel_with_daily_data(file_path, year, month)
+    except Exception as e:
+        print(f"  Ошибка обработки {os.path.basename(file_path)}: {e}")
+        return []
+
 def main():
     base_path = input("Путь к папке «Журнал учёта работы скважин ПХГ (прил.4)»: ").strip().strip('"')
     
     all_data = []
     
     # Обрабатываем годы с 2019 по 2024
+    jobs = []
     for year in range(2019, 2025):
         year_path = os.path.join(base_path, str(year))
         
@@ -362,15 +371,15 @@ def main():
                         print(f"  Пропускаем {file_name} - формат xls (будет обработан отдельно)")
                         continue
                         
-                    file_path = os.path.join(year_path, file_name)
-                    
-                    # Парсим файл
-                    well_data = parse_excel_with_daily_data(file_path, year, month)
-                    all_data.extend(well_data)
-                    
+                    jobs.append((os.path.join(year_path, file_name), year, month))
                 except (IndexError, ValueError, Exception) as e:
                     print(f"  Ошибка обработки {file_name}: {e}")
                     continue
+    
+    # файлы независимы: разбираются параллельно на всех ядрах, результат и вывод идут в порядке файлов
+    from pxg_core.parallel import map_module_function
+    for well_data in map_module_function(__file__, "parse_one_file", jobs, parse_one_file):
+        all_data.extend(well_data)
     
     # Создаем итоговый DataFrame
     if all_data:

@@ -271,6 +271,27 @@ class DateCorrector:
         return df_corrected, corrections_df
 
 
+def load_one_file(input_file):
+    """Чтение одного файла ГДИ и его очистка (то, что не зависит от остальных файлов); None - файл не прочитан."""
+    # Читаем Excel файл - сначала пытаемся определить тип формата
+    df = read_excel_file(input_file)
+    if df is None:
+        return None
+    # 1. СНАЧАЛА преобразуем экспоненциальные числа (пока они еще текст)
+    df = convert_exponential_text_to_number(df)
+    # 2. Потом очистка от апострофов
+    df = clean_apostrophes(df)
+    # 3. Очистка столбца ГСП
+    df = clean_gsp_column(df)
+    # 4. Исправляем некорректные значения ГСП
+    df = fix_gsp_values(df)
+    # 5. Заменяем точки на запятые в числах
+    df = replace_dots_with_commas_in_numbers(df)
+    # Добавляем информацию о источнике данных
+    df['Источник_данных'] = os.path.basename(input_file)
+    return df
+
+
 def process_wells_data(input_files, output_file, periods_file=None, gsp_mapping_file=None):
     """
     Функция для обработки данных скважин из нескольких файлов
@@ -316,33 +337,13 @@ def process_wells_data(input_files, output_file, periods_file=None, gsp_mapping_
                 print(f"\n⚠️ Файл распределения ГСП не найден: {gsp_mapping_file}")
             print(f"ГСП будет заполняться только из данных скважин")
 
-        for input_file in input_files:
+        # файлы независимы: читаются и чистятся параллельно на всех ядрах, результат и вывод идут в порядке файлов
+        from pxg_core.parallel import map_module_function
+        loaded = map_module_function(__file__, "load_one_file", [(f,) for f in input_files], load_one_file)
+        for input_file, df in zip(input_files, loaded):
             print(f"Обрабатывается файл: {input_file}")
-
-            # Читаем Excel файл - сначала пытаемся определить тип формата
-            df = read_excel_file(input_file)
-
             if df is not None:
-                # 1. СНАЧАЛА преобразуем экспоненциальные числа (пока они еще текст)
-                df = convert_exponential_text_to_number(df)
-
-                # 2. Потом очистка от апострофов
-                df = clean_apostrophes(df)
-
-                # 3. Очистка столбца ГСП
-                df = clean_gsp_column(df)
-
-                # 4. Исправляем некорректные значения ГСП
-                df = fix_gsp_values(df)
-
-                # 5. Заменяем точки на запятые в числах
-                df = replace_dots_with_commas_in_numbers(df)
-
                 print(f"  Загружено строк: {len(df)}, столбцов: {len(df.columns)}")
-
-                # Добавляем информацию о источнике данных
-                df['Источник_данных'] = os.path.basename(input_file)
-
                 all_data.append(df)
             else:
                 print(f"  Не удалось прочитать файл: {input_file}")
