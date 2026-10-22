@@ -31,8 +31,8 @@ jobs:
       - name: Run from the unpacked archive on generated source files
         run: |
           mkdir t && cd t
-          python -c "import sys,zipfile,tarfile; p=sys.argv[1]; zipfile.ZipFile(p).extractall('.') if p.endswith('.zip') else tarfile.open(p).extractall('.')" ../dist/PXG_Base_portable_*
-          cd PXG_Base
+          python -c "import sys,zipfile,tarfile; p=sys.argv[1]; zipfile.ZipFile(p).extractall('.') if p.endswith('.zip') else tarfile.open(p).extractall('.')" ../dist/Ishodnye_dannye_portable_*
+          cd Ishodnye_dannye
           PY="$PWD/python/bin/python3.13"; [ -f python/python.exe ] && PY="$PWD/python/python.exe"
           export PYTHONNOUSERSITE=1 PYTHONPATH="$PWD"
           "$PY" -s -m pxg_base.testdata.flows data
@@ -61,6 +61,6 @@ jobs:
           ls ../desk | grep -c . | grep -qx 6
       - uses: actions/upload-artifact@v4
         with:
-          name: PXG_Base_portable_${{ matrix.target }}
-          path: dist/PXG_Base_portable_*
+          name: Ishodnye_dannye_portable_${{ matrix.target }}
+          path: dist/Ishodnye_dannye_portable_*
           compression-level: 0

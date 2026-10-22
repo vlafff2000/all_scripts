@@ -33,7 +33,7 @@ def pick(arg: str):
 
 def serve(port: int = 8766) -> int:
     import uvicorn
-    print("«База ПХГ» открыта на http://127.0.0.1:%d (остановить: Ctrl+C)" % port)
+    print("«Работа с исходными данными» открыта на http://127.0.0.1:%d (остановить: Ctrl+C)" % port)
     uvicorn.run("pxg_base.api:app", host="127.0.0.1", port=port, log_level="warning")
     return 0
 

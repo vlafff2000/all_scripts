@@ -1,7 +1,7 @@
-"""Build a portable «База ПХГ» folder: its own CPython (3.13 for Windows and Linux) + the newest libraries that exist for it + the application.
+"""Build a portable «Работа с исходными данными» folder: its own CPython (3.13 for Windows and Linux) + the newest libraries that exist for it + the application.
 
-    python tools/build_portable.py windows   ->  dist/PXG_Base_portable_windows_x64.zip
-    python tools/build_portable.py linux     ->  dist/PXG_Base_portable_linux_x64.tar.gz
+    python tools/build_portable.py windows   ->  dist/Ishodnye_dannye_portable_windows_x64.zip
+    python tools/build_portable.py linux     ->  dist/Ishodnye_dannye_portable_linux_x64.tar.gz
 
 The target computer needs neither Python, nor pip, nor the internet: unpack and start the launcher.
 The build machine needs the internet and pip (any OS, Python 3.9+). Packages are the newest releases of
@@ -27,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS = ROOT / 'requirements.txt'
-NAME = 'PXG_Base'
+NAME = 'Ishodnye_dannye'
 PBS = ('https://github.com/astral-sh/python-build-standalone/releases/download/20261003/'
        'cpython-{}%2B20261003-{}-install_only.tar.gz')
 
@@ -52,7 +52,7 @@ SDIST_ONLY = {'proxy-tools', 'odfpy'}  # чистый Python, опубликов
 SKIP_TOOLS = set()
 
 WINDOWS_LAUNCHERS = {
-    'PXG_Base.bat': 'rem База ПХГ: окно приложения (или браузер, если окно недоступно).\r\n'
+    'Ishodnye_dannye.bat': 'rem Работа с исходными данными: окно приложения (или браузер, если окно недоступно).\r\n'
                     '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base --app %*',
     'Karty.bat': 'rem Карты: окно приложения (или браузер, если окно недоступно).\r\n'
                      '"%~dp0python\\python.exe" -s -X utf8 -m gsp_maps %*',
@@ -75,7 +75,7 @@ WINDOWS_LAUNCHERS = {
     'Sozdat_yarlyki.bat': 'rem Создаёт ярлыки со значками на рабочем столе (Remove: --remove).\r\n'
                           '"%~dp0python\\python.exe" -s -X utf8 -m pxg_core.desktop_shortcuts %*\r\n'
                           'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
-    'PXG_Base_console.bat': 'rem База ПХГ: консольное меню модулей.\r\n'
+    'Ishodnye_dannye_console.bat': 'rem Работа с исходными данными: консольное меню модулей.\r\n'
                             '"%~dp0python\\python.exe" -s -X utf8 -m pxg_base %*',
 }
 WINDOWS_PREFIX = ('@echo off\r\nchcp 65001 >nul\r\ncd /d "%~dp0"\r\n'
@@ -83,7 +83,7 @@ WINDOWS_PREFIX = ('@echo off\r\nchcp 65001 >nul\r\ncd /d "%~dp0"\r\n'
 WINDOWS_SUFFIX = '\r\nif errorlevel 1 pause\r\n'
 
 LINUX_LAUNCHERS = {
-    'pxg_base.sh': '# База ПХГ в браузере.\nexec "$PY" -s -X utf8 -m pxg_base --browser "$@"',
+    'ishodnye_dannye.sh': '# Работа с исходными данными в браузере.\nexec "$PY" -s -X utf8 -m pxg_base --browser "$@"',
     'karty.sh': '# Карты в браузере.\nexec "$PY" -s -X utf8 -m gsp_maps --browser "$@"',
     'perechislit_unrst.sh': '# Перечислитель UNRST: bash perechislit_unrst.sh (без аргументов берёт все *.UNRST из этой папки и из папки запуска);\n'
                             '# можно указать пути: bash perechislit_unrst.sh /путь/РАСЧЁТ.UNRST. Отчёт <имя>_keywords.txt ложится рядом с файлом.\n'
@@ -108,12 +108,12 @@ LINUX_LAUNCHERS = {
     'sozdat_yarlyki.sh': '# Ярлыки со значками на рабочем столе: bash sozdat_yarlyki.sh (убрать: bash sozdat_yarlyki.sh --remove).\n'
                          '"$PY" -s -X utf8 -m pxg_core.desktop_shortcuts "$@"\n'
                          'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
-    'pxg_base_console.sh': '# База ПХГ: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
+    'ishodnye_dannye_console.sh': '# Работа с исходными данными: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
                 'unset PYTHONHOME PYTHONPATH\nexport PYTHONNOUSERSITE=1 PYTHONUTF8=1\nPY=python/bin/python3.13\n')
 
-README = '''База ПХГ — переносная версия ({target})
+README = '''Работа с исходными данными — переносная версия ({target})
 =========================================
 
 Ничего устанавливать не нужно: Python и все библиотеки уже лежат в папке python.
@@ -136,7 +136,7 @@ README = '''База ПХГ — переносная версия ({target})
    Проект по умолчанию лежит в папке Скедул_ПХГ/Объект вашего профиля (переменная SCHEDULE_PXG_PROJECT меняет место).
 
 7. {shortcuts} — один раз создаёт на рабочем столе ярлыки со своим значком для каждого приложения
-   (База ПХГ, Карты, ГДМ, Перечислитель UNRST, Описание расчёта, консоль). Папку программы после этого не переносите:
+   (Работа с исходными данными, Карты, ГДМ, Перечислитель UNRST, Описание расчёта, консоль). Папку программы после этого не переносите:
    ярлыки ссылаются на неё; перенесли — запустите {shortcuts} ещё раз. Убрать ярлыки: {shortcuts} --remove.
 
 Результаты запусков «Базы ПХГ» складываются в папку pxg_runs рядом с программой (или в папку, которую укажете в форме).
@@ -154,7 +154,7 @@ python\\python.exe в этой папке (сборка python-build-standalone,
 LINUX_NOTE = '''
 Приложение открывается в браузере по умолчанию. Если браузер не открылся,
 откройте адрес, который программа напечатала в терминале.
-Если файл не запускается двойным щелчком: chmod +x *.sh, затем ./pxg_base.sh (на РЕД ОС без аргументов: bash gdm.sh в папке с файлами)
+Если файл не запускается двойным щелчком: chmod +x *.sh, затем ./ishodnye_dannye.sh (на РЕД ОС без аргументов: bash gdm.sh в папке с файлами)
 '''
 
 
@@ -236,8 +236,8 @@ def write_launchers(target, folder):
     if target == 'windows':
         for name, body in WINDOWS_LAUNCHERS.items():
             (folder / name).write_bytes((WINDOWS_PREFIX + body + WINDOWS_SUFFIX).encode('utf-8'))
-        text = README.format(target='Windows', example='C:\\GasAtlas', six='PXG_Base.bat',
-                             five='PXG_Base_console.bat', maps='Karty.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', sched='GDM.bat', shortcuts='Sozdat_yarlyki.bat', note=WINDOWS_NOTE)
+        text = README.format(target='Windows', example='C:\\GasAtlas', six='Ishodnye_dannye.bat',
+                             five='Ishodnye_dannye_console.bat', maps='Karty.bat', unrst='Perechislit_UNRST.bat', descr='Opisat_model.bat', sched='GDM.bat', shortcuts='Sozdat_yarlyki.bat', note=WINDOWS_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_bytes(text.replace('\n', '\r\n').encode('utf-8-sig'))
     else:
         for name, body in LINUX_LAUNCHERS.items():
@@ -245,20 +245,20 @@ def write_launchers(target, folder):
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
-                             six='pxg_base.sh', five='pxg_base_console.sh', maps='karty.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', sched='gdm.sh', shortcuts='sozdat_yarlyki.sh', note=LINUX_NOTE)
+                             six='ishodnye_dannye.sh', five='ishodnye_dannye_console.sh', maps='karty.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', sched='gdm.sh', shortcuts='sozdat_yarlyki.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')
 
 
 def archive(target, folder, out):
     out.mkdir(parents=True, exist_ok=True)
     if target == 'windows':
-        path = out / 'PXG_Base_portable_windows_x64.zip'
+        path = out / 'Ishodnye_dannye_portable_windows_x64.zip'
         with zipfile.ZipFile(str(path), 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
             for item in sorted(folder.rglob('*')):
                 if item.is_file():
                     z.write(str(item), str(Path(NAME) / item.relative_to(folder)))
     else:
-        path = out / 'PXG_Base_portable_linux_x64.tar.gz'
+        path = out / 'Ishodnye_dannye_portable_linux_x64.tar.gz'
         with tarfile.open(str(path), 'w:gz') as t:
             t.add(str(folder), arcname=NAME)
     log('Готово: {} ({:.0f} МБ)'.format(path, path.stat().st_size / 2**20))

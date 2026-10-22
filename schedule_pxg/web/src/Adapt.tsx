@@ -105,7 +105,7 @@ export default function Adapt() {
 
       <section className="card">
         <div className="step-head"><span className="step-n">1</span><h2>База ГДИ</h2></div>
-        <p className="lead">Файл, который собрала «База ПХГ» (модуль «Преобразование таблиц ГДИ в базу»). Коэффициенты a и b берутся не из файла, а считаются заново по режимам.</p>
+        <p className="lead">Файл, который собрала «Работа с исходными данными» (модуль «Преобразование таблиц ГДИ в базу»). Коэффициенты a и b берутся не из файла, а считаются заново по режимам.</p>
         <div className="row">
           <label className="grow">Файл<input value={db} onChange={e => setDb(e.target.value)} placeholder="Путь к БД ГДИ (.xlsx)" /></label>
           <button onClick={pick} disabled={busy}>Выбрать файл</button>
