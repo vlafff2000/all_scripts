@@ -32,7 +32,7 @@ MIN_RUN_DAYS = 5               # режим короче этого срока �
 # ключи точек, как в `atlas/engine/core/exclusions.py: KEYS` (текстовые поля; дата; числовые ключи не нужны этим таблицам)
 KEYS = {"production": ["kind", "well", "date"], "response": ["well", "date", "horizon"], "object_pressure": ["date"],
         "operations": ["well", "date", "kind"], "water": ["well", "date"], "bottom": ["well", "date"],
-        "annulus": ["well", "date"], "ggh": ["well", "date"], "elpro": ["kind", "group", "well", "date", "np"]}
+        "annulus": ["well", "date"], "gis_packs": ["well", "date", "pack"], "gis_intervals": ["well", "date", "pack", "from_m"], "ggh": ["well", "date"], "elpro": ["kind", "group", "well", "date", "np"]}
 # таблицы Атласа, которые можно положить на карту по скважинам (параметр); без номера скважины — нет
 PARAM_TABLES = {"production": "Расходы по скважинам", "response": "Отклик: давления и уровни", "operations": "Режимы работы",
                 "water": "Вода по скважинам", "bottom": "Забой", "construction": "Конструкция скважины", "gdi": "ГДИ",
