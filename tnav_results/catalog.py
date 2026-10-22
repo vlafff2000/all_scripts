@@ -5,12 +5,38 @@
 """
 from __future__ import annotations
 
+import json
 import os
 from typing import Dict, List, Sequence
 
 EXTS = ("EGRID", "INIT", "SMSPEC", "UNSMRY", "UNRST", "RSSPEC")
 SUMMARY = ("SMSPEC", "UNSMRY")                 # нужны для давлений и дебитов
 INDICATORS = ("EGRID", "INIT", "UNRST")        # нужны для газонасыщенного объёма и ГВК (SGAS в UNRST)
+
+
+def folders_path() -> str:
+    """Список папок с результатами общий для всех программ пользователя (как настройки проводника)."""
+    home = os.environ.get("PXG_HOME") or os.path.join(os.path.expanduser("~"), ".pxg")
+    return os.path.join(home, "tnav_folders.json")
+
+
+def load_folders() -> List[str]:
+    try:
+        with open(folders_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    return [str(x) for x in data] if isinstance(data, list) else []
+
+
+def save_folders(folders: Sequence[str]) -> None:
+    """Пишет список папок. Нет прав на запись — OSError, его показывает API."""
+    path = folders_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(list(folders), f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
 
 
 def model_entry(anchor: str, files: Dict[str, str]) -> dict:

@@ -117,6 +117,7 @@ def test_models_catalog_and_select(tmp_path, monkeypatch):
     from tnav_results import catalog
     folder = str(tmp_path / "proj")
     monkeypatch.setattr(api, "FOLDER", folder)
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
     root = tmp_path / "runs"
     for sub in ("a/base", "a/gas_v2", "b"):
         (root / sub).mkdir(parents=True)
@@ -134,6 +135,7 @@ def test_models_catalog_and_select(tmp_path, monkeypatch):
     sel = c.post("/api/models/select", json={"selected": [gas["id"]]}).json()
     assert [m["id"] for m in sel["models"] if m["selected"]] == [gas["id"]]
     assert Project.load(folder).models["selected"] == [gas["id"]]
+    assert catalog.load_folders() == [str(root)]          # папки общие для программ, в проекте не хранятся
     # старый путь: показатели по ?model= без сценария
     assert c.get("/api/results", params={"model": gas["id"]}).json()["steps"] == 2
     assert c.get("/api/results/series", params={"model": gas["id"], "keyword": "WBHP", "objects": "W1"}).json()["series"]["W1"]["values"] == [100.0, 101.0]

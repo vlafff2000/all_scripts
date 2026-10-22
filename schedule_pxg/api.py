@@ -928,14 +928,15 @@ def _model_path(request: Request, p: Project) -> str:
 
 def _models_view(p: Project) -> dict:
     sel = list(p.models.get("selected", []))
-    found = tnav_catalog.scan(p.models.get("folders", []))
+    folders = tnav_catalog.load_folders()
+    found = tnav_catalog.scan(folders)
     ids = {m["id"] for m in found}
     # выбранные модели вне папок (старые привязки, файлы из другой папки) тоже показываем
     extra = [tnav_catalog.model_entry(x, results.find_files(x)) for x in sel if x not in ids and results.find_files(x)]
     models = found + extra
     for m in models:
         m["selected"] = m["id"] in sel
-    return {"folders": list(p.models.get("folders", [])), "models": models}
+    return {"folders": folders, "models": models}
 
 
 async def models_get(request: Request):
@@ -944,15 +945,16 @@ async def models_get(request: Request):
 
 async def models_folders(request: Request):
     b = await request.json()
-    p = _project()
     folders = []
     for f in b.get("folders") or []:
         f = _clean(f)
         if f and f not in folders:
             folders.append(f)
-    p.models["folders"] = folders
-    p.save(FOLDER)
-    return JSONResponse(await run_in_threadpool(lambda: _models_view(p)))
+    try:
+        await run_in_threadpool(tnav_catalog.save_folders, folders)
+    except OSError as e:
+        return _err("Не удалось сохранить список папок: %s" % e)
+    return JSONResponse(await run_in_threadpool(lambda: _models_view(_project())))
 
 
 async def models_select(request: Request):

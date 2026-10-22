@@ -45,7 +45,7 @@ class Project:
         self.control: dict = {}  # режим управления и лимиты (control.Control.to_dict)
         self.scenarios: dict = {}  # сценарии и ветви (scenarios.Scenarios.to_dict)
         self.results: Dict[str, str] = {}  # сценарий -> путь к модели с результатами расчёта (старое; читается для миграции в models)
-        self.models: dict = {}  # папки с результатами (folders) и выбранные для показа модели (selected, пути файлов модели); см. tnav_results.catalog
+        self.models: dict = {}  # выбранные для показа модели (selected, пути файлов модели); папки — общие, tnav_results.catalog.load_folders
         self.averaging: dict = {}  # выбор комбинаций лет, исключения, ручные доли (averaging.Averaging.to_dict)
         self.adapt: dict = {}  # адаптация по ГДИ: db (путь к БД ГДИ), cols, settings (gdi_adapt.selection.Settings), overrides, config (поля gdi_adapt.config.Config), scenario
         self.sources: dict = {}  # источники проекта: flows (база расходов), groups (разбивка на группы), daily_total (эталон); см. sources.py
