@@ -143,3 +143,26 @@ def test_no_storage_is_idle_with_clear_checklist(tmp_path, monkeypatch):
     pr = Project()
     pr.start_loading()
     assert pr.state == "idle" and all(not c["ok"] for c in pr.check())
+
+
+def test_any_atlas_numeric_column_is_a_map_parameter(tmp_path):
+    response = pd.DataFrame({"well": ["11", "11", "12"], "date": pd.to_datetime(["2025-11-01", "2025-11-05", "2025-11-03"]),
+                             "horizon": "Щигровский", "pressure": [100.0, 120.0, 90.0], "level": [1.0, 2.0, 3.0]})
+    ops = pd.DataFrame({"well": ["11", "12"], "date": pd.to_datetime(["2025-11-01", "2025-11-03"]), "kind": "withdrawal",
+                        "work_hours": [24.0, 12.0]})
+    ids = atlas_source.point_ids(response, "response")
+    data = open_data(tmp_path, {"production": prod(), "response": response, "operations": ops},
+                     settings={"excluded_points": {ids.iloc[1] + ":pressure": {}}})
+    names = {(p["table"], p["column"]) for p in data.parameters()}
+    assert {("response", "pressure"), ("response", "level"), ("operations", "work_hours")} <= names
+    assert ("response", "well") not in names and ("response", "date") not in names
+    mean, _ = data.parameter_values("response", "level", "mean")
+    assert mean == {11: 1.5, 12: 3.0}
+    last, _ = data.parameter_values("response", "pressure", "last")
+    assert last == {11: 100.0, 12: 90.0}          # исключённая точка 120 — пропуск, а не значение
+    part, _ = data.parameter_values("response", "level", "sum", "2025-11-02", "2025-11-30")
+    assert part == {11: 2.0, 12: 3.0}
+    hours, _ = data.parameter_values("operations", "work_hours", "count")
+    assert hours == {11: 1, 12: 1}
+    none, warn = data.parameter_values("response", "nope")
+    assert none == {} and warn
