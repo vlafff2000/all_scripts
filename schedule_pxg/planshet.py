@@ -180,7 +180,7 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
         notes.append("Эталонный суточный объём не задан: срез модели взят на дату замера")
 
     def profiles(day, ws):
-        rows, _info = results.well_profile(model_path, dt.datetime.combine(day, dt.time()), ws)
+        rows, _info = results.well_profile(model_path, dt.datetime.combine(day, dt.time()), ws, thr)
         return {r["well"]: r["cells"] for r in rows}
 
     out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names})

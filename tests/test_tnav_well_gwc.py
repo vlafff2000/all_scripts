@@ -107,3 +107,22 @@ def test_well_profile_columns_and_perforation(tmp_path):
     step = list(iter_restart_steps(ur))[0]
     prof, missing = wells_profile_at(load_model(egrid), ur, step, ["OBS1", "X"])
     assert [x.well for x in prof] == ["OBS1"] and missing == ["X"] and prof[0].cells
+
+
+def test_profile_gwc_is_old_column_gwc_and_pack_logic_matches(tmp_path):
+    """Планшет и сравнение не считают ГВК своим способом: профиль несёт результат column_gwc, а gwc_in_pack по всей колонне ему равен."""
+    from schedule_pxg.gwc_compare import gwc_in_pack
+    from tnav_results.well_gwc import well_profile
+    m = _model(tmp_path)
+    thr = [0.3, 0.3, 0.3, 0.01, 0.3, 0.3, 0.3, 0.3, 0.3, 0.01, 0.3, 0.3]
+    for col, cells in (((0, 0), [(0, 0, 0)]), ((1, 0), [(1, 0, 1)]), ((1, 1), [(1, 1, 0)])):
+        p = well_profile(m, SG, "W", cells, None, thr)
+        old = column_gwc(m, SG, thr, col)
+        assert p.gwc == old and p.column == col
+        z, status = gwc_in_pack([c._asdict() for c in p.cells], 0.01, -900.0, -1100.0)         # пачка шире колонны
+        assert z == old.top_down.cell                                                         # те же границы ячеек и та же Sgr по ячейкам
+        assert (status == "не достигнут") == old.top_down.at_grid_edge
+    sg = list(SG)
+    sg[1], sg[5], sg[9] = 0.8, 0.0, 0.7                                                       # разорванный контакт: берётся «сверху вниз», как в column_gwc
+    p = well_profile(m, sg, "W", [(1, 0, 0)], None, [0.3] * 12)
+    assert gwc_in_pack([c._asdict() for c in p.cells], 0.01, -900.0, -1100.0)[0] == p.gwc.top_down.cell == -1010.0

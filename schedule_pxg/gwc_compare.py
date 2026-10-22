@@ -5,7 +5,7 @@
   начавшейся в сентябре–декабре года замера;
 * весна (март–май) — последний день паузы после остановки отбора: конец первой паузы, начавшейся в марте–мае;
 * иначе (нет эталонного суточного объёма, месяц вне сезонов) — дата самого замера.
-ГВК модели в пачке — низ газовой пачки от кровли газа внутри пачки, газ = Sg выше порога. Если газ идёт до подошвы пачки,
+ГВК модели в пачке — низ газовой пачки от кровли газа внутри пачки, газ = Sg выше критической Sgr ячейки (`thr` в ячейке: SGCR из INIT, иначе порог из настроек) — как в tnav_results.well_gwc.column_gwc; для колонны целиком результат совпадает с ним (тест). Если газ идёт до подошвы пачки,
 контакт «не достигнут», если газа в пачке нет — «газа нет»: такие пары в статистику не входят и считаются отдельно.
 Глубины — а.о., отрицательные; Δ = модель − факт, м (плюс — контакт модели выше факта).
 """
@@ -58,14 +58,14 @@ def gwc_in_pack(cells: Sequence[dict], thr: float, top: float, bottom: float) ->
     """ГВК модели внутри пачки [bottom, top] (а.о., top выше): низ газовой пачки от кровли газа; статус — OK / «не достигнут» / «газа нет»."""
     part = [c for c in cells if c["bottom"] < top and c["top"] > bottom]
     part.sort(key=lambda c: -c["top"])
-    i = next((k for k, c in enumerate(part) if c["sg"] > thr), None)
+    i = next((k for k, c in enumerate(part) if c["sg"] > c.get("thr", thr)), None)
     if i is None:
         return None, NO_GAS
     k = i
-    while k + 1 < len(part) and part[k + 1]["sg"] > thr and abs(part[k + 1]["top"] - part[k]["bottom"]) < 0.5:
+    while k + 1 < len(part) and part[k + 1]["sg"] > part[k + 1].get("thr", thr) and abs(part[k + 1]["top"] - part[k]["bottom"]) < 0.5:
         k += 1
     z = max(part[k]["bottom"], bottom)
-    return z, (NOT_REACHED if k == len(part) - 1 and part[k]["bottom"] <= bottom + 0.5 else OK)
+    return z, (NOT_REACHED if k == len(part) - 1 else OK)
 
 
 def stats(deltas: Sequence[float]) -> dict:
