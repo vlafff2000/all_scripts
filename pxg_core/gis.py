@@ -41,6 +41,7 @@ _TOP_RE = re.compile(r"^кровля\s*(\d*)$", re.I)
 _DATE_RE = re.compile(r"([А-Яа-яЁё]{2,})\.?\s*(\d{4})")
 _YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})\s*г")
 _WELL_RE = re.compile(r"№\s*(\d+)")
+_SUM_RE = re.compile(r"SUM\(\s*[A-Z](\d+)(?::[A-Z](\d+))?\s*\)", re.I)
 
 
 # ----------------------------------------------------------------------------------------------- даты
@@ -367,6 +368,28 @@ def _classify_b(row: Row, b_cached) -> None:
         row.note = s
 
 
+def _fix_shifted_dates(blocks: List[Block], issues: List[Issue]) -> None:
+    """Дата записана строкой ниже первого интервала замера (бывает после вставки строк): Excel считал замер по диапазону,
+    который начинается выше строки с датой (SUM(I24:I27) при дате в строке 25). Строки между началом диапазона и датой
+    переходят в этот замер; в «Проверку» идёт заметка."""
+    for prev, b in zip(blocks, blocks[1:]):
+        if not b.rows:
+            continue
+        head = b.rows[0]
+        m = _SUM_RE.search(head.xf.get("K", "") or head.xf.get("H", ""))
+        start = int(m.group(1)) if m else head.xl_row
+        moved = [r for r in prev.rows if start <= r.xl_row < head.xl_row]
+        if not moved or len(moved) == len(prev.rows):
+            continue
+        prev.rows = [r for r in prev.rows if r not in moved]
+        for r in moved:
+            r.block = b.block
+        b.rows = moved + b.rows
+        issues.append(Issue("note", "date_shifted", b.sheet, head.xl_row,
+                            f"Дата стоит ниже первого интервала замера: строки {moved[0].xl_row}–{moved[-1].xl_row} "
+                            f"отнесены к замеру {b.date_text.strip()} (так же считает формула листа)", b.date_text))
+
+
 def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[float] = None,
                 kg_min: float = KG_MIN, file_alts: Optional[Dict[str, float]] = None,
                 perfs: Optional[Dict[str, Tuple[float, float]]] = None) -> SheetResult:
@@ -448,6 +471,7 @@ def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[f
         rows.append(row)
         cur.rows.append(row)
 
+    _fix_shifted_dates(blocks, issues)
     sheet_alt, sheet_src = _find_alt(ws, wv, header, rows)
     file_alt = (file_alts or {}).get(well)
     if alt is not None:
@@ -634,7 +658,6 @@ def load_book(path: str, legends: Optional[Dict[str, Dict[str, str]]] = None, al
 
 # ------------------------------------------------------------------------------------ сверка с Excel
 
-_SUM_RE = re.compile(r"SUM\(\s*[A-Z](\d+)(?::[A-Z](\d+))?\s*\)", re.I)
 _PLUS_RE = re.compile(r"^=\s*J(\d+)(?:\s*\+\s*J(\d+))+\s*$", re.I)
 _DIFF_RE = re.compile(r"^=\s*D(\d+)\s*-\s*C(\d+)\s*$", re.I)
 _GVK_F_RE = re.compile(r'IF\(\s*B\d+\s*=\s*"([^"]+)"\s*,\s*\(\s*D\d+\s*-\s*\$[A-Z]+\$\d+\s*\)\s*\*\s*\(?-1\)?', re.I)

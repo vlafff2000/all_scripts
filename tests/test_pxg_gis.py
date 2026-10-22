@@ -297,3 +297,19 @@ def test_export_excel_and_atlas_tables(tmp_path):
     (out / "gis_db_meta.json").write_text(json.dumps(data), encoding="utf8")
     with pytest.raises(ValueError):
         gis_export.read_meta(str(out))
+
+
+def test_date_below_first_interval_is_moved_to_its_block(tmp_path):
+    """Дата стоит строкой ниже первого интервала, формула листа считает от строки выше (скв. 14, строка 24–25)."""
+    book = make_book(tmp_path / "g.xlsx", [
+        ("Сент.1984г", None, 770, 771, 0.3, 0.6, None),
+        (None, None, 771, 772, 0.3, 0.6, None),
+        (None, None, 770, 771.2, 0.3, 0.6, None),          # строка 7: принадлежит следующему замеру
+        ("Окт.1984г", None, 771.2, 772, 0.3, 0.6, None),
+    ])
+    wb = openpyxl.load_workbook(book)
+    wb["7"]["K8"] = "=SUM(J7:J8)"
+    wb.save(book)
+    res = gis.load_book(str(book))["7"]
+    assert [len(b.rows) for b in res.blocks] == [2, 2]
+    assert any(i.code == "date_shifted" for i in res.issues)
