@@ -31,13 +31,17 @@ from .pvt import PVT
 from . import quality
 from .snapshot import WellSnapshot, save_snapshots
 
-MAX_WORKERS = 8                 # верхняя граница числа процессов для параллельного расчёта
+MAX_WORKERS = 16                # верхняя граница числа процессов для параллельного расчёта
 MIN_PARALLEL_JOBS = 8           # меньше исследований - считаем в этом же процессе (запуск пула дороже расчёта)
 
 
 def default_workers() -> int:
-    """Число процессов для расчёта: min(число ядер, 8)."""
-    return max(1, min(os.cpu_count() or 1, MAX_WORKERS))
+    """Число процессов для расчёта: PXG_WORKERS, иначе min(число ядер, 16)."""
+    try:
+        n = int(os.environ.get("PXG_WORKERS", "") or 0)
+    except ValueError:
+        n = 0
+    return max(1, n if n > 0 else min(os.cpu_count() or 1, MAX_WORKERS))
 
 
 class _Log:

@@ -240,3 +240,23 @@ def test_porv_check_in_describe(tmp_path):
     init.write_bytes(_blk("PORV", "REAL", [1.0] * 4 + [2.0, 3.0, 4.0, 5.0]))
     text = describe([eg, str(init)])
     assert "Сверка INIT и EGRID" in text and "по ячейкам ACTNUM 6" in text and "неопорных ячейках" in text and "3 из них" in text
+
+
+def test_parallel_steps_equal_serial(tmp_path, monkeypatch):
+    """Шаги рестарта на нескольких процессах дают то же, что один процесс (показатели и ГВК по скважинам)."""
+    from tnav_results import parallel
+    from tnav_results.well_gwc import wells_gwc_over_time
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    egrid = _egrid(tmp_path / "M.EGRID")
+    init = tmp_path / "M.INIT"
+    init.write_bytes(_blk("PORV", "REAL", PORV))
+    sgs = [[min(1.0, v + 0.05 * n) if v else 0.0 for v in SG] for n in range(5)]
+    ur = _unrst(tmp_path / "M.UNRST", sgs, [[100.0 + i for i in range(12)]] * 5, with_wells=True)
+    m = load_model(egrid)
+    assert parallel.default_workers() >= 1
+    one = indicators_over_time(m, str(init), ur, 0.3, egrid_path=egrid, workers=1)
+    many = indicators_over_time(m, str(init), ur, 0.3, egrid_path=egrid, workers=3)
+    assert len(one) == 5 and many == one
+    w1 = wells_gwc_over_time(m, None, ur, 0.3, egrid_path=egrid, workers=1)
+    w3 = wells_gwc_over_time(m, None, ur, 0.3, egrid_path=egrid, workers=3)
+    assert w3 == w1 and w1[0]

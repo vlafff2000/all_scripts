@@ -116,7 +116,7 @@ def indicators(path: str, dates: Optional[Sequence[dt.datetime]] = None, thresho
         all_steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
         picked = {pick_step(all_steps, d).seqnum: pick_step(all_steps, d) for d in dates}
         steps = [picked[k] for k in sorted(picked)]
-    rows = indicators_over_time(model, f["INIT"], f["UNRST"], th, steps=steps)
+    rows = indicators_over_time(model, f["INIT"], f["UNRST"], th, steps=steps, egrid_path=f["EGRID"])
     if not rows:
         raise ValueError("В UNRST нет SGAS: газонасыщенность не записана")
     out = []
@@ -149,7 +149,7 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
         all_steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
         picked = {pick_step(all_steps, d).seqnum: pick_step(all_steps, d) for d in dates}
         steps = [picked[k] for k in sorted(picked)]
-    rows, info = wells_gwc_over_time(model, f.get("INIT"), f["UNRST"], th, wells, steps)
+    rows, info = wells_gwc_over_time(model, f.get("INIT"), f["UNRST"], th, wells, steps, egrid_path=f["EGRID"])
     if not info["wells"]:
         raise ValueError("В рестарте не найдены ячейки вскрытия скважин (или имена не совпали)")
     if not rows:

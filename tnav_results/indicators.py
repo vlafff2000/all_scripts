@@ -336,24 +336,35 @@ def pick_step(steps: Sequence[RestartStep], date: dt.datetime) -> RestartStep:
     return min(dated, key=lambda s: abs((s.date - date).total_seconds()))
 
 
+def _indicator_row(model: CellModel, st: RestartStep, ctx):
+    """Показатели одного шага рестарта (None — в нём нет SGAS); ctx — то, что общее для всех шагов."""
+    unrst_path, sgas, threshold, porv, layers, regions = ctx
+    sg = read_restart_keyword(unrst_path, st, sgas)
+    if sg is None:
+        return None
+    return (st.date, gas_pore_volume(model, porv, sg, threshold, layers, regions),
+            gwc_stats(model, gwc_map(model, sg, threshold)))
+
+
 def indicators_over_time(model: CellModel, init_path: str, unrst_path: str,
                          threshold: float = DEFAULT_SG_THRESHOLD, sgas: str = "SGAS",
                          layers: Optional[Dict[str, Tuple[int, int]]] = None,
                          region_key: Optional[str] = None,
-                         steps: Optional[Sequence[RestartStep]] = None):
-    """По каждой дате рестарта: (дата, GasPoreVolume, GwcStats). Куб читается по одному шагу."""
+                         steps: Optional[Sequence[RestartStep]] = None,
+                         egrid_path: Optional[str] = None, workers: Optional[int] = None):
+    """По каждой дате рестарта: (дата, GasPoreVolume, GwcStats). Куб читается по одному шагу.
+
+    С egrid_path шаги считаются параллельно на всех ядрах (``tnav_results.parallel``), результат тот же.
+    """
+    from .parallel import map_steps
     need = ["PORV"] + ([region_key] if region_key else [])
     init = read_init(init_path, need)
     porv = [v for part in model.to_units(init["PORV"], "PORV", "sum") for v in part]   # один раз, по единицам
     regions = init.get(region_key) if region_key else None
-    out = []
-    for st in (steps if steps is not None else iter_restart_steps(unrst_path)):
-        sg = read_restart_keyword(unrst_path, st, sgas)
-        if sg is None:
-            continue
-        out.append((st.date, gas_pore_volume(model, porv, sg, threshold, layers, regions),
-                    gwc_stats(model, gwc_map(model, sg, threshold))))
-    return out
+    ctx = (unrst_path, sgas, threshold, porv, layers, regions)
+    rows = map_steps(_indicator_row, model, list(steps if steps is not None else iter_restart_steps(unrst_path)),
+                     ctx, egrid_path, workers)
+    return [r for r in rows if r is not None]
 
 
 # ---------------------------------------------------------------- 3. давление наблюдательных скважин

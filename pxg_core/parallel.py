@@ -1,0 +1,57 @@
+"""Параллельная обработка файлов «Базы ПХГ»: файлы независимы, поэтому раздаются процессам (все ядра, до 16).
+
+Модули базы запускаются как скрипты (runpy), их функции нельзя передать процессам напрямую, поэтому процесс сам загружает файл
+модуля (один раз) и вызывает функцию по имени. Вывод процесса возвращается и печатается в порядке файлов, замечания по датам
+(``DATE_ISSUES``) переносятся в основной процесс. Число процессов: PXG_WORKERS, иначе число ядер (не больше 16); мало файлов — в том же процессе.
+"""
+from __future__ import annotations
+
+import contextlib
+import io
+import os
+import runpy
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context
+from typing import Any, List, Optional, Sequence
+
+MAX_WORKERS = 16
+MIN_PARALLEL_ITEMS = int(os.environ.get("PXG_PARALLEL_MIN") or 4)      # меньше файлов — запуск процессов дороже расчёта
+
+_MODULES: dict = {}
+
+
+def default_workers() -> int:
+    try:
+        n = int(os.environ.get("PXG_WORKERS", "") or 0)
+    except ValueError:
+        n = 0
+    return max(1, n if n > 0 else min(os.cpu_count() or 1, MAX_WORKERS))
+
+
+def _call(job):
+    module_path, func, args = job
+    from pxg_core import расходы_файлы as rf
+    ns = _MODULES.get(module_path)
+    if ns is None:
+        ns = _MODULES[module_path] = runpy.run_path(module_path, run_name="pxg_worker")
+    rf.reset_date_issues()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = ns[func](*args)
+    return res, list(rf.DATE_ISSUES), buf.getvalue()
+
+
+def map_module_function(module_path: str, func: str, arg_list: Sequence[tuple], local: Any, workers: Optional[int] = None) -> List[Any]:
+    """[module.func(*args) для args из arg_list] по порядку (local — та же функция в этом процессе для малого числа файлов); вывод печатается, замечания по датам копятся как при обычном вызове."""
+    from pxg_core import расходы_файлы as rf
+    arg_list = list(arg_list)
+    n = min(default_workers() if workers is None else max(1, workers), len(arg_list))
+    if n < 2 or len(arg_list) < MIN_PARALLEL_ITEMS:
+        return [local(*a) for a in arg_list]
+    out = []
+    with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as ex:
+        for res, issues, text in ex.map(_call, [(module_path, func, a) for a in arg_list], chunksize=1):
+            print(text, end="")
+            rf.DATE_ISSUES.extend(issues)
+            out.append(res)
+    return out
