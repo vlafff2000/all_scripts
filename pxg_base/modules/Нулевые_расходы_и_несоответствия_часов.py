@@ -3,6 +3,7 @@ import numpy as np
 import os
 import glob
 import re
+from pxg_core.parallel import map_module_function
 from datetime import datetime
 from pxg_core.расходы_файлы import normalize_sheet_name, get_sheet_names, find_wells_count, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent
 
@@ -275,11 +276,13 @@ def process_all_seasons_production(root_folder):
         
         # Обрабатываем каждый файл в сезоне
         season_data = []
-        for file_path in excel_files:
+        # файлы независимы: считаются параллельно на всех ядрах, результат и вывод идут в порядке файлов
+        results = map_module_function(__file__, "process_excel_file_intelligent",
+                                      [(fp, year, season_name, "отбор") for fp in excel_files],
+                                      process_excel_file_intelligent)
+        for file_path, result_df in zip(excel_files, results):
             file_name = os.path.basename(file_path)
             print(f"  Обработка файла: {file_name}")
-            
-            result_df = process_excel_file_intelligent(file_path, year=year, season=season_name, data_type="отбор")
             
             if result_df is not None:
                 season_data.append(result_df)
@@ -345,11 +348,12 @@ def process_all_seasons_injection(root_folder):
         
         # Обрабатываем каждый файл в году
         year_data = []
-        for file_path in excel_files:
+        results = map_module_function(__file__, "process_excel_file_intelligent",
+                                      [(fp, year_name, None, "закачка") for fp in excel_files],
+                                      process_excel_file_intelligent)
+        for file_path, result_df in zip(excel_files, results):
             file_name = os.path.basename(file_path)
             print(f"  Обработка файла: {file_name}")
-            
-            result_df = process_excel_file_intelligent(file_path, year=year_name, data_type="закачка")
             
             if result_df is not None:
                 year_data.append(result_df)
