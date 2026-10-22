@@ -4,7 +4,7 @@ import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, grou
 import { createPortal } from 'react-dom'
 import { groupColor, type TnavModel, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type IsoResult } from './model'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, gwcContour, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcContour, type IsoResult, type RoofRaster } from './model'
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
 /** Параметр Атласа на карте: список параметров, выбор и агрегация, готовая раскраска (считает страница). */
@@ -16,11 +16,10 @@ export interface GisPicker {
   options: Record<string, string[]>; dates: Record<string, string>; paint: PaintData | null
   iso: { on: boolean; step: string; reach: string }; isoNote: string
   source: 'fact' | 'model' | 'delta'; modelInfo: string
+  gwc: { on: boolean; mode: 'plane' | 'idw' }
   roof: { on: boolean; model: string; layer: string; step: string; models: TnavModel[]; note: string; grid: RoofRaster | null }
-  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string }) => void
+  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string; gwcOn?: boolean; gwcMode?: 'plane' | 'idw' }) => void
 }
-/** Растр кровли в координатах карты (Y вниз): z по строкам, NaN — нет значения. */
-export interface RoofRaster { z: Float64Array; nx: number; ny: number; x0: number; y0: number; dx: number; dy: number }
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
 interface Props {
@@ -133,7 +132,7 @@ const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: n
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, source, modelInfo, roof, onChange }: GisPicker) {
+function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, source, modelInfo, roof, gwc, gwcNote, onChange }: GisPicker & { gwcNote: string }) {
   const [well, setWell] = useState('')
   if (!catalog) return <p className="muted">Читаю базу ГИС…</p>
   if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
@@ -169,6 +168,11 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
       <select value={roof.step} onChange={e => onChange({ roofStep: e.target.value })} aria-label="Шаг изолиний кровли">
         <option value="">Шаг кровли: подобрать</option>{['2', '5', '10', '20', '50', '100'].map(s => <option key={s} value={s}>Шаг {s} м</option>)}</select>
       <span className="muted">{roof.note || 'Кровля — верх ячеек выбранного слоя модели: слой задаёте вы.'}</span>
+      <label className="check"><input type="checkbox" checked={gwc.on} onChange={e => onChange({ gwcOn: e.target.checked })} /> Контур ГВК по кровле</label>
+      {gwc.on && <>
+        <select value={gwc.mode} onChange={e => onChange({ gwcMode: e.target.value as 'plane' | 'idw' })} aria-label="Поверхность ГВК">
+          <option value="plane">Поверхность ГВК: плоскость по скважинам</option><option value="idw">Поверхность ГВК: по скважинам как есть</option></select>
+        <span className="muted">Контур — где кровля пересекает ГВК замерных скважин, в радиусе доверия из настройки изолиний. {gwcNote}</span></>}
     </div>}
     {source === 'fact' && multi.length > 0 && !against && <div className="gis-pin">
       <span className="muted">В сезоне несколько замеров: по умолчанию последний, другой можно выбрать.</span>
@@ -339,6 +343,17 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const step = Number(gis.iso.step) || niceLevelStep((Math.max(...vs) - Math.min(...vs)) || 1)
     return isolines(pts, spacing, step, Number(gis.iso.reach) || 1.5)
   }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, placed, spacing, spread])
+  // контур ГВК по кровле: только для значений ГВК (факт ГИС без сравнения сезонов или ГВК модели)
+  const gwc = useMemo(() => {
+    if (options.paint !== 'gis' || !gis?.gwc.on || !gis.roof.on) return null
+    const r = gis.roof.grid
+    if (!r) return { d: '', at: null, note: 'Нужна кровля из модели: включите её и выберите модель и слой.', surface: '' } as GwcContour
+    if (gis.source === 'delta' || (gis.source === 'fact' && (gis.metric !== 'gvk_abs_m' || gis.against))) return { d: '', at: null, note: 'Контур строится по значениям ГВК: выберите показатель «ГВК, м а.о.» без сравнения сезонов или «ГВК модели».', surface: '' } as GwcContour
+    if (spread) return { d: '', at: null, note: 'На схеме с разнесёнными скважинами контур не строится.', surface: '' } as GwcContour
+    const pts = placed.filter(p => gis.paint?.vals.has(p.well)).map(p => ({ x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
+    const res = gwcContour(pts, r, spacing, Number(gis.iso.reach) || 1.5, gis.gwc.mode)
+    return { ...res, note: res.note || res.surface + '.' }
+  }, [options.paint, gis?.gwc.on, gis?.gwc.mode, gis?.roof.on, gis?.roof.grid, gis?.source, gis?.metric, gis?.against, gis?.paint, gis?.iso.reach, placed, spacing, spread])
   // изолинии кровли из модели: тонкие линии под скважинами, шаг подбирается или задаётся
   const roofLines = useMemo(() => {
     const r = gis?.roof.grid
@@ -585,6 +600,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               {roofLines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={pal.muted} strokeWidth={0.9} opacity={0.8} vectorEffect="non-scaling-stroke" />
                 <text x={l.at[0]} y={l.at[1]} fontSize={9.5 / K} textAnchor="middle" fill={pal.muted} stroke={pal.bg} strokeWidth={2.5 / K} paintOrder="stroke">{fmt1(l.level)}</text></g>)}
             </g>}
+            {gwc?.d && <g aria-label="Контур ГВК по кровле">
+              <path d={gwc.d} fill="none" stroke={pal.accent} strokeWidth={3} strokeDasharray="7 4" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+              {gwc.at && <text x={gwc.at[0]} y={gwc.at[1]} fontSize={12 / K} fontWeight={700} textAnchor="middle" fill={pal.accent} stroke={pal.bg} strokeWidth={3.5 / K} paintOrder="stroke">ГВК</text>}
+            </g>}
             {iso && <g aria-label="Изолинии">
               {iso.conf.map((c, i) => <path key={'c' + i} d={c.d} fill={pal.accent} opacity={c.a} stroke="none" />)}
               {iso.lines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
@@ -665,7 +684,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
             </>}
-            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} />}
+            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} gwcNote={gwc?.note ?? ''} />}
             {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
             {!paintData && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
