@@ -215,6 +215,8 @@ class SheetResult:
     rows: List[Row]
     legend: List[LegendEntry]
     issues: List[Issue]
+    alt_sheet: Optional[float] = None    # альтитуда по подписи «Алт.=» на листе (даже если взята другая)
+    perf: Optional[Tuple[float, float]] = None   # (верх, низ) перфорации, а.о., из файла «Глубины_перфораций»
 
     @property
     def data_rows(self) -> List[Row]:
@@ -275,8 +277,13 @@ def _classify_b(row: Row, b_cached) -> None:
 
 
 def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[float] = None,
-                kg_min: float = KG_MIN) -> SheetResult:
-    """Разбор одного листа. ws — лист с формулами, wv — тот же лист со значениями; legend — ручные правки {цвет: пачка}."""
+                kg_min: float = KG_MIN, file_alts: Optional[Dict[str, float]] = None,
+                perfs: Optional[Dict[str, Tuple[float, float]]] = None) -> SheetResult:
+    """Разбор одного листа. ws — лист с формулами, wv — тот же лист со значениями; legend — ручные правки {цвет: пачка}.
+
+    Альтитуда: вручную (alt) главнее файла (file_alts: {скважина: Алт}), файл главнее подписи на листе. При расхождении
+    с листом больше 0,05 м в проверку идут оба значения. perfs: {скважина: (верх, низ)} перфорации из того же файла.
+    """
     name = ws.title
     issues: List[Issue] = []
     header = _find_header(ws)
@@ -350,7 +357,17 @@ def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[f
         rows.append(row)
         cur.rows.append(row)
 
-    the_alt, alt_src = (alt, "задана вручную") if alt is not None else _find_alt(ws, wv, header, rows)
+    sheet_alt, sheet_src = _find_alt(ws, wv, header, rows)
+    file_alt = (file_alts or {}).get(well)
+    if alt is not None:
+        the_alt, alt_src = alt, "задана вручную"
+    elif file_alt is not None:
+        the_alt, alt_src = file_alt, "файл альтитуд"
+        if sheet_alt is not None and abs(sheet_alt - file_alt) > 0.05:
+            issues.append(Issue("warn", "alt_mismatch", name, 0,
+                                f"Альтитуда: на листе {sheet_alt:g}, в файле {file_alt:g}; взята из файла", f"{sheet_alt:g} / {file_alt:g}"))
+    else:
+        the_alt, alt_src = sheet_alt, sheet_src
     if the_alt is None:
         has_gvk = any(x.gvk_label for x in rows)
         issues.append(Issue("error" if has_gvk else "warn", "no_alt", name, 0,
@@ -365,7 +382,8 @@ def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[f
 
     for b in blocks:
         _gvk_per_pack(b, the_alt, issues)
-    return SheetResult(name, well, header, the_alt, alt_src, hints, blocks, rows, legend_rows, issues)
+    return SheetResult(name, well, header, the_alt, alt_src, hints, blocks, rows, legend_rows, issues, sheet_alt,
+                       (perfs or {}).get(well))
 
 
 def _build_legend(sheet: str, rows: List[Row], hints: List[str], manual: Dict[str, str],
@@ -482,7 +500,10 @@ def to_frames(results: Dict[str, SheetResult]) -> Dict[str, pd.DataFrame]:
                 groups[x.pack or f"цвет {x.color}"].append(x)
             for grp in groups.values():
                 packs.append({"Скважина": res.well, "Лист": res.sheet, "Замер": b.block, "Дата": b.date, "Сезон": b.season,
-                              "Пачка": grp[0].pack, "Цвет": grp[0].color, "Альтитуда, м": res.alt, **_aggregate(grp)})
+                              "Пачка": grp[0].pack, "Цвет": grp[0].color, "Альтитуда, м": res.alt,
+                              "Альтитуда по листу, м": res.alt_sheet,
+                              "Перфорация верх, м": res.perf[0] if res.perf else None,
+                              "Перфорация низ, м": res.perf[1] if res.perf else None, **_aggregate(grp)})
         legend += [{"Лист": e.sheet, "Скважина": res.well, "Цвет": e.color, "Пачка": e.pack, "Источник": e.source,
                     "Статус": e.status, "Причина": e.reason, "Строк": e.rows, "Метки ГВК": e.labels} for e in res.legend]
         issues += [{"Уровень": i.level, "Код": i.code, "Скважина": res.well, "Лист": i.sheet, "Строка": i.row,
@@ -492,7 +513,8 @@ def to_frames(results: Dict[str, SheetResult]) -> Dict[str, pd.DataFrame]:
 
 
 def load_book(path: str, legends: Optional[Dict[str, Dict[str, str]]] = None, alts: Optional[Dict[str, float]] = None,
-              sheets: Optional[List[str]] = None, kg_min: float = KG_MIN) -> Dict[str, SheetResult]:
+              sheets: Optional[List[str]] = None, kg_min: float = KG_MIN, file_alts: Optional[Dict[str, float]] = None,
+              perfs: Optional[Dict[str, Tuple[float, float]]] = None) -> Dict[str, SheetResult]:
     """Все листы-скважины книги. Служебные листы («Тек.забой», «примеч») и листы без шапки «Дата» пропускаются."""
     import openpyxl
     wb = openpyxl.load_workbook(path)
@@ -502,7 +524,7 @@ def load_book(path: str, legends: Optional[Dict[str, Dict[str, str]]] = None, al
         ws = wb[name]
         if _find_header(ws) is None:
             continue
-        out[name] = parse_sheet(ws, wv[name], (legends or {}).get(name), (alts or {}).get(name), kg_min)
+        out[name] = parse_sheet(ws, wv[name], (legends or {}).get(name), (alts or {}).get(name), kg_min, file_alts, perfs)
     return out
 
 
@@ -663,14 +685,25 @@ def report(results: Dict[str, SheetResult]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def keyed(d: dict) -> dict:
+    """{номер скважины: значение} из gsp_maps.inputs.load_perforations → ключи-строки, как номера скважин в разборе."""
+    return {str(int(k)): v for k, v in d.items()}
+
+
 def main(argv=None) -> None:
     import argparse
     import os
     ap = argparse.ArgumentParser(description="Разбор «Базы ГИС-контроль»: отчёт и сверка с сохранёнными значениями Excel")
     ap.add_argument("xlsx")
+    ap.add_argument("--perf", help="«Глубины_перфораций.xlsx»: листы «перфорации» и «альтитуды»")
     ap.add_argument("--out", help="папка для выгрузки таблиц разбора в Excel")
     a = ap.parse_args(argv)
-    res = load_book(a.xlsx)
+    file_alts = perfs = None
+    if a.perf:
+        from gsp_maps.inputs import load_perforations
+        depths, alt = load_perforations(a.perf)
+        file_alts, perfs = keyed(alt), keyed(depths)
+    res = load_book(a.xlsx, file_alts=file_alts, perfs=perfs)
     rep, par = report(res), parity(res)
     pd.set_option("display.width", 250, "display.max_columns", 30, "display.max_rows", 200)
     print(rep.to_string(index=False))
