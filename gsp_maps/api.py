@@ -111,6 +111,30 @@ async def param(request: Request):
         return _err(str(e), 404)
 
 
+async def gis_catalog(request: Request):
+    """Что есть в базе ГИС проекта Атласа: пачки, сезоны замеров, показатели."""
+    if PROJECT.atlas is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    return JSONResponse(await run_in_threadpool(PROJECT.gis_catalog))
+
+
+async def gis_values(request: Request):
+    """Показатель пачки по скважинам за сезон (against — изменение к другому сезону; pins — «скважина:дата,…» закрепление замера)."""
+    if PROJECT.atlas is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    q = request.query_params
+    pins: dict = {}
+    for item in (q.get("pins") or "").split(","):
+        well, _, day = item.partition(":")
+        if well.strip().isdigit() and day.strip():
+            pins[int(well)] = day.strip()
+    try:
+        return JSONResponse(await run_in_threadpool(PROJECT.gis_payload, q.get("pack") or "", q.get("metric") or "gvk_abs_m",
+                                                    q.get("season") or "", q.get("against") or "", pins))
+    except ValueError as e:
+        return _err(str(e), 404)
+
+
 async def models_get(request: Request):
     """Модели tNavigator: папки из общего списка, найденные модели и отмеченные для карты."""
     return JSONResponse(await run_in_threadpool(tnav_models.view, PROJECT.models))
@@ -255,6 +279,8 @@ def build_app() -> Starlette:
         Route("/api/work", work),
         Route("/api/params", params),
         Route("/api/param", param),
+        Route("/api/gis", gis_catalog),
+        Route("/api/gis/values", gis_values),
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
         Route("/api/models/select", models_select, methods=["POST"]),

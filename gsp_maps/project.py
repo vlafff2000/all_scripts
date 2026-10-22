@@ -13,7 +13,7 @@ import pandas as pd
 
 from pxg_core import workspace
 
-from . import atlas_source, inputs, wellmap
+from . import atlas_source, gis_source, inputs, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
 
 PATH_KEYS = ["map", "atlas_storage", "atlas_project"]    # карта-сетка Excel — необязательный запасной источник положений
@@ -351,6 +351,13 @@ class Project:
         values, warn = self.atlas.parameter_values(table, column, agg, start, end)
         return {"table": table, "column": column, "agg": agg, "title": atlas_source.PARAM_TABLES[table],
                 "values": {str(w): v for w, v in values.items()}, "warnings": warn}
+
+    def gis_catalog(self) -> dict:
+        return gis_source.catalog(self.atlas) if self.atlas is not None else {"packs": [], "seasons": [], "metrics": [], "note": ""}
+
+    def gis_payload(self, pack: str, metric: str, season: str, against: str, pins: Dict[int, str]) -> dict:
+        assert self.atlas is not None
+        return gis_source.values(self.atlas, pack, metric, season, against, pins)
 
     def work_payload(self, gsp: str) -> dict:
         """Работа скважин по сезонам и месяцам: матрицы «скважина × сезон» и «скважина × месяц», очерёдность ввода."""
