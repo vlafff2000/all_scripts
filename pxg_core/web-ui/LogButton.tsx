@@ -17,7 +17,7 @@ function LogButton() {
     const next = !open
     setOpen(next)
     if (!next) return
-    try { setInfo(await (await fetch('/api/log')).json()) } catch { setNote('Не удалось узнать, где лежит лог.') }
+    try { setInfo(await (await fetch('/api/log/info')).json()) } catch { setNote('Не удалось узнать, где лежит лог.') }
   }
   const pack = async () => {
     setBusy(true); setNote(''); setBundle(null)

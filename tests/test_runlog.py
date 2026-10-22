@@ -101,7 +101,7 @@ def test_requests_logged_and_bundle(logs):
     assert "POST /api/ok -> 200" in text and "GET /api/ok" not in text
     assert "GET /api/boom: необработанная ошибка" in text and "RuntimeError: сбой" in text
     assert c.get("/api/log/download").status_code == 200
-    assert c.get("/api/log").json()["files"]
+    assert c.get("/api/log/info").json()["files"]
     assert c.get("/api/log/bundle/..%2Fx.zip").status_code == 404
 
 

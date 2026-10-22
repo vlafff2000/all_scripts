@@ -302,6 +302,7 @@ async def open_dir(request: Request):
 def routes() -> List[Route]:
     return [
         Route("/api/log", info),
+        Route("/api/log/info", info),
         Route("/api/log/download", download),
         Route("/api/log/bundle", bundle, methods=["POST"]),
         Route("/api/log/bundle/{name}", bundle_file),
