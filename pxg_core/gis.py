@@ -217,10 +217,101 @@ class SheetResult:
     issues: List[Issue]
     alt_sheet: Optional[float] = None    # альтитуда по подписи «Алт.=» на листе (даже если взята другая)
     perf: Optional[Tuple[float, float]] = None   # (верх, низ) перфорации, а.о., из файла «Глубины_перфораций»
+    tab_color: str = ""                  # цвет ярлыка листа (RGB без прозрачности) — атрибут скважины
 
     @property
     def data_rows(self) -> List[Row]:
         return [r for r in self.rows if r.frm is not None or r.to is not None]
+
+
+# ---------------------------------------------------------------------------------------------- статусы
+
+DONE = "выполнено"
+# Статус наблюдения по тексту примечания: порядок важен (первое совпадение для одной строки текста).
+STATUS_RULES = [
+    (re.compile(r"не\s+были\s+выполнен|не\s+выполнен", re.I), "не выполнено"),
+    (re.compile(r"не\s*охвач|не\s*охв\.|охвачен[аы]?\s+не", re.I), "пласт не охвачен"),
+    (re.compile(r"обводнен", re.I), "обводнена"),
+    (re.compile(r"остановк", re.I), "остановка"),
+    (re.compile(r"прихват", re.I), "прихват"),
+    (re.compile(r"газ\s+в\s+пласте.*не\s+отмеча", re.I), "газ не отмечается"),
+    (re.compile(r"работы\s+проведены\s+на\s+скважине", re.I), "работы на другой скважине"),
+    (re.compile(r"заглушен|ремонт", re.I), "скважина в ремонте"),
+    (re.compile(r"спец\.?\s*исследован", re.I), "спец. исследования"),
+    (re.compile(r"переаттестац", re.I), "переаттестация"),
+]
+
+
+def status_of(text: str) -> str:
+    """Код статуса по тексту примечания; пусто, если текст ничего не говорит о ходе исследования."""
+    for rx, code in STATUS_RULES:
+        if rx.search(text or ""):
+            return code
+    return ""
+
+
+def block_statuses(b: "Block") -> Tuple[List[str], str]:
+    """(коды статусов, весь текст) замера: примечания в дате, тексты вместо интервалов, метки «остановка», Кг-слова."""
+    texts = [b.note or ""]
+    for r in b.rows:
+        texts += [r.status, r.note, r.kg_text if status_of(r.kg_text) else "", r.label_raw if not r.gvk_label and not r.top_label else ""]
+    codes: List[str] = []
+    for t in texts:
+        c = status_of(t)
+        if c and c not in codes:
+            codes.append(c)
+    has_data = any(r.hi is not None for r in b.rows)
+    if has_data:
+        codes.insert(0, DONE)
+    return codes, "; ".join(dict.fromkeys(t for t in texts if t))
+
+
+# Цвета ярлыков листов: смысл, который назвал инженер (остальные цвета читаются, но смысл не придумывается).
+TAB_MEANING = {"00FF00": "газонасыщенная перемычка между двумя пачками (выборка для Костикова)"}
+
+
+def tab_color(ws) -> str:
+    c = ws.sheet_properties.tabColor
+    if c is None:
+        return ""
+    if c.type == "rgb" and isinstance(c.rgb, str):
+        return c.rgb.upper()[-6:]
+    return f"theme{c.theme}" if c.type == "theme" else f"idx{c.indexed}"
+
+
+def read_bottom(path: str, sheet: str = "Тек.забой") -> pd.DataFrame:
+    """Лист «Тек.забой»: максимальная глубина прохождения прибора по скважинам и датам.
+
+    Строка заголовка — «№ скв.» и номера скважин по столбцам; первая строка без даты — текущий забой скважины, ниже даты
+    замеров. Результат длинный: Скважина, Дата, Глубина, Вид («текущий забой» / «прохождение прибора»).
+    """
+    import openpyxl
+    wv = openpyxl.load_workbook(path, data_only=True)
+    cols = ["Скважина", "Дата", "Глубина, м", "Вид"]
+    if sheet not in wv.sheetnames:
+        return pd.DataFrame(columns=cols)
+    ws = wv[sheet]
+    head = next((r for r in range(1, 10) if "скв" in _str(ws.cell(r, 1).value).lower()), None)
+    if head is None:
+        return pd.DataFrame(columns=cols)
+    wells = {}
+    for c in range(2, ws.max_column + 1):
+        v, _ = _num(ws.cell(head, c).value)
+        if v is not None:
+            wells[c] = str(int(v))
+    out = []
+    for r in range(head + 1, ws.max_row + 1):
+        a = ws.cell(r, 1).value
+        d = parse_date(a) if a is not None else None
+        for c, w in wells.items():
+            depth, _ = _num(ws.cell(r, c).value)
+            if depth is None:
+                continue
+            if a is None:
+                out.append([w, None, depth, "текущий забой"])
+            elif d is not None and d.date is not None:
+                out.append([w, d.exact or d.date, depth, "прохождение прибора"])
+    return pd.DataFrame(out, columns=cols)
 
 
 # ----------------------------------------------------------------------------------------------- разбор
@@ -382,8 +473,16 @@ def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[f
 
     for b in blocks:
         _gvk_per_pack(b, the_alt, issues)
-    return SheetResult(name, well, header, the_alt, alt_src, hints, blocks, rows, legend_rows, issues, sheet_alt,
-                       (perfs or {}).get(well))
+        codes, text = block_statuses(b)
+        if not codes:
+            issues.append(Issue("warn", "block_empty", name, b.xl_row,
+                                "Замер без интервалов и без понятного статуса: текст сохранён как примечание", text))
+    res = SheetResult(name, well, header, the_alt, alt_src, hints, blocks, rows, legend_rows, issues, sheet_alt,
+                      (perfs or {}).get(well), tab_color(ws))
+    if res.tab_color:
+        issues.append(Issue("note", "tab_color", name, 0,
+                            "Цвет ярлыка: " + (TAB_MEANING.get(res.tab_color) or f"{res.tab_color} (смысл не задан)"), res.tab_color))
+    return res
 
 
 def _build_legend(sheet: str, rows: List[Row], hints: List[str], manual: Dict[str, str],
@@ -487,10 +586,12 @@ def to_frames(results: Dict[str, SheetResult]) -> Dict[str, pd.DataFrame]:
             data = [x for x in b.rows if x.frm is not None or x.to is not None]
             allp = _aggregate(b.rows)
             notes = [b.note] + [r.status for r in b.rows if r.status and r.frm is None and r.to is None]
+            codes, full_text = block_statuses(b)
             blocks.append({
                 "Скважина": res.well, "Лист": res.sheet, "Замер": b.block, "Строка листа": b.xl_row,
                 "Дата в файле": b.date_text, "Дата": b.date, "Дата (точная)": b.exact, "Сезон": b.season,
                 "Качество даты": b.quality, "Примечание": "; ".join(x for x in notes if x),
+                "Статус": ", ".join(codes) if codes else "нет данных", "Текст статуса": full_text,
                 "Строк интервалов": len(data), "Пачек": len({x.pack or x.color for x in data}),
                 "hг эф (весь замер), м": allp["hг эф, м"], "Кг ср.взв (весь замер)": allp["Кг ср.взв"],
                 "Этаж (весь замер), м": allp["Этаж, м"],
@@ -508,8 +609,11 @@ def to_frames(results: Dict[str, SheetResult]) -> Dict[str, pd.DataFrame]:
                     "Статус": e.status, "Причина": e.reason, "Строк": e.rows, "Метки ГВК": e.labels} for e in res.legend]
         issues += [{"Уровень": i.level, "Код": i.code, "Скважина": res.well, "Лист": i.sheet, "Строка": i.row,
                     "Сообщение": i.message, "Значение": i.value} for i in res.issues]
+    sheets = [{"Лист": r.sheet, "Скважина": r.well, "Альтитуда, м": r.alt, "Источник альтитуды": r.alt_source,
+               "Цвет ярлыка": r.tab_color, "Смысл цвета": TAB_MEANING.get(r.tab_color, "смысл не задан" if r.tab_color else ""),
+               "Замеров": len(r.blocks), "Строк интервалов": len(r.data_rows)} for r in results.values()]
     return {"Строки": pd.DataFrame(rows), "Замеры": pd.DataFrame(blocks), "Пачки": pd.DataFrame(packs),
-            "Легенда": pd.DataFrame(legend), "Проверка": pd.DataFrame(issues)}
+            "Листы": pd.DataFrame(sheets), "Легенда": pd.DataFrame(legend), "Проверка": pd.DataFrame(issues)}
 
 
 def load_book(path: str, legends: Optional[Dict[str, Dict[str, str]]] = None, alts: Optional[Dict[str, float]] = None,

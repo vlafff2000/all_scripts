@@ -220,3 +220,49 @@ def test_altitude_file_beats_sheet_and_manual_beats_file(tmp_path):
     assert gis.load_book(str(book), alts={"7": 90.0}, file_alts={"7": 95.0})["7"].alt == 90.0
     same = gis.load_book(str(book), file_alts={"7": 100.0})["7"]
     assert not any(i.code == "alt_mismatch" for i in same.issues)
+
+
+def test_statuses_instead_of_gaps(tmp_path):
+    book = make_book(tmp_path / "g.xlsx", [
+        ("Март 2010г", None, 100, 102, 0.3, 0.6, None),
+        ("Октябрь 2010г", None, "Исследования не были выполнены, т.к. не были выполнены ремонтные работы", None, None, None, None),
+        ("Май 2011г", None, "Пласт-коллетор исследованиями не охвачен", None, None, None, None),
+        ("Ноябрь 2011г", None, 100, 102, 0.3, "обводнен", None),
+        ("Апрель 2012г", "Остановка", None, None, None, None, None),
+        ("Май 2012г", None, "газ в пласте-коллекторе не отмечается", None, None, None, None),
+        ("Март 2013г", None, "что-то непонятное", None, None, None, None),
+        ("Октябрь 2013г", None, 100, 102, 0.3, 0.5, None),
+        ("При проведении ГИС произошел прихват прибора на глубине 777м.", None, 102, 104, 0.3, 0.5, None),
+    ])
+    res = gis.load_book(str(book))["7"]
+    blocks = gis.to_frames({"7": res})["Замеры"]
+    st = list(blocks["Статус"])
+    assert st[0] == "выполнено"
+    assert st[1] == "не выполнено" and st[2] == "пласт не охвачен"
+    assert "обводнена" in st[3] and st[3].startswith("выполнено")
+    assert st[4] == "остановка" and st[5] == "газ не отмечается"
+    assert st[6] == "нет данных" and "что-то непонятное" in blocks["Текст статуса"][6]
+    assert "прихват" in st[7]
+    # текст не потерян, а непонятное — в «Проверке»
+    assert [i for i in res.issues if i.code == "block_empty"][0].value == "что-то непонятное"
+
+
+def test_tab_color_and_current_bottom(tmp_path):
+    book = make_book(tmp_path / "g.xlsx", [("Октябрь 2020г", None, 100, 103, 0.3, 0.6, None)])
+    wb = openpyxl.load_workbook(book)
+    wb["7"].sheet_properties.tabColor = "FF00FF00"
+    ws = wb.create_sheet("Тек.забой")
+    ws["B1"] = "Максимальная глубина прохождения геофизического прибора (м)"
+    for c, v in zip("ABC", ["№ скв.", 7, 8]):
+        ws[f"{c}2"] = v
+    ws["B3"], ws["C3"] = 850, 821
+    ws["A4"], ws["B4"] = dt.datetime(1997, 9, 1), 800
+    wb.save(book)
+    res = gis.load_book(str(book))
+    assert list(res) == ["7"]                                   # служебный лист не разбирается как скважина
+    assert res["7"].tab_color == "00FF00"
+    row = gis.to_frames(res)["Листы"].iloc[0]
+    assert "перемычка" in row["Смысл цвета"]
+    b = gis.read_bottom(str(book))
+    assert sorted(b["Скважина"] + ":" + b["Вид"] + ":" + b["Глубина, м"].astype(str)) == [
+        "7:прохождение прибора:800.0", "7:текущий забой:850.0", "8:текущий забой:821.0"]
