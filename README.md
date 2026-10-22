@@ -32,21 +32,11 @@ python -m gsp_maps --server                # только сервер, порт
 Интерфейс (разработка): `cd pxg_base/web` или `cd gsp_maps/web`, затем `npm install && npm run dev` (/api проксируется на сервер) и `npm run build` перед коммитом, чтобы обновить `web/dist`.
 Тесты: `python -m pytest -q tests`. Они работают на сгенерированных исходных файлах (отдельные генераторы тестовых данных в репозиторий не добавляются, настоящие файлы лежат у пользователя).
 
-## Переносные архивы
+## Переносной архив
 
-Для компьютеров без Python и интернета. Архив содержит собственный Python (с tkinter), последние версии библиотек, которые для него существуют, и оба приложения.
+Для компьютеров без Python и интернета собирается один архив со всеми приложениями ПХГ (Атлас, «Работа с исходными данными», «Карты», «ГДМ», «ГИС и ГВК», отчёты) — в репозитории `gas_atlas`, см. его `tools/build_unified.py` и `.github/workflows/portable.yml` (Actions → «Единый архив ПХГ»). Отдельные архивы этого репозитория не собираются.
 
-| Система | Архив | Python | Запуск |
-|---|---|---|---|
-| Windows 10 и новее, x64 | `Ishodnye_dannye_portable_windows_x64.zip` | 3.13 | `Ishodnye_dannye.bat`, `Karty.bat`, `GDM.bat`, `Ishodnye_dannye_console.bat`, `Sozdat_yarlyki.bat` |
-| Linux x86_64, glibc 2.17+ (целевая система РЕД ОС 7.3) | `Ishodnye_dannye_portable_linux_x64.tar.gz` | 3.13 | `ishodnye_dannye.sh`, `karty.sh`, `gdm.sh`, `ishodnye_dannye_console.sh`, `sozdat_yarlyki.sh` |
-
-Для РЕД ОС 7.3 берутся только колёса manylinux2014, поэтому numpy и pandas там на последних версиях, у которых такие колёса ещё есть (numpy 2.2, pandas 2.3). Результаты «Работы с исходными данными» пишутся в папку `pxg_runs` рядом с архивом.
-
-Ярлыки со значками на рабочем столе: один раз запустить `Sozdat_yarlyki.bat` (Windows) или `bash sozdat_yarlyki.sh` (РЕД ОС) — у каждого приложения свой значок.
-
-Сборка вручную (нужны интернет и Python 3.13): `python tools/build_portable.py windows` или `linux`, результат в `dist/`.
-В GitHub: Actions → «Portable archives» → Run workflow (или тег `v*`). Задание собирает оба архива, запускает «Работу с исходными данными», «Карты» и «ГДМ» из распакованного архива и выкладывает архивы как артефакты. Обычный CI (`CI`) гоняет тесты на Python 3.13 при каждом PR (3.12 и 3.14 — вручную, Actions → CI → Run workflow).
+Ярлыки со значками на рабочем столе: `Sozdat_yarlyki.bat` (Windows) или `bash sozdat_yarlyki.sh` (РЕД ОС) в распакованном архиве.
 
 ## Что дальше
 - «Карты»: html-карта и GIF из старого скрипта не переносятся (PNG и Excel остаются); дальше развивается интерактивная карта и сверка по `docs/parity/gsp_maps.md`.
