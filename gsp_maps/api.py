@@ -20,7 +20,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import gis_source, models as tnav_models
+from . import gis_source, models as tnav_models, roof as roof_mod
 from .project import PATH_KEYS, Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -140,6 +140,19 @@ async def gis_model(request: Request):
     from tnav_results import gwc_share
     q = request.query_params
     return JSONResponse(await run_in_threadpool(lambda: gis_source.model_values(gwc_share.load(), q.get("pack") or "", q.get("season") or "")))
+
+
+async def roof(request: Request):
+    """Кровля пласта из модели: растр отметок верха ячеек слоя (?model=путь к файлу модели, ?layer=номер слоя, 0 — верхний активный)."""
+    q = request.query_params
+    path = q.get("model") or (PROJECT.models[0] if PROJECT.models else "")
+    if not path:
+        return _err("Модель для кровли не выбрана.", 404)
+    try:
+        layer = int(q.get("layer") or 1)
+        return JSONResponse(await run_in_threadpool(roof_mod.roof_grid, path, layer))
+    except (ValueError, OSError, KeyError, IndexError) as e:
+        return _err("Кровля из модели не построена: %s" % e)
 
 
 async def models_get(request: Request):
@@ -289,6 +302,7 @@ def build_app() -> Starlette:
         Route("/api/gis", gis_catalog),
         Route("/api/gis/values", gis_values),
         Route("/api/gis/model", gis_model),
+        Route("/api/roof", roof),
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
         Route("/api/models/select", models_select, methods=["POST"]),

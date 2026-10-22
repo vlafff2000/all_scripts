@@ -2,9 +2,9 @@ import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
-import { groupColor, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
+import { groupColor, type TnavModel, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type IsoResult } from './model'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type IsoResult } from './model'
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
 /** Параметр Атласа на карте: список параметров, выбор и агрегация, готовая раскраска (считает страница). */
@@ -16,8 +16,11 @@ export interface GisPicker {
   options: Record<string, string[]>; dates: Record<string, string>; paint: PaintData | null
   iso: { on: boolean; step: string; reach: string }; isoNote: string
   source: 'fact' | 'model' | 'delta'; modelInfo: string
-  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta' }) => void
+  roof: { on: boolean; model: string; layer: string; step: string; models: TnavModel[]; note: string; grid: RoofRaster | null }
+  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string }) => void
 }
+/** Растр кровли в координатах карты (Y вниз): z по строкам, NaN — нет значения. */
+export interface RoofRaster { z: Float64Array; nx: number; ny: number; x0: number; y0: number; dx: number; dy: number }
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
 interface Props {
@@ -130,7 +133,7 @@ const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: n
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, source, modelInfo, onChange }: GisPicker) {
+function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, source, modelInfo, roof, onChange }: GisPicker) {
   const [well, setWell] = useState('')
   if (!catalog) return <p className="muted">Читаю базу ГИС…</p>
   if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
@@ -157,6 +160,15 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
       <select value={iso.reach} onChange={e => onChange({ isoReach: e.target.value })} aria-label="Радиус доверия">
         {[['1', 'Радиус доверия: 1 расстояние между скважинами'], ['1.5', 'Радиус доверия: 1,5'], ['2.5', 'Радиус доверия: 2,5'], ['4', 'Радиус доверия: 4']].map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
       <span className="muted">За краем области скважин изолинии не строятся; чем дальше от скважин, тем бледнее заливка.{isoNote ? ' ' + isoNote : ''}</span>
+    </div>}
+    <label className="check"><input type="checkbox" checked={roof.on} onChange={e => onChange({ roofOn: e.target.checked })} /> Кровля пласта из модели</label>
+    {roof.on && <div className="gis-pin">
+      <select value={roof.model} onChange={e => onChange({ roofModel: e.target.value })} aria-label="Модель для кровли">
+        <option value="">Выберите модель…</option>{roof.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+      <label className="muted">Слой ячеек (0 — верхний активный) <input type="number" min={0} value={roof.layer} onChange={e => onChange({ roofLayer: e.target.value })} aria-label="Слой кровли" style={{ width: 64 }} /></label>
+      <select value={roof.step} onChange={e => onChange({ roofStep: e.target.value })} aria-label="Шаг изолиний кровли">
+        <option value="">Шаг кровли: подобрать</option>{['2', '5', '10', '20', '50', '100'].map(s => <option key={s} value={s}>Шаг {s} м</option>)}</select>
+      <span className="muted">{roof.note || 'Кровля — верх ячеек выбранного слоя модели: слой задаёте вы.'}</span>
     </div>}
     {source === 'fact' && multi.length > 0 && !against && <div className="gis-pin">
       <span className="muted">В сезоне несколько замеров: по умолчанию последний, другой можно выбрать.</span>
@@ -327,6 +339,16 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const step = Number(gis.iso.step) || niceLevelStep((Math.max(...vs) - Math.min(...vs)) || 1)
     return isolines(pts, spacing, step, Number(gis.iso.reach) || 1.5)
   }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, placed, spacing, spread])
+  // изолинии кровли из модели: тонкие линии под скважинами, шаг подбирается или задаётся
+  const roofLines = useMemo(() => {
+    const r = gis?.roof.grid
+    if (options.paint !== 'gis' || !gis?.roof.on || !r) return null
+    const v = Array.from(r.z).filter(Number.isFinite)
+    if (!v.length) return null
+    const lo = Math.min(...v), hi = Math.max(...v)
+    const step = Number(gis.roof.step) || niceLevelStep((hi - lo) || 1)
+    return contourLines(r.z, r.nx, r.ny, r.x0, r.y0, r.dx, r.dy, step, lo, hi)
+  }, [options.paint, gis?.roof.on, gis?.roof.step, gis?.roof.grid])
   const sx = (mx: number) => view.k * (fit.s * mx + fit.ox) + view.tx, sy = (my: number) => view.k * (fit.s * my + fit.oy) + view.ty
   const bar = niceStep(140 / K)
   // в режиме группировки круги имеют постоянный размер на экране (как значки на веб-картах), поэтому при приближении близкие скважины расходятся
@@ -559,6 +581,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
             <g opacity={0.07} fill={pal.accent}>{placed.map(q => <circle key={q.well} cx={q.x} cy={q.y} r={halo} />)}</g>
+            {roofLines && <g aria-label="Кровля пласта">
+              {roofLines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={pal.muted} strokeWidth={0.9} opacity={0.8} vectorEffect="non-scaling-stroke" />
+                <text x={l.at[0]} y={l.at[1]} fontSize={9.5 / K} textAnchor="middle" fill={pal.muted} stroke={pal.bg} strokeWidth={2.5 / K} paintOrder="stroke">{fmt1(l.level)}</text></g>)}
+            </g>}
             {iso && <g aria-label="Изолинии">
               {iso.conf.map((c, i) => <path key={'c' + i} d={c.d} fill={pal.accent} opacity={c.a} stroke="none" />)}
               {iso.lines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
