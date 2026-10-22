@@ -167,6 +167,27 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
     return out, {"notes": notes, "sgr_source": info["sgr_source"], "wells": info["wells"]}
 
 
+def well_profile(path: str, date: dt.datetime, wells: Sequence[str]) -> Tuple[List[dict], dict]:
+    """Газонасыщенность вдоль колонны скважин на шаге рестарта, ближайшем к дате (для планшета), TVDSS."""
+    from tnav_results.indicators import load_model, pick_step
+    from tnav_results.well_gwc import wells_profile_at
+    from tnav_results import iter_restart_steps
+
+    f = find_files(path)
+    miss = [k for k in ("EGRID", "UNRST") if k not in f]
+    if miss:
+        raise ValueError("Для планшета нужны файлы EGRID и UNRST (не найдены: %s)" % ", ".join(miss))
+    steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
+    if not steps:
+        raise ValueError("В UNRST нет шагов с датой")
+    step = pick_step(steps, date)
+    profiles, missing = wells_profile_at(load_model(f["EGRID"]), f["UNRST"], step, list(wells))
+    rows = [{"well": p.well, "date": str(p.date.date()) if p.date else "", "column": list(p.column), "columns": p.columns,
+             "cells": [{"top": c.top, "bottom": c.bottom, "sg": c.sg, "perforated": c.perforated} for c in p.cells]}
+            for p in profiles]
+    return rows, {"step_date": str(step.date.date()), "missing": missing}
+
+
 def report(path: str, kind: str) -> str:
     """Те же отчёты, что делают Opisat_model и Perechislit_UNRST: kind 'model' (EGRID/INIT/SMSPEC/UNSMRY) или 'restart' (UNRST).
 

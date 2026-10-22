@@ -90,3 +90,20 @@ def test_connections_follow_restart_step(tmp_path, monkeypatch):
     monkeypatch.setattr(wg, "read_well_connections", per_step)
     rows, info = wg.wells_gwc_over_time(m, None, ur, 0.3)
     assert [r.date for r in rows] == [dt.datetime(2026, 2, 1)] and info["wells"] == ["OBS1"]
+
+
+def test_well_profile_columns_and_perforation(tmp_path):
+    from tnav_results.well_gwc import well_profile, wells_profile_at
+    from tnav_results import iter_restart_steps
+    m = _model(tmp_path)
+    p = well_profile(m, SG, "W", [(0, 0, 1), (0, 0, 0), (1, 1, 0)])
+    assert p.column == (0, 0) and p.columns == 2                      # главная колонна — где больше ячеек вскрытия
+    assert [(c.top, c.bottom, c.perforated) for c in p.cells] == [(-1000.0, -1010.0, True), (-1010.0, -1020.0, True), (-1020.0, -1030.0, False)]
+    assert [c.sg for c in p.cells] == [0.8, 0.6, 0.0]                 # колонна (0,0) из описания сетки
+    assert p.cells[0].top > p.cells[0].bottom                         # глубины со знаком минус: вниз — меньше
+    assert well_profile(m, SG, "W", []) is None
+    egrid = _egrid(tmp_path / "P.EGRID")
+    ur = _unrst(tmp_path / "P.UNRST", [SG], [PORV], with_wells=True)
+    step = list(iter_restart_steps(ur))[0]
+    prof, missing = wells_profile_at(load_model(egrid), ur, step, ["OBS1", "X"])
+    assert [x.well for x in prof] == ["OBS1"] and missing == ["X"] and prof[0].cells

@@ -1042,6 +1042,21 @@ async def results_well_gwc(request: Request):
     return JSONResponse({"rows": rows, **info})
 
 
+async def results_well_profile(request: Request):
+    path = _model_path(request, _project())
+    if not path:
+        return _err("Модель с результатами не выбрана", 404)
+    try:
+        date = dt.datetime.strptime(request.query_params.get("date") or "", "%Y-%m-%d")
+        wells = [w.strip() for w in (request.query_params.get("wells") or "").split("|") if w.strip()]
+        if not wells:
+            return _err("Не выбраны скважины")
+        rows, info = await run_in_threadpool(results.well_profile, path, date, wells)
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось построить профили скважин: %s" % e)
+    return JSONResponse({"rows": rows, **info})
+
+
 async def adapt_get(request: Request):
     return JSONResponse(await run_in_threadpool(lambda: adapt_view.view(_project())))
 
@@ -1349,6 +1364,7 @@ def build_app() -> Starlette:
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
         Route("/api/results/wellgwc", results_well_gwc),
+        Route("/api/results/wellprofile", results_well_profile),
         Route("/api/results/report", results_report),
         *fs_browse.routes(),
         Route("/api/sources/sample", sources_sample),
