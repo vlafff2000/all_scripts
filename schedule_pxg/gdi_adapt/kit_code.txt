@@ -1,6 +1,6 @@
 # =====================================================================================
-#  Скедул ПХГ: чтение данных модели для адаптации по ГДИ. Вставьте код целиком в python-секцию
-#  тНавигатора и запустите. Править ничего не нужно. Дальше вернитесь в «Скедул ПХГ».
+#  ГДМ: чтение данных модели для адаптации по ГДИ. Вставьте код целиком в python-секцию
+#  тНавигатора и запустите. Править ничего не нужно. Дальше вернитесь в «ГДМ».
 #  Нужен только numpy (scipy, pandas и Excel здесь не используются).
 # =====================================================================================
 import json
@@ -14,7 +14,7 @@ PROJECT_DIR = r"__PROJECT_DIR__"
 
 if not os.path.isdir(os.path.join(PROJECT_DIR, 'pi_dfac')):
     raise RuntimeError('Не найдена папка комплекта: %s (внутри должна быть папка pi_dfac). '
-                       'Если комплект перенесли, заново скопируйте код из «Скедул ПХГ».' % PROJECT_DIR)
+                       'Если комплект перенесли, заново скопируйте код из «ГДМ».' % PROJECT_DIR)
 if PROJECT_DIR not in sys.path:
     sys.path.insert(0, PROJECT_DIR)
 for _m in [m for m in sys.modules if m == 'pi_dfac' or m.startswith('pi_dfac.')]:
@@ -49,7 +49,7 @@ try:
     save_snapshots(snaps, os.path.join(RUN_DIR, 'snapshots.pkl'))
     log('Готово: прочитано %d из %d, пропущено %d, %.0f с. Файл: %s' % (len(snaps), len(studies), len(failed), time.time() - t0,
                                                                        os.path.join(RUN_DIR, 'snapshots.pkl')))
-    log('Вернитесь в «Скедул ПХГ»: вкладка «Адаптация по ГДИ», шаг 5.')
+    log('Вернитесь в «ГДМ»: вкладка «Адаптация по ГДИ», шаг 5.')
 except Exception:
     log('ОШИБКА:\n' + traceback.format_exc())
     _log.close()

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 APPS = [
     ('pxg_base', 'База ПХГ', 'PXG_Base.bat', 'pxg_base.sh'),
     ('karty_gsp', 'Карты ГСП', 'Karty_GSP.bat', 'karty_gsp.sh'),
-    ('skedul_pxg', 'Скедул ПХГ', 'Skedul_PXG.bat', 'skedul_pxg.sh'),
+    ('gdm', 'ГДМ', 'GDM.bat', 'gdm.sh'),
     ('perechislit_unrst', 'Перечислитель UNRST', 'Perechislit_UNRST.bat', 'perechislit_unrst.sh'),
     ('opisat_model', 'Описание расчёта', 'Opisat_model.bat', 'opisat_model.sh'),
     ('pxg_base_console', 'База ПХГ (консоль)', 'PXG_Base_console.bat', 'pxg_base_console.sh'),
