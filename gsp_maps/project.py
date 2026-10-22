@@ -337,6 +337,15 @@ class Project:
         return {"wells": m["wells"].tolist(), "days": m["days"].tolist(),
                 "flow": np.round(m["flow"], 1).tolist()}
 
+    def parameter_catalog(self) -> List[dict]:
+        return self.atlas.parameters() if self.atlas is not None else []
+
+    def parameter_payload(self, table: str, column: str, agg: str, start: str, end: str) -> dict:
+        assert self.atlas is not None
+        values, warn = self.atlas.parameter_values(table, column, agg, start, end)
+        return {"table": table, "column": column, "agg": agg, "title": atlas_source.PARAM_TABLES[table],
+                "values": {str(w): v for w, v in values.items()}, "warnings": warn}
+
     def work_payload(self, gsp: str) -> dict:
         """Работа скважин по сезонам и месяцам: матрицы «скважина × сезон» и «скважина × месяц», очерёдность ввода."""
         st = self.store

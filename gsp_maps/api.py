@@ -89,6 +89,25 @@ async def gsp(request: Request):
     return JSONResponse(await run_in_threadpool(PROJECT.gsp_payload, name, mode))
 
 
+async def params(request: Request):
+    """Параметры Атласа по скважинам: какие таблицы и числовые колонки можно положить на карту."""
+    if PROJECT.atlas is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    return JSONResponse({"items": await run_in_threadpool(PROJECT.parameter_catalog)})
+
+
+async def param(request: Request):
+    """Значение параметра по скважинам за период (agg: mean, sum, last, count)."""
+    if PROJECT.atlas is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    q = request.query_params
+    try:
+        return JSONResponse(await run_in_threadpool(PROJECT.parameter_payload, q.get("table") or "", q.get("column") or "",
+                                                    q.get("agg") or "mean", q.get("start") or "", q.get("end") or ""))
+    except ValueError as e:
+        return _err(str(e), 404)
+
+
 async def work(request: Request):
     if PROJECT.store is None:
         return _err("Данные ещё не загружены из проекта Атласа.", 409)
@@ -162,6 +181,8 @@ def build_app() -> Starlette:
         Route("/api/locate", locate),
         Route("/api/season", season),
         Route("/api/work", work),
+        Route("/api/params", params),
+        Route("/api/param", param),
         Route("/api/summary", summary),
         Route("/api/export", export, methods=["POST"]),
         Route("/api/image", save_image, methods=["POST"]),

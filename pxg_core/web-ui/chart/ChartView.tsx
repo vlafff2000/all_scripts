@@ -45,7 +45,7 @@ interface Props {
   onExclude: (dataset: string, id: string) => void
   /** Кроссплот давлений: щелчок по кнопке в закреплённой подсказке открывает динамику скважины. */
   onOpenWell?: (well: string, date: string) => void
-  /** Адрес на Карты ГСП для скважины из подсказки; null — скважины нет в проекте, кнопки нет. */
+  /** Адрес на Карты для скважины из подсказки; null — скважины нет в проекте, кнопки нет. */
   mapLink?: (well: string) => string | null
   onDownload?: (format: string, dpi: number) => Promise<void>
   /** PNG графика для буфера обмена (как при выгрузке): кнопка «Копировать» для вставки в презентацию или письмо. */
@@ -562,7 +562,7 @@ export function ChartView({ chart: given, excludeMode, onExclude, onOpenWell, ma
         (copy.lastElementChild ?? copy).insertAdjacentHTML('beforeend',
           `<button type="button" class="tip-go" data-open-well="${escapeHtml(where[1])}|${where[2]}">Динамика скважины</button>`)
       }
-      // скважина из подсказки есть в проекте — ссылка на Карты ГСП (открывается в новой вкладке)
+      // скважина из подсказки есть в проекте — ссылка на Карты (открывается в новой вкладке)
       const mapWell = /^Скв\. (\S+)/.exec(pt?.track.series.labels?.[pt.track.src[pt.k]] ?? '')?.[1]
       const mapHref = st.mapLink && mapWell ? st.mapLink(mapWell) : null
       if (mapHref) {

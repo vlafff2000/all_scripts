@@ -117,6 +117,12 @@ export const saveImage = (name: string, blob: Blob) =>
 
 export interface WorkSeason { kind: 'Отбор' | 'Закачка'; key: string; total: number[]; days: number[]; first: number[]; idle: number[]; start: number; end: number }
 export interface WorkData { wells: number[]; seasons: WorkSeason[]; months: number[]; monthFlow: number[][]; monthDays: number[][]; monthWater: number[][] }
+/** Параметр проекта Атласа по скважинам: таблица и числовая колонка (см. /api/params). */
+export interface ParamItem { table: string; column: string; title: string; label: string; rows: number; perWell: boolean }
+export interface ParamValues { table: string; column: string; agg: string; title: string; values: Record<string, number>; warnings: string[] }
+export const getParams = () => call<{ items: ParamItem[] }>('/api/params')
+export const getParam = (table: string, column: string, agg: string) =>
+  call<ParamValues>('/api/param?' + new URLSearchParams({ table, column, agg }))
 export const getWork = (gsp: string) => call<WorkData>('/api/work?name=' + encodeURIComponent(gsp))
 
 export interface SummaryData { columns: string[]; rows: (string | number | null)[][] }

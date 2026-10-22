@@ -22,12 +22,28 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from .store import _frame_to_arrays
 
 KGF_TO_BAR = 0.980665          # Атлас хранит давления в кгс/см², Карты считают в барах
 MIN_RUN_DAYS = 5               # режим короче этого срока при выводе периодов сливается с предыдущим
-KEYS = {"production": ["kind", "well", "date"], "response": ["well", "date", "horizon"], "object_pressure": ["date"]}
+# ключи точек, как в `atlas/engine/core/exclusions.py: KEYS` (текстовые поля; дата; числовые ключи не нужны этим таблицам)
+KEYS = {"production": ["kind", "well", "date"], "response": ["well", "date", "horizon"], "object_pressure": ["date"],
+        "operations": ["well", "date", "kind"], "water": ["well", "date"], "bottom": ["well", "date"],
+        "annulus": ["well", "date"], "ggh": ["well", "date"], "elpro": ["kind", "group", "well", "date", "np"]}
+# таблицы Атласа, которые можно положить на карту по скважинам (параметр); без номера скважины — нет
+PARAM_TABLES = {"production": "Расходы по скважинам", "response": "Отклик: давления и уровни", "operations": "Режимы работы",
+                "water": "Вода по скважинам", "bottom": "Забой", "construction": "Конструкция скважины", "gdi": "ГДИ",
+                "pressure_match": "Адаптация давлений", "ggh": "ГГХ", "elpro": "Эльпро", "annulus": "Затрубное давление",
+                "well_geo": "Положение и перфорация"}
+PARAM_SKIP = {"well", "year", "np", "season", "x", "y"}   # номера и координаты — не параметры
+PARAM_LABELS = {"q": "Расход", "pressure": "Давление, кгс/см²", "level": "Уровень", "work_hours": "Время работы, ч",
+                "water_rate": "Расход воды, т/сут", "water_factor_l": "Водный фактор", "bottom_m": "Забой, м", "top_m": "Верх, м",
+                "altitude": "Альтитуда, м", "perf_top": "Перфорация, верх, м", "perf_bottom": "Перфорация, низ, м", "dp2": "Депрессия",
+                "fact": "Факт", "model": "Модель", "hc": "Углеводороды", "gas": "Газ", "p": "Давление", "diameter_mm": "Диаметр, мм"}
+PARAM_AGG = {"mean": "среднее", "sum": "сумма", "last": "последнее", "count": "число записей"}
 SOURCES = [("flow", "Расходы по скважинам"), ("periods", "Периоды работы объекта"), ("press_gsp", "Давление по ГСП"),
            ("press_obj", "Давление по объекту"), ("water", "Вынос воды по скважинам"), ("xy", "Координаты X, Y"),
            ("altitude", "Альтитуды"), ("perf", "Перфорации")]
@@ -98,6 +114,7 @@ class AtlasData:
         self.key = "%s:%s:%s" % (pid, snapshot, self.manifest.get("revision"))
         self.excluded = set((self.manifest.get("settings") or {}).get("excluded_points") or {})
         self.warnings: List[str] = []
+        self._frames: Dict[str, Optional[pd.DataFrame]] = {}   # таблицы для параметров, читаются один раз
 
     def frame(self, name: str) -> Optional[pd.DataFrame]:
         if self._dir is None or not self.tables.get(name):
@@ -265,3 +282,58 @@ class AtlasData:
         df = df.assign(date=pd.to_datetime(df["date"]).dt.normalize()).groupby("date", as_index=False)["pressure"].mean()
         out = pd.DataFrame({"Дата": df["date"], "Давление_бар": (df["pressure"] * KGF_TO_BAR).round(2), "Скважина": 0}, columns=cols)
         return out.sort_values("Дата", kind="stable").reset_index(drop=True), []
+
+    # ---------- любой параметр по скважинам ----------
+    def parameters(self) -> List[dict]:
+        """Числовые колонки таблиц Атласа с номером скважины — всё, что можно положить на карту. Читается только схема файлов."""
+        out: List[dict] = []
+        if self._dir is None:
+            return out
+        for table, title in PARAM_TABLES.items():
+            path = self._dir / (table + ".parquet")
+            if not self.tables.get(table) or not path.is_file():
+                continue
+            for field in pq.read_schema(path):
+                if field.name in PARAM_SKIP or not (pa.types.is_integer(field.type) or pa.types.is_floating(field.type)):
+                    continue
+                out.append({"table": table, "column": field.name, "title": title, "label": PARAM_LABELS.get(field.name, field.name),
+                            "rows": int(self.tables[table]), "perWell": table != "well_geo"})
+        return out
+
+    def parameter_values(self, table: str, column: str, agg: str = "mean", start: str = "", end: str = "") -> Tuple[Dict[int, float], List[str]]:
+        """Значение параметра по каждой скважине за период: среднее, сумма, последнее или число записей.
+        Исключённые в Атласе точки — пропуск. Пустой результат — не ошибка, а пустой словарь с пояснением."""
+        if table not in PARAM_TABLES or agg not in PARAM_AGG:
+            raise ValueError("Нет такого параметра: %s / %s / %s" % (table, column, agg))
+        warn: List[str] = []
+        df = self._param_frame(table)
+        if df is None or column not in df or "well" not in df:
+            return {}, ["В проекте Атласа нет параметра «%s» (%s)." % (column, PARAM_TABLES[table])]
+        well = pd.to_numeric(df["well"], errors="coerce")
+        val = pd.to_numeric(df[column], errors="coerce")
+        keep = well.notna() & val.notna()
+        if "date" in df:
+            date = pd.to_datetime(df["date"], errors="coerce")
+            keep &= date.notna()
+            if start:
+                keep &= date >= pd.Timestamp(start)
+            if end:
+                keep &= date <= pd.Timestamp(end) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+        if self.excluded:
+            if table in KEYS:
+                ids = point_ids(df, table) + (":" + column if table == "response" else "")
+                keep &= ~ids.isin(self.excluded)
+            else:
+                warn.append("Исключения для таблицы «%s» на карте не учтены: проверьте точки в Атласе." % PARAM_TABLES[table])
+        part = pd.DataFrame({"well": well[keep].astype(int).to_numpy(), "v": val[keep].to_numpy()})
+        if "date" in df:
+            part["date"] = date[keep].to_numpy()
+            part = part.sort_values("date", kind="stable")
+        grouped = part.groupby("well")["v"]
+        series = {"mean": grouped.mean, "sum": grouped.sum, "last": grouped.last, "count": grouped.count}[agg]()
+        return {int(w): float(v) for w, v in series.items() if np.isfinite(v)}, warn
+
+    def _param_frame(self, table: str) -> Optional[pd.DataFrame]:
+        if table not in self._frames:
+            self._frames[table] = self.frame(table)
+        return self._frames[table]

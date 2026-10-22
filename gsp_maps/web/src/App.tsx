@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { exportExcel, getGsp, getSeason, getState, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getParam, getParams, getSeason, getState, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
 import MapView, { type MapHandle } from './MapView'
-import { SeasonCalc, fmtDay, scopeKeys } from './model'
+import { SeasonCalc, atlasPaint, fmtDay, scopeKeys } from './model'
 import SharesPage from './SharesPage'
 import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
-import { bubbleScale, hideIdle, minValue, labelMode, paintMode, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
 
 const PAGES = [
@@ -110,6 +110,27 @@ export default function App() {
     return () => { live = false }
   }, [ready, gsp, mode])
 
+  // параметры Атласа: каталог — при загрузке проекта; значения — при выборе параметра на карте
+  const [atlasItems, setAtlasItems] = useState<ParamItem[]>([])
+  const [atlasVals, setAtlasVals] = useState<ParamValues | null>(null)
+  const atlasPick = usePref(atlasParam), atlasAggV = usePref(atlasAgg)
+  useEffect(() => {
+    if (!ready) return
+    getParams().then(r => setAtlasItems(r.items)).catch(() => setAtlasItems([]))
+  }, [ready])
+  useEffect(() => {
+    if (!ready || paint !== 'atlas' || !atlasPick.includes('|')) { setAtlasVals(null); return }
+    let live = true
+    const [table, column] = atlasPick.split('|')
+    getParam(table, column, atlasAggV).then(r => live && setAtlasVals(r)).catch(() => live && setAtlasVals(null))
+    return () => { live = false }
+  }, [ready, paint, atlasPick, atlasAggV])
+  const atlasData = useMemo(() => {
+    if (!atlasVals) return null
+    const item = atlasItems.find(i => i.table === atlasVals.table && i.column === atlasVals.column)
+    return atlasPaint(atlasVals.values, (item ? item.title + ' · ' + item.label : atlasVals.column) + ' · ' + (atlasVals.agg === 'mean' ? 'среднее' : atlasVals.agg), atlasVals.warnings)
+  }, [atlasVals, atlasItems])
+
   // адрес из ссылки: сначала группа и вид/сезон, выбор скважины — когда загрузится нужная группа
   useEffect(() => {
     if (!ready || !addr) return
@@ -176,7 +197,7 @@ export default function App() {
   const setWindow = useCallback((a: number, b: number) => setWin([a, b]), [])
   const [a, b] = calc ? calc.clampWindow(win[0], win[1]) : [0, 0]
   const title = g && calc ? `${g.gsp} · ${kind} ${season} · ${fmtDay(calc.days[a])} — ${fmtDay(calc.days[b])}` : ''
-  useEffect(() => { document.title = 'Карты ГСП' + (gsp ? ' · ' + gsp : '') }, [gsp])
+  useEffect(() => { document.title = 'Карты' + (gsp ? ' · ' + gsp : '') }, [gsp])
 
   const flash = (t: string) => { setNote(t); setTimeout(() => setNote(''), 6000) }
   const png = async () => {
@@ -222,7 +243,7 @@ export default function App() {
   }
 
   const groupedNav = useMemo(() => PAGES, [])
-  if (error) return <div className="fatal"><h1>Карты ГСП</h1><p>{error}</p></div>
+  if (error) return <div className="fatal"><h1>Карты</h1><p>{error}</p></div>
   const body = () => {
     if (!app) return <p className="muted">Загрузка…</p>
     if (page === 'data') return <DataPage app={app} setApp={setApp} mode={mode} setMode={posMode.set} gsp={gsp} onReload={refresh} />
@@ -249,7 +270,7 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
+          <MapView ref={map} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />
           <Timeline g={g} calc={calc} a={a} b={b} setWindow={setWindow} />
@@ -262,7 +283,7 @@ export default function App() {
     <div className={'shell' + (collapsed ? ' collapsed' : '')}>
       <aside className="sidebar">
         <div className="brand">
-          <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">Карты ГСП</span></a>
+          <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">Карты</span></a>
           <button type="button" className="side-toggle" onClick={() => sidebarCollapsed.set(!collapsed)} aria-expanded={!collapsed} title={collapsed ? 'Показать меню' : 'Свернуть меню'}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d={collapsed ? 'M6 3.5 10.5 8 6 12.5' : 'M10 3.5 5.5 8 10 12.5'} /></svg></button>
         </div>
