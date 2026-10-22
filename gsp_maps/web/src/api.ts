@@ -120,6 +120,12 @@ export interface WorkData { wells: number[]; seasons: WorkSeason[]; months: numb
 /** Параметр проекта Атласа по скважинам: таблица и числовая колонка (см. /api/params). */
 export interface ParamItem { table: string; column: string; title: string; label: string; rows: number; perWell: boolean }
 export interface ParamValues { table: string; column: string; agg: string; title: string; values: Record<string, number>; warnings: string[] }
+/** ГИС и ГВК из базы ГИС проекта Атласа: что есть (пачки, сезоны, показатели) и значения по скважинам (см. /api/gis). */
+export interface GisCatalog { packs: string[]; seasons: { key: string; wells: number }[]; metrics: { key: string; label: string }[]; note: string }
+export interface GisValues { values: Record<string, number>; dates: Record<string, string>; options: Record<string, string[]>; title: string; warnings: string[] }
+export const getGis = () => call<GisCatalog>('/api/gis')
+export const getGisValues = (pack: string, metric: string, season: string, against: string, pins: Record<string, string>) =>
+  call<GisValues>('/api/gis/values?' + new URLSearchParams({ pack, metric, season, against, pins: Object.entries(pins).map(([w, d]) => `${w}:${d}`).join(',') }))
 export const getParams = () => call<{ items: ParamItem[] }>('/api/params')
 export const getParam = (table: string, column: string, agg: string) =>
   call<ParamValues>('/api/param?' + new URLSearchParams({ table, column, agg }))

@@ -111,7 +111,7 @@ def values(atlas: AtlasData, pack: str, metric: str, season: str, against: str =
     if against:
         before, bdates, _ = season_values(against)
         out = {w: round(v - before[w], 4) for w, v in now.items() if w in before}
-        title = "Изменение: %s · %s · %s минус %s" % (METRICS[metric], pack, season, against)
+        title = "Δ %s · %s · %s − %s" % (METRICS[metric], pack, season, against)
         dates = {w: "%s → %s" % (bdates[w], dates[w]) for w in out}
         now = out
         if not now:

@@ -2,7 +2,7 @@ import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
-import { groupColor, type GspData, type ParamItem, type SeasonInfo } from './api'
+import { groupColor, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, monthOf, niceStep, place, sectorPath, waterByWell } from './model'
 
@@ -10,6 +10,12 @@ export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share
 /** Параметр Атласа на карте: список параметров, выбор и агрегация, готовая раскраска (считает страница). */
 export interface AtlasPicker { items: ParamItem[]; pick: string; agg: string; onPick: (pick: string, agg: string) => void; paint: PaintData | null }
 /** Раскраска по моделям tNavigator: выбор моделей и вектора (панель) и значения на карте (paint). */
+/** Режим «ГИС и ГВК»: что выбрано и что можно выбрать; замер скважины закрепляется вручную (pins), по умолчанию берётся последний в сезоне. */
+export interface GisPicker {
+  catalog: GisCatalog | null; pack: string; metric: string; season: string; against: string; pins: Record<string, string>
+  options: Record<string, string[]>; dates: Record<string, string>; paint: PaintData | null
+  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string> }) => void
+}
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
 interface Props {
@@ -17,6 +23,7 @@ interface Props {
   options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; title: string
   /** Параметр Атласа: только на странице карты. */
   atlas?: AtlasPicker
+  gis?: GisPicker
   models?: ModelsPanel
   /** Режим сравнения: общий масштаб кругов и общий вид (зум/сдвиг) у двух карт. */
   /** Куда выводить подсказку: элемент вне карты (тогда она не закрывает скважины) или null — рядом с курсором. */
@@ -121,7 +128,35 @@ const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: n
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView, atlas, models }, ref) {
+function GisControls({ catalog, pack, metric, season, against, pins, options, dates, onChange }: GisPicker) {
+  const [well, setWell] = useState('')
+  if (!catalog) return <p className="muted">Читаю базу ГИС…</p>
+  if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
+  const multi = Object.keys(options).sort((a, b) => Number(a) - Number(b))
+  const w = multi.includes(well) ? well : multi[0] ?? ''
+  const cur = pins[w] || (dates[w] ?? '')
+  return <>
+    <select value={pack} onChange={e => onChange({ pack: e.target.value })} aria-label="Пачка">
+      {catalog.packs.map(p => <option key={p} value={p}>Пачка: {p}</option>)}</select>
+    <select value={metric} onChange={e => onChange({ metric: e.target.value })} aria-label="Показатель ГИС">
+      {catalog.metrics.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}</select>
+    <select value={season} onChange={e => onChange({ season: e.target.value })} aria-label="Сезон замера">
+      {catalog.seasons.map(s => <option key={s.key} value={s.key}>{s.key} · скважин {s.wells}</option>)}</select>
+    <select value={against} onChange={e => onChange({ against: e.target.value })} aria-label="Сравнить с сезоном">
+      <option value="">Без сравнения</option>
+      {catalog.seasons.filter(s => s.key !== season).map(s => <option key={s.key} value={s.key}>Изменение к: {s.key}</option>)}</select>
+    {multi.length > 0 && !against && <div className="gis-pin">
+      <span className="muted">В сезоне несколько замеров: по умолчанию последний, другой можно выбрать.</span>
+      <select value={w} onChange={e => setWell(e.target.value)} aria-label="Скважина с несколькими замерами">
+        {multi.map(x => <option key={x} value={x}>Скважина {x}{pins[x] ? ' (выбран вручную)' : ''}</option>)}</select>
+      <select value={cur} onChange={e => onChange({ pins: { ...pins, [w]: e.target.value } })} aria-label="Замер скважины">
+        {options[w].map(d => <option key={d} value={d}>{d}</option>)}</select>
+      {Object.keys(pins).length > 0 && <button type="button" className="quiet" onClick={() => onChange({ pins: {} })}>Сбросить выбор замеров</button>}
+    </div>}
+  </>
+}
+
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView, atlas, gis, models }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
@@ -191,7 +226,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return { mode: keys.length === 1 && keys[0] === season ? 'one' : scopeMode, keys, calcs: multi.calcs }
   }, [multi, scopeMode, picked, season])
   const calcPaint: PaintData | null = useMemo(() => paintFor(options.paint, g, calc, kind, season, a, b, options.paint === 'entry' || options.paint === 'wf' ? scope : undefined), [options.paint, g, calc, kind, season, a, b, scope])
-  const paintData: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : calcPaint
+  const paintData: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : options.paint === 'gis' ? gis?.paint ?? null : calcPaint
   const wm = useMemo(() => waterMonths(water), [water])
   // кольца воды скважины: один месяц — одно кольцо (замеры месяца сводятся к максимуму)
   const rings = useMemo(() => {
@@ -577,6 +612,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
             </>}
+            {options.paint === 'gis' && gis && <GisControls {...gis} />}
             {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
             {!paintData && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
