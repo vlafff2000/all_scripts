@@ -9,6 +9,7 @@ import collections
 import datetime as dt
 import math
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -18,6 +19,8 @@ from typing import Dict, List, Optional, Tuple
 import openpyxl
 import pandas as pd
 from openpyxl.utils import column_index_from_string as ci, get_column_letter as gl
+
+from .parallel import map_jobs
 
 MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
 REF = re.compile(r"(\$?)([A-Z]{1,3})(\$?)(\d+)")
@@ -34,7 +37,8 @@ def to_xlsx(path: str, workdir: str, use_soffice: bool = True) -> Optional[str]:
     src = os.path.join(workdir, "src" + os.path.splitext(path)[1])
     shutil.copy(path, src)
     try:
-        subprocess.run([exe, "--headless", "--convert-to", "xlsx", "--outdir", workdir, src],
+        profile = "-env:UserInstallation=" + pathlib.Path(workdir, "lo_profile").absolute().as_uri()      # свой профиль: параллельные soffice не мешают друг другу
+        subprocess.run([exe, "--headless", profile, "--convert-to", "xlsx", "--outdir", workdir, src],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -759,6 +763,49 @@ def expand_paths(items: List[str]) -> List[str]:
     return res
 
 
+MB_PER_FILE = 400       # один процесс читает книгу целиком (pandas/openpyxl)
+
+
+def _process_file(job) -> Dict[str, object]:
+    """Один файл build: вид, чтение, пересчёт; сообщения возвращаются (печатает основной процесс, в порядке файлов)."""
+    n, path, tmp, otbor_year, zak_year, years, xls_formulas = job
+    kind = classify(path)
+    name = os.path.basename(path)
+    out: Dict[str, object] = {"name": name, "log": [], "status": "skip"}
+    lg = out["log"].append
+    if not kind:
+        out["status"] = "unknown"
+        lg("⚠️ %s: вид файла не опознан (ни шахматка, ни книга воды), пропущен" % name)
+        return out
+    if kind == "вода":
+        out["water"] = read_water(path)
+        out["status"] = "water"
+        lg("💧 %s: вода" % name)
+        return out
+    wd = os.path.join(tmp, str(n))
+    os.makedirs(wd)
+    year = _manual_year(name, years) or (otbor_year if kind == "отбор" else zak_year) or _infer_year(path)
+    try:
+        sh = Shakh(path, kind, year, wd, xls_formulas=xls_formulas)
+    except YearUnknown:
+        out["status"] = "noyear"
+        lg("❌ %s: год первых суток не определён (нет ни в имени файла, ни в шапке листа), файл пропущен. Укажите год в поле «Годы по файлам»" % name)
+        return out
+    sh.label = name
+    try:
+        df = recompute(sh, sh.wells_table())
+    except ShakhError as e:
+        lg("❌ %s" % e)
+        return out
+    if sh.has_formulas:
+        sh.check_formula_patterns(["qгаза (расч)", "q газа пром"] if kind == "отбор" else ["q газа пром", "Qгаза пром.", "Qгаза отч."])
+    df.insert(0, "Файл", name)
+    out.update(status="ok", kind=kind, sh=sh, df=df)
+    lg("📄 %s (%s): %d скважин, %d суток (%s…%s)" % (name, kind, len(sh.blocks), len(sh.day_cols),
+                                                   sh.day_cols[0][1] if sh.day_cols else "", sh.day_cols[-1][1] if sh.day_cols else ""))
+    return out
+
+
 def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_year: Optional[int] = None, zak_year: Optional[int] = None,
           xls_formulas: bool = False, log=print, years: str = "") -> Dict[str, object]:
     """Сводит файлы (шахматки отбора и закачки по сезонам, книги воды) в книгу Excel и базу SQLite рядом (расширение .sqlite).
@@ -772,38 +819,19 @@ def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_y
     water: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
     unknown: List[str] = []
     noyear: List[str] = []
-    for n, path in enumerate(files):
-        kind = classify(path)
-        name = os.path.basename(path)
-        if not kind:
+    jobs = [(n, path, tmp, otbor_year, zak_year, years, xls_formulas) for n, path in enumerate(files)]
+    for r in map_jobs(_process_file, jobs, MB_PER_FILE):       # файлы независимы: по ядрам, результат тот же, что подряд
+        for line in r["log"]:
+            log(line)
+        status, name = r["status"], r["name"]
+        if status == "unknown":
             unknown.append(name)
-            log("⚠️ %s: вид файла не опознан (ни шахматка, ни книга воды), пропущен" % name)
-            continue
-        if kind == "вода":
-            water.append(read_water(path))
-            log("💧 %s: вода" % name)
-            continue
-        wd = os.path.join(tmp, str(n))
-        os.makedirs(wd)
-        year = _manual_year(name, years) or (otbor_year if kind == "отбор" else zak_year) or _infer_year(path)
-        try:
-            sh = Shakh(path, kind, year, wd, xls_formulas=xls_formulas)
-        except YearUnknown:
+        elif status == "noyear":
             noyear.append(name)
-            log("❌ %s: год первых суток не определён (нет ни в имени файла, ни в шапке листа), файл пропущен. Укажите год в поле «Годы по файлам»" % name)
-            continue
-        sh.label = name
-        try:
-            df = recompute(sh, sh.wells_table())
-        except ShakhError as e:
-            log("❌ %s" % e)
-            continue
-        if sh.has_formulas:
-            sh.check_formula_patterns(["qгаза (расч)", "q газа пром"] if kind == "отбор" else ["q газа пром", "Qгаза пром.", "Qгаза отч."])
-        df.insert(0, "Файл", name)
-        parts[kind].append((sh, df))
-        log("📄 %s (%s): %d скважин, %d суток (%s…%s)" % (name, kind, len(sh.blocks), len(sh.day_cols),
-                                                       sh.day_cols[0][1] if sh.day_cols else "", sh.day_cols[-1][1] if sh.day_cols else ""))
+        elif status == "water":
+            water.append(r["water"])
+        elif status == "ok":
+            parts[r["kind"]].append((r["sh"], r["df"]))
     all_sh = [sh for lst in parts.values() for sh, _d in lst]
     # группы: таблица зон последнего файла, где скважина встречается
     zrows = []
