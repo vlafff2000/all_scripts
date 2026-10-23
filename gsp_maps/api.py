@@ -143,6 +143,25 @@ async def gis_model(request: Request):
     return JSONResponse(await run_in_threadpool(lambda: gis_source.model_values(gwc_share.load(), q.get("pack") or "", q.get("season") or "")))
 
 
+async def observers_get(request: Request):
+    """Наблюдательные скважины (ГИС, замеры давления; вне групп) с положением; без координат — в списке missing."""
+    if PROJECT.atlas is None or PROJECT.store is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    return JSONResponse(await run_in_threadpool(PROJECT.observers_payload))
+
+
+async def observers_mark(request: Request):
+    """Ручной выбор инженера: {well, kind: obs|prod|auto}."""
+    if PROJECT.atlas is None or PROJECT.store is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    b = await request.json()
+    try:
+        PROJECT.mark_observer(int(b.get("well")), str(b.get("kind") or ""))
+    except (TypeError, ValueError) as e:
+        return _err(str(e))
+    return JSONResponse(await run_in_threadpool(PROJECT.observers_payload))
+
+
 async def roof(request: Request):
     """Кровля пласта из модели: растр отметок верха ячеек слоя (?model=путь к файлу модели, ?layer=номер слоя, 0 — верхний активный)."""
     q = request.query_params
@@ -305,6 +324,8 @@ def build_app() -> Starlette:
         Route("/api/gis", gis_catalog),
         Route("/api/gis/values", gis_values),
         Route("/api/gis/model", gis_model),
+        Route("/api/observers", observers_get),
+        Route("/api/observers/mark", observers_mark, methods=["POST"]),
         Route("/api/roof", roof),
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),

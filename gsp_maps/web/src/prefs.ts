@@ -43,6 +43,8 @@ export const gisRoof = pref<boolean>('gsp.gisRoof', false)
 export const gisRoofModel = pref<string>('gsp.gisRoofModel', '', raw => String(raw || ''))
 export const gisRoofLayer = pref<string>('gsp.gisRoofLayer', '1', raw => String(raw ?? '1'))
 export const gisRoofStep = pref<string>('gsp.gisRoofStep', '', raw => String(raw || ''))
+/** Показывать ли наблюдательные скважины (вне групп) в режиме «ГИС и ГВК». */
+export const gisObservers = pref<boolean>('gsp.gisObservers', true)
 export const gisIso = pref<boolean>('gsp.gisIso', false)
 export const gisIsoStep = pref<string>('gsp.gisIsoStep', '', raw => String(raw || ''))
 export const gisIsoReach = pref<string>('gsp.gisIsoReach', '1.5', raw => String(raw || '1.5'))

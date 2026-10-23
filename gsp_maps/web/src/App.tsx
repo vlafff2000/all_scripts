@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { exportExcel, getGsp, getGis, getGisModel, getRoof, type RoofGrid, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getGis, getObservers, markObserver, type Observers, getGisModel, getRoof, type RoofGrid, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
@@ -9,7 +9,7 @@ import SharesPage from './SharesPage'
 import WellsPage from './WellsPage'
 import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
-import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, gisPack, gisMetric, gisSeason, gisAgainst, gisPins, gisSource, gisRoof, gisRoofModel, gisRoofLayer, gisRoofStep, gisIso, gisIsoStep, gisIsoReach, modelKeyword, modelAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, gisPack, gisMetric, gisSeason, gisAgainst, gisPins, gisSource, gisRoof, gisRoofModel, gisRoofLayer, gisRoofStep, gisIso, gisObservers, gisIsoStep, gisIsoReach, modelKeyword, modelAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
 
 const PAGES = [
@@ -133,6 +133,8 @@ export default function App() {
 
   // ГИС и ГВК: каталог базы ГИС — при загрузке проекта; значения — при выборе в режиме «ГИС и ГВК»
   const [gisCat, setGisCat] = useState<GisCatalog | null>(null)
+  const [obs, setObs] = useState<Observers | null>(null)
+  const obsOn = usePref(gisObservers)
   const [gisVals, setGisVals] = useState<GisValues | null>(null)
   const gPack = usePref(gisPack), gMetric = usePref(gisMetric), gSeason = usePref(gisSeason), gAgainst = usePref(gisAgainst), gPinsRaw = usePref(gisPins), isoOn = usePref(gisIso), isoStep = usePref(gisIsoStep), isoReach = usePref(gisIsoReach)
   const gPins = useMemo(() => Object.fromEntries(gPinsRaw.split(',').filter(x => x.includes(':')).map(x => x.split(':') as [string, string])), [gPinsRaw])
@@ -141,6 +143,12 @@ export default function App() {
     getGis().then(setGisCat).catch(() => setGisCat(null))
   }, [ready])
   // выбор по умолчанию — подсказка: пачка с наибольшим числом замеров не определяется, берём первую и последний сезон; инженер меняет вручную
+  useEffect(() => {
+    if (!ready || paint !== 'gis') return
+    let live = true
+    getObservers().then(r => live && setObs(r)).catch(() => live && setObs(null))
+    return () => { live = false }
+  }, [ready, paint])
   const gisPackUse = gisCat?.packs.includes(gPack) ? gPack : gisCat?.packs[0] ?? ''
   const gisSeasonUse = gisCat?.seasons.some(s => s.key === gSeason) ? gSeason : gisCat?.seasons[gisCat.seasons.length - 1]?.key ?? ''
   const gisAgainstUse = gisCat?.seasons.some(s => s.key === gAgainst) && gAgainst !== gisSeasonUse ? gAgainst : ''
@@ -369,7 +377,7 @@ export default function App() {
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
-          <MapView ref={map} models={{ paint: modelData?.paint ?? null, picker: { view: modelView, keywords: modelKws, keyword: modelKw, agg: modelAggV, note: modelErr || modelData?.note || (pair.length ? '' : 'Отметьте модели, которые нужно показать на карте.'), onKeyword: k => modelKeyword.set(k), onAgg: v => modelAgg.set(v), onSelect: ids => selectModels(ids).then(setModelView).catch(e => setModelErr(String(e.message || e))), onFolders: fs => setModelFolders(fs).then(setModelView).catch(e => setModelErr(String(e.message || e))), onAddFolder: () => pickPath('folder', '').then(r => { if (r.path) setModelFolders([...(modelView?.folders ?? []), r.path]).then(setModelView) }).catch(e => setModelErr(String(e.message || e))) } }} gis={{ catalog: gisCat, pack: gisPackUse, metric: gMetric, season: gisSeasonUse, against: gisAgainstUse, pins: gPins, options: gisVals?.options ?? {}, dates: gisVals?.dates ?? {}, paint: gisData, iso: { on: isoOn, step: isoStep, reach: isoReach }, isoNote: '', roof: { on: roofOn, model: roofPath, layer: roofLayer, step: roofStep, models: (modelView?.models ?? []).filter(m => m.files.includes('EGRID')), note: roofErr || roofGrid?.note || '', grid: roofRaster }, source: gSource, modelInfo: gisMod?.info ?? gisMod?.warnings[0] ?? '',
+          <MapView ref={map} models={{ paint: modelData?.paint ?? null, picker: { view: modelView, keywords: modelKws, keyword: modelKw, agg: modelAggV, note: modelErr || modelData?.note || (pair.length ? '' : 'Отметьте модели, которые нужно показать на карте.'), onKeyword: k => modelKeyword.set(k), onAgg: v => modelAgg.set(v), onSelect: ids => selectModels(ids).then(setModelView).catch(e => setModelErr(String(e.message || e))), onFolders: fs => setModelFolders(fs).then(setModelView).catch(e => setModelErr(String(e.message || e))), onAddFolder: () => pickPath('folder', '').then(r => { if (r.path) setModelFolders([...(modelView?.folders ?? []), r.path]).then(setModelView) }).catch(e => setModelErr(String(e.message || e))) } }} gis={{ catalog: gisCat, pack: gisPackUse, metric: gMetric, season: gisSeasonUse, against: gisAgainstUse, pins: gPins, options: gisVals?.options ?? {}, dates: gisVals?.dates ?? {}, paint: gisData, iso: { on: isoOn, step: isoStep, reach: isoReach }, isoNote: '', obs: { on: obsOn, data: obs, onToggle: v => gisObservers.set(v), onMark: (w, k) => markObserver(w, k).then(setObs).catch(() => undefined) }, roof: { on: roofOn, model: roofPath, layer: roofLayer, step: roofStep, models: (modelView?.models ?? []).filter(m => m.files.includes('EGRID')), note: roofErr || roofGrid?.note || '', grid: roofRaster }, source: gSource, modelInfo: gisMod?.info ?? gisMod?.warnings[0] ?? '',
             onChange: p => { if (p.pack !== undefined) gisPack.set(p.pack); if (p.metric !== undefined) gisMetric.set(p.metric); if (p.season !== undefined) gisSeason.set(p.season); if (p.against !== undefined) gisAgainst.set(p.against); if (p.roofOn !== undefined) gisRoof.set(p.roofOn); if (p.roofModel !== undefined) gisRoofModel.set(p.roofModel); if (p.roofLayer !== undefined) gisRoofLayer.set(p.roofLayer); if (p.roofStep !== undefined) gisRoofStep.set(p.roofStep); if (p.source !== undefined) gisSource.set(p.source); if (p.iso !== undefined) gisIso.set(p.iso); if (p.isoStep !== undefined) gisIsoStep.set(p.isoStep); if (p.isoReach !== undefined) gisIsoReach.set(p.isoReach); if (p.pins) gisPins.set(Object.entries(p.pins).map(([w, d]) => `${w}:${d}`).join(',')) } }} atlas={{ items: atlasItems, pick: atlasPick, agg: atlasAggV, paint: atlasData, onPick: (p, ag) => { atlasParam.set(p); atlasAgg.set(ag) } }} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={pick} group={group} onGroup={setGroup} title={title} tipHost={insp && tmode === 'dock' ? tipDock : null} multi={multi}
             options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
             onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />

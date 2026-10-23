@@ -129,6 +129,12 @@ export const getGisModel = (pack: string, season: string) => call<GisModel>('/ap
 /** Кровля пласта из модели: растр отметок (а.о.) верха ячеек слоя; строки идут по возрастанию Y, пропуск — null. */
 export interface RoofGrid { x0: number; y0: number; dx: number; dy: number; nx: number; ny: number; z: (number | null)[][]; layers: number; note: string }
 export const getRoof = (model: string, layer: number) => call<RoofGrid>('/api/roof?' + new URLSearchParams({ model, layer: String(layer) }))
+/** Наблюдательные скважины: ГИС или замеры давления, не входят в группы; без координат — в missing. kind: obs | prod | auto (ручной выбор инженера). */
+export interface ObserverWell { well: number; why: string[]; manual: boolean; inGroup: boolean; x?: number; y?: number }
+export interface Observers { wells: ObserverWell[]; missing: ObserverWell[]; forcedProd: number[]; note: string }
+export const getObservers = () => call<Observers>('/api/observers')
+export const markObserver = (well: number, kind: 'obs' | 'prod' | 'auto') =>
+  call<Observers>('/api/observers/mark', post({ well, kind }))
 export const getGis = () => call<GisCatalog>('/api/gis')
 export const getGisValues = (pack: string, metric: string, season: string, against: string, pins: Record<string, string>) =>
   call<GisValues>('/api/gis/values?' + new URLSearchParams({ pack, metric, season, against, pins: Object.entries(pins).map(([w, d]) => `${w}:${d}`).join(',') }))

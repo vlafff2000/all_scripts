@@ -2,7 +2,7 @@ import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
-import { groupColor, type TnavModel, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
+import { groupColor, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type IsoResult } from './model'
 
@@ -15,6 +15,8 @@ export interface GisPicker {
   catalog: GisCatalog | null; pack: string; metric: string; season: string; against: string; pins: Record<string, string>
   options: Record<string, string[]>; dates: Record<string, string>; paint: PaintData | null
   iso: { on: boolean; step: string; reach: string }; isoNote: string
+  /** Наблюдательные скважины (вне групп): свой флажок показа, ручное отнесение к наблюдательным/эксплуатационным. */
+  obs: { on: boolean; data: Observers | null; onToggle: (v: boolean) => void; onMark: (well: number, kind: 'obs' | 'prod' | 'auto') => void }
   source: 'fact' | 'model' | 'delta'; modelInfo: string
   roof: { on: boolean; model: string; layer: string; step: string; models: TnavModel[]; note: string; grid: RoofRaster | null }
   onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string }) => void
@@ -133,7 +135,25 @@ const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: n
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, source, modelInfo, roof, onChange }: GisPicker) {
+/** Наблюдательные скважины: показ, список «нет координат» и ручное решение инженера (оно важнее автоопределения). */
+function ObserverControls({ obs }: { obs: GisPicker['obs'] }) {
+  const [add, setAdd] = useState('')
+  const d = obs.data
+  const n = d ? d.wells.length + d.missing.length : 0
+  return <>
+    <label className="check"><input type="checkbox" checked={obs.on} onChange={e => obs.onToggle(e.target.checked)} /> Наблюдательные скважины (◆){d ? ` · ${n}` : ''}</label>
+    {obs.on && d && <div className="gis-pin">
+      <span className="muted">{d.note || 'Наблюдательные — скважины с ГИС или замерами давления, которых нет ни в одной группе. Это подсказка: решение за вами.'}</span>
+      {d.missing.length > 0 && <span className="muted" title="Нет X, Y в проекте Атласа">Нет координат: {d.missing.map(m => m.well).join(', ')}</span>}
+      {[...d.wells, ...d.missing].map(o => <span key={o.well} className="muted">{o.well} ({o.why.join(', ') || '—'}){o.manual ? ' · вручную' : ''}{' '}
+        <button type="button" className="quiet" onClick={() => obs.onMark(o.well, 'prod')}>→ эксплуатационная</button>{o.manual && <> <button type="button" className="quiet" onClick={() => obs.onMark(o.well, 'auto')}>Авто</button></>}</span>)}
+      {d.forcedProd.length > 0 && <span className="muted">Отнесены к эксплуатационным: {d.forcedProd.map(w => <button key={w} type="button" className="quiet" title="Вернуть автоопределение" onClick={() => obs.onMark(w, 'auto')}>{w} ↩</button>)}</span>}
+      <input value={add} onChange={e => setAdd(e.target.value.replace(/\D/g, ''))} placeholder="Номер скважины" aria-label="Номер скважины" style={{ width: 120 }} />
+      <button type="button" className="quiet" disabled={!add} onClick={() => { obs.onMark(Number(add), 'obs'); setAdd('') }}>Сделать наблюдательной</button>
+    </div>}
+  </>
+}
+function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, obs, source, modelInfo, roof, onChange }: GisPicker) {
   const [well, setWell] = useState('')
   if (!catalog) return <p className="muted">Читаю базу ГИС…</p>
   if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
@@ -161,6 +181,7 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
         {[['1', 'Радиус доверия: 1 расстояние между скважинами'], ['1.5', 'Радиус доверия: 1,5'], ['2.5', 'Радиус доверия: 2,5'], ['4', 'Радиус доверия: 4']].map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
       <span className="muted">За краем области скважин изолинии не строятся; чем дальше от скважин, тем бледнее заливка.{isoNote ? ' ' + isoNote : ''}</span>
     </div>}
+    <ObserverControls obs={obs} />
     <label className="check"><input type="checkbox" checked={roof.on} onChange={e => onChange({ roofOn: e.target.checked })} /> Кровля пласта из модели</label>
     {roof.on && <div className="gis-pin">
       <select value={roof.model} onChange={e => onChange({ roofModel: e.target.value })} aria-label="Модель для кровли">
@@ -214,7 +235,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const [frameAll, setFrameAll] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
   const { placed, spacing, far } = geo
-  const bounds = frameAll ? geo.boundsAll : geo.bounds
+  const obsBox = frameAll && gis?.obs.on && !spread ? gis.obs.data?.wells.filter(o => o.x !== undefined) ?? [] : []
+  const bounds = useMemo(() => {
+    const b = frameAll ? geo.boundsAll : geo.bounds
+    if (!obsBox.length) return b
+    const xs = obsBox.map(o => o.x!), ys = obsBox.map(o => -o.y!)
+    return { x0: Math.min(b.x0, ...xs), x1: Math.max(b.x1, ...xs), y0: Math.min(b.y0, ...ys), y1: Math.max(b.y1, ...ys) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameAll, geo, gis?.obs.data, gis?.obs.on, spread])
   const rmax = useMemo(() => {
     if (geo.unit) return geo.unit
     const span = Math.max(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0, 1)
@@ -481,6 +509,19 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, rd, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
+  // наблюдательные скважины (вне групп): ромбы в координатах карты; при «схеме» положения условные, поэтому они не рисуются
+  const obsPts = useMemo(() => (options.paint === 'gis' && gis?.obs.on && !spread ? gis.obs.data?.wells.filter(o => o.x !== undefined && o.y !== undefined) ?? [] : []), [options.paint, gis?.obs.on, gis?.obs.data, spread])
+  const obsLayer = obsPts.length ? <g aria-label="Наблюдательные скважины">
+    {obsPts.map(o => {
+      const pv = paintData?.vals.get(o.well), r = rd * 0.5, x = o.x!, y = -o.y!
+      const fill = pv && paintData ? rampColor(paintData.stops, (pv.v - paintData.lo) / (paintData.hi - paintData.lo)) : pal.surface
+      return <g key={o.well}>
+        <path d={`M${x},${y - r}L${x + r},${y}L${x},${y + r}L${x - r},${y}Z`} fill={fill} stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+        <text x={x} y={y - r - 3 / K} fontSize={10 / K} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{o.well}{pv ? ' · ' + pv.label : ''}</text>
+        <title>{`Наблюдательная скважина ${o.well} (${o.why.join(', ')})${pv ? '\n' + pv.tip : '\nНет данных ГИС для этой раскраски'}`}</title>
+      </g>
+    })}
+  </g> : null
   const tipNode = useMemo(() => {
     if (!tipWell) return null
         const st = win.stats[tipIdx], share = st.total > 0 && win.sumAll > 0 ? st.total / win.sumAll : 0
@@ -591,6 +632,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 <text x={l.at[0]} y={l.at[1]} fontSize={11 / K} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{fmt1(l.level)}</text></g>)}
             </g>}
             {layer}
+            {obsLayer}
           </g>
         </g>
         {/* заголовок и легенда рисуются в координатах экрана, поэтому попадают и в PNG */}
