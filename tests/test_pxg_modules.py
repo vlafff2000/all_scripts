@@ -224,3 +224,102 @@ def test_office_converter_batch_and_fallback(tmp_path):
     # LibreOffice: Excel → pdf, лист → csv
     res = oc.convert_file(f, "pdf", str(tmp_path / "a.pdf"), soffice)
     assert res["status"] == "ok" and (tmp_path / "a.pdf").stat().st_size > 0
+
+
+def test_flow_db_same_with_parallel_files(tmp_path, monkeypatch):
+    """Файлы расходов обрабатываются параллельно на нескольких процессах: база та же, что при одном процессе."""
+    import shutil
+    tree = make_flow_tree(tmp_path / "data")
+    for f in list(tree.root.rglob("*.xlsx")):                  # по два файла в папке, чтобы работали два процесса
+        shutil.copy(f, f.with_name(f.stem + "_b.xlsx"))
+    params = {"root": str(tree.root), "periods": str(tree.periods_file)}
+    monkeypatch.setenv("PXG_WORKERS", "1")
+    run_module("Создание_базы_данных_расходов", params, tmp_path / "one")
+    monkeypatch.setenv("PXG_WORKERS", "3")
+    monkeypatch.setenv("PXG_PARALLEL_MIN", "1")
+    job = run_module("Создание_базы_данных_расходов", params, tmp_path / "many")
+    name = "Сводка_закачка_отбор_обновленный_скрипт.xlsx"
+    a, b = pd.read_excel(tmp_path / "one" / name, sheet_name=None), pd.read_excel(tmp_path / "many" / name, sheet_name=None)
+    assert list(a) == list(b)
+    for sheet in a:
+        pd.testing.assert_frame_equal(a[sheet], b[sheet])
+    assert any("Обработка файла" in line for line in job["log"])
+    assert len(a["Данные"] if "Данные" in a else next(iter(a.values()))) > 0
+
+
+def test_map_module_function_uses_processes_and_keeps_order(tmp_path, capsys):
+    from pxg_core import parallel
+    from pxg_core.расходы_файлы import DATE_ISSUES, reset_date_issues
+    mod = tmp_path / "m.py"
+    mod.write_text("import os\nfrom pxg_core.расходы_файлы import DATE_ISSUES\n"
+                   "def work(x):\n    print('файл', x)\n    DATE_ISSUES.append(x)\n    return (x * 2, os.getpid())\n", encoding="utf-8")
+    reset_date_issues()
+    res = parallel.map_module_function(str(mod), "work", [(i,) for i in range(6)], None, workers=3)
+    assert [r[0] for r in res] == [0, 2, 4, 6, 8, 10] and os.getpid() not in {r[1] for r in res}
+    assert capsys.readouterr().out.splitlines() == ["файл %d" % i for i in range(6)] and sorted(DATE_ISSUES) == list(range(6))
+    reset_date_issues()
+
+
+def _same_books(a_dir, b_dir, names):
+    for name in names:
+        a, b = pd.read_excel(a_dir / name, sheet_name=None), pd.read_excel(b_dir / name, sheet_name=None)
+        assert list(a) == list(b)
+        for sheet in a:
+            pd.testing.assert_frame_equal(a[sheet], b[sheet])
+
+
+def _tree_with_pairs(path):
+    import shutil
+    tree = make_flow_tree(path)
+    for f in list(tree.root.rglob("*.xlsx")):                  # по два файла в папке, чтобы работали два процесса
+        shutil.copy(f, f.with_name(f.stem + "_b.xlsx"))
+    return tree
+
+
+def test_zero_flows_same_with_parallel_files(tmp_path, monkeypatch):
+    tree = _tree_with_pairs(tmp_path / "data")
+    monkeypatch.setenv("PXG_WORKERS", "1")
+    one = run_module("Нулевые_расходы_и_несоответствия_часов", {"root": str(tree.root), "mode": "1"}, tmp_path / "one")
+    monkeypatch.setenv("PXG_WORKERS", "3")
+    monkeypatch.setenv("PXG_PARALLEL_MIN", "1")
+    run_module("Нулевые_расходы_и_несоответствия_часов", {"root": str(tree.root), "mode": "1"}, tmp_path / "many")
+    assert one["files"]
+    _same_books(tmp_path / "one", tmp_path / "many", one["files"])
+
+
+def test_update_db_same_with_parallel_files(tmp_path, monkeypatch):
+    import shutil
+    tree = _tree_with_pairs(tmp_path / "data")
+    built = run_module("Создание_базы_данных_расходов", {"root": str(tree.root), "periods": str(tree.periods_file)}, tmp_path / "db")
+    db = tmp_path / "db" / "Сводка_закачка_отбор_обновленный_скрипт.xlsx"
+    assert db.name in built["files"]
+    folder = next(p for p in (tree.root / "Отбор").rglob("*") if p.is_dir() and len(list(p.glob("*.xlsx"))) >= 2)
+    outs = {}
+    for label, workers in (("one", "1"), ("many", "3")):
+        monkeypatch.setenv("PXG_WORKERS", workers)
+        monkeypatch.setenv("PXG_PARALLEL_MIN", "1")
+        shutil.copy(db, tmp_path / ("db_" + label + ".xlsx"))
+        job = run_module("Дополнение_базы_данных_расходов", {"db": str(tmp_path / ("db_" + label + ".xlsx")), "max_date": "01.12.2023",
+                                                             "periods": str(tree.periods_file), "kind": "отбор", "folder": str(folder)},
+                         tmp_path / ("upd_" + label))
+        outs[label] = job
+    assert any("ГОТОВО" in line for line in outs["many"]["log"])
+    one, many = (pd.read_excel(tmp_path / ("db_" + x + ".xlsx"), sheet_name=None) for x in ("one", "many"))
+    assert list(one) == list(many)
+    for sheet in one:
+        pd.testing.assert_frame_equal(one[sheet], many[sheet])
+    before = pd.read_excel(db, sheet_name=None)
+    assert any(not one[sh].equals(before[sh]) for sh in one)                      # база действительно изменена
+
+
+def test_interannular_collection_same_with_parallel_files(tmp_path, monkeypatch):
+    from tests.test_pxg_real_formats import _mk_book
+    for n in range(4):
+        (tmp_path / "src").mkdir(exist_ok=True) or _mk_book(tmp_path / "src" / ("мк_%d.xlsx" % n))
+    monkeypatch.setenv("PXG_PARALLEL_MIN", "1")
+    outs = {}
+    for label, workers in (("one", "1"), ("many", "3")):
+        monkeypatch.setenv("PXG_WORKERS", workers)
+        outs[label] = run_module("Сбор_данных_по_межколонным_давлениям", {"root": str(tmp_path / "src")}, tmp_path / label)
+    assert outs["one"]["files"] and outs["one"]["files"] == outs["many"]["files"]
+    _same_books(tmp_path / "one", tmp_path / "many", outs["one"]["files"])

@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import os
 
-from pxg_core import fs_browse
+from pxg_core import fs_browse, runlog
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -65,6 +65,7 @@ async def config(request: Request):
 
 
 async def load(request: Request):
+    runlog.action("Карты: загрузка данных проекта Атласа")
     PROJECT.start_loading()
     return JSONResponse(await run_in_threadpool(_state))
 
@@ -132,6 +133,7 @@ async def gis_values(request: Request):
         return JSONResponse(await run_in_threadpool(PROJECT.gis_payload, q.get("pack") or "", q.get("metric") or "gvk_abs_m",
                                                     q.get("season") or "", q.get("against") or "", pins))
     except ValueError as e:
+        runlog.log.warning("ГИС и ГВК: значения не получены (пачка=%s, показатель=%s, сезон=%s): %s", q.get("pack"), q.get("metric"), q.get("season"), e)
         return _err(str(e), 404)
 
 
@@ -139,7 +141,40 @@ async def gis_model(request: Request):
     """ГВК модели и отклонение от факта из последнего сравнения в ГДМ (пачка и сезон замера)."""
     from tnav_results import gwc_share
     q = request.query_params
-    return JSONResponse(await run_in_threadpool(lambda: gis_source.model_values(gwc_share.load(), q.get("pack") or "", q.get("season") or "")))
+    try:
+        return JSONResponse(await run_in_threadpool(lambda: gis_source.model_values(gwc_share.load(), q.get("pack") or "", q.get("season") or "")))
+    except Exception as e:
+        runlog.log.exception("ГВК модели: сравнение из ГДМ не прочитано")
+        return _err("ГВК модели не прочитан (%s: %s). Подробности в логе (кнопка «Лог»)." % (type(e).__name__, str(e)[:300] or "без текста"), 500)
+
+
+async def client_log(request: Request):
+    """Сбой или пустой результат, замеченный в окне (изолинии, кровля): пишется в лог, чтобы разработчик видел причину, а не «ничего нет»."""
+    try:
+        b = await request.json()
+    except ValueError:
+        b = {}
+    runlog.log.warning("окно: %s — %s", str(b.get("where") or "?")[:80], str(b.get("text") or "")[:1500])
+    return JSONResponse({"ok": True})
+
+
+async def observers_get(request: Request):
+    """Наблюдательные скважины (ГИС, замеры давления; вне групп) с положением; без координат — в списке missing."""
+    if PROJECT.atlas is None or PROJECT.store is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    return JSONResponse(await run_in_threadpool(PROJECT.observers_payload))
+
+
+async def observers_mark(request: Request):
+    """Ручной выбор инженера: {well, kind: obs|prod|auto}."""
+    if PROJECT.atlas is None or PROJECT.store is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    b = await request.json()
+    try:
+        PROJECT.mark_observer(int(b.get("well")), str(b.get("kind") or ""))
+    except (TypeError, ValueError) as e:
+        return _err(str(e))
+    return JSONResponse(await run_in_threadpool(PROJECT.observers_payload))
 
 
 async def roof(request: Request):
@@ -150,9 +185,16 @@ async def roof(request: Request):
         return _err("Модель для кровли не выбрана.", 404)
     try:
         layer = int(q.get("layer") or 1)
-        return JSONResponse(await run_in_threadpool(roof_mod.roof_grid, path, layer))
+        with runlog.timed("Карты: кровля пласта из модели", модель=os.path.basename(path), слой=layer) as t:
+            r = await run_in_threadpool(roof_mod.roof_grid, path, layer)
+            t["колонн_в_растре"] = sum(1 for row in r["z"] for v in row if v is not None)
+        return JSONResponse(r)
     except (ValueError, OSError, KeyError, IndexError) as e:
+        runlog.log.warning("Кровля из модели не построена (%s): %s", path, e, exc_info=True)
         return _err("Кровля из модели не построена: %s" % e)
+    except Exception as e:                                    # молчаливых сбоев не бывает: сообщение на экране и трассировка в логе
+        runlog.log.exception("Кровля из модели: непредвиденная ошибка (%s)", path)
+        return _err("Кровля из модели не построена (%s: %s). Подробности в логе (кнопка «Лог»)." % (type(e).__name__, str(e)[:300] or "без текста"), 500)
 
 
 async def models_get(request: Request):
@@ -182,6 +224,15 @@ async def models_select(request: Request):
         if x and x not in ids:
             ids.append(x)
     PROJECT.set_models(ids)
+    return JSONResponse(await run_in_threadpool(tnav_models.view, PROJECT.models))
+
+
+async def models_rename(request: Request):
+    """Имя модели вручную (пустое — вернуть автоматическое)."""
+    b = await request.json()
+    mid = str(b.get("id") or "").strip()
+    if mid:
+        await run_in_threadpool(tnav_models.catalog.save_name, mid, str(b.get("name") or ""))
     return JSONResponse(await run_in_threadpool(tnav_models.view, PROJECT.models))
 
 
@@ -289,7 +340,9 @@ async def open_folder(request: Request):
 
 
 def build_app() -> Starlette:
+    runlog.setup("Карты")
     routes = [
+        *runlog.routes(),
         Route("/api/state", state),
         Route("/api/config", config, methods=["POST"]),
         Route("/api/load", load, methods=["POST"]),
@@ -302,10 +355,14 @@ def build_app() -> Starlette:
         Route("/api/gis", gis_catalog),
         Route("/api/gis/values", gis_values),
         Route("/api/gis/model", gis_model),
+        Route("/api/observers", observers_get),
+        Route("/api/observers/mark", observers_mark, methods=["POST"]),
         Route("/api/roof", roof),
+        Route("/api/client-log", client_log, methods=["POST"]),
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
         Route("/api/models/select", models_select, methods=["POST"]),
+        Route("/api/models/rename", models_rename, methods=["POST"]),
         Route("/api/model-keywords", model_keywords),
         Route("/api/model-values", model_values),
         Route("/api/summary", summary),
@@ -317,7 +374,7 @@ def build_app() -> Starlette:
     ]
     if DIST.is_dir():
         routes.append(Mount("/", StaticFiles(directory=str(DIST), html=True)))
-    return Starlette(routes=routes, middleware=[Middleware(GZipMiddleware, minimum_size=1024)])
+    return Starlette(routes=routes, middleware=[Middleware(runlog.RequestLog), Middleware(GZipMiddleware, minimum_size=1024)])
 
 
 PROJECT.start_loading()  # база из прошлого сеанса грузится сразу, пока открывается окно

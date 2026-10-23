@@ -9,6 +9,7 @@ import collections
 import datetime as dt
 import math
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -18,6 +19,8 @@ from typing import Dict, List, Optional, Tuple
 import openpyxl
 import pandas as pd
 from openpyxl.utils import column_index_from_string as ci, get_column_letter as gl
+
+from .parallel import map_jobs
 
 MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
 REF = re.compile(r"(\$?)([A-Z]{1,3})(\$?)(\d+)")
@@ -34,7 +37,8 @@ def to_xlsx(path: str, workdir: str, use_soffice: bool = True) -> Optional[str]:
     src = os.path.join(workdir, "src" + os.path.splitext(path)[1])
     shutil.copy(path, src)
     try:
-        subprocess.run([exe, "--headless", "--convert-to", "xlsx", "--outdir", workdir, src],
+        profile = "-env:UserInstallation=" + pathlib.Path(workdir, "lo_profile").absolute().as_uri()      # свой профиль: параллельные soffice не мешают друг другу
+        subprocess.run([exe, "--headless", profile, "--convert-to", "xlsx", "--outdir", workdir, src],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -44,6 +48,50 @@ def to_xlsx(path: str, workdir: str, use_soffice: bool = True) -> Optional[str]:
 
 def _text(v) -> str:
     return "" if v is None else re.sub(r"\s+", " ", str(v)).strip()
+
+
+_LOOK = str.maketrans("aeopcxyABCEHKMOPTX", "аеорсхуАВСЕНКМОРТХ")  # латиница, похожая на кириллицу
+
+
+def _norm_key(lab: str) -> str:
+    """Подпись без регистра, пробелов (в т.ч. неразрывных), точек и скобок: «Q газа пром.» = «q газа пром»."""
+    t = str(lab).replace("\u00a0", " ").replace("ё", "е").replace("Ё", "Е").lower()
+    t = re.sub(r"[\s.,:;()\[\]_-]+", "", t)
+    return t.translate(_LOOK) if re.search("[а-я]", t) else t
+
+
+KNOWN_LABELS = ["Состояние", "t работы", "Диам. штуцера", "Ршт. блок", "q (шум)", "qгаза (расч)", "q газа пром",
+                "Qгаза пром.", "Qгаза отч", "Qгаза отч.", "Qгаза сут"]
+_CANON: Dict[str, List[str]] = {}
+for _k in KNOWN_LABELS:
+    _CANON.setdefault(_norm_key(_k), []).append(_k)
+
+
+def _canon(lab: str) -> str:
+    """Подпись строки в том виде, как её знает код (если опознана), иначе как есть."""
+    if lab in KNOWN_LABELS:
+        return lab
+    return _CANON.get(_norm_key(lab), [lab])[0]
+
+
+class ShakhError(Exception):
+    """Понятная ошибка структуры шахматки (что и где не найдено)."""
+
+
+def _block_labels(raw: List[Tuple[str, int]]) -> Dict[str, int]:
+    """{подпись: строка}; опознанные по нормализации подписи приводятся к известному виду, если он не занят точным совпадением
+    («Qгаза пром.» и «q газа пром» в файлах закачки - разные строки, и совпадают после нормализации)."""
+    taken = {lab for lab, _r in raw if lab in KNOWN_LABELS}
+    out: Dict[str, int] = {}
+    for lab, r in raw:
+        new = lab
+        if lab not in KNOWN_LABELS:
+            c = next((k for k in _CANON.get(_norm_key(lab), []) if k not in taken), None)
+            if c:
+                new = c
+                taken.add(c)
+        out[new] = r
+    return out
 
 
 def _num(v) -> Optional[float]:
@@ -244,18 +292,18 @@ class Shakh:
         r = 1
         nrow = len(self.V)
         while r <= nrow:
-            if _text(self.v(r, 2)) == "Состояние":
+            if _canon(_text(self.v(r, 2))) == "Состояние":
                 well = _text(self.v(r, 1))
                 try:
                     well = str(int(float(well)))
                 except ValueError:
                     pass
-                labs: Dict[str, int] = {}
+                raw: List[Tuple[str, int]] = []
                 rr = r
-                while rr <= nrow and _text(self.v(rr, 2)) and (rr == r or _text(self.v(rr, 2)) != "Состояние"):
-                    lab = _text(self.v(rr, 2))
-                    labs[lab] = rr
+                while rr <= nrow and _text(self.v(rr, 2)) and (rr == r or _canon(_text(self.v(rr, 2))) != "Состояние"):
+                    raw.append((_text(self.v(rr, 2)), rr))
                     rr += 1
+                labs = _block_labels(raw)
                 if any(b[1] == well for b in self.blocks):
                     self.issue("предупреждение", "Повтор скважины", "строка %d" % r,
                                "Скважина «%s» уже есть выше; блок загружен как «%s (дубль, строка %d)»" % (well, well, r))
@@ -298,11 +346,11 @@ class Shakh:
         """Строки ПХГ-уровня: выше первого блока (подпись в столбце B) и расчётные строки ниже последнего блока."""
         rows: Dict[str, int] = {}
         for r in range(self.day_row + 1, self.first_block_row):
-            lab = _text(self.v(r, 2))
+            lab = _canon(_text(self.v(r, 2)))
             if lab:
                 rows.setdefault(lab, r)
         for r in range(self.last_block_row + 1, len(self.V) + 1):
-            lab = _text(self.v(r, 2))
+            lab = _canon(_text(self.v(r, 2)))
             if lab:
                 rows.setdefault("(внизу) " + lab, r)
         return rows
@@ -471,13 +519,30 @@ def recompute(sh: Shakh, df: pd.DataFrame) -> pd.DataFrame:
     """Qгаз.пром = (расчётный дебит скважины) × K, K = Qотч по ПХГ / сумма расчётных дебитов по ВСЕМ скважинам."""
     otbor = sh.kind == "отбор"
     obj = sh.object_rows()
-    q_obj_row = obj["Qгаза отч"] if otbor else obj["Qгаза сут"]
     target = "q газа пром" if otbor else "Qгаза пром."
+    base = "qгаза (расч)" if otbor else "q газа пром"
+    obj_lab = "Qгаза отч" if otbor else "Qгаза сут"
+    if obj_lab not in obj:
+        raise ShakhError("%s: нет строки «%s» уровня ПХГ (над блоками скважин). Найдены подписи: %s" % (
+            getattr(sh, "label", "файл"), obj_lab, ", ".join(k for k in obj if not k.startswith("(внизу)")) or "нет"))
+    q_obj_row = obj[obj_lab]
+    inputs = ["Диам. штуцера", "Ршт. блок", "t работы"] if otbor else ["q (шум)", "t работы"]
+    lost = [x for x in inputs + [target, base] if x not in df.columns]
+    if lost:
+        found = sorted({l for _s, _w, labs in sh.blocks for l in labs})
+        raise ShakhError("%s: ни в одном блоке скважины нет строк «%s». Найдены подписи: %s. "
+                         "Проверьте подписи в столбце B (допустимы любой регистр, пробелы и точки)." % (
+                             getattr(sh, "label", "файл"), "», «".join(lost), ", ".join(found) or "нет"))
+    for _s, _w, _labs in sh.blocks:
+        miss = [x for x in inputs + [target, base] if x not in _labs]
+        if miss:
+            sh.issue("предупреждение", "Нет строки в блоке скважины", "скв. %s, строка %d" % (_w, _s),
+                     "В блоке нет строк «%s» (значения приняты за 0, сверка Qгаз.пром для этой скважины пропущена). "
+                     "Найдены подписи: %s" % ("», «".join(miss), ", ".join(_labs) or "нет"))
     krow = _k_row(sh, target)
     sh.k_row = krow
     if sh.has_formulas:
         sh.check_sum_coverage(krow)
-    base = "qгаза (расч)" if otbor else "q газа пром"
     n = lambda x: _num(x) or 0.0
     if otbor:
         df["q расч (пересчёт)"] = [0.0141 * n(d) ** 2 * n(p) * math.sqrt(1 + 0.002253 * n(p)) / 24 * n(t)
@@ -507,6 +572,9 @@ def recompute(sh: Shakh, df: pd.DataFrame) -> pd.DataFrame:
     for is_b, w, d, bf, bc in zip(bad, df["Скважина"], df["Дата"], base_f_all, df["q расч (пересчёт)"]):
         labs = starts[w][1]
         col = date2col[d]
+        if target not in labs or base not in labs:
+            own.append("")
+            continue
         fm_t, fm_b = sh.f(labs[target], col), sh.f(labs[base], col)
         reason = ""
         if is_b and not isf(fm_t):
@@ -695,6 +763,49 @@ def expand_paths(items: List[str]) -> List[str]:
     return res
 
 
+MB_PER_FILE = 400       # один процесс читает книгу целиком (pandas/openpyxl)
+
+
+def _process_file(job) -> Dict[str, object]:
+    """Один файл build: вид, чтение, пересчёт; сообщения возвращаются (печатает основной процесс, в порядке файлов)."""
+    n, path, tmp, otbor_year, zak_year, years, xls_formulas = job
+    kind = classify(path)
+    name = os.path.basename(path)
+    out: Dict[str, object] = {"name": name, "log": [], "status": "skip"}
+    lg = out["log"].append
+    if not kind:
+        out["status"] = "unknown"
+        lg("⚠️ %s: вид файла не опознан (ни шахматка, ни книга воды), пропущен" % name)
+        return out
+    if kind == "вода":
+        out["water"] = read_water(path)
+        out["status"] = "water"
+        lg("💧 %s: вода" % name)
+        return out
+    wd = os.path.join(tmp, str(n))
+    os.makedirs(wd)
+    year = _manual_year(name, years) or (otbor_year if kind == "отбор" else zak_year) or _infer_year(path)
+    try:
+        sh = Shakh(path, kind, year, wd, xls_formulas=xls_formulas)
+    except YearUnknown:
+        out["status"] = "noyear"
+        lg("❌ %s: год первых суток не определён (нет ни в имени файла, ни в шапке листа), файл пропущен. Укажите год в поле «Годы по файлам»" % name)
+        return out
+    sh.label = name
+    try:
+        df = recompute(sh, sh.wells_table())
+    except ShakhError as e:
+        lg("❌ %s" % e)
+        return out
+    if sh.has_formulas:
+        sh.check_formula_patterns(["qгаза (расч)", "q газа пром"] if kind == "отбор" else ["q газа пром", "Qгаза пром.", "Qгаза отч."])
+    df.insert(0, "Файл", name)
+    out.update(status="ok", kind=kind, sh=sh, df=df)
+    lg("📄 %s (%s): %d скважин, %d суток (%s…%s)" % (name, kind, len(sh.blocks), len(sh.day_cols),
+                                                   sh.day_cols[0][1] if sh.day_cols else "", sh.day_cols[-1][1] if sh.day_cols else ""))
+    return out
+
+
 def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_year: Optional[int] = None, zak_year: Optional[int] = None,
           xls_formulas: bool = False, log=print, years: str = "") -> Dict[str, object]:
     """Сводит файлы (шахматки отбора и закачки по сезонам, книги воды) в книгу Excel и базу SQLite рядом (расширение .sqlite).
@@ -708,34 +819,19 @@ def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_y
     water: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
     unknown: List[str] = []
     noyear: List[str] = []
-    for n, path in enumerate(files):
-        kind = classify(path)
-        name = os.path.basename(path)
-        if not kind:
+    jobs = [(n, path, tmp, otbor_year, zak_year, years, xls_formulas) for n, path in enumerate(files)]
+    for r in map_jobs(_process_file, jobs, MB_PER_FILE):       # файлы независимы: по ядрам, результат тот же, что подряд
+        for line in r["log"]:
+            log(line)
+        status, name = r["status"], r["name"]
+        if status == "unknown":
             unknown.append(name)
-            log("⚠️ %s: вид файла не опознан (ни шахматка, ни книга воды), пропущен" % name)
-            continue
-        if kind == "вода":
-            water.append(read_water(path))
-            log("💧 %s: вода" % name)
-            continue
-        wd = os.path.join(tmp, str(n))
-        os.makedirs(wd)
-        year = _manual_year(name, years) or (otbor_year if kind == "отбор" else zak_year) or _infer_year(path)
-        try:
-            sh = Shakh(path, kind, year, wd, xls_formulas=xls_formulas)
-        except YearUnknown:
+        elif status == "noyear":
             noyear.append(name)
-            log("❌ %s: год первых суток не определён (нет ни в имени файла, ни в шапке листа), файл пропущен. Укажите год в поле «Годы по файлам»" % name)
-            continue
-        sh.label = name
-        df = recompute(sh, sh.wells_table())
-        if sh.has_formulas:
-            sh.check_formula_patterns(["qгаза (расч)", "q газа пром"] if kind == "отбор" else ["q газа пром", "Qгаза пром.", "Qгаза отч."])
-        df.insert(0, "Файл", name)
-        parts[kind].append((sh, df))
-        log("📄 %s (%s): %d скважин, %d суток (%s…%s)" % (name, kind, len(sh.blocks), len(sh.day_cols),
-                                                       sh.day_cols[0][1] if sh.day_cols else "", sh.day_cols[-1][1] if sh.day_cols else ""))
+        elif status == "water":
+            water.append(r["water"])
+        elif status == "ok":
+            parts[r["kind"]].append((r["sh"], r["df"]))
     all_sh = [sh for lst in parts.values() for sh, _d in lst]
     # группы: таблица зон последнего файла, где скважина встречается
     zrows = []

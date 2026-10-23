@@ -18,7 +18,7 @@ from tests.test_pxg_modules import run_module  # noqa: E402
 Q_CALC = 0.0141 * 10 ** 2 * 50 * math.sqrt(1 + 0.002253 * 50)   # t = 24 ч: /24*t = 1
 
 
-def make_otbor(path, bad_label=False):
+def make_otbor(path, bad_label=False, prom_label="q газа пром", drop_prom_in=None):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(["Шахматка-газ. Журнал учёта"])
@@ -34,7 +34,8 @@ def make_otbor(path, bad_label=False):
         ws.append([None, "Диам. штуцера", "мм", None, 10, 10, 10])
         ws.append([None, "Ршт. блок", "кгс/см2", None, 50, 50, 50])
         ws.append([None, "qгаза (расч)", "т.м3/сут", None] + [Q_CALC] * 3)
-        ws.append([None, "q газа пром", "т.м3/сут", None] + [q_prom] * 3)
+        if well != drop_prom_in:
+            ws.append([None, prom_label, "т.м3/сут", None] + [q_prom] * 3)
     wb.save(path)
 
 
@@ -168,3 +169,68 @@ def test_year_from_header_manual_and_unknown(tmp_path):
     assert not len(res["issues"][res["issues"]["Вид"] == "Год не определён"])
     book = pd.read_excel(str(tmp_path / "b.xlsx"), sheet_name="Отбор_по_скважинам")
     assert str(book["Дата"].min())[:4] == "2014"
+
+
+@pytest.mark.parametrize("label", ["Q газа пром.", "q  газа  пром", "q\u00a0газа пром.", "Q ГАЗА ПРОМ", "q газа пром "])
+def test_label_variants_are_recognised(tmp_path, label):
+    f = tmp_path / "o.xlsx"
+    make_otbor(f, prom_label=label)
+    sh = шахматка.Shakh(str(f), "отбор", 2025, str(tmp_path))
+    df = шахматка.recompute(sh, sh.wells_table())
+    assert df["Qгаз.пром (пересчёт)"].sum() == pytest.approx(300.0)
+
+
+def test_block_without_label_is_warned_not_fatal(tmp_path):
+    f = tmp_path / "o.xlsx"
+    make_otbor(f, drop_prom_in="2")
+    sh = шахматка.Shakh(str(f), "отбор", 2025, str(tmp_path))
+    sh.label = "o.xlsx"
+    df = шахматка.recompute(sh, sh.wells_table())
+    assert len(df) == 6 and df["Qгаз.пром (пересчёт)"].sum() == pytest.approx(300.0)
+    w = [i for i in sh.issues if i["Вид"] == "Нет строки в блоке скважины"]
+    assert len(w) == 1
+
+
+def test_missing_label_everywhere_gives_clear_message(tmp_path):
+    f = tmp_path / "o.xlsx"
+    make_otbor(f, prom_label="Дебит пром")
+    sh = шахматка.Shakh(str(f), "отбор", 2025, str(tmp_path))
+    sh.label = "o.xlsx"
+    with pytest.raises(шахматка.ShakhError) as e:
+        шахматка.recompute(sh, sh.wells_table())
+    msg = str(e.value)
+    assert "o.xlsx" in msg and "q газа пром" in msg and "Дебит пром" in msg
+
+
+def test_build_parallel_equals_serial(tmp_path, monkeypatch):
+    """Файлы по ядрам дают ту же базу, что подряд: листы Excel, сообщения и замечания совпадают."""
+    for i in range(5):
+        make_otbor(tmp_path / ("otbor %d.xlsx" % (2020 + i)), bad_label=(i == 2), drop_prom_in="2" if i == 3 else None)
+    (tmp_path / "bad.xlsx").write_bytes(b"not an excel")
+    files = [str(p) for p in sorted(tmp_path.glob("*.xlsx"))]
+    res, logs = {}, {}
+    for w in ("1", "3"):
+        monkeypatch.setenv("PXG_WORKERS", w)
+        log = []
+        res[w] = шахматка.build(files, str(tmp_path / ("out%s.xlsx" % w)), log=log.append)
+        logs[w] = log
+    assert logs["1"] == logs["3"] and len(logs["1"]) == 6
+    a = pd.read_excel(tmp_path / "out1.xlsx", sheet_name=None)
+    b = pd.read_excel(tmp_path / "out3.xlsx", sheet_name=None)
+    assert a.keys() == b.keys()
+    for name in a:
+        pd.testing.assert_frame_equal(a[name], b[name])
+    pd.testing.assert_frame_equal(res["1"]["issues"], res["3"]["issues"])
+
+
+def test_check_parallel_equals_serial(tmp_path, monkeypatch):
+    for i in range(5):
+        make_otbor(tmp_path / ("otbor %d.xlsx" % (2020 + i)), bad_label=(i == 2))
+    (tmp_path / "bad.xlsx").write_bytes(b"not an excel")
+    vals = {"files": "\n".join(str(p) for p in sorted(tmp_path.glob("*.xlsx")))}
+    got = {}
+    for w in ("1", "3"):
+        monkeypatch.setenv("PXG_WORKERS", w)
+        rep = check.check_shakhmatka(vals)
+        got[w] = (rep.issues, rep.checked, rep.hidden)
+    assert got["1"] == got["3"] and got["1"][0]

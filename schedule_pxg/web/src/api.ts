@@ -359,6 +359,10 @@ export interface FactWell {
 export const getPlanshetFact = (wells: string[], date: string, alts: Record<string, string> = {}) =>
   call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/fact?' + new URLSearchParams({
     wells: wells.join('|'), date, alts: Object.entries(alts).filter(([, v]) => v.trim() !== '').map(([w, v]) => w + ':' + v.trim()).join('|') }))
+export interface GisObs { well: string; date: string; season: string; packs: number }
+export const getPlanshetCatalog = () => call<{ wells: string[]; observations: GisObs[] }>('/api/planshet/catalog')
+export const getPlanshetFacts = (picks: [string, string][], alts: Record<string, string> = {}) =>
+  call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/facts', post({ picks, alts }))
 export interface ProfileCell { top: number; bottom: number; sg: number; perforated: boolean; thr: number }
 export interface ModelGwc { cell: number; interp: number; at_grid_edge: boolean; lowest_cell: number; torn: boolean }
 /** gwc — ГВК колонны прежней логикой «ГВК по скважинам» (сверху вниз), считает сервер. */
@@ -373,3 +377,16 @@ export interface CompareRow {
 export interface CompareResult { rows: CompareRow[]; skipped: Record<string, number>; notes: string[] }
 export const comparePlanshet = (body: { model: string; wells: string[]; thr: number; slices: Record<string, string>; alts: Record<string, string> }) =>
   call<CompareResult>('/api/planshet/compare', post(body))
+
+export interface HmRow { key: string; well: string; group: string; hist: number; model: number; diff: number; hist_avg: number; model_avg: number; diff_avg: number
+  pct: number | null; status: string; label: string; why: string; excluded: boolean }
+export interface HmTotal { hist: number; model: number; ref: number | null; hist_avg: number; model_avg: number; ref_avg: number | null; model_field: number | null
+  status: string; label: string; why: string; differs_from_db: boolean; hist_vs_ref: number | null }
+export interface HmSeason { name: string; kind: string; start: string; end: string; compared: { start: string; end: string; days: number; full: boolean } | null
+  rows: HmRow[]; groups: { group: string; hist: number; model: number; diff: number; pct: number | null }[]; notes: string[]; total?: HmTotal }
+export interface HmSettings { rel_pct: number; abs_k: number }
+export interface HmResult { seasons: HmSeason[]; notes: string[]; settings: HmSettings; history_source: string; hist_unit: { mode: string; factor: number; reason: string }; atlas: { projects: { id: string; name: string }[]; selected: string }
+  saved: { seasons: { name: string; kind: string; start: string; end: string }[]; excluded: string[]; unit_k: number | null; schedule_path: string; hist_unit: string; atlas_project: string } }
+export interface HmBody { model: string; settings?: Partial<HmSettings>; seasons?: { name: string; kind: string; start: string; end: string }[]; excluded?: string[]; unit_k?: number | null; schedule_path?: string; atlas_project?: string; hist_unit?: string }
+export const histModel = (b: HmBody) => call<HmResult>('/api/results/histmodel', post(b))
+export const histModelXlsx = (b: HmBody) => download('/api/results/histmodel/xlsx', b, 'История_и_модель.xlsx')

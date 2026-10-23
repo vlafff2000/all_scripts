@@ -116,7 +116,7 @@ def indicators(path: str, dates: Optional[Sequence[dt.datetime]] = None, thresho
         all_steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
         picked = {pick_step(all_steps, d).seqnum: pick_step(all_steps, d) for d in dates}
         steps = [picked[k] for k in sorted(picked)]
-    rows = indicators_over_time(model, f["INIT"], f["UNRST"], th, steps=steps)
+    rows = indicators_over_time(model, f["INIT"], f["UNRST"], th, steps=steps, egrid_path=f["EGRID"])
     if not rows:
         raise ValueError("В UNRST нет SGAS: газонасыщенность не записана")
     out = []
@@ -149,7 +149,7 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
         all_steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
         picked = {pick_step(all_steps, d).seqnum: pick_step(all_steps, d) for d in dates}
         steps = [picked[k] for k in sorted(picked)]
-    rows, info = wells_gwc_over_time(model, f.get("INIT"), f["UNRST"], th, wells, steps)
+    rows, info = wells_gwc_over_time(model, f.get("INIT"), f["UNRST"], th, wells, steps, egrid_path=f["EGRID"])
     if not info["wells"]:
         raise ValueError("В рестарте не найдены ячейки вскрытия скважин (или имена не совпали)")
     if not rows:
@@ -167,17 +167,23 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
     return out, {"notes": notes, "sgr_source": info["sgr_source"], "wells": info["wells"]}
 
 
-_MODEL_CACHE: dict = {}
-
-
 def _cached_model(egrid: str):
-    """Сетка читается один раз на файл (до смены файла): сравнение берёт много срезов одной модели."""
+    """Сетка читается один раз на файл (в памяти и на диске, см. tnav_results.grid_cache): сравнение берёт много срезов одной модели."""
     from tnav_results.indicators import load_model
-    key = (egrid, os.path.getmtime(egrid))
-    if _MODEL_CACHE.get("key") != key:
-        _MODEL_CACHE.clear()
-        _MODEL_CACHE["key"], _MODEL_CACHE["model"] = key, load_model(egrid)
-    return _MODEL_CACHE["model"]
+    return load_model(egrid)
+
+
+_STEPS_CACHE: dict = {}
+
+
+def _dated_steps(unrst: str) -> list:
+    """Шаги рестарта с датой: UNRST просматривается один раз на файл (до смены размера или даты), а не при каждом запросе планшета."""
+    st = os.stat(unrst)
+    key = (os.path.abspath(unrst), st.st_size, st.st_mtime_ns)
+    if _STEPS_CACHE.get("key") != key:
+        from tnav_results import iter_restart_steps
+        _STEPS_CACHE["key"], _STEPS_CACHE["steps"] = key, [s for s in iter_restart_steps(unrst) if s.date is not None]
+    return _STEPS_CACHE["steps"]
 
 
 def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Optional[float] = None) -> Tuple[List[dict], dict]:
@@ -190,7 +196,7 @@ def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Option
     miss = [k for k in ("EGRID", "UNRST") if k not in f]
     if miss:
         raise ValueError("Для планшета нужны файлы EGRID и UNRST (не найдены: %s)" % ", ".join(miss))
-    steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
+    steps = _dated_steps(f["UNRST"])
     if not steps:
         raise ValueError("В UNRST нет шагов с датой")
     step = pick_step(steps, date)

@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
-from gsp_maps.inputs import load_perforations
+from gsp_maps.inputs import perforation_abs, read_perforations
 from pxg_core import gis_export
 
 from .project import Project
@@ -24,10 +24,13 @@ def settings(p: Project) -> dict:
     return dict(p.sources.get("gis") or {})
 
 
-def set_settings(p: Project, folder: str = "", perf_file: str = "") -> None:
-    """Папка выгрузки базы ГИС и файл перфораций; пустое значение — убрать."""
+def set_settings(p: Project, folder: str = "", perf_file: str = "", perf_mode: Optional[str] = None) -> None:
+    """Папка выгрузки базы ГИС и файл перфораций; пустое значение — убрать. perf_mode: "" — по умолчанию, "ao" — столбцы
+    без подписи это а.о., "md" — положительные значения без подписи это глубина от стола; None — не менять."""
     cur = settings(p)
     cur["folder"], cur["perf_file"] = folder.strip(), perf_file.strip()
+    if perf_mode is not None:
+        cur["perf_mode"] = perf_mode if perf_mode in ("ao", "md") else ""
     p.sources["gis"] = {k: v for k, v in cur.items() if v}
 
 
@@ -70,13 +73,22 @@ def abs_depth(depth: Optional[float], altitude: Optional[float]) -> Optional[flo
 
 
 def perforations(path: str) -> Dict[str, dict]:
-    """Перфорации и альтитуды по скважинам: {скв: {top, bottom, altitude}}; значения как в файле (верх выше низа)."""
-    depths, alts = load_perforations(path)
+    """Перфорации и альтитуды по скважинам: {скв: {rows: {ao, md, plain}, altitude}}; значения как в файле."""
+    rows, alts = read_perforations(path)
     out: Dict[str, dict] = {}
-    for w in set(depths) | set(alts):
-        t, b = depths.get(w, (None, None))
-        out[_key(w)] = {"top": t, "bottom": b, "altitude": alts.get(w)}
+    for w in set(rows) | set(alts):
+        out[_key(w)] = {"rows": rows.get(w) or {}, "altitude": alts.get(w)}
     return out
+
+
+_SOURCE = {"ao": "а.о. взяты из файла как есть (столбцы верха и низа в а.о.)",
+           "md": "в файле нет столбцов в а.о.: пересчитано из MD как альтитуда − MD (для наклонной скважины это приближение)",
+           "ao_flip": "а.о. из файла были без знака минус, поставлен минус (глубина ниже моря отрицательна)",
+           "plain_ao": "столбцы без подписи MD/а.о.: приняты за а.о. как есть",
+           "plain_flip": "столбцы без подписи MD/а.о.: приняты за а.о., положительным поставлен минус (если это глубина от стола, выберите режим «MD»)",
+           "plain_md": "столбцы без подписи MD/а.о.: по режиму «MD» положительные значения пересчитаны как альтитуда − глубина",
+           "md_no_altitude": "есть только MD, а альтитуды нет: перфорацию не показываю, задайте альтитуду вручную",
+           "plain_no_altitude": "положительные значения без подписи и без альтитуды: перфорацию не показываю, задайте альтитуду вручную"}
 
 
 def observations(tables: Dict[str, pd.DataFrame], well: str) -> List[dict]:
@@ -85,6 +97,27 @@ def observations(tables: Dict[str, pd.DataFrame], well: str) -> List[dict]:
     df = df[df["well"].map(_key) == _key(well)].sort_values("date")
     return [{"date": str(r.date.date()) if r.date == r.date else "", "season": r.season, "status": r.status,
              "packs": int(r.packs) if r.packs == r.packs else 0} for r in df.itertuples(index=False)]
+
+
+def season_key(season, date: str) -> str:
+    """Сезон замера как в Атласе и Картах: «осень/весна + год»; месяцы вне сезонов — «без сезона»."""
+    return "%s %s" % (season if isinstance(season, str) and season else "без сезона", date[:4])
+
+
+def catalog(p: Project) -> dict:
+    """Все скважины базы ГИС и их замеры (дата, сезон) — для выбора на планшете."""
+    s = settings(p)
+    if not s.get("folder"):
+        raise ValueError("Не выбрана папка базы ГИС")
+    obs = load_tables(s["folder"])["gis_observations"]
+    rows = []
+    for r in obs.sort_values(["date"]).itertuples(index=False):
+        if r.date != r.date:
+            continue
+        d = str(r.date.date())
+        rows.append({"well": _key(r.well), "date": d, "season": season_key(r.season, d),
+                     "packs": int(r.packs) if r.packs == r.packs else 0})
+    return {"wells": sorted({r["well"] for r in rows}, key=lambda w: (len(w), w)), "observations": rows}
 
 
 def fact(tables: Dict[str, pd.DataFrame], well: str, date: str = "", alt_override: Optional[float] = None) -> dict:
@@ -124,8 +157,10 @@ def fact(tables: Dict[str, pd.DataFrame], well: str, date: str = "", alt_overrid
             "altitude": alt, "intervals": intervals, "packs": gvk, "notes": notes}
 
 
-def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[str, float]] = None) -> dict:
-    """Факт ГИС и перфорации выбранных скважин для планшета; alts — альтитуды, заданные вручную (скважина → м), главнее базы."""
+def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[str, float]] = None,
+         picks: Optional[Sequence[tuple]] = None) -> dict:
+    """Факт ГИС и перфорации выбранных скважин для планшета; alts — альтитуды, заданные вручную (скважина → м), главнее базы.
+    picks — пары (скважина, дата): по строке на каждый выбранный замер (несколько дат одной скважины); иначе wells и date."""
     s = settings(p)
     if not s.get("folder"):
         raise ValueError("Не выбрана папка базы ГИС")
@@ -135,27 +170,31 @@ def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[s
     if not s.get("perf_file"):
         notes.append("Файл перфораций не выбран: перфорации на планшете не показаны")
     rows = []
-    for w in wells:
+    for w, day in (list(picks) if picks else [(w, date) for w in wells]):
         mine = (alts or {}).get(_key(w))
-        f = fact(tables, w, date, mine)
+        f = fact(tables, w, day, mine)
         pf = perf.get(_key(w))
         if mine is None and pf and pf.get("altitude") is not None and f["altitude"] is None:
-            f = fact(tables, w, date, pf["altitude"])
-        f["perforation"] = ({"top": abs_depth_perf(pf["top"], f["altitude"]), "bottom": abs_depth_perf(pf["bottom"], f["altitude"])}
-                            if pf and pf.get("top") is not None else None)
+            f = fact(tables, w, day, pf["altitude"])
+        f["perforation"] = None
+        if pf and pf["rows"]:
+            pair, src = perforation_abs(pf["rows"], f["altitude"], s.get("perf_mode", ""))
+            if pair is not None:
+                f["perforation"] = {"top": pair[0], "bottom": pair[1]}
+            f["notes"].append("Перфорация: " + _SOURCE[src])
         if mine is not None:
             f["notes"].append("Альтитуда задана вручную: %s м" % mine)
         rows.append(f)
     return {"rows": rows, "notes": notes}
 
 
-def abs_depth_perf(v: Optional[float], altitude: Optional[float]) -> Optional[float]:
-    """Перфорация из файла: отрицательное значение — уже отметка а.о.; положительное — глубина от стола."""
-    if v is None:
-        return None
-    if v <= 0:
-        return v
-    return abs_depth(v, altitude)
+def _profile_job(job):
+    """Профили скважин на одну дату среза (для процессов): {скважина: ячейки колонны}."""
+    import datetime as dt
+    from . import results
+    model_path, day, wells, thr = job
+    rows, _info = results.well_profile(model_path, dt.datetime.combine(dt.date.fromisoformat(day), dt.time()), wells, thr)
+    return {r["well"]: r["cells"] for r in rows}
 
 
 def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float = 0.01, slices: Optional[Dict[str, str]] = None,
@@ -183,7 +222,19 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
         rows, _info = results.well_profile(model_path, dt.datetime.combine(day, dt.time()), ws, thr)
         return {r["well"]: r["cells"] for r in rows}
 
-    out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names})
+    def profiles_many(by_date):
+        from pxg_core.parallel import map_jobs
+        days = list(by_date)
+        try:
+            mb = os.path.getsize(results.find_files(model_path)["EGRID"]) / 1048576.0 * 6.5 + 150.0
+        except (OSError, KeyError):
+            mb = 500.0
+        # срезы независимы: каждая дата считается в своём процессе (сетка из дискового кэша), порядок и результат те же
+        got = map_jobs(_profile_job, [(model_path, d.isoformat(), list(by_date[d]), thr) for d in days], mb)
+        return dict(zip(days, got))
+
+    out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names},
+                              profiles_many)
     out["notes"] = notes
     try:                                    # «Карты» читают последнее сравнение; нет прав на запись — не помеха расчёту
         from tnav_results import gwc_share

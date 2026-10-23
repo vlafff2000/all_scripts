@@ -13,7 +13,7 @@ import pandas as pd
 
 from pxg_core import workspace
 
-from . import atlas_source, gis_source, inputs, wellmap
+from . import atlas_source, gis_source, inputs, observers, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
 
 PATH_KEYS = ["map", "atlas_storage", "atlas_project"]    # карта-сетка Excel — необязательный запасной источник положений
@@ -35,6 +35,7 @@ class Project:
     def __init__(self) -> None:
         self.paths: Dict[str, str] = {k: "" for k in PATH_KEYS}
         self.results_dir = ""
+        self.observer_marks: Dict[str, Dict[str, str]] = {}  # проект Атласа → {скважина: obs|prod}, ручной выбор инженера
         self.models: List[str] = []  # модели tNavigator, отмеченные для карты (пути из общего каталога)
         self.store: Optional[Store] = None
         self.atlas: Optional[atlas_source.AtlasData] = None
@@ -52,16 +53,33 @@ class Project:
             self.paths.update({k: str(v) for k, v in data.get("paths", {}).items() if k in self.paths})
             self.results_dir = str(data.get("results_dir", ""))
             self.models = [str(x) for x in data.get("models", [])]
+            self.observer_marks = {str(p): {str(w): str(k) for w, k in m.items()} for p, m in (data.get("observers") or {}).items()}
         except (OSError, ValueError):
             pass
 
     def _save(self) -> None:
         try:
             config_file().parent.mkdir(parents=True, exist_ok=True)
-            config_file().write_text(json.dumps({"paths": self.paths, "results_dir": self.results_dir, "models": self.models}, ensure_ascii=False, indent=1),
+            config_file().write_text(json.dumps({"paths": self.paths, "results_dir": self.results_dir, "models": self.models,
+                                                  "observers": self.observer_marks}, ensure_ascii=False, indent=1),
                                      encoding="utf-8")
         except OSError:
             pass
+
+    def mark_observer(self, well: int, kind: str) -> None:
+        """Ручное решение инженера: obs — наблюдательная, prod — эксплуатационная, auto — убрать пометку."""
+        marks = self.observer_marks.setdefault(self.project_id(), {})
+        if kind == "auto":
+            marks.pop(str(well), None)
+        elif kind in observers.MANUAL:
+            marks[str(well)] = kind
+        else:
+            raise ValueError("Вид скважины: obs, prod или auto.")
+        self._save()
+
+    def observers_payload(self) -> dict:
+        assert self.atlas is not None and self.store is not None
+        return observers.observers(self.atlas, np.unique(self.store.well).tolist(), self.xy()[0], self.observer_marks.get(self.project_id(), {}))
 
     def set_models(self, ids: List[str]) -> None:
         self.models = list(ids)
@@ -135,11 +153,21 @@ class Project:
             with self._lock:
                 self._cache.clear()
                 self.atlas, self.store, self._tables = atlas, store, tables
+            threading.Thread(target=self._warm_map, daemon=True).start()
             self.log.append("Готово: ГСП — %d, строк — %d (%.1f с)" % (len(store.gsp_names), len(store.well), time.time() - t0))
             self.state = "ready"
         except Exception as e:  # показываем человеку, а не роняем сервер
             self.log.append("Ошибка: %s" % e)
             self.state = "error"
+
+    def _warm_map(self) -> None:
+        """Книга карты читается в фоне сразу после загрузки проекта, чтобы первый выбор групп не ждал её."""
+        p = self.paths["map"]
+        if p and os.path.isfile(p):
+            try:
+                wellmap.read_grids(p)
+            except Exception:
+                pass  # ошибку покажет обычный запрос группы
 
     # ---------- кэш по файлам ----------
     def _memo(self, key: Tuple, mt: float, make: Callable[[], object]):
@@ -231,6 +259,9 @@ class Project:
     # ---------- расчёты для интерфейса ----------
     def season_pressure(self, which: str, gsp: str = "") -> Dict[Tuple[int, str], float]:
         """Среднее давление за сезон: по месяцу замера (как add_directions_and_pressure)."""
+        return self._memo(("season_pressure", which, gsp), 0.0, lambda: self._season_pressure(which, gsp))
+
+    def _season_pressure(self, which: str, gsp: str) -> Dict[Tuple[int, str], float]:
         df, _ = self.gsp_pressure(which, gsp) if gsp else self.pressure(which)
         if not len(df):
             return {}
@@ -254,8 +285,8 @@ class Project:
                 df[col] = v
         w = self.water()[0]
         if len(w):
-            sk = [season_of(int(m), int(y)) for m, y in zip(w["Месяц"], w["Год"])]
-            sel = w[[k == (season, KIND_NAMES[kind]) for k in sk]]
+            wk = self._memo(("water_seasons",), 0.0, lambda: [season_of(int(m), int(y)) for m, y in zip(w["Месяц"], w["Год"])])
+            sel = w[[k == (season, KIND_NAMES[kind]) for k in wk]]
             for mark in sorted(sel["Метка_замера"].unique()):
                 part = sel[sel["Метка_замера"] == mark].drop_duplicates("Скважина").set_index("Скважина")
                 df["Водный_фактор_" + mark] = df["Скважина"].map(part["Водный_фактор"])
@@ -266,20 +297,29 @@ class Project:
         assert self.store is not None
         wells = self.store.wells(gsp)
         cells, dims, notes = {}, (0, 0), []
+        missing_sheet = ""
         if self.paths["map"] and os.path.isfile(self.paths["map"]) and mode in ("auto", "grid", "xy"):
             try:
                 cells, dims, _ = self.grid(gsp)
             except KeyError as e:
-                notes.append(str(e.args[0]))
+                missing_sheet = str(e.args[0])
             except Exception as e:
                 notes.append("Карта-сетка не прочитана: %s" % e)
         xy: Dict[int, Tuple[float, float]] = self.xy()[0] if mode in ("auto", "xy") else {}
+        # у группы нет листа карты, но скважины есть в XY — это не замечание, положения известны
+        if missing_sheet and not any(w in xy for w in wells):
+            notes.append(missing_sheet)
         res = wellmap.layout(wells, cells, dims, xy, mode)
         res["notes"] = notes + res["notes"]
         res["has_grid"], res["has_xy"] = bool(cells), any(w in xy for w in wells)
         return res
 
     def gsp_payload(self, gsp: str, mode: str = "auto") -> dict:
+        """Данные карты группы; готовый ответ запоминается до перезагрузки проекта или смены файла карты."""
+        mp = self.paths["map"]
+        return self._memo(("gsp_payload", gsp, mode, mp), _mtime(mp) if mp else 0.0, lambda: self._gsp_payload(gsp, mode))
+
+    def _gsp_payload(self, gsp: str, mode: str) -> dict:
         st = self.store
         assert st is not None
         lay = self.layout_for(gsp, mode)

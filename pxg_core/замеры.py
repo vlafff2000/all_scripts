@@ -147,6 +147,11 @@ def _read(path: str) -> Dict[str, pd.DataFrame]:
     raise last or RuntimeError("нет движка чтения")
 
 
+def parse_job(job) -> Parsed:
+    """parse_file для процесса (одно задание — кортеж (путь, предел избыточного давления))."""
+    return parse_file(*job)
+
+
 def parse_file(path: str, excess_limit: float = EXCESS_LIMIT) -> Parsed:
     """Строки замеров из одного файла. Всё, что не удалось разобрать, — в problems, а не молча."""
     out = Parsed()

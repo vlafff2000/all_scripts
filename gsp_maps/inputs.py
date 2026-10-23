@@ -71,12 +71,62 @@ def load_periods(path: str) -> Tuple[List[Tuple[int, str]], List[str]]:
 
 
 # ---------------- глубины и альтитуды ----------------
-def load_perforations(path: str) -> Tuple[Dict[int, Tuple[float, float]], Dict[int, float]]:
-    """Абсолютные глубины верха/низа перфорации (как в старом скрипте, столбцы 5 и 6) и альтитуды устья."""
-    depths: Dict[int, Tuple[float, float]] = {}
+_AO = re.compile(r"(?<![а-яa-z])(?:а\.?\s?о|ао|ao|tvdss|sstvd)\.?(?![а-яa-z])|абс|отметк")
+_MD = re.compile(r"(?<![а-яa-z])(?:md|мд)(?![а-яa-z])|по стволу|измерен")
+
+
+def _norm_header(text) -> str:
+    return re.sub(r"\s+", " ", str(text).lower().replace("ё", "е")).strip() if text == text and text is not None else ""
+
+
+def _perf_columns(df: pd.DataFrame) -> Tuple[Dict[str, int], int]:
+    """Явные столбцы перфорации по заголовкам (в одну или две строки): {md_top, md_bottom, ao_top, ao_bottom, plain_top,
+    plain_bottom, altitude} → номер столбца, и номер первой строки данных."""
+    first = 0
+    for i in range(min(4, len(df))):
+        if _num_cell(df.iat[i, 0]) is not None:
+            first = i
+            break
+        first = i + 1
+    heads = [""] * df.shape[1]
+    for i in range(first):
+        last = ""
+        for j in range(df.shape[1]):
+            t = _norm_header(df.iat[i, j])
+            last = t or (last if i < first - 1 else "")
+            heads[j] = (heads[j] + " " + last).strip()
+    cols: Dict[str, int] = {}
+    for j, t in enumerate(heads):
+        top, bot = bool(re.search(r"верх|кровл|top", t)), bool(re.search(r"низ|подошв|bottom|bot\b", t))
+        if top == bot:
+            if "альтитуд" in t or "altitude" in t:
+                cols.setdefault("altitude", j)
+            continue
+        kind = "ao" if _AO.search(t) else "md" if _MD.search(t) else "plain"
+        cols.setdefault("%s_%s" % (kind, "top" if top else "bottom"), j)
+    return cols, first
+
+
+def _num_cell(v) -> Optional[float]:
+    try:
+        x = float(str(v).strip().replace(",", ".").replace(" ", ""))
+    except (ValueError, TypeError):
+        return None
+    return x if x == x and x != -999.25 else None
+
+
+def read_perforations(path: str) -> Tuple[Dict[int, dict], Dict[int, float]]:
+    """Перфорации и альтитуды из «Глубины_перфораций.xlsx».
+
+    По заголовкам берутся явные столбцы верха/низа: в а.о. (`ao`) и в MD (`md`); если их нет — столбцы 5 и 6 как в старом
+    скрипте (`plain`), знак которых и решает, что это (отрицательное — а.о., положительное — глубина от стола).
+    Возвращает ({скв: {ao, md, plain: (верх, низ) или None}}, {скв: альтитуда}); ни знак, ни порядок столбцов не угадываются,
+    пока есть явные заголовки.
+    """
+    rows: Dict[int, dict] = {}
     alt: Dict[int, float] = {}
     if not path or not os.path.isfile(path):
-        return depths, alt
+        return rows, alt
     try:
         xl = pd.ExcelFile(path, engine="calamine")
     except Exception:
@@ -84,15 +134,26 @@ def load_perforations(path: str) -> Tuple[Dict[int, Tuple[float, float]], Dict[i
     names = xl.sheet_names
     sheet = next((n for n in names if "перфор" in n.lower()), None)
     if sheet:
-        df = xl.parse(sheet)
-        for r in df.itertuples(index=False):
+        df = xl.parse(sheet, header=None)
+        cols, first = _perf_columns(df)
+        if not any(k.endswith(("_top", "_bottom")) for k in cols):   # заголовков нет: старый формат, столбцы 5 и 6
+            cols = {"plain_top": 4, "plain_bottom": 5}
+            first = 0
+        for r in range(first, len(df)):
             try:
-                well = int(float(str(r[0]).strip()))
-                top, bottom = float(r[4]), float(r[5])
-            except (ValueError, TypeError, IndexError):
+                well = int(float(str(df.iat[r, 0]).strip()))
+            except (ValueError, TypeError):
                 continue
-            if well and top == top and bottom == bottom and top and bottom:
-                depths[well] = (top, bottom)
+            row: Dict[str, object] = {}
+            for kind in ("ao", "md", "plain"):
+                t = _num_cell(df.iat[r, cols["%s_top" % kind]]) if "%s_top" % kind in cols and cols["%s_top" % kind] < df.shape[1] else None
+                b = _num_cell(df.iat[r, cols["%s_bottom" % kind]]) if "%s_bottom" % kind in cols and cols["%s_bottom" % kind] < df.shape[1] else None
+                row[kind] = (t, b) if t and b else None
+            if well and any(row.values()):
+                rows[well] = row
+            z = _num_cell(df.iat[r, cols["altitude"]]) if "altitude" in cols else None
+            if well and z is not None:
+                alt[well] = z
     sheet = next((n for n in names if "альтитуд" in n.lower()), None)
     if sheet:
         df = xl.parse(sheet)
@@ -103,6 +164,41 @@ def load_perforations(path: str) -> Tuple[Dict[int, Tuple[float, float]], Dict[i
                 continue
             if z == z:
                 alt[well] = z
+    return rows, alt
+
+
+def _below_sea(pair: Tuple[float, float]) -> Tuple[Tuple[float, float], bool]:
+    """а.о. ниже моря — со знаком минус: положительное значение — та же глубина без знака, переворачиваем."""
+    flip = any(v > 0 for v in pair)
+    return (tuple(-abs(v) for v in pair) if flip else pair), flip
+
+
+def perforation_abs(row: dict, altitude: Optional[float], mode: str = "") -> Tuple[Optional[Tuple[float, float]], str]:
+    """(верх, низ) в а.о. и откуда взято. Явные а.о. — как в файле (без знака — ставим минус); иначе MD через альтитуду
+    (альтитуда − MD). Столбцы без подписи: по умолчанию и при mode="ao" это а.о. (положительные получают минус),
+    при mode="md" положительные — глубина от стола, пересчитывается через альтитуду."""
+    if row.get("ao"):
+        pair, flip = _below_sea(row["ao"])
+        return pair, "ao_flip" if flip else "ao"
+    if row.get("md"):
+        return (None, "md_no_altitude") if altitude is None else ((altitude - row["md"][0], altitude - row["md"][1]), "md")
+    if row.get("plain"):
+        t, b = row["plain"]
+        if mode == "md" and t > 0 and b > 0:
+            return (None, "plain_no_altitude") if altitude is None else ((altitude - t, altitude - b), "plain_md")
+        pair, flip = _below_sea((t, b))
+        return pair, "plain_flip" if flip else "plain_ao"
+    return None, ""
+
+
+def load_perforations(path: str) -> Tuple[Dict[int, Tuple[float, float]], Dict[int, float]]:
+    """Абсолютные отметки верха/низа перфорации (а.о., глубина ниже моря со знаком минус) и альтитуды устья из файла."""
+    rows, alt = read_perforations(path)
+    depths: Dict[int, Tuple[float, float]] = {}
+    for well, row in rows.items():
+        pair, _src = perforation_abs(row, alt.get(well))
+        if pair is not None:
+            depths[well] = pair
     return depths, alt
 
 

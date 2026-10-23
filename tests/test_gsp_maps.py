@@ -197,6 +197,45 @@ def test_grid_matches_old(old, tmp_path):
         wellmap.read_grid(str(path), "ГСП 3")
 
 
+def test_grids_read_once_for_all_sheets_and_equal_to_old(old, tmp_path, monkeypatch):
+    """Книга карты читается одним проходом на все листы (и берётся из кэша на диске), результат тот же, что у старого чтения."""
+    from openpyxl import Workbook
+    monkeypatch.setenv("GSP_MAPS_CACHE", str(tmp_path / "cache"))
+    wellmap._GRIDS.clear()
+    path = tmp_path / "карта.xlsx"
+    wb = Workbook()
+    wb.active.title = "ГСП 1"
+    wb.create_sheet("ГСП 7")
+    for ws, base in zip(wb.worksheets, (100, 700)):
+        ws.cell(30, 12).number_format = "0"
+        for i in range(5):
+            ws.cell(2 + i * 3, 2 + i).value = base + i
+        ws.cell(9, 9).value = "подпись"
+    wb.save(str(path))
+    a = wellmap.read_grid(str(path), "ГСП 1")
+    b = wellmap.read_grid(str(path), "ГСП 7")
+    assert a[0] == old["load_map_file"](str(path), "ГСП 1")[0] and b[0] == old["load_map_file"](str(path), "ГСП 7")[0]
+    assert a[1] == b[1] == (30, 12) and (a[2], b[2]) == ("ГСП 1", "ГСП 7")
+    wellmap._GRIDS.clear()                      # новый запуск: сетки берутся из файла кэша, а не из книги
+    monkeypatch.setattr("openpyxl.load_workbook", lambda *a, **k: pytest.fail("книга прочитана повторно"))
+    assert wellmap.read_grid(str(path), "ГСП 7") == b
+
+
+def test_gsp_payload_is_remembered_until_reload(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("GSP_MAPS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
+    from gsp_maps import project
+    _path, o, z = db
+    p = project.Project()
+    from gsp_maps.store import _frame_to_arrays
+    parts = [_frame_to_arrays(o, OTBOR), _frame_to_arrays(z, ZAKACHKA)]
+    p.store = Store.from_raw({k: np.concatenate([x[k] for x in parts]) for k in parts[0]})
+    first = p.gsp_payload("ГСП 1")
+    assert p.gsp_payload("ГСП 1") is first and p.gsp_payload("ГСП 2") is not first
+    p._cache.clear()
+    assert p.gsp_payload("ГСП 1") == first
+
+
 # ---------------- XY из tNavigator ----------------
 def test_xy_parsing_variants():
     xy, w = wellmap.parse_xy_lines(["Well\tX\tY\tZ", "W500\t1234,5\t999.1\t10", "501 100 200", "'Скв_502'; 5; 6", "S-503;7,5;8,5;0", ""])
@@ -484,3 +523,24 @@ def test_base_water_xlsx_is_read_as_monthly_flow_in_lh(tmp_path):
     assert first["Водный_фактор"] == 0.5
     unknown = df.iloc[1]
     assert unknown["Примечание"] == "песок" and pd.isna(unknown["Расход_воды_лч"])
+
+
+def test_grid_sheet_name_separators(tmp_path):
+    path = tmp_path / "карта.xlsx"
+    make_map(path, CELLS, sheet="ГСП-7")
+    assert wellmap.read_grid(str(path), "ГСП 7")[2] == "ГСП-7"
+    assert wellmap.read_grid(str(path), "ГСП_7")[2] == "ГСП-7"
+
+
+def test_layout_missing_sheet_with_xy_has_no_note(tmp_path):
+    from types import SimpleNamespace
+    from gsp_maps.project import Project
+    path = tmp_path / "карта.xlsx"
+    make_map(path, CELLS)  # лист только «ГСП 9»
+    me = SimpleNamespace(store=SimpleNamespace(wells=lambda g: [500, 501]), paths={"map": str(path)},
+                         xy=lambda: ({500: (1.0, 2.0), 501: (3.0, 4.0)}, []),
+                         grid=lambda g: wellmap.read_grid(str(path), g))
+    lay = Project.layout_for(me, "ГСП 7", "auto")
+    assert lay["mode"] == "xy" and not any("На листах карты" in n for n in lay["notes"])
+    me.xy = lambda: ({}, [])
+    assert any("На листах карты" in n for n in Project.layout_for(me, "ГСП 7", "auto")["notes"])

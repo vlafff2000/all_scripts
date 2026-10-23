@@ -48,6 +48,7 @@ class Project:
         self.models: dict = {}  # выбранные для показа модели (selected, пути файлов модели); папки — общие, tnav_results.catalog.load_folders
         self.averaging: dict = {}  # выбор комбинаций лет, исключения, ручные доли (averaging.Averaging.to_dict)
         self.adapt: dict = {}  # адаптация по ГДИ: db (путь к БД ГДИ), cols, settings (gdi_adapt.selection.Settings), overrides, config (поля gdi_adapt.config.Config), scenario
+        self.histmodel: dict = {}  # сопоставление история/модель: settings (допуски), seasons (ручные сезоны), excluded, unit_k; см. histmodel.py
         self.sources: dict = {}  # источники проекта: flows (база расходов), groups (разбивка на группы), daily_total (эталон); см. sources.py
 
     # скважины
@@ -130,7 +131,8 @@ class Project:
             "groups.json": {"groups": self.groups, "well_group": self.well_group}, "sets.json": self.sets,
             "templates.json": self.templates, "techmaps.json": self.techmaps, "outages.json": self.outages,
             "control.json": self.control, "scenarios.json": self.scenarios, "averaging.json": self.averaging,
-            "results.json": self.results, "models.json": self.models, "sources.json": self.sources, "adapt.json": self.adapt}
+            "results.json": self.results, "models.json": self.models, "sources.json": self.sources, "adapt.json": self.adapt,
+            "histmodel.json": self.histmodel}
         with _SAVE_LOCK:
             written = []
             try:
@@ -170,6 +172,7 @@ class Project:
             p.models = {"folders": [], "selected": sorted(set(p.results.values()))}
         p.sources = _read_json(os.path.join(folder, "sources.json"), {})
         p.adapt = _read_json(os.path.join(folder, "adapt.json"), {})
+        p.histmodel = _read_json(os.path.join(folder, "histmodel.json"), {})
         old = p.averaging.pop("sources", None)  # старые проекты: файлы истории лежали в осреднении
         if old and not (p.sources.get("flows") or {}).get("paths"):
             p.sources.setdefault("flows", {})["paths"] = [str(x) for x in old]

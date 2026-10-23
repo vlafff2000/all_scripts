@@ -61,9 +61,17 @@ def test_view_needs_folder_and_checks_format(tmp_path):
 
 
 def test_perf_conversion():
-    assert planshet.abs_depth_perf(-905.0, 100.0) == -905.0
-    assert planshet.abs_depth_perf(1005.0, 100.0) == -905.0
-    assert planshet.abs_depth_perf(1005.0, None) is None
+    from gsp_maps.inputs import perforation_abs
+    assert perforation_abs({"plain": (-905.0, -915.0)}, 100.0) == ((-905.0, -915.0), "plain_ao")
+    # без подписи и без режима положительные значения — а.о. без знака: получают минус; режим «md» — глубина от стола
+    assert perforation_abs({"plain": (1005.0, 1015.0)}, 100.0) == ((-1005.0, -1015.0), "plain_flip")
+    assert perforation_abs({"plain": (1005.0, 1015.0)}, 100.0, "md") == ((-905.0, -915.0), "plain_md")
+    assert perforation_abs({"plain": (1005.0, 1015.0)}, None, "md")[0] is None
+    assert perforation_abs({"ao": (1500.0, 1520.0)}, 85.0) == ((-1500.0, -1520.0), "ao_flip")
+    # явные а.о. главнее MD и не зависят от знака и альтитуды
+    both = {"ao": (-1500.0, -1520.0), "md": (1700.0, 1730.0)}
+    assert perforation_abs(both, 85.0) == ((-1500.0, -1520.0), "ao")
+    assert perforation_abs({"md": (1700.0, 1730.0)}, 85.0) == ((-1615.0, -1645.0), "md")
     p = Project("x")
     planshet.set_settings(p, "a", "b")
     planshet.set_settings(p, "", "b")
@@ -77,3 +85,67 @@ def test_view_manual_altitude_wins(tmp_path):
     assert v["altitude"] == 50.0 and v["intervals"][0]["top"] == -950.0
     assert any("вручную" in n for n in v["notes"])
     assert planshet.view(p, ["101"])["rows"][0]["altitude"] == 100.0
+
+
+def test_catalog_and_multi_dates(tmp_path):
+    p = Project("x")
+    planshet.set_settings(p, _folder(tmp_path), "")
+    c = planshet.catalog(p)
+    assert c["wells"] == ["101"]
+    assert [(o["date"], o["season"]) for o in c["observations"]] == [("2024-11-01", "осень 2024"), ("2025-04-10", "весна 2025")]
+    v = planshet.view(p, [], "", None, [("101", "2024-11-01"), ("101.0", "2025-04-10")])
+    assert [r["date"] for r in v["rows"]] == ["2024-11-01", "2025-04-10"]
+
+
+def _perf_book(path, header, rows, alt=None):
+    import pandas as pd
+    with pd.ExcelWriter(path, engine="openpyxl") as w:
+        pd.DataFrame(header + rows).to_excel(w, sheet_name="перфорации", header=False, index=False)
+        if alt:
+            pd.DataFrame([["Скв", "Z"]] + alt).to_excel(w, sheet_name="альтитуды", header=False, index=False)
+
+
+def test_perf_file_explicit_md_and_ao_columns(tmp_path):
+    from gsp_maps.inputs import load_perforations, read_perforations
+    f = str(tmp_path / "p.xlsx")
+    # MD стоят в тех самых столбцах 5 и 6, где раньше ждали а.о. — наклонная скважина: MD заметно больше глубины
+    _perf_book(f, [["Скв", "Пласт", "Куст", "Верх MD, м", "Низ MD, м", "Верх а.о., м", "Низ а.о., м"]],
+               [[31, "A", 1, 1700.0, 1730.0, -1500.0, -1525.0], [32, "A", 1, 1700.0, 1730.0, None, None]],
+               [[31, 85.0], [32, 85.0]])
+    rows, _ = read_perforations(f)
+    assert rows[31]["md"] == (1700.0, 1730.0) and rows[31]["ao"] == (-1500.0, -1525.0) and rows[32]["ao"] is None
+    depths, alt = load_perforations(f)
+    assert depths[31] == (-1500.0, -1525.0)          # а.о. напрямую
+    assert depths[32] == (85.0 - 1700.0, 85.0 - 1730.0)   # нет а.о. — из MD через альтитуду
+
+
+def test_perf_file_two_row_header_and_legacy(tmp_path):
+    from gsp_maps.inputs import read_perforations
+    f = str(tmp_path / "p2.xlsx")
+    _perf_book(f, [["Скв", "", "Верх перфорации", "", "Низ перфорации", ""], ["", "", "MD", "а.о.", "MD", "а.о."]],
+               [[5, 0, 1700.0, -1600.0, 1730.0, -1620.0]])
+    rows, _ = read_perforations(f)
+    assert rows[5]["ao"] == (-1600.0, -1620.0) and rows[5]["md"] == (1700.0, 1730.0)
+    g = str(tmp_path / "old.xlsx")
+    _perf_book(g, [["Скв", "a", "b", "c", "Верх", "Низ"]], [[7, 0, 0, 0, -1500.5, -1520.0]])
+    rows, _ = read_perforations(g)
+    assert rows[7] == {"ao": None, "md": None, "plain": (-1500.5, -1520.0)}
+
+
+def test_view_shows_perforation_source(tmp_path):
+    f = str(tmp_path / "p.xlsx")
+    _perf_book(f, [["Скв", "Верх MD", "Низ MD", "Верх а.о.", "Низ а.о."]], [[101, 1700.0, 1730.0, -1500.0, -1525.0]], [[101, 85.0]])
+    p = Project("x")
+    planshet.set_settings(p, _folder(tmp_path), f)
+    r = planshet.view(p, ["101"])["rows"][0]
+    assert r["perforation"] == {"top": -1500.0, "bottom": -1525.0}
+    assert any(n.startswith("Перфорация: а.о.") for n in r["notes"])
+
+
+def test_perf_mode_setting_survives_source_save():
+    p = Project("x")
+    planshet.set_settings(p, "a", "b", "md")
+    planshet.set_settings(p, "a", "c")
+    assert p.sources["gis"] == {"folder": "a", "perf_file": "c", "perf_mode": "md"}
+    planshet.set_settings(p, "a", "c", "")
+    assert "perf_mode" not in p.sources["gis"]

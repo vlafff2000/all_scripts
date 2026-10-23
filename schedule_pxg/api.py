@@ -7,7 +7,7 @@ import datetime as dt
 import io
 import os
 
-from pxg_core import fs_browse, workspace
+from pxg_core import fs_browse, runlog, workspace
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -24,7 +24,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, historymode, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
+from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, histmodel, historymode, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .gdi_adapt import export_charts
 from .project import Project
 
@@ -770,7 +770,7 @@ async def sources_set(request: Request):
             sources.set_daily_total(p, _clean(d.get("path")), d.get("unit") or "м3/сут")
         if "gis" in b:
             g = b["gis"] or {}
-            planshet.set_settings(p, _clean(g.get("folder")), _clean(g.get("perf_file")))
+            planshet.set_settings(p, _clean(g.get("folder")), _clean(g.get("perf_file")), g.get("perf_mode"))
     except ValueError as e:
         return _err(str(e))
     p.save(FOLDER)
@@ -804,6 +804,27 @@ async def planshet_fact(request: Request):
                 w, v = item.split(":", 1)
                 alts[w.strip()] = float(v.replace(",", "."))
         return JSONResponse(await run_in_threadpool(planshet.view, _project(), wells, request.query_params.get("date") or "", alts))
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать базу ГИС: %s" % e)
+
+
+async def planshet_catalog(request: Request):
+    """Скважины базы ГИС и их замеры с сезонами — для выбора на планшете."""
+    try:
+        return JSONResponse(await run_in_threadpool(planshet.catalog, _project()))
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать базу ГИС: %s" % e)
+
+
+async def planshet_facts(request: Request):
+    """Факт по выбранным замерам: {picks: [[скважина, дата], …], alts: {скважина: м}}."""
+    b = await request.json()
+    picks = [(str(w), str(d)) for w, d in b.get("picks") or []]
+    if not picks:
+        return _err("Не выбраны скважины")
+    try:
+        alts = {str(w).strip(): float(str(v).replace(",", ".")) for w, v in (b.get("alts") or {}).items() if str(v).strip() != ""}
+        return JSONResponse(await run_in_threadpool(planshet.view, _project(), [], "", alts, picks))
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось прочитать базу ГИС: %s" % e)
 
@@ -991,6 +1012,15 @@ async def models_folders(request: Request):
     return JSONResponse(await run_in_threadpool(lambda: _models_view(_project())))
 
 
+async def models_rename(request: Request):
+    """Имя модели вручную (пустое — вернуть автоматическое)."""
+    b = await request.json()
+    mid = str(b.get("id") or "").strip()
+    if mid:
+        await run_in_threadpool(tnav_catalog.save_name, mid, str(b.get("name") or ""))
+    return JSONResponse(await run_in_threadpool(lambda: _models_view(_project())))
+
+
 async def models_select(request: Request):
     b = await request.json()
     p = _project()
@@ -1026,6 +1056,7 @@ async def results_attach(request: Request):
     path = _clean(b.get("path"))
     if path and not results.find_files(path):
         return _err("Не нашёл файлов модели (EGRID, INIT, SMSPEC, UNSMRY, UNRST) по пути «%s»" % path)
+    runlog.action("ГДМ: модель сценария «%s»" % name, путь=path or "снята")
     if path:
         p.results[name] = path
     else:
@@ -1047,6 +1078,48 @@ async def results_series(request: Request):
     if not data:
         return _err("В сводке нет вектора %s" % kw, 404)
     return JSONResponse({"keyword": kw, "series": {o: {"dates": [str(d.date()) for d, _ in r], "values": [v for _, v in r]} for o, r in data.items()}})
+
+
+async def results_histmodel(request: Request):
+    """История/модель по газу: {model, settings?, seasons?, excluded?, unit_k?}; присланное запоминается в проекте."""
+    b = await request.json()
+    model = _clean(b.get("model"))
+    if not model:
+        return _err("Модель с результатами не выбрана", 404)
+    p = _project()
+    try:
+        out = await run_in_threadpool(histmodel.view, p, model, b)
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось сопоставить историю с моделью: %s" % e)
+    if any(k in b for k in ("settings", "seasons", "excluded", "unit_k", "schedule_path", "atlas_project", "atlas_storage", "hist_unit")):
+        p.save(FOLDER)
+    return JSONResponse(out)
+
+
+async def results_histmodel_xlsx(request: Request):
+    """Excel сопоставления история/модель (тело — как у /api/results/histmodel; сами настройки тоже запоминаются)."""
+    b = await request.json()
+    model = _clean(b.get("model"))
+    if not model:
+        return _err("Модель с результатами не выбрана", 404)
+    import tempfile
+
+    def f():
+        res = histmodel.view(_project(), model, b)
+        fd, path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            histmodel.save_xlsx(path, res)
+            with open(path, "rb") as fh:
+                return fh.read()
+        finally:
+            os.remove(path)
+    try:
+        data = await run_in_threadpool(f)
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось выгрузить сопоставление: %s" % e)
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename*=UTF-8''%s" % quote("История_и_модель.xlsx")})
 
 
 async def results_indicators(request: Request):
@@ -1328,7 +1401,9 @@ async def results_report(request: Request):
 
 
 def build_app() -> Starlette:
+    runlog.setup("ГДМ")
     routes = [
+        *runlog.routes(),
         Route("/api/state", state),
         Route("/api/preview", preview),
         Route("/api/trial", trial, methods=["POST"]),
@@ -1366,6 +1441,8 @@ def build_app() -> Starlette:
         Route("/api/sources/set", sources_set, methods=["POST"]),
         Route("/api/sources/folder", sources_folder, methods=["POST"]),
         Route("/api/planshet/fact", planshet_fact),
+        Route("/api/planshet/catalog", planshet_catalog),
+        Route("/api/planshet/facts", planshet_facts, methods=["POST"]),
         Route("/api/planshet/compare", planshet_compare, methods=["POST"]),
         Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),
@@ -1396,10 +1473,13 @@ def build_app() -> Starlette:
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
         Route("/api/models/select", models_select, methods=["POST"]),
+        Route("/api/models/rename", models_rename, methods=["POST"]),
         Route("/api/results", results_get),
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
+        Route("/api/results/histmodel", results_histmodel, methods=["POST"]),
+        Route("/api/results/histmodel/xlsx", results_histmodel_xlsx, methods=["POST"]),
         Route("/api/results/wellgwc", results_well_gwc),
         Route("/api/results/wellprofile", results_well_profile),
         Route("/api/results/report", results_report),
@@ -1410,7 +1490,7 @@ def build_app() -> Starlette:
     ]
     if DIST.is_dir():
         routes.append(Mount("/", StaticFiles(directory=str(DIST), html=True)))
-    return Starlette(routes=routes, middleware=[Middleware(GZipMiddleware, minimum_size=1024)])
+    return Starlette(routes=routes, middleware=[Middleware(runlog.RequestLog), Middleware(GZipMiddleware, minimum_size=1024)])
 
 
 app = build_app()

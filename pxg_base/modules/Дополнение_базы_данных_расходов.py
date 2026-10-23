@@ -3,6 +3,7 @@ import numpy as np
 import os
 import glob
 import re
+from pxg_core.parallel import map_module_function
 from datetime import datetime
 from pathlib import Path
 import time
@@ -495,20 +496,17 @@ def process_new_data(excel_files_folder, periods_file_path, data_type):
     all_data = []
     total_rows = 0
 
-    for file_path in excel_files:
+    # год берётся из имени файла; файлы независимы: считаются параллельно на всех ядрах, результат и вывод идут в порядке файлов
+    def _year(file_path):
+        year_match = re.search(r'20\d{2}', os.path.basename(file_path))
+        return year_match.group() if year_match else None
+
+    results = map_module_function(__file__, "process_excel_file_intelligent",
+                                  [(fp, _year(fp), None, data_type, periods) for fp in excel_files],
+                                  process_excel_file_intelligent)
+    for file_path, result_df in zip(excel_files, results):
         file_name = os.path.basename(file_path)
         print(f"\n  Обработка: {file_name}")
-
-        # Определяем год
-        year_match = re.search(r'20\d{2}', file_name)
-        year = year_match.group() if year_match else None
-
-        result_df = process_excel_file_intelligent(
-            file_path,
-            year=year,
-            data_type=data_type,
-            periods=periods
-        )
 
         if result_df is not None and not result_df.empty:
             all_data.append(result_df)

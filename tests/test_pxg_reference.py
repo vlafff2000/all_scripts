@@ -169,3 +169,28 @@ def test_gdi_pressure_difference_and_default_season(gdi):
     seasons = gdi.add_season_column(df.copy())
     assert list(seasons.columns)[:2] == ["Дата", "Сезон"]
     assert seasons["Сезон"].tolist() == ["Зима 2023-2024", "Зима 2023-2024", "Весна 2024", "Лето 2024", "Осень 2024", "Не указан"]
+
+
+def _same_sheets(a, b):
+    assert list(a) == list(b)
+    for name in a:
+        pd.testing.assert_frame_equal(a[name], b[name])
+
+
+def test_journal_and_gdi_same_with_parallel_files(tmp_path, monkeypatch):
+    """Файлы читаются на нескольких процессах (по два файла в каждом модуле): итог тот же, что на одном."""
+    root = tmp_path / "j"
+    (root / "2019").mkdir(parents=True)
+    (root / "2020").mkdir()
+    _journal(root / "2019" / "2019_12.xlsx", "отбор газа", [[31, 0, 0, 0, 240, 24, 0, 0, 0, 100, 10]])
+    _journal(root / "2020" / "2020_02.xlsx", "закачка газа", [[31, 0, 0, 0, 50, 12, 0, 0, 0, 60, 0]])
+    files = _gdi_sources(tmp_path)
+    monkeypatch.setenv("PXG_PARALLEL_MIN", "1")
+    outs = {}
+    for label, workers in (("one", "1"), ("many", "3")):
+        monkeypatch.setenv("PXG_WORKERS", workers)
+        j = run_module("Журнал_отбора_и_закачки_2019_2024", {"root": str(root)}, tmp_path / ("j_" + label))
+        g = run_module(GDI, {"files": files, "output": "out.xlsx"}, tmp_path / ("g_" + label))
+        outs[label] = (read_all(tmp_path / ("j_" + label) / j["files"][0]), read_all(tmp_path / ("g_" + label) / "out.xlsx"))
+    _same_sheets(outs["one"][0], outs["many"][0])
+    _same_sheets(outs["one"][1], outs["many"][1])

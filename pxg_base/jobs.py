@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from pxg_core import workspace
+from pxg_core import runlog, workspace
 
 from .registry import MODULES
 from .webspec import WebSpec, get as get_spec, lines_of
@@ -80,6 +80,7 @@ def _run(job: Job, spec: WebSpec) -> None:
     env["PXG_DIALOGS"] = json.dumps(spec.dialog_config(job.values), ensure_ascii=False)
     env.update(spec.env_values(job.values))
     code = -1
+    runlog.action("Работа с исходными данными: запуск модуля «%s»" % job.module, **{k: v for k, v in job.values.items() if v not in ("", None)})
     try:
         proc = subprocess.Popen(
             [sys.executable, "-u", str(Path(__file__).with_name("runner.py")), str(path)] + spec.argv(job.values), cwd=str(job.out_dir), env=env,
@@ -102,6 +103,11 @@ def _run(job: Job, spec: WebSpec) -> None:
         job.sizes = {f: (job.out_dir / f).stat().st_size for f in job.files}
         job.status = "done" if code == 0 else "failed"
         job.finished = time.time()
+        tail = list(job.log[-30:])
+    runlog.summary("модуль «%s» %s за %.1f с" % (job.module, "завершён" if code == 0 else "завершился с ошибкой (код %s)" % code,
+                                                job.finished - job.started), файлов=len(job.files))
+    if code != 0:
+        runlog.log.error("последние строки вывода модуля «%s»:\n%s", job.module, "\n".join(tail))
     if code == 0 and job.files:
         # последние файлы — в общую папку «выгрузки»; сбой копирования не должен ронять запуск
         try:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import threading
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -26,29 +27,82 @@ def list_sheets(path: str) -> List[str]:
         wb.close()
 
 
-def read_grid(path: str, gsp: str) -> Tuple[Dict[int, Tuple[int, int]], Tuple[int, int], str]:
-    """{скважина: (строка, столбец)}, размеры листа (строк, столбцов), имя листа. Лист — «ГСП 9» или содержащий это имя."""
-    from openpyxl import load_workbook
-    wb = load_workbook(path, data_only=True)
-    ws = None
-    if gsp in wb.sheetnames:
-        ws = wb[gsp]
-    else:
-        for name in wb.sheetnames:
-            if gsp.lower() in name.lower():
-                ws = wb[name]
-                break
-    if ws is None:
-        raise KeyError("На листах карты нет «%s» (есть: %s)" % (gsp, ", ".join(wb.sheetnames)))
+def _sheet_key(name: str) -> str:
+    """«ГСП-7», «ГСП_7» и «ГСП 7» — одно имя."""
+    return re.sub(r"[\s_\-]+", "", str(name)).lower()
+
+
+_GRIDS: Dict[str, Tuple[Tuple[int, int], Dict[str, tuple]]] = {}
+_GRIDS_VERSION = 1
+_GRIDS_LOCK = threading.Lock()   # группы запрашиваются параллельно: книгу карты читает один поток, остальные ждут
+
+
+def _parse_sheet(ws) -> tuple:
     cells: Dict[int, Tuple[int, int]] = {}
-    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column):
-        for cell in row:
-            if cell.value is not None:
-                try:
-                    cells[int(float(str(cell.value).strip()))] = (cell.row, cell.column)
-                except ValueError:
-                    pass
+    # только существующие ячейки в порядке «строка, столбец» (iter_rows по всему листу создаёт каждую пустую ячейку)
+    for (r, c), cell in sorted(ws._cells.items()):
+        if cell.value is not None:
+            try:
+                cells[int(float(str(cell.value).strip()))] = (r, c)
+            except ValueError:
+                pass
     return cells, (ws.max_row, ws.max_column), ws.title
+
+
+def read_grids(path: str) -> Dict[str, tuple]:
+    """Сетки всех листов книги за один проход: {лист: (скважина → (строка, столбец), размеры, имя)}. Книга читается один раз
+    и запоминается (в памяти и в кэше на диске), а не заново для каждой группы."""
+    st = os.stat(path)
+    sig = (st.st_size, st.st_mtime_ns)
+    hit = _GRIDS.get(path)
+    if hit and hit[0] == sig:
+        return hit[1]
+    with _GRIDS_LOCK:
+        hit = _GRIDS.get(path)
+        if hit and hit[0] == sig:
+            return hit[1]
+        return _read_grids(path, sig)
+
+
+def _read_grids(path: str, sig: Tuple[int, int]) -> Dict[str, tuple]:
+    from openpyxl import load_workbook
+    cache = None
+    try:
+        import hashlib
+        import json
+        from .store import cache_dir
+        key = "%s|%d|%d|%d" % (os.path.abspath(path), sig[0], sig[1], _GRIDS_VERSION)
+        cache = cache_dir() / ("grid_" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:20] + ".json")
+        raw = json.loads(cache.read_text(encoding="utf-8"))
+        grids = {n: ({int(w): (r, c) for w, r, c in v["cells"]}, (v["dims"][0], v["dims"][1]), v["title"]) for n, v in raw.items()}
+    except Exception:
+        grids = None
+    if grids is None:
+        wb = load_workbook(path, data_only=True)
+        grids = {name: _parse_sheet(wb[name]) for name in wb.sheetnames}
+        if cache is not None:
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cache.with_name(cache.name + ".tmp")
+                tmp.write_text(json.dumps({n: {"cells": [[w, r, c] for w, (r, c) in g[0].items()], "dims": list(g[1]), "title": g[2]}
+                                           for n, g in grids.items()}), encoding="utf-8")
+                os.replace(str(tmp), str(cache))
+            except Exception:
+                pass  # кэш не обязателен
+    _GRIDS[path] = (sig, grids)
+    return grids
+
+
+def read_grid(path: str, gsp: str) -> Tuple[Dict[int, Tuple[int, int]], Tuple[int, int], str]:
+    """{скважина: (строка, столбец)}, размеры листа (строк, столбцов), имя листа. Лист — «ГСП 9» или содержащий это имя
+    (дефис, подчёркивание и пробел не различаются). Книга читается один раз на все группы."""
+    grids = read_grids(path)
+    key = _sheet_key(gsp)
+    name = next((n for n in grids if _sheet_key(n) == key), None) or next((n for n in grids if key in _sheet_key(n)), None)
+    if name is None:
+        raise KeyError("На листах карты нет «%s» (есть: %s)" % (gsp, ", ".join(grids)))
+    cells, dims, title = grids[name]
+    return dict(cells), dims, title
 
 
 def grid_directions(cells: Dict[int, Tuple[int, int]], dims: Tuple[int, int]) -> Dict[int, str]:
