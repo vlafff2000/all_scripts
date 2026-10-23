@@ -31,3 +31,37 @@ def test_same_size_grid_is_read_once_for_all_models(tmp_path):
         first = roof.roof_grid(str(tmp_path / "a" / "A.EGRID"), 1)
         second = roof.roof_grid(str(tmp_path / "b" / "B.EGRID"), 1)
     assert load.call_count == 1 and first["z"] == second["z"] and "A.EGRID" in second["note"] and "A.EGRID" not in first["note"]
+
+
+def test_roof_endpoint_reports_every_failure_and_logs_traceback(tmp_path, caplog, monkeypatch):
+    pytest.importorskip("pyarrow")
+    from starlette.testclient import TestClient
+    from gsp_maps import api
+    _egrid(tmp_path / "M.EGRID")
+    client = TestClient(api.build_app(), raise_server_exceptions=False)
+    ok = client.get("/api/roof", params={"model": str(tmp_path / "M.EGRID"), "layer": 1})
+    assert ok.status_code == 200 and "mapaxes" in ok.json()
+    # известная ошибка: сообщение на экране и запись в лог
+    with caplog.at_level("WARNING"):
+        bad = client.get("/api/roof", params={"model": str(tmp_path / "нет.EGRID"), "layer": 1})
+    assert bad.status_code == 400 and "Кровля из модели не построена" in bad.json()["error"]
+    assert any("Кровля из модели не построена" in r.getMessage() for r in caplog.records)
+
+    # непредвиденная ошибка: не пустой экран, а понятный текст; трассировка в логе
+    def boom(*a, **k):
+        raise TypeError("странный файл")
+    monkeypatch.setattr(roof, "roof_grid", boom)
+    caplog.clear()
+    with caplog.at_level("ERROR"):
+        r = client.get("/api/roof", params={"model": str(tmp_path / "M.EGRID"), "layer": 1})
+    assert r.status_code == 500 and "TypeError" in r.json()["error"] and "Лог" in r.json()["error"]
+    assert any(rec.exc_info for rec in caplog.records)
+
+
+def test_client_log_endpoint_writes_to_log(caplog):
+    pytest.importorskip("pyarrow")
+    from starlette.testclient import TestClient
+    from gsp_maps import api
+    with caplog.at_level("WARNING"):
+        r = TestClient(api.build_app()).post("/api/client-log", json={"where": "кровля", "text": "вне карты скважин"})
+    assert r.status_code == 200 and any("вне карты скважин" in x.getMessage() for x in caplog.records)

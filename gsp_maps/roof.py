@@ -82,5 +82,6 @@ def roof_grid(anchor: str, layer: int, n: int = 110) -> dict:
     z = [[None] * nx for _ in range(ny)]
     for (a, b), v in acc.items():
         z[b][a] = round(sum(v) / len(v), 2)
-    return {"x0": x0, "y0": y0, "dx": dx, "dy": dy, "nx": nx, "ny": ny, "z": z, "layers": nk,
-            "note": "Кровля: верх ячеек слоя %s, колонн %d, растр %d×%d (среднее по клеткам растра).%s" % (layer or "«верхняя активная»", len(pts), nx, ny, shared)}
+    axes = " В модели задан MAPAXES (поворот или сдвиг карты): он не применяется, координаты — в системе COORD." if m.grid.mapaxes else ""
+    return {"x0": x0, "y0": y0, "dx": dx, "dy": dy, "nx": nx, "ny": ny, "z": z, "layers": nk, "mapaxes": bool(m.grid.mapaxes),
+            "note": "Кровля: верх ячеек слоя %s, колонн %d, растр %d×%d (среднее по клеткам растра).%s%s" % (layer or "«верхняя активная»", len(pts), nx, ny, shared, axes)}

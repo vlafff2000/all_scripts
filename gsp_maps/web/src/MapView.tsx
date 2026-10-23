@@ -2,7 +2,7 @@ import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
-import { groupColor, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
+import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type IsoResult } from './model'
 
@@ -17,7 +17,7 @@ export interface GisPicker {
   iso: { on: boolean; step: string; reach: string }; isoNote: string
   /** Наблюдательные скважины (вне групп): свой флажок показа, ручное отнесение к наблюдательным/эксплуатационным. */
   obs: { on: boolean; data: Observers | null; onToggle: (v: boolean) => void; onMark: (well: number, kind: 'obs' | 'prod' | 'auto') => void }
-  source: 'fact' | 'model' | 'delta'; modelInfo: string
+  source: 'fact' | 'model' | 'delta'; modelInfo: string; error?: string
   roof: { on: boolean; model: string; layer: string; step: string; models: TnavModel[]; note: string; grid: RoofRaster | null }
   onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string }) => void
 }
@@ -153,14 +153,15 @@ function ObserverControls({ obs }: { obs: GisPicker['obs'] }) {
     </div>}
   </>
 }
-function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, obs, source, modelInfo, roof, onChange }: GisPicker) {
+function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, obs, source, modelInfo, roof, error, onChange }: GisPicker) {
   const [well, setWell] = useState('')
-  if (!catalog) return <p className="muted">Читаю базу ГИС…</p>
+  if (!catalog) return error ? <p className="note warning">{error}</p> : <p className="muted">Читаю базу ГИС…</p>
   if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
   const multi = Object.keys(options).sort((a, b) => Number(a) - Number(b))
   const w = multi.includes(well) ? well : multi[0] ?? ''
   const cur = pins[w] || (dates[w] ?? '')
   return <>
+    {error && <p className="note warning">{error}</p>}
     <select value={source} onChange={e => onChange({ source: e.target.value as 'fact' | 'model' | 'delta' })} aria-label="Источник значений">
       <option value="fact">Факт ГИС</option><option value="model">ГВК модели (из ГДМ)</option><option value="delta">Модель − факт (из ГДМ)</option></select>
     <select value={pack} onChange={e => onChange({ pack: e.target.value })} aria-label="Пачка">
@@ -359,24 +360,49 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const unit = g.layout.mode === 'xy' && !spread ? 'м' : ''
   const K = fit.s * view.k
   // изолинии показателя ГИС: только на карте в координатах (не на схеме с разнесёнными скважинами)
-  const iso = useMemo(() => {
-    if (options.paint !== 'gis' || !gis?.iso.on || !gis.paint) return null
-    if (spread) return { lines: [], conf: [], step: 0, note: 'На схеме с разнесёнными скважинами изолинии не строятся: выключите «Разнести скважины».' } as IsoResult
-    const pts = placed.filter(p => gis.paint!.vals.has(p.well)).map(p => ({ x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
-    const vs = pts.map(p => p.v)
-    const step = Number(gis.iso.step) || niceLevelStep((Math.max(...vs) - Math.min(...vs)) || 1)
-    return isolines(pts, spacing, step, Number(gis.iso.reach) || 1.5)
+  const iso = useMemo((): IsoResult | null => {
+    if (options.paint !== 'gis' || !gis?.iso.on) return null
+    const note = (text: string): IsoResult => ({ lines: [], conf: [], step: 0, note: text })
+    if (!gis.paint) return note('Изолиний нет: для выбранной пачки, показателя и сезона нет значений по скважинам.')
+    if (spread) return note('На схеме с разнесёнными скважинами изолинии не строятся: выключите «Разнести скважины».')
+    try {
+      const pts = placed.filter(p => gis.paint!.vals.has(p.well)).map(p => ({ x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
+      if (pts.length < 3) return note(`Изолиний нет: на карте ${pts.length} из ${gis.paint.vals.size} скважин со значением (нужно не меньше трёх). Выберите группу или «Весь объект».`)
+      const vs = pts.map(p => p.v)
+      const step = Number(gis.iso.step) || niceLevelStep((Math.max(...vs) - Math.min(...vs)) || 1)
+      return isolines(pts, spacing, step, Number(gis.iso.reach) || 1.5)
+    } catch (e) {
+      return note('Изолинии не построены из-за ошибки: ' + String((e as Error)?.message || e))
+    }
   }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, placed, spacing, spread])
-  // изолинии кровли из модели: тонкие линии под скважинами, шаг подбирается или задаётся
-  const roofLines = useMemo(() => {
+  // изолинии кровли из модели: тонкие линии под скважинами, шаг подбирается или задаётся; любой исход объясняется на экране
+  const roofRes = useMemo((): { lines: ReturnType<typeof contourLines> | null; warn: string } => {
     const r = gis?.roof.grid
-    if (options.paint !== 'gis' || !gis?.roof.on || !r) return null
-    const v = Array.from(r.z).filter(Number.isFinite)
-    if (!v.length) return null
-    const lo = Math.min(...v), hi = Math.max(...v)
-    const step = Number(gis.roof.step) || niceLevelStep((hi - lo) || 1)
-    return contourLines(r.z, r.nx, r.ny, r.x0, r.y0, r.dx, r.dy, step, lo, hi)
-  }, [options.paint, gis?.roof.on, gis?.roof.step, gis?.roof.grid])
+    if (options.paint !== 'gis' || !gis?.roof.on || !r) return { lines: null, warn: '' }
+    try {
+      const v = Array.from(r.z).filter(Number.isFinite)
+      if (!v.length) return { lines: null, warn: 'Кровля: в выбранном слое нет ячеек — укажите другой слой.' }
+      const lo = Math.min(...v), hi = Math.max(...v)
+      const rx1 = r.x0 + (r.nx - 1) * r.dx, ry1 = r.y0 + (r.ny - 1) * r.dy
+      const wx = placed.map(p => p.x), wy = placed.map(p => p.y)
+      let warn = ''
+      if (placed.length && (Math.max(...wx) < r.x0 - r.dx || Math.min(...wx) > rx1 + r.dx || Math.max(...wy) < r.y0 - r.dy || Math.min(...wy) > ry1 + r.dy)) {
+        warn = `Кровля лежит вне карты скважин: модель X ${Math.round(r.x0)}…${Math.round(rx1)}, Y ${Math.round(-ry1)}…${Math.round(-r.y0)}; скважины X ${Math.round(Math.min(...wx))}…${Math.round(Math.max(...wx))}, Y ${Math.round(-Math.max(...wy))}…${Math.round(-Math.min(...wy))}. Координаты скважин и сетки модели в разных системах (проверьте MAPAXES и источник XY).`
+      } else if (g.layout.mode !== 'xy') warn = 'Скважины стоят по сетке листа Excel, а не по координатам XY: кровля модели не совместится с ними. Загрузите координаты tNavigator в Атласе.'
+      const step = Number(gis.roof.step) || niceLevelStep((hi - lo) || 1)
+      const lines = contourLines(r.z, r.nx, r.ny, r.x0, r.y0, r.dx, r.dy, step, lo, hi)
+      if (!warn && !lines.length) warn = `Кровля построена, но изолиний нет: отметки ${fmt1(lo)}…${fmt1(hi)} м почти не меняются при шаге ${step} м — уменьшите шаг или выберите другой слой.`
+      return { lines, warn }
+    } catch (e) {
+      return { lines: null, warn: 'Кровля не нарисована из-за ошибки: ' + String((e as Error)?.message || e) }
+    }
+  }, [options.paint, gis?.roof.on, gis?.roof.step, gis?.roof.grid, placed, g.layout.mode])
+  const roofLines = roofRes.lines
+  const roofWarn = roofRes.warn
+  // то, что на экране «ничего нет», пишется и в лог программы
+  useEffect(() => { if (roofWarn) reportIssue('кровля', roofWarn) }, [roofWarn])
+  const isoWarn = iso && !iso.lines.length ? iso.note : ''
+  useEffect(() => { if (isoWarn) reportIssue('изолинии ГИС и ГВК', isoWarn) }, [isoWarn])
   const sx = (mx: number) => view.k * (fit.s * mx + fit.ox) + view.tx, sy = (my: number) => view.k * (fit.s * my + fit.oy) + view.ty
   const bar = niceStep(140 / K)
   // в режиме группировки круги имеют постоянный размер на экране (как значки на веб-картах), поэтому при приближении близкие скважины расходятся
@@ -707,7 +733,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
             </>}
-            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} />}
+            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} roof={{ ...gis.roof, note: [gis.roof.note, roofWarn].filter(Boolean).join(' ') }} />}
             {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
             {!paintData && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>

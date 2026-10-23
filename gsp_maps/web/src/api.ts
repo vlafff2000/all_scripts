@@ -127,8 +127,10 @@ export interface GisValues { values: Record<string, number>; dates: Record<strin
 export interface GisModel { model: Record<string, number>; delta: Record<string, number>; dates: Record<string, string>; info: string; warnings: string[] }
 export const getGisModel = (pack: string, season: string) => call<GisModel>('/api/gis/model?' + new URLSearchParams({ pack, season }))
 /** Кровля пласта из модели: растр отметок (а.о.) верха ячеек слоя; строки идут по возрастанию Y, пропуск — null. */
-export interface RoofGrid { x0: number; y0: number; dx: number; dy: number; nx: number; ny: number; z: (number | null)[][]; layers: number; note: string }
+export interface RoofGrid { x0: number; y0: number; dx: number; dy: number; nx: number; ny: number; z: (number | null)[][]; layers: number; note: string; mapaxes?: boolean }
 export const getRoof = (model: string, layer: number) => call<RoofGrid>('/api/roof?' + new URLSearchParams({ model, layer: String(layer) }))
+/** Сбой или пустой результат в окне — в лог программы (Проект/logs/gsp_maps.log), чтобы причину можно было найти. Сам не падает. */
+export const reportIssue = (where: string, text: string) => { fetch('/api/client-log', post({ where, text })).catch(() => undefined) }
 /** Наблюдательные скважины: ГИС или замеры давления, не входят в группы; без координат — в missing. kind: obs | prod | auto (ручной выбор инженера). */
 export interface ObserverWell { well: number; why: string[]; manual: boolean; inGroup: boolean; x?: number; y?: number }
 export interface Observers { wells: ObserverWell[]; missing: ObserverWell[]; forcedProd: number[]; note: string }
