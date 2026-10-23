@@ -24,7 +24,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, historymode, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
+from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, histmodel, historymode, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .gdi_adapt import export_charts
 from .project import Project
 
@@ -1050,6 +1050,22 @@ async def results_series(request: Request):
     return JSONResponse({"keyword": kw, "series": {o: {"dates": [str(d.date()) for d, _ in r], "values": [v for _, v in r]} for o, r in data.items()}})
 
 
+async def results_histmodel(request: Request):
+    """История/модель по газу: {model, settings?, seasons?, excluded?, unit_k?}; присланное запоминается в проекте."""
+    b = await request.json()
+    model = _clean(b.get("model"))
+    if not model:
+        return _err("Модель с результатами не выбрана", 404)
+    p = _project()
+    try:
+        out = await run_in_threadpool(histmodel.view, p, model, b)
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось сопоставить историю с моделью: %s" % e)
+    if any(k in b for k in ("settings", "seasons", "excluded", "unit_k")):
+        p.save(FOLDER)
+    return JSONResponse(out)
+
+
 async def results_indicators(request: Request):
     path = _model_path(request, _project())
     if not path:
@@ -1403,6 +1419,7 @@ def build_app() -> Starlette:
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
+        Route("/api/results/histmodel", results_histmodel, methods=["POST"]),
         Route("/api/results/wellgwc", results_well_gwc),
         Route("/api/results/wellprofile", results_well_profile),
         Route("/api/results/report", results_report),
