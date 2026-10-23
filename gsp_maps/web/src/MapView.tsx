@@ -770,6 +770,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         {multiG && g.groups!.map(n => <span key={n} className="map-chip" title={byGroup ? 'Цвет круга — группа' : n}><i className="gdot" style={{ background: groupColor(n) }} />{n}</span>)}
         {far.length > 0 && <span className="map-chip" title={'Далёкие скважины: ' + far.join(', ')}>{frameAll ? 'Показаны все скважины' : `За кадром: ${far.length} скв.`}<button type="button" onClick={() => setFrameAll(v => !v)}>{frameAll ? 'Основная группа' : 'Показать'}</button></span>}
         {spread && placed.length > 1 && <span className="map-chip" title="Скважины разнесены для читаемости: взаимное расположение сохранено, расстояния условные">Схема, расстояния условные</span>}
+        {options.paint === 'gis' && gis && [gis.error, isoWarn && gis.iso.on ? isoWarn : '', gis.roof.on && !roofLines?.length ? [gis.roof.grid ? '' : gis.roof.note, roofWarn].filter(Boolean).join(' ') : ''].filter(Boolean).map((t, k) =>
+          <span key={'gw' + k} className="map-chip warn" role="alert" style={{ whiteSpace: 'normal', maxWidth: 520 }}>{t}</span>)}
         {geo.unplaced.length > 0 && <span className="map-chip warn" title={geo.unplaced.join(', ')}>Без координат: {geo.unplaced.length} скв.</span>}
       </div>
       <div className="map-tools no-export">
