@@ -207,3 +207,39 @@ def test_history_from_model_folder_schedule(tmp_path, monkeypatch):
     _write_model(bare, _summary())
     with pytest.raises(ValueError, match="Историю взять неоткуда"):
         hm.view(Project(), str(bare), {})
+
+
+def _atlas_storage(root, h, daily, name="Объект"):
+    """Минимальное хранилище Атласа: manifest.json и снимок с таблицами production и gas_db (расходы — тыс. м³/сут)."""
+    import json
+    base = root / "projects" / "p1"
+    snap = base / "snapshots" / "s1"
+    snap.mkdir(parents=True)
+    prod = pd.DataFrame({"kind": h["kind"].map({hm.PROD: "withdrawal", hm.INJ: "injection"}), "well": h["well"], "date": h["date"], "q": h["rate"] / 1000.0})
+    prod.to_parquet(snap / "production.parquet")
+    gas = pd.DataFrame({"kind": "withdrawal", "date": daily["Дата"], "gas": daily["Объем"] / 1000.0})
+    gas.to_parquet(snap / "gas_db.parquet")
+    (base / "manifest.json").write_text(json.dumps({"id": "p1", "name": name, "updated": "2026-10-20", "snapshot": "s1", "revision": 1,
+                                                    "tables": {"production": len(prod), "gas_db": len(gas)}}), encoding="utf-8")
+
+
+def test_history_and_reference_from_atlas(tmp_path, monkeypatch):
+    pytest.importorskip("pyarrow")
+    from schedule_pxg import sources
+    h = _case()
+    storage = tmp_path / "st"
+    _atlas_storage(storage, h, _daily(h))
+    monkeypatch.setenv("GAS_ATLAS_STORAGE", str(storage))
+    monkeypatch.setattr(sources, "flow_paths", lambda p: [])
+    mdl = tmp_path / "m"
+    mdl.mkdir()
+    _write_model(mdl, _summary(prod=(80.0, 20.0)))
+    out = hm.view(Project(), str(mdl), {})
+    assert out["history_source"].startswith("проект Атласа «Объект»") and "эталон" in out["history_source"]
+    inj, prod = out["seasons"]
+    assert inj["total"]["hist"] == 1500.0 and prod["total"]["ref"] == 1200.0 and prod["total"]["status"] == hm.SHORT
+    assert out["atlas"]["projects"] == [{"id": "p1", "name": "Объект"}]
+    # хранилища нет — ищем schedule в папке модели, а не падаем
+    monkeypatch.delenv("GAS_ATLAS_STORAGE")
+    with pytest.raises(ValueError, match="Историю взять неоткуда"):
+        hm.view(Project(), str(mdl), {})

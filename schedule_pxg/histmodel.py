@@ -303,35 +303,50 @@ def view(project, model_path: str, body: Optional[dict] = None) -> dict:
     запоминаются в проекте (`project.histmodel`), без них берутся прежние; вернуть автоподсказку сезонов — `seasons: []`.
     История: файл schedule, выбранный вручную (`schedule_path`), иначе база расходов проекта, иначе schedule из папки модели."""
     import os
-    from . import results, sources
+    from . import atlas_data, results, sources
     body = body or {}
     saved = project.histmodel
-    for k in ("settings", "seasons", "excluded", "unit_k", "schedule_path"):
+    for k in ("settings", "seasons", "excluded", "unit_k", "schedule_path", "atlas_project", "atlas_storage"):
         if k in body:
             saved[k] = body[k]
     notes: List[str] = []
     manual = str(saved.get("schedule_path") or "").strip().strip('"')
+    own_daily = sources.load_daily_total(project)      # эталон, заданный вручную, главнее эталона Атласа
+    has_flows = bool(sources.flow_paths(project))
+    atlas = None
+    if (not manual and not has_flows) or not len(own_daily):
+        try:
+            atlas = atlas_data.load(str(saved.get("atlas_storage") or ""), str(saved.get("atlas_project") or ""))
+        except (OSError, ValueError, KeyError, ImportError) as e:
+            notes.append("Проект Атласа не прочитан (%s)" % e)
+    atlas_info = {"projects": [{"id": p["id"], "name": p["name"]} for p in atlas[3]], "selected": atlas[2]} if atlas else {"projects": [], "selected": ""}
     if manual:
         if not os.path.isfile(manual):
             raise ValueError("Файл schedule не найден: %s" % manual)
         hist, source = schedule_history([manual]), "schedule: %s" % os.path.basename(manual)
-    elif sources.flow_paths(project):
+    elif has_flows:
         hist, source = sources.load_project_history(project), "база расходов проекта"
+    elif atlas is not None:
+        hist, source = atlas[0], atlas[2]
     else:
         files = find_schedule(model_path)
         if not files:
-            raise ValueError("Историю взять неоткуда: в папке модели нет файла schedule с WCONHIST/WCONINJH, "
-                             "а база расходов в проекте не задана. Укажите файл schedule или базу расходов")
+            raise ValueError("Историю взять неоткуда: в Атласе нет проекта с расходами, в проекте ГДМ не задана база расходов, "
+                             "а в папке модели нет файла schedule с WCONHIST/WCONINJH. Укажите файл schedule или базу расходов")
         hist, source = schedule_history(files), "schedule из папки модели: %s" % ", ".join(os.path.basename(f) for f in files[:5])
     if not len(hist):
         raise ValueError("В источнике истории нет расходов по скважинам (%s)" % source)
-    daily = sources.load_daily_total(project)
+    daily = own_daily
+    if not len(own_daily) and atlas is not None and len(atlas[1]):
+        daily = atlas[1]
+        source += "; эталон — «БД по учету газа» из %s" % atlas[2]
     out = compare(hist, results.load_summary(model_path), project, daily, saved.get("seasons") or None, saved.get("settings"),
                   saved.get("excluded") or [], float(saved["unit_k"]) if saved.get("unit_k") else None)
     out["notes"] = notes + out["notes"]
     out["history_source"] = source
+    out["atlas"] = atlas_info
     out["saved"] = {"seasons": saved.get("seasons") or [], "excluded": saved.get("excluded") or [], "unit_k": saved.get("unit_k"),
-                    "schedule_path": manual}
+                    "schedule_path": manual, "atlas_project": saved.get("atlas_project") or ""}
     if daily is None or not len(daily):
         out["notes"].append("Эталонный суточный объём не задан: итог по сезону сравнивается с историей по скважинам")
     return out

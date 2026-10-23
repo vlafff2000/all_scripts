@@ -381,8 +381,8 @@ export interface HmTotal { hist: number; model: number; ref: number | null; hist
 export interface HmSeason { name: string; kind: string; start: string; end: string; compared: { start: string; end: string; days: number; full: boolean } | null
   rows: HmRow[]; groups: { group: string; hist: number; model: number; diff: number; pct: number | null }[]; notes: string[]; total?: HmTotal }
 export interface HmSettings { rel_pct: number; abs_k: number }
-export interface HmResult { seasons: HmSeason[]; notes: string[]; settings: HmSettings; history_source: string
-  saved: { seasons: { name: string; kind: string; start: string; end: string }[]; excluded: string[]; unit_k: number | null; schedule_path: string } }
-export interface HmBody { model: string; settings?: Partial<HmSettings>; seasons?: { name: string; kind: string; start: string; end: string }[]; excluded?: string[]; unit_k?: number | null; schedule_path?: string }
+export interface HmResult { seasons: HmSeason[]; notes: string[]; settings: HmSettings; history_source: string; atlas: { projects: { id: string; name: string }[]; selected: string }
+  saved: { seasons: { name: string; kind: string; start: string; end: string }[]; excluded: string[]; unit_k: number | null; schedule_path: string; atlas_project: string } }
+export interface HmBody { model: string; settings?: Partial<HmSettings>; seasons?: { name: string; kind: string; start: string; end: string }[]; excluded?: string[]; unit_k?: number | null; schedule_path?: string; atlas_project?: string }
 export const histModel = (b: HmBody) => call<HmResult>('/api/results/histmodel', post(b))
 export const histModelXlsx = (b: HmBody) => download('/api/results/histmodel/xlsx', b, 'История_и_модель.xlsx')
