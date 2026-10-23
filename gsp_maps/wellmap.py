@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import os
 import re
+from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -26,18 +27,25 @@ def list_sheets(path: str) -> List[str]:
         wb.close()
 
 
-def read_grid(path: str, gsp: str) -> Tuple[Dict[int, Tuple[int, int]], Tuple[int, int], str]:
-    """{скважина: (строка, столбец)}, размеры листа (строк, столбцов), имя листа. Лист — «ГСП 9» или содержащий это имя."""
+def _sheet_key(name: str) -> str:
+    """«ГСП-7», «ГСП_7» и «ГСП 7» — одно имя."""
+    return re.sub(r"[\s_\-]+", "", str(name)).lower()
+
+
+@lru_cache(maxsize=2)
+def _workbook(path: str, mtime: float):
     from openpyxl import load_workbook
-    wb = load_workbook(path, data_only=True)
-    ws = None
-    if gsp in wb.sheetnames:
-        ws = wb[gsp]
-    else:
-        for name in wb.sheetnames:
-            if gsp.lower() in name.lower():
-                ws = wb[name]
-                break
+    return load_workbook(path, data_only=True)
+
+
+def read_grid(path: str, gsp: str) -> Tuple[Dict[int, Tuple[int, int]], Tuple[int, int], str]:
+    """{скважина: (строка, столбец)}, размеры листа (строк, столбцов), имя листа. Лист — «ГСП 9» или содержащий это имя
+    (дефис, подчёркивание и пробел не различаются). Книга читается один раз на все группы."""
+    wb = _workbook(path, os.path.getmtime(path))
+    key = _sheet_key(gsp)
+    ws = next((wb[n] for n in wb.sheetnames if _sheet_key(n) == key), None)
+    if ws is None:
+        ws = next((wb[n] for n in wb.sheetnames if key in _sheet_key(n)), None)
     if ws is None:
         raise KeyError("На листах карты нет «%s» (есть: %s)" % (gsp, ", ".join(wb.sheetnames)))
     cells: Dict[int, Tuple[int, int]] = {}
