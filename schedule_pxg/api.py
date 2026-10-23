@@ -1066,6 +1066,32 @@ async def results_histmodel(request: Request):
     return JSONResponse(out)
 
 
+async def results_histmodel_xlsx(request: Request):
+    """Excel сопоставления история/модель (тело — как у /api/results/histmodel; сами настройки тоже запоминаются)."""
+    b = await request.json()
+    model = _clean(b.get("model"))
+    if not model:
+        return _err("Модель с результатами не выбрана", 404)
+    import tempfile
+
+    def f():
+        res = histmodel.view(_project(), model, b)
+        fd, path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            histmodel.save_xlsx(path, res)
+            with open(path, "rb") as fh:
+                return fh.read()
+        finally:
+            os.remove(path)
+    try:
+        data = await run_in_threadpool(f)
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось выгрузить сопоставление: %s" % e)
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename*=UTF-8''%s" % quote("История_и_модель.xlsx")})
+
+
 async def results_indicators(request: Request):
     path = _model_path(request, _project())
     if not path:
@@ -1420,6 +1446,7 @@ def build_app() -> Starlette:
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
         Route("/api/results/histmodel", results_histmodel, methods=["POST"]),
+        Route("/api/results/histmodel/xlsx", results_histmodel_xlsx, methods=["POST"]),
         Route("/api/results/wellgwc", results_well_gwc),
         Route("/api/results/wellprofile", results_well_profile),
         Route("/api/results/report", results_report),
