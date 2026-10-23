@@ -1012,6 +1012,15 @@ async def models_folders(request: Request):
     return JSONResponse(await run_in_threadpool(lambda: _models_view(_project())))
 
 
+async def models_rename(request: Request):
+    """Имя модели вручную (пустое — вернуть автоматическое)."""
+    b = await request.json()
+    mid = str(b.get("id") or "").strip()
+    if mid:
+        await run_in_threadpool(tnav_catalog.save_name, mid, str(b.get("name") or ""))
+    return JSONResponse(await run_in_threadpool(lambda: _models_view(_project())))
+
+
 async def models_select(request: Request):
     b = await request.json()
     p = _project()
@@ -1464,6 +1473,7 @@ def build_app() -> Starlette:
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
         Route("/api/models/select", models_select, methods=["POST"]),
+        Route("/api/models/rename", models_rename, methods=["POST"]),
         Route("/api/results", results_get),
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
