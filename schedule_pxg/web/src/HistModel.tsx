@@ -84,7 +84,7 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
       {res && <div className="row" style={{ flexWrap: 'wrap' }}><span className="muted small" title="Шапка файла может не совпадать с содержимым (например, м³ вместо тыс. м³). Авто сравнивает порядок величины истории с эталоном узла учёта (без него — с моделью)">Единицы истории:</span>
         <select value={['auto', '1', '0.001', '1000'].includes(hu) ? hu : 'custom'} onChange={e => { const v = e.target.value === 'custom' ? '1' : e.target.value; setHu(v); run({ hist_unit: v }) }}>
           <option value="auto">определить по порядку величины</option><option value="1">как прочитано из источника (×1)</option>
-          <option value="0.001">в источнике м³, а не тыс. м³ (÷1000)</option><option value="1000">в источнике млн м³ вместо тыс. м³ (×1000)</option><option value="custom">свой множитель…</option></select>
+          <option value="0.001">значения в 1000 раз больше: в источнике м³, а не тыс. м³ (÷1000)</option><option value="1000">значения в 1000 раз меньше, чем нужно (×1000)</option><option value="custom">свой множитель…</option></select>
         {!['auto', '1', '0.001', '1000'].includes(hu) && <input style={{ width: 80 }} value={hu} onChange={e => setHu(e.target.value)} onBlur={() => run()} />}
         <span className="small">Сейчас ×{res.hist_unit.factor}: {res.hist_unit.reason}</span></div>}
       {res && res.atlas.projects.length > 1 && <div className="row"><span className="muted small">Проект Атласа:</span>
