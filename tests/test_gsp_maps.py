@@ -484,3 +484,24 @@ def test_base_water_xlsx_is_read_as_monthly_flow_in_lh(tmp_path):
     assert first["Водный_фактор"] == 0.5
     unknown = df.iloc[1]
     assert unknown["Примечание"] == "песок" and pd.isna(unknown["Расход_воды_лч"])
+
+
+def test_grid_sheet_name_separators(tmp_path):
+    path = tmp_path / "карта.xlsx"
+    make_map(path, CELLS, sheet="ГСП-7")
+    assert wellmap.read_grid(str(path), "ГСП 7")[2] == "ГСП-7"
+    assert wellmap.read_grid(str(path), "ГСП_7")[2] == "ГСП-7"
+
+
+def test_layout_missing_sheet_with_xy_has_no_note(tmp_path):
+    from types import SimpleNamespace
+    from gsp_maps.project import Project
+    path = tmp_path / "карта.xlsx"
+    make_map(path, CELLS)  # лист только «ГСП 9»
+    me = SimpleNamespace(store=SimpleNamespace(wells=lambda g: [500, 501]), paths={"map": str(path)},
+                         xy=lambda: ({500: (1.0, 2.0), 501: (3.0, 4.0)}, []),
+                         grid=lambda g: wellmap.read_grid(str(path), g))
+    lay = Project.layout_for(me, "ГСП 7", "auto")
+    assert lay["mode"] == "xy" and not any("На листах карты" in n for n in lay["notes"])
+    me.xy = lambda: ({}, [])
+    assert any("На листах карты" in n for n in Project.layout_for(me, "ГСП 7", "auto")["notes"])
