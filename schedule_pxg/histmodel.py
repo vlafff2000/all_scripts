@@ -283,3 +283,48 @@ def view(project, model_path: str, body: Optional[dict] = None) -> dict:
     if daily is None or not len(daily):
         out["notes"].append("Эталонный суточный объём не задан: итог по сезону сравнивается с историей по скважинам")
     return out
+
+
+def save_xlsx(path: str, res: dict) -> None:
+    """Выгрузка в Excel: лист «Скважины» (история/модель по сезонам, разности — формулами) и «Сезоны» (итоги по объекту:
+    суммы по скважинам без исключённых — формулами SUMIFS, отличие от эталона — формулами). Пометки статуса — текст-подсказка."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Сезоны"
+    wl = wb.create_sheet("Скважины")
+    wl.append(["Сезон", "Скважина", "Группа", "Вид", "Суток", "История, тыс. м³", "Модель, тыс. м³", "Модель − история, тыс. м³",
+               "Отклонение, %", "История, тыс. м³/сут", "Модель, тыс. м³/сут", "Модель − история, тыс. м³/сут", "Пометка", "Причина", "Исключена"])
+    ws.append(["Сезон", "Вид", "С", "По", "Сравнено суток", "История, тыс. м³", "Модель, тыс. м³", "Эталон (узел учёта), тыс. м³",
+               "Модель − эталон, тыс. м³", "Модель − эталон, %", "История − эталон, тыс. м³", "Пометка", "Причина"])
+    n = 1
+    for se in res["seasons"]:
+        for r in se["rows"]:
+            n += 1
+            wl.append([se["name"], r["well"], r["group"], se["kind"], se["compared"]["days"], r["hist"], r["model"],
+                       "=G%d-F%d" % (n, n), '=IF(F%d=0,"",H%d/F%d)' % (n, n, n), "=F%d/E%d" % (n, n), "=G%d/E%d" % (n, n),
+                       "=K%d-J%d" % (n, n), r["label"], r["why"], "да" if r["excluded"] else "нет"])
+            wl.cell(row=n, column=9).number_format = "0.0%"
+    last = max(n, 2)
+    m = 1
+    for se in res["seasons"]:
+        m += 1
+        t, c = se.get("total"), se.get("compared")
+        if not t:
+            ws.append([se["name"], se["kind"], se["start"], se["end"], 0, None, None, None, None, None, None, "", "; ".join(se["notes"])])
+            continue
+        sums = ['=SUMIFS(Скважины!$%s$2:$%s$%d,Скважины!$A$2:$A$%d,$A%d,Скважины!$O$2:$O$%d,"нет")' % (col, col, last, last, m, last) for col in "FG"]
+        ws.append([se["name"], se["kind"], c["start"], c["end"], c["days"], sums[0], sums[1], t["ref"],
+                   '=IF(H%d="","",G%d-H%d)' % (m, m, m), '=IF(OR(H%d="",H%d=0),"",I%d/H%d)' % (m, m, m, m),
+                   '=IF(H%d="","",F%d-H%d)' % (m, m, m), t["label"], t["why"] or "; ".join(se["notes"])])
+        ws.cell(row=m, column=10).number_format = "0.0%"
+    for sheet in (ws, wl):
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+        for i in range(1, sheet.max_column + 1):
+            sheet.column_dimensions[get_column_letter(i)].width = 18
+        sheet.freeze_panes = "A2"
+    wb.save(path)
