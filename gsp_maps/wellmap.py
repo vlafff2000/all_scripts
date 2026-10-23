@@ -27,6 +27,11 @@ def list_sheets(path: str) -> List[str]:
         wb.close()
 
 
+def _sheet_key(name: str) -> str:
+    """«ГСП-7», «ГСП_7» и «ГСП 7» — одно имя."""
+    return re.sub(r"[\s_\-]+", "", str(name)).lower()
+
+
 _GRIDS: Dict[str, Tuple[Tuple[int, int], Dict[str, tuple]]] = {}
 _GRIDS_VERSION = 1
 _GRIDS_LOCK = threading.Lock()   # группы запрашиваются параллельно: книгу карты читает один поток, остальные ждут
@@ -89,9 +94,11 @@ def _read_grids(path: str, sig: Tuple[int, int]) -> Dict[str, tuple]:
 
 
 def read_grid(path: str, gsp: str) -> Tuple[Dict[int, Tuple[int, int]], Tuple[int, int], str]:
-    """{скважина: (строка, столбец)}, размеры листа (строк, столбцов), имя листа. Лист — «ГСП 9» или содержащий это имя."""
+    """{скважина: (строка, столбец)}, размеры листа (строк, столбцов), имя листа. Лист — «ГСП 9» или содержащий это имя
+    (дефис, подчёркивание и пробел не различаются). Книга читается один раз на все группы."""
     grids = read_grids(path)
-    name = gsp if gsp in grids else next((n for n in grids if gsp.lower() in n.lower()), None)
+    key = _sheet_key(gsp)
+    name = next((n for n in grids if _sheet_key(n) == key), None) or next((n for n in grids if key in _sheet_key(n)), None)
     if name is None:
         raise KeyError("На листах карты нет «%s» (есть: %s)" % (gsp, ", ".join(grids)))
     cells, dims, title = grids[name]
