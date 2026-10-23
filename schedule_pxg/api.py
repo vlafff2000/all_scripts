@@ -770,7 +770,7 @@ async def sources_set(request: Request):
             sources.set_daily_total(p, _clean(d.get("path")), d.get("unit") or "м3/сут")
         if "gis" in b:
             g = b["gis"] or {}
-            planshet.set_settings(p, _clean(g.get("folder")), _clean(g.get("perf_file")))
+            planshet.set_settings(p, _clean(g.get("folder")), _clean(g.get("perf_file")), g.get("perf_mode"))
     except ValueError as e:
         return _err(str(e))
     p.save(FOLDER)
