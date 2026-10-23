@@ -808,6 +808,27 @@ async def planshet_fact(request: Request):
         return _err("Не удалось прочитать базу ГИС: %s" % e)
 
 
+async def planshet_catalog(request: Request):
+    """Скважины базы ГИС и их замеры с сезонами — для выбора на планшете."""
+    try:
+        return JSONResponse(await run_in_threadpool(planshet.catalog, _project()))
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать базу ГИС: %s" % e)
+
+
+async def planshet_facts(request: Request):
+    """Факт по выбранным замерам: {picks: [[скважина, дата], …], alts: {скважина: м}}."""
+    b = await request.json()
+    picks = [(str(w), str(d)) for w, d in b.get("picks") or []]
+    if not picks:
+        return _err("Не выбраны скважины")
+    try:
+        alts = {str(w).strip(): float(str(v).replace(",", ".")) for w, v in (b.get("alts") or {}).items() if str(v).strip() != ""}
+        return JSONResponse(await run_in_threadpool(planshet.view, _project(), [], "", alts, picks))
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать базу ГИС: %s" % e)
+
+
 async def sources_folder(request: Request):
     """Папка выгрузок Базы ПХГ: находит базу расходов по имени и ставит её источником (группы — столбец в базе)."""
     b = await request.json()
@@ -1411,6 +1432,8 @@ def build_app() -> Starlette:
         Route("/api/sources/set", sources_set, methods=["POST"]),
         Route("/api/sources/folder", sources_folder, methods=["POST"]),
         Route("/api/planshet/fact", planshet_fact),
+        Route("/api/planshet/catalog", planshet_catalog),
+        Route("/api/planshet/facts", planshet_facts, methods=["POST"]),
         Route("/api/planshet/compare", planshet_compare, methods=["POST"]),
         Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),

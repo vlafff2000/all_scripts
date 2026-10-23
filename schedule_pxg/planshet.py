@@ -87,6 +87,27 @@ def observations(tables: Dict[str, pd.DataFrame], well: str) -> List[dict]:
              "packs": int(r.packs) if r.packs == r.packs else 0} for r in df.itertuples(index=False)]
 
 
+def season_key(season, date: str) -> str:
+    """Сезон замера как в Атласе и Картах: «осень/весна + год»; месяцы вне сезонов — «без сезона»."""
+    return "%s %s" % (season if isinstance(season, str) and season else "без сезона", date[:4])
+
+
+def catalog(p: Project) -> dict:
+    """Все скважины базы ГИС и их замеры (дата, сезон) — для выбора на планшете."""
+    s = settings(p)
+    if not s.get("folder"):
+        raise ValueError("Не выбрана папка базы ГИС")
+    obs = load_tables(s["folder"])["gis_observations"]
+    rows = []
+    for r in obs.sort_values(["date"]).itertuples(index=False):
+        if r.date != r.date:
+            continue
+        d = str(r.date.date())
+        rows.append({"well": _key(r.well), "date": d, "season": season_key(r.season, d),
+                     "packs": int(r.packs) if r.packs == r.packs else 0})
+    return {"wells": sorted({r["well"] for r in rows}, key=lambda w: (len(w), w)), "observations": rows}
+
+
 def fact(tables: Dict[str, pd.DataFrame], well: str, date: str = "", alt_override: Optional[float] = None) -> dict:
     """Фактический замер скважины на дату (пусто — последний): интервалы с Кг и ГВК пачек в а.о."""
     k = _key(well)
@@ -124,8 +145,10 @@ def fact(tables: Dict[str, pd.DataFrame], well: str, date: str = "", alt_overrid
             "altitude": alt, "intervals": intervals, "packs": gvk, "notes": notes}
 
 
-def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[str, float]] = None) -> dict:
-    """Факт ГИС и перфорации выбранных скважин для планшета; alts — альтитуды, заданные вручную (скважина → м), главнее базы."""
+def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[str, float]] = None,
+         picks: Optional[Sequence[tuple]] = None) -> dict:
+    """Факт ГИС и перфорации выбранных скважин для планшета; alts — альтитуды, заданные вручную (скважина → м), главнее базы.
+    picks — пары (скважина, дата): по строке на каждый выбранный замер (несколько дат одной скважины); иначе wells и date."""
     s = settings(p)
     if not s.get("folder"):
         raise ValueError("Не выбрана папка базы ГИС")
@@ -135,12 +158,12 @@ def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[s
     if not s.get("perf_file"):
         notes.append("Файл перфораций не выбран: перфорации на планшете не показаны")
     rows = []
-    for w in wells:
+    for w, day in (list(picks) if picks else [(w, date) for w in wells]):
         mine = (alts or {}).get(_key(w))
-        f = fact(tables, w, date, mine)
+        f = fact(tables, w, day, mine)
         pf = perf.get(_key(w))
         if mine is None and pf and pf.get("altitude") is not None and f["altitude"] is None:
-            f = fact(tables, w, date, pf["altitude"])
+            f = fact(tables, w, day, pf["altitude"])
         f["perforation"] = ({"top": abs_depth_perf(pf["top"], f["altitude"]), "bottom": abs_depth_perf(pf["bottom"], f["altitude"])}
                             if pf and pf.get("top") is not None else None)
         if mine is not None:
