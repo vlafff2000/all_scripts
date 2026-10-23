@@ -450,3 +450,47 @@ export function isolines(points: IsoPoint[], spacing: number, step: number, reac
   }
   return { lines, conf, step, note: lines.length ? '' : 'В этой области значения почти не меняются: изолиний с таким шагом нет.' }
 }
+
+/** Контур ГВК по кровле: линия, где кровля пласта (растр модели) пересекает поверхность ГВК, проведённую через замерные скважины.
+ *  Так контур идёт вдоль изолиний кровли, а у скважины встаёт туда, где кровля на глубине ГВК. Поверхность ГВК — плоскость
+ *  (наименьшие квадраты; меньше трёх скважин или скважины на линии — среднее) или взвешенная по расстоянию (idw), как есть по скважинам.
+ *  Считается только в радиусе доверия `reach` средних расстояний между скважинами и только там, где у кровли есть значение. */
+export interface RoofRaster { z: Float64Array; nx: number; ny: number; x0: number; y0: number; dx: number; dy: number }
+export interface GwcContour { d: string; at: [number, number] | null; note: string; surface: string }
+export function gwcContour(wells: IsoPoint[], roof: RoofRaster, spacing: number, reach: number, mode: 'plane' | 'idw'): GwcContour {
+  const none = (note: string): GwcContour => ({ d: '', at: null, note, surface: '' })
+  if (!wells.length) return none('Нет скважин с ГВК для контура.')
+  const mean = wells.reduce((s, w) => s + w.v, 0) / wells.length
+  let g: (x: number, y: number) => number = () => mean
+  let surface = 'среднее ГВК скважин'
+  if (mode === 'plane' && wells.length >= 3) {
+    // z = a + b·(x−cx) + c·(y−cy): нормальные уравнения 3×3
+    const cx = wells.reduce((s, w) => s + w.x, 0) / wells.length, cy = wells.reduce((s, w) => s + w.y, 0) / wells.length
+    let sxx = 0, sxy = 0, syy = 0, sxz = 0, syz = 0
+    for (const w of wells) { const u = w.x - cx, v = w.y - cy, z = w.v - mean; sxx += u * u; sxy += u * v; syy += v * v; sxz += u * z; syz += v * z }
+    const det = sxx * syy - sxy * sxy
+    if (Math.abs(det) > 1e-9 * (sxx * syy + 1)) {
+      const b = (sxz * syy - syz * sxy) / det, c = (syz * sxx - sxz * sxy) / det
+      g = (x, y) => mean + b * (x - cx) + c * (y - cy)
+      surface = `плоскость ГВК по ${wells.length} скважинам (наклон ${(Math.hypot(b, c) * 1000).toFixed(1)} м на км)`
+    }
+  } else if (mode === 'idw') {
+    g = (x, y) => {
+      let sw = 0, sv = 0
+      for (const w of wells) { const d = Math.hypot(w.x - x, w.y - y); if (d < 1e-9) return w.v; const k = 1 / (d * d); sw += k; sv += k * w.v }
+      return sv / sw
+    }
+    surface = 'ГВК по скважинам (взвешенное по расстоянию)'
+  }
+  const rad = Math.max(reach * spacing, 1e-9)
+  const D = new Float64Array(roof.nx * roof.ny).fill(NaN)
+  for (let j = 0; j < roof.ny; j++) for (let i = 0; i < roof.nx; i++) {
+    const r = roof.z[j * roof.nx + i]
+    if (!Number.isFinite(r)) continue
+    const x = roof.x0 + i * roof.dx, y = roof.y0 + j * roof.dy
+    if (wells.some(w => Math.hypot(w.x - x, w.y - y) <= rad)) D[j * roof.nx + i] = r - g(x, y)
+  }
+  const line = contourLines(D, roof.nx, roof.ny, roof.x0, roof.y0, roof.dx, roof.dy, 1, 0, 0)
+  if (!line.length) return { d: '', at: null, note: 'Кровля нигде не пересекает ГВК в радиусе доверия: контур не построен (проверьте слой кровли и радиус).', surface }
+  return { d: line[0].d, at: line[0].at, note: '', surface }
+}
