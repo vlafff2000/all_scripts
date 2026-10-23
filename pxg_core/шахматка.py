@@ -522,12 +522,19 @@ def recompute(sh: Shakh, df: pd.DataFrame) -> pd.DataFrame:
         raise ShakhError("%s: нет строки «%s» уровня ПХГ (над блоками скважин). Найдены подписи: %s" % (
             getattr(sh, "label", "файл"), obj_lab, ", ".join(k for k in obj if not k.startswith("(внизу)")) or "нет"))
     q_obj_row = obj[obj_lab]
+    inputs = ["Диам. штуцера", "Ршт. блок", "t работы"] if otbor else ["q (шум)", "t работы"]
+    lost = [x for x in inputs + [target, base] if x not in df.columns]
+    if lost:
+        found = sorted({l for _s, _w, labs in sh.blocks for l in labs})
+        raise ShakhError("%s: ни в одном блоке скважины нет строк «%s». Найдены подписи: %s. "
+                         "Проверьте подписи в столбце B (допустимы любой регистр, пробелы и точки)." % (
+                             getattr(sh, "label", "файл"), "», «".join(lost), ", ".join(found) or "нет"))
     for _s, _w, _labs in sh.blocks:
-        miss = [x for x in (target, base) if x not in _labs]
+        miss = [x for x in inputs + [target, base] if x not in _labs]
         if miss:
-            raise ShakhError("%s: в блоке скважины «%s» (строка %d) нет строк «%s». Найдены подписи: %s. "
-                             "Проверьте подписи в столбце B этого блока (допустимы любой регистр, пробелы и точки)." % (
-                                 getattr(sh, "label", "файл"), _w, _s, "», «".join(miss), ", ".join(_labs) or "нет"))
+            sh.issue("предупреждение", "Нет строки в блоке скважины", "скв. %s, строка %d" % (_w, _s),
+                     "В блоке нет строк «%s» (значения приняты за 0, сверка Qгаз.пром для этой скважины пропущена). "
+                     "Найдены подписи: %s" % ("», «".join(miss), ", ".join(_labs) or "нет"))
     krow = _k_row(sh, target)
     sh.k_row = krow
     if sh.has_formulas:
@@ -561,6 +568,9 @@ def recompute(sh: Shakh, df: pd.DataFrame) -> pd.DataFrame:
     for is_b, w, d, bf, bc in zip(bad, df["Скважина"], df["Дата"], base_f_all, df["q расч (пересчёт)"]):
         labs = starts[w][1]
         col = date2col[d]
+        if target not in labs or base not in labs:
+            own.append("")
+            continue
         fm_t, fm_b = sh.f(labs[target], col), sh.f(labs[base], col)
         reason = ""
         if is_b and not isf(fm_t):

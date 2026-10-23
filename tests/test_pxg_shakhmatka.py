@@ -180,12 +180,23 @@ def test_label_variants_are_recognised(tmp_path, label):
     assert df["Qгаз.пром (пересчёт)"].sum() == pytest.approx(300.0)
 
 
-def test_missing_label_gives_clear_message(tmp_path):
+def test_block_without_label_is_warned_not_fatal(tmp_path):
     f = tmp_path / "o.xlsx"
     make_otbor(f, drop_prom_in="2")
+    sh = шахматка.Shakh(str(f), "отбор", 2025, str(tmp_path))
+    sh.label = "o.xlsx"
+    df = шахматка.recompute(sh, sh.wells_table())
+    assert len(df) == 6 and df["Qгаз.пром (пересчёт)"].sum() == pytest.approx(300.0)
+    w = [i for i in sh.issues if i["Вид"] == "Нет строки в блоке скважины"]
+    assert len(w) == 1
+
+
+def test_missing_label_everywhere_gives_clear_message(tmp_path):
+    f = tmp_path / "o.xlsx"
+    make_otbor(f, prom_label="Дебит пром")
     sh = шахматка.Shakh(str(f), "отбор", 2025, str(tmp_path))
     sh.label = "o.xlsx"
     with pytest.raises(шахматка.ShakhError) as e:
         шахматка.recompute(sh, sh.wells_table())
     msg = str(e.value)
-    assert "o.xlsx" in msg and "«2»" in msg and "q газа пром" in msg and "Диам. штуцера" in msg
+    assert "o.xlsx" in msg and "q газа пром" in msg and "Дебит пром" in msg
