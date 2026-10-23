@@ -200,3 +200,37 @@ def test_missing_label_everywhere_gives_clear_message(tmp_path):
         шахматка.recompute(sh, sh.wells_table())
     msg = str(e.value)
     assert "o.xlsx" in msg and "q газа пром" in msg and "Дебит пром" in msg
+
+
+def test_build_parallel_equals_serial(tmp_path, monkeypatch):
+    """Файлы по ядрам дают ту же базу, что подряд: листы Excel, сообщения и замечания совпадают."""
+    for i in range(5):
+        make_otbor(tmp_path / ("otbor %d.xlsx" % (2020 + i)), bad_label=(i == 2), drop_prom_in="2" if i == 3 else None)
+    (tmp_path / "bad.xlsx").write_bytes(b"not an excel")
+    files = [str(p) for p in sorted(tmp_path.glob("*.xlsx"))]
+    res, logs = {}, {}
+    for w in ("1", "3"):
+        monkeypatch.setenv("PXG_WORKERS", w)
+        log = []
+        res[w] = шахматка.build(files, str(tmp_path / ("out%s.xlsx" % w)), log=log.append)
+        logs[w] = log
+    assert logs["1"] == logs["3"] and len(logs["1"]) == 6
+    a = pd.read_excel(tmp_path / "out1.xlsx", sheet_name=None)
+    b = pd.read_excel(tmp_path / "out3.xlsx", sheet_name=None)
+    assert a.keys() == b.keys()
+    for name in a:
+        pd.testing.assert_frame_equal(a[name], b[name])
+    pd.testing.assert_frame_equal(res["1"]["issues"], res["3"]["issues"])
+
+
+def test_check_parallel_equals_serial(tmp_path, monkeypatch):
+    for i in range(5):
+        make_otbor(tmp_path / ("otbor %d.xlsx" % (2020 + i)), bad_label=(i == 2))
+    (tmp_path / "bad.xlsx").write_bytes(b"not an excel")
+    vals = {"files": "\n".join(str(p) for p in sorted(tmp_path.glob("*.xlsx")))}
+    got = {}
+    for w in ("1", "3"):
+        monkeypatch.setenv("PXG_WORKERS", w)
+        rep = check.check_shakhmatka(vals)
+        got[w] = (rep.issues, rep.checked, rep.hidden)
+    assert got["1"] == got["3"] and got["1"][0]
