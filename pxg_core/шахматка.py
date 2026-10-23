@@ -46,6 +46,50 @@ def _text(v) -> str:
     return "" if v is None else re.sub(r"\s+", " ", str(v)).strip()
 
 
+_LOOK = str.maketrans("aeopcxyABCEHKMOPTX", "аеорсхуАВСЕНКМОРТХ")  # латиница, похожая на кириллицу
+
+
+def _norm_key(lab: str) -> str:
+    """Подпись без регистра, пробелов (в т.ч. неразрывных), точек и скобок: «Q газа пром.» = «q газа пром»."""
+    t = str(lab).replace("\u00a0", " ").replace("ё", "е").replace("Ё", "Е").lower()
+    t = re.sub(r"[\s.,:;()\[\]_-]+", "", t)
+    return t.translate(_LOOK) if re.search("[а-я]", t) else t
+
+
+KNOWN_LABELS = ["Состояние", "t работы", "Диам. штуцера", "Ршт. блок", "q (шум)", "qгаза (расч)", "q газа пром",
+                "Qгаза пром.", "Qгаза отч", "Qгаза отч.", "Qгаза сут"]
+_CANON: Dict[str, List[str]] = {}
+for _k in KNOWN_LABELS:
+    _CANON.setdefault(_norm_key(_k), []).append(_k)
+
+
+def _canon(lab: str) -> str:
+    """Подпись строки в том виде, как её знает код (если опознана), иначе как есть."""
+    if lab in KNOWN_LABELS:
+        return lab
+    return _CANON.get(_norm_key(lab), [lab])[0]
+
+
+class ShakhError(Exception):
+    """Понятная ошибка структуры шахматки (что и где не найдено)."""
+
+
+def _block_labels(raw: List[Tuple[str, int]]) -> Dict[str, int]:
+    """{подпись: строка}; опознанные по нормализации подписи приводятся к известному виду, если он не занят точным совпадением
+    («Qгаза пром.» и «q газа пром» в файлах закачки - разные строки, и совпадают после нормализации)."""
+    taken = {lab for lab, _r in raw if lab in KNOWN_LABELS}
+    out: Dict[str, int] = {}
+    for lab, r in raw:
+        new = lab
+        if lab not in KNOWN_LABELS:
+            c = next((k for k in _CANON.get(_norm_key(lab), []) if k not in taken), None)
+            if c:
+                new = c
+                taken.add(c)
+        out[new] = r
+    return out
+
+
 def _num(v) -> Optional[float]:
     if isinstance(v, bool) or v is None:
         return None
@@ -244,18 +288,18 @@ class Shakh:
         r = 1
         nrow = len(self.V)
         while r <= nrow:
-            if _text(self.v(r, 2)) == "Состояние":
+            if _canon(_text(self.v(r, 2))) == "Состояние":
                 well = _text(self.v(r, 1))
                 try:
                     well = str(int(float(well)))
                 except ValueError:
                     pass
-                labs: Dict[str, int] = {}
+                raw: List[Tuple[str, int]] = []
                 rr = r
-                while rr <= nrow and _text(self.v(rr, 2)) and (rr == r or _text(self.v(rr, 2)) != "Состояние"):
-                    lab = _text(self.v(rr, 2))
-                    labs[lab] = rr
+                while rr <= nrow and _text(self.v(rr, 2)) and (rr == r or _canon(_text(self.v(rr, 2))) != "Состояние"):
+                    raw.append((_text(self.v(rr, 2)), rr))
                     rr += 1
+                labs = _block_labels(raw)
                 if any(b[1] == well for b in self.blocks):
                     self.issue("предупреждение", "Повтор скважины", "строка %d" % r,
                                "Скважина «%s» уже есть выше; блок загружен как «%s (дубль, строка %d)»" % (well, well, r))
@@ -298,11 +342,11 @@ class Shakh:
         """Строки ПХГ-уровня: выше первого блока (подпись в столбце B) и расчётные строки ниже последнего блока."""
         rows: Dict[str, int] = {}
         for r in range(self.day_row + 1, self.first_block_row):
-            lab = _text(self.v(r, 2))
+            lab = _canon(_text(self.v(r, 2)))
             if lab:
                 rows.setdefault(lab, r)
         for r in range(self.last_block_row + 1, len(self.V) + 1):
-            lab = _text(self.v(r, 2))
+            lab = _canon(_text(self.v(r, 2)))
             if lab:
                 rows.setdefault("(внизу) " + lab, r)
         return rows
@@ -471,13 +515,23 @@ def recompute(sh: Shakh, df: pd.DataFrame) -> pd.DataFrame:
     """Qгаз.пром = (расчётный дебит скважины) × K, K = Qотч по ПХГ / сумма расчётных дебитов по ВСЕМ скважинам."""
     otbor = sh.kind == "отбор"
     obj = sh.object_rows()
-    q_obj_row = obj["Qгаза отч"] if otbor else obj["Qгаза сут"]
     target = "q газа пром" if otbor else "Qгаза пром."
+    base = "qгаза (расч)" if otbor else "q газа пром"
+    obj_lab = "Qгаза отч" if otbor else "Qгаза сут"
+    if obj_lab not in obj:
+        raise ShakhError("%s: нет строки «%s» уровня ПХГ (над блоками скважин). Найдены подписи: %s" % (
+            getattr(sh, "label", "файл"), obj_lab, ", ".join(k for k in obj if not k.startswith("(внизу)")) or "нет"))
+    q_obj_row = obj[obj_lab]
+    for _s, _w, _labs in sh.blocks:
+        miss = [x for x in (target, base) if x not in _labs]
+        if miss:
+            raise ShakhError("%s: в блоке скважины «%s» (строка %d) нет строк «%s». Найдены подписи: %s. "
+                             "Проверьте подписи в столбце B этого блока (допустимы любой регистр, пробелы и точки)." % (
+                                 getattr(sh, "label", "файл"), _w, _s, "», «".join(miss), ", ".join(_labs) or "нет"))
     krow = _k_row(sh, target)
     sh.k_row = krow
     if sh.has_formulas:
         sh.check_sum_coverage(krow)
-    base = "qгаза (расч)" if otbor else "q газа пром"
     n = lambda x: _num(x) or 0.0
     if otbor:
         df["q расч (пересчёт)"] = [0.0141 * n(d) ** 2 * n(p) * math.sqrt(1 + 0.002253 * n(p)) / 24 * n(t)
@@ -729,7 +783,11 @@ def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_y
             log("❌ %s: год первых суток не определён (нет ни в имени файла, ни в шапке листа), файл пропущен. Укажите год в поле «Годы по файлам»" % name)
             continue
         sh.label = name
-        df = recompute(sh, sh.wells_table())
+        try:
+            df = recompute(sh, sh.wells_table())
+        except ShakhError as e:
+            log("❌ %s" % e)
+            continue
         if sh.has_formulas:
             sh.check_formula_patterns(["qгаза (расч)", "q газа пром"] if kind == "отбор" else ["q газа пром", "Qгаза пром.", "Qгаза отч."])
         df.insert(0, "Файл", name)

@@ -18,7 +18,7 @@ from tests.test_pxg_modules import run_module  # noqa: E402
 Q_CALC = 0.0141 * 10 ** 2 * 50 * math.sqrt(1 + 0.002253 * 50)   # t = 24 ч: /24*t = 1
 
 
-def make_otbor(path, bad_label=False):
+def make_otbor(path, bad_label=False, prom_label="q газа пром", drop_prom_in=None):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(["Шахматка-газ. Журнал учёта"])
@@ -34,7 +34,8 @@ def make_otbor(path, bad_label=False):
         ws.append([None, "Диам. штуцера", "мм", None, 10, 10, 10])
         ws.append([None, "Ршт. блок", "кгс/см2", None, 50, 50, 50])
         ws.append([None, "qгаза (расч)", "т.м3/сут", None] + [Q_CALC] * 3)
-        ws.append([None, "q газа пром", "т.м3/сут", None] + [q_prom] * 3)
+        if well != drop_prom_in:
+            ws.append([None, prom_label, "т.м3/сут", None] + [q_prom] * 3)
     wb.save(path)
 
 
@@ -168,3 +169,23 @@ def test_year_from_header_manual_and_unknown(tmp_path):
     assert not len(res["issues"][res["issues"]["Вид"] == "Год не определён"])
     book = pd.read_excel(str(tmp_path / "b.xlsx"), sheet_name="Отбор_по_скважинам")
     assert str(book["Дата"].min())[:4] == "2014"
+
+
+@pytest.mark.parametrize("label", ["Q газа пром.", "q  газа  пром", "q\u00a0газа пром.", "Q ГАЗА ПРОМ", "q газа пром "])
+def test_label_variants_are_recognised(tmp_path, label):
+    f = tmp_path / "o.xlsx"
+    make_otbor(f, prom_label=label)
+    sh = шахматка.Shakh(str(f), "отбор", 2025, str(tmp_path))
+    df = шахматка.recompute(sh, sh.wells_table())
+    assert df["Qгаз.пром (пересчёт)"].sum() == pytest.approx(300.0)
+
+
+def test_missing_label_gives_clear_message(tmp_path):
+    f = tmp_path / "o.xlsx"
+    make_otbor(f, drop_prom_in="2")
+    sh = шахматка.Shakh(str(f), "отбор", 2025, str(tmp_path))
+    sh.label = "o.xlsx"
+    with pytest.raises(шахматка.ShakhError) as e:
+        шахматка.recompute(sh, sh.wells_table())
+    msg = str(e.value)
+    assert "o.xlsx" in msg and "«2»" in msg and "q газа пром" in msg and "Диам. штуцера" in msg
