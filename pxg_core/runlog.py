@@ -215,9 +215,16 @@ class RequestLog:
         start = time.perf_counter()
         try:
             await self.app(scope, receive, wrapped)
-        except Exception:
+        except Exception as e:
             log.exception("%s %s: необработанная ошибка за %.2f с", method, path, time.perf_counter() - start)
-            raise
+            if status[0]:                       # ответ уже начат: прервать соединение, как раньше
+                raise
+            # вместо голой «ошибки сервера 500»: окно показывает поле error
+            text = "Непредвиденная ошибка расчёта (%s: %s). Подробности в логе (кнопка «Лог»), пришлите пакет разработчику." % (
+                type(e).__name__, str(e)[:300] or "без текста")
+            await JSONResponse({"error": text}, status_code=500)(scope, receive, send)
+            status[0] = 500
+            return
         took = time.perf_counter() - start
         quiet = method == "GET" and any(path.startswith(p) for p in _QUIET)
         if status[0] >= 500:

@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from typing import Any, Callable, List, Optional, Sequence
 
@@ -58,7 +59,11 @@ def map_steps(fn: Callable, model, steps: Sequence, ctx: Any = None, egrid_path:
         log.info("%s: %d шагов в одном процессе, %.2f с", name, len(steps), time.perf_counter() - t0)
         return res
     log.info("%s: %d шагов на %d процессах", name, len(steps), n)
-    with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn"), initializer=_init, initargs=(egrid_path, ctx)) as ex:
-        res = list(ex.map(_run, [(fn, s) for s in steps], chunksize=1))
+    try:
+        with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn"), initializer=_init, initargs=(egrid_path, ctx)) as ex:
+            res = list(ex.map(_run, [(fn, s) for s in steps], chunksize=1))
+    except (BrokenProcessPool, MemoryError, PermissionError):      # процесс убит (нехватка памяти) или не запустился: те же шаги подряд
+        log.exception("%s: %d процессов не справились, считаем в одном", name, n)
+        res = [fn(model, s, ctx) for s in steps]
     log.info("%s: %d шагов готово за %.2f с (%d процессов)", name, len(steps), time.perf_counter() - t0, n)
     return res

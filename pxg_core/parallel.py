@@ -10,7 +10,9 @@ import contextlib
 import io
 import os
 import runpy
+import logging
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from typing import Any, List, Optional, Sequence
 
@@ -65,5 +67,9 @@ def map_jobs(fn, jobs: Sequence[Any], mb_per_worker: float = 0.0, workers: Optio
     n = min(_workers(mb_per_worker) if workers is None else max(1, workers), len(jobs))
     if n < 2 or len(jobs) < MIN_PARALLEL_ITEMS:
         return [fn(j) for j in jobs]
-    with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as ex:
-        return list(ex.map(fn, jobs, chunksize=1))
+    try:
+        with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as ex:
+            return list(ex.map(fn, jobs, chunksize=1))
+    except (BrokenProcessPool, MemoryError, PermissionError):      # процесс убит (нехватка памяти) или не запустился: те же расчёты подряд
+        logging.getLogger(__name__).exception("%d процессов не справились, считаем в одном", n)
+        return [fn(j) for j in jobs]

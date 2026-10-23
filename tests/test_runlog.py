@@ -90,7 +90,8 @@ def test_requests_logged_and_bundle(logs):
     c = TestClient(_app(), raise_server_exceptions=False)
     c.get("/api/ok")                    # чтение без замечаний в лог не пишется
     c.post("/api/ok")
-    assert c.get("/api/boom").status_code == 500
+    boom = c.get("/api/boom")
+    assert boom.status_code == 500 and "RuntimeError: сбой" in boom.json()["error"] and "Лог" in boom.json()["error"]
     r = c.post("/api/log/bundle").json()
     assert r["name"].endswith(".zip") and r["size"] > 0
     got = c.get(r["url"])
