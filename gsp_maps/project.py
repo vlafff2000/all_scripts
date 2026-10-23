@@ -266,14 +266,18 @@ class Project:
         assert self.store is not None
         wells = self.store.wells(gsp)
         cells, dims, notes = {}, (0, 0), []
+        missing_sheet = ""
         if self.paths["map"] and os.path.isfile(self.paths["map"]) and mode in ("auto", "grid", "xy"):
             try:
                 cells, dims, _ = self.grid(gsp)
             except KeyError as e:
-                notes.append(str(e.args[0]))
+                missing_sheet = str(e.args[0])
             except Exception as e:
                 notes.append("Карта-сетка не прочитана: %s" % e)
         xy: Dict[int, Tuple[float, float]] = self.xy()[0] if mode in ("auto", "xy") else {}
+        # у группы нет листа карты, но скважины есть в XY — это не замечание, положения известны
+        if missing_sheet and not any(w in xy for w in wells):
+            notes.append(missing_sheet)
         res = wellmap.layout(wells, cells, dims, xy, mode)
         res["notes"] = notes + res["notes"]
         res["has_grid"], res["has_xy"] = bool(cells), any(w in xy for w in wells)
