@@ -167,17 +167,27 @@ def read_perforations(path: str) -> Tuple[Dict[int, dict], Dict[int, float]]:
     return rows, alt
 
 
-def perforation_abs(row: dict, altitude: Optional[float]) -> Tuple[Optional[Tuple[float, float]], str]:
-    """(верх, низ) в а.о. и откуда взято: явные а.о. из файла; иначе MD через альтитуду (альтитуда − MD); иначе по знаку."""
+def _below_sea(pair: Tuple[float, float]) -> Tuple[Tuple[float, float], bool]:
+    """а.о. ниже моря — со знаком минус: положительное значение — та же глубина без знака, переворачиваем."""
+    flip = any(v > 0 for v in pair)
+    return (tuple(-abs(v) for v in pair) if flip else pair), flip
+
+
+def perforation_abs(row: dict, altitude: Optional[float], mode: str = "") -> Tuple[Optional[Tuple[float, float]], str]:
+    """(верх, низ) в а.о. и откуда взято. Явные а.о. — как в файле (без знака — ставим минус); иначе MD через альтитуду
+    (альтитуда − MD). Столбцы без подписи: по умолчанию и при mode="ao" это а.о. (положительные получают минус),
+    при mode="md" положительные — глубина от стола, пересчитывается через альтитуду."""
     if row.get("ao"):
-        return row["ao"], "ao"
+        pair, flip = _below_sea(row["ao"])
+        return pair, "ao_flip" if flip else "ao"
     if row.get("md"):
         return (None, "md_no_altitude") if altitude is None else ((altitude - row["md"][0], altitude - row["md"][1]), "md")
     if row.get("plain"):
         t, b = row["plain"]
-        if t <= 0 and b <= 0:
-            return (t, b), "plain_ao"
-        return (None, "plain_no_altitude") if altitude is None else ((altitude - t, altitude - b), "plain_md")
+        if mode == "md" and t > 0 and b > 0:
+            return (None, "plain_no_altitude") if altitude is None else ((altitude - t, altitude - b), "plain_md")
+        pair, flip = _below_sea((t, b))
+        return pair, "plain_flip" if flip else "plain_ao"
     return None, ""
 
 
@@ -187,8 +197,6 @@ def load_perforations(path: str) -> Tuple[Dict[int, Tuple[float, float]], Dict[i
     depths: Dict[int, Tuple[float, float]] = {}
     for well, row in rows.items():
         pair, _src = perforation_abs(row, alt.get(well))
-        if pair is None and row.get("plain"):
-            pair = row["plain"]          # без альтитуды — как в файле (поведение старого скрипта)
         if pair is not None:
             depths[well] = pair
     return depths, alt

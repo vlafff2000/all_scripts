@@ -63,8 +63,11 @@ def test_view_needs_folder_and_checks_format(tmp_path):
 def test_perf_conversion():
     from gsp_maps.inputs import perforation_abs
     assert perforation_abs({"plain": (-905.0, -915.0)}, 100.0) == ((-905.0, -915.0), "plain_ao")
-    assert perforation_abs({"plain": (1005.0, 1015.0)}, 100.0) == ((-905.0, -915.0), "plain_md")
-    assert perforation_abs({"plain": (1005.0, 1015.0)}, None)[0] is None
+    # без подписи и без режима положительные значения — а.о. без знака: получают минус; режим «md» — глубина от стола
+    assert perforation_abs({"plain": (1005.0, 1015.0)}, 100.0) == ((-1005.0, -1015.0), "plain_flip")
+    assert perforation_abs({"plain": (1005.0, 1015.0)}, 100.0, "md") == ((-905.0, -915.0), "plain_md")
+    assert perforation_abs({"plain": (1005.0, 1015.0)}, None, "md")[0] is None
+    assert perforation_abs({"ao": (1500.0, 1520.0)}, 85.0) == ((-1500.0, -1520.0), "ao_flip")
     # явные а.о. главнее MD и не зависят от знака и альтитуды
     both = {"ao": (-1500.0, -1520.0), "md": (1700.0, 1730.0)}
     assert perforation_abs(both, 85.0) == ((-1500.0, -1520.0), "ao")
@@ -137,3 +140,12 @@ def test_view_shows_perforation_source(tmp_path):
     r = planshet.view(p, ["101"])["rows"][0]
     assert r["perforation"] == {"top": -1500.0, "bottom": -1525.0}
     assert any(n.startswith("Перфорация: а.о.") for n in r["notes"])
+
+
+def test_perf_mode_setting_survives_source_save():
+    p = Project("x")
+    planshet.set_settings(p, "a", "b", "md")
+    planshet.set_settings(p, "a", "c")
+    assert p.sources["gis"] == {"folder": "a", "perf_file": "c", "perf_mode": "md"}
+    planshet.set_settings(p, "a", "c", "")
+    assert "perf_mode" not in p.sources["gis"]

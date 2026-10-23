@@ -24,10 +24,13 @@ def settings(p: Project) -> dict:
     return dict(p.sources.get("gis") or {})
 
 
-def set_settings(p: Project, folder: str = "", perf_file: str = "") -> None:
-    """Папка выгрузки базы ГИС и файл перфораций; пустое значение — убрать."""
+def set_settings(p: Project, folder: str = "", perf_file: str = "", perf_mode: Optional[str] = None) -> None:
+    """Папка выгрузки базы ГИС и файл перфораций; пустое значение — убрать. perf_mode: "" — по умолчанию, "ao" — столбцы
+    без подписи это а.о., "md" — положительные значения без подписи это глубина от стола; None — не менять."""
     cur = settings(p)
     cur["folder"], cur["perf_file"] = folder.strip(), perf_file.strip()
+    if perf_mode is not None:
+        cur["perf_mode"] = perf_mode if perf_mode in ("ao", "md") else ""
     p.sources["gis"] = {k: v for k, v in cur.items() if v}
 
 
@@ -80,8 +83,10 @@ def perforations(path: str) -> Dict[str, dict]:
 
 _SOURCE = {"ao": "а.о. взяты из файла как есть (столбцы верха и низа в а.о.)",
            "md": "в файле нет столбцов в а.о.: пересчитано из MD как альтитуда − MD (для наклонной скважины это приближение)",
-           "plain_ao": "столбцы без подписи MD/а.о.: отрицательные значения приняты за а.о.",
-           "plain_md": "столбцы без подписи MD/а.о.: положительные значения приняты за глубину от стола и пересчитаны через альтитуду",
+           "ao_flip": "а.о. из файла были без знака минус, поставлен минус (глубина ниже моря отрицательна)",
+           "plain_ao": "столбцы без подписи MD/а.о.: приняты за а.о. как есть",
+           "plain_flip": "столбцы без подписи MD/а.о.: приняты за а.о., положительным поставлен минус (если это глубина от стола, выберите режим «MD»)",
+           "plain_md": "столбцы без подписи MD/а.о.: по режиму «MD» положительные значения пересчитаны как альтитуда − глубина",
            "md_no_altitude": "есть только MD, а альтитуды нет: перфорацию не показываю, задайте альтитуду вручную",
            "plain_no_altitude": "положительные значения без подписи и без альтитуды: перфорацию не показываю, задайте альтитуду вручную"}
 
@@ -173,7 +178,7 @@ def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[s
             f = fact(tables, w, day, pf["altitude"])
         f["perforation"] = None
         if pf and pf["rows"]:
-            pair, src = perforation_abs(pf["rows"], f["altitude"])
+            pair, src = perforation_abs(pf["rows"], f["altitude"], s.get("perf_mode", ""))
             if pair is not None:
                 f["perforation"] = {"top": pair[0], "bottom": pair[1]}
             f["notes"].append("Перфорация: " + _SOURCE[src])
