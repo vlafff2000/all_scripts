@@ -373,3 +373,16 @@ export interface CompareRow {
 export interface CompareResult { rows: CompareRow[]; skipped: Record<string, number>; notes: string[] }
 export const comparePlanshet = (body: { model: string; wells: string[]; thr: number; slices: Record<string, string>; alts: Record<string, string> }) =>
   call<CompareResult>('/api/planshet/compare', post(body))
+
+export interface HmRow { key: string; well: string; group: string; hist: number; model: number; diff: number; hist_avg: number; model_avg: number; diff_avg: number
+  pct: number | null; status: string; label: string; why: string; excluded: boolean }
+export interface HmTotal { hist: number; model: number; ref: number | null; hist_avg: number; model_avg: number; ref_avg: number | null; model_field: number | null
+  status: string; label: string; why: string; differs_from_db: boolean; hist_vs_ref: number | null }
+export interface HmSeason { name: string; kind: string; start: string; end: string; compared: { start: string; end: string; days: number; full: boolean } | null
+  rows: HmRow[]; groups: { group: string; hist: number; model: number; diff: number; pct: number | null }[]; notes: string[]; total?: HmTotal }
+export interface HmSettings { rel_pct: number; abs_k: number }
+export interface HmResult { seasons: HmSeason[]; notes: string[]; settings: HmSettings
+  saved: { seasons: { name: string; kind: string; start: string; end: string }[]; excluded: string[]; unit_k: number | null } }
+export interface HmBody { model: string; settings?: Partial<HmSettings>; seasons?: { name: string; kind: string; start: string; end: string }[]; excluded?: string[]; unit_k?: number | null }
+export const histModel = (b: HmBody) => call<HmResult>('/api/results/histmodel', post(b))
+export const histModelXlsx = (b: HmBody) => download('/api/results/histmodel/xlsx', b, 'История_и_модель.xlsx')
