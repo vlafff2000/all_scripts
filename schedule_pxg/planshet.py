@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
-from gsp_maps.inputs import load_perforations
+from gsp_maps.inputs import perforation_abs, read_perforations
 from pxg_core import gis_export
 
 from .project import Project
@@ -70,13 +70,20 @@ def abs_depth(depth: Optional[float], altitude: Optional[float]) -> Optional[flo
 
 
 def perforations(path: str) -> Dict[str, dict]:
-    """Перфорации и альтитуды по скважинам: {скв: {top, bottom, altitude}}; значения как в файле (верх выше низа)."""
-    depths, alts = load_perforations(path)
+    """Перфорации и альтитуды по скважинам: {скв: {rows: {ao, md, plain}, altitude}}; значения как в файле."""
+    rows, alts = read_perforations(path)
     out: Dict[str, dict] = {}
-    for w in set(depths) | set(alts):
-        t, b = depths.get(w, (None, None))
-        out[_key(w)] = {"top": t, "bottom": b, "altitude": alts.get(w)}
+    for w in set(rows) | set(alts):
+        out[_key(w)] = {"rows": rows.get(w) or {}, "altitude": alts.get(w)}
     return out
+
+
+_SOURCE = {"ao": "а.о. взяты из файла как есть (столбцы верха и низа в а.о.)",
+           "md": "в файле нет столбцов в а.о.: пересчитано из MD как альтитуда − MD (для наклонной скважины это приближение)",
+           "plain_ao": "столбцы без подписи MD/а.о.: отрицательные значения приняты за а.о.",
+           "plain_md": "столбцы без подписи MD/а.о.: положительные значения приняты за глубину от стола и пересчитаны через альтитуду",
+           "md_no_altitude": "есть только MD, а альтитуды нет: перфорацию не показываю, задайте альтитуду вручную",
+           "plain_no_altitude": "положительные значения без подписи и без альтитуды: перфорацию не показываю, задайте альтитуду вручную"}
 
 
 def observations(tables: Dict[str, pd.DataFrame], well: str) -> List[dict]:
@@ -164,21 +171,16 @@ def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[s
         pf = perf.get(_key(w))
         if mine is None and pf and pf.get("altitude") is not None and f["altitude"] is None:
             f = fact(tables, w, day, pf["altitude"])
-        f["perforation"] = ({"top": abs_depth_perf(pf["top"], f["altitude"]), "bottom": abs_depth_perf(pf["bottom"], f["altitude"])}
-                            if pf and pf.get("top") is not None else None)
+        f["perforation"] = None
+        if pf and pf["rows"]:
+            pair, src = perforation_abs(pf["rows"], f["altitude"])
+            if pair is not None:
+                f["perforation"] = {"top": pair[0], "bottom": pair[1]}
+            f["notes"].append("Перфорация: " + _SOURCE[src])
         if mine is not None:
             f["notes"].append("Альтитуда задана вручную: %s м" % mine)
         rows.append(f)
     return {"rows": rows, "notes": notes}
-
-
-def abs_depth_perf(v: Optional[float], altitude: Optional[float]) -> Optional[float]:
-    """Перфорация из файла: отрицательное значение — уже отметка а.о.; положительное — глубина от стола."""
-    if v is None:
-        return None
-    if v <= 0:
-        return v
-    return abs_depth(v, altitude)
 
 
 def _profile_job(job):
