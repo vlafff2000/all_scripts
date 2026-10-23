@@ -26,8 +26,24 @@ def projects(storage: str = "") -> Tuple[List[dict], Optional[str]]:
     return [p for p in atlas_source.list_projects(root) if p["tables"].get("production")], str(root)
 
 
+def well_groups(data) -> dict:
+    """Разбивка скважин на группы из Атласа: ручные правки групп проекта главнее, затем столбец группы в расходах,
+    затем в других таблицах со скважиной и группой (ЭЛПРО). Пусто — группы не заданы."""
+    out: dict = {}
+    for name in ("elpro", "production"):               # позднее перекрывает раннее: расходы главнее ЭЛПРО
+        df = data.frame(name)
+        if df is None or df.empty or "group" not in df or "well" not in df:
+            continue
+        part = df[["well", "group"]].dropna()
+        part = part.assign(well=part["well"].astype(str).str.strip(), group=part["group"].astype(str).str.strip())
+        part = part[part["group"].ne("") & part["group"].ne("nan")]
+        out.update(dict(zip(part["well"], part["group"])))
+    out.update({str(w).strip(): g for w, g in data.groups_override().items()})
+    return out
+
+
 def load(storage: str = "", project_id: str = ""):
-    """(история, эталон, подпись, проекты) из проекта Атласа или None, если хранилища/проекта с расходами нет.
+    """(история, эталон, подпись, проекты, группы скважин) из проекта Атласа или None, если хранилища/проекта с расходами нет.
     История — таблица `history.COLUMNS` (м³/сут), эталон — «Дата», «Объем» (м³/сут) или пустая таблица."""
     from gsp_maps import atlas_source
     found, root = projects(storage)
@@ -54,4 +70,4 @@ def load(storage: str = "", project_id: str = ""):
         daily = pd.DataFrame({"Дата": g["d"], "Объем": g["gas"] * 1000.0})
     else:
         daily = pd.DataFrame(columns=["Дата", "Объем"])
-    return hist, daily, "проект Атласа «%s»" % data.name, found
+    return hist, daily, "проект Атласа «%s»" % data.name, found, well_groups(data)

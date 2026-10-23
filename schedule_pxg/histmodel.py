@@ -154,7 +154,7 @@ def _key(project, name: str) -> str:
 
 def compare(hist: pd.DataFrame, summary: Summary, project=None, daily: Optional[pd.DataFrame] = None,
             seasons: Optional[Sequence[dict]] = None, settings: Optional[dict] = None, excluded: Sequence[str] = (),
-            unit_k: Optional[float] = None) -> dict:
+            unit_k: Optional[float] = None, groups: Optional[dict] = None) -> dict:
     """Сравнение история/модель/эталон: {seasons: [...], notes, settings}. Сезон: итог по объекту, группы, строки по скважинам."""
     st = dict(DEFAULTS, **{k: v for k, v in (settings or {}).items() if v not in (None, "")})
     rel, abs_k = float(st["rel_pct"]), float(st["abs_k"])
@@ -177,7 +177,8 @@ def compare(hist: pd.DataFrame, summary: Summary, project=None, daily: Optional[
     ref = None
     if daily is not None and len(daily):
         ref = daily.assign(d=pd.to_datetime(daily["Дата"]).dt.normalize()).groupby("d")["Объем"].sum()
-    gof = (project.well_group if project is not None else {})
+    gof = dict(groups or {})                        # группы из источника истории; заданные в проекте ГДМ главнее
+    gof.update(project.well_group if project is not None else {})
     out = []
     for se in seasons:
         kind = se["kind"]
@@ -336,12 +337,15 @@ def view(project, model_path: str, body: Optional[dict] = None) -> dict:
         hist, source = schedule_history(files), "schedule из папки модели: %s" % ", ".join(os.path.basename(f) for f in files[:5])
     if not len(hist):
         raise ValueError("В источнике истории нет расходов по скважинам (%s)" % source)
+    groups = atlas[4] if atlas is not None else {}
+    if groups:
+        groups = {_key(project, w): g for w, g in groups.items()}
     daily = own_daily
     if not len(own_daily) and atlas is not None and len(atlas[1]):
         daily = atlas[1]
         source += "; эталон — «БД по учету газа» из %s" % atlas[2]
     out = compare(hist, results.load_summary(model_path), project, daily, saved.get("seasons") or None, saved.get("settings"),
-                  saved.get("excluded") or [], float(saved["unit_k"]) if saved.get("unit_k") else None)
+                  saved.get("excluded") or [], float(saved["unit_k"]) if saved.get("unit_k") else None, groups)
     out["notes"] = notes + out["notes"]
     out["history_source"] = source
     out["atlas"] = atlas_info

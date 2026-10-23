@@ -215,7 +215,8 @@ def _atlas_storage(root, h, daily, name="Объект"):
     base = root / "projects" / "p1"
     snap = base / "snapshots" / "s1"
     snap.mkdir(parents=True)
-    prod = pd.DataFrame({"kind": h["kind"].map({hm.PROD: "withdrawal", hm.INJ: "injection"}), "well": h["well"], "date": h["date"], "q": h["rate"] / 1000.0})
+    prod = pd.DataFrame({"kind": h["kind"].map({hm.PROD: "withdrawal", hm.INJ: "injection"}), "well": h["well"], "date": h["date"], "q": h["rate"] / 1000.0,
+                         "group": h["well"].map({"W1": "ГСП-1", "W2": "ГСП-2"})})
     prod.to_parquet(snap / "production.parquet")
     gas = pd.DataFrame({"kind": "withdrawal", "date": daily["Дата"], "gas": daily["Объем"] / 1000.0})
     gas.to_parquet(snap / "gas_db.parquet")
@@ -239,6 +240,7 @@ def test_history_and_reference_from_atlas(tmp_path, monkeypatch):
     inj, prod = out["seasons"]
     assert inj["total"]["hist"] == 1500.0 and prod["total"]["ref"] == 1200.0 and prod["total"]["status"] == hm.SHORT
     assert out["atlas"]["projects"] == [{"id": "p1", "name": "Объект"}]
+    assert {r["well"]: r["group"] for r in prod["rows"]} == {"W1": "ГСП-1", "W2": "ГСП-2"} and [g["group"] for g in prod["groups"]] == ["ГСП-1", "ГСП-2"]
     # хранилища нет — ищем schedule в папке модели, а не падаем
     monkeypatch.delenv("GAS_ATLAS_STORAGE")
     with pytest.raises(ValueError, match="Историю взять неоткуда"):
