@@ -13,7 +13,7 @@ import pandas as pd
 
 from pxg_core import workspace
 
-from . import atlas_source, gis_source, inputs, wellmap
+from . import atlas_source, gis_source, inputs, observers, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
 
 PATH_KEYS = ["map", "atlas_storage", "atlas_project"]    # карта-сетка Excel — необязательный запасной источник положений
@@ -35,6 +35,7 @@ class Project:
     def __init__(self) -> None:
         self.paths: Dict[str, str] = {k: "" for k in PATH_KEYS}
         self.results_dir = ""
+        self.observer_marks: Dict[str, Dict[str, str]] = {}  # проект Атласа → {скважина: obs|prod}, ручной выбор инженера
         self.models: List[str] = []  # модели tNavigator, отмеченные для карты (пути из общего каталога)
         self.store: Optional[Store] = None
         self.atlas: Optional[atlas_source.AtlasData] = None
@@ -52,16 +53,33 @@ class Project:
             self.paths.update({k: str(v) for k, v in data.get("paths", {}).items() if k in self.paths})
             self.results_dir = str(data.get("results_dir", ""))
             self.models = [str(x) for x in data.get("models", [])]
+            self.observer_marks = {str(p): {str(w): str(k) for w, k in m.items()} for p, m in (data.get("observers") or {}).items()}
         except (OSError, ValueError):
             pass
 
     def _save(self) -> None:
         try:
             config_file().parent.mkdir(parents=True, exist_ok=True)
-            config_file().write_text(json.dumps({"paths": self.paths, "results_dir": self.results_dir, "models": self.models}, ensure_ascii=False, indent=1),
+            config_file().write_text(json.dumps({"paths": self.paths, "results_dir": self.results_dir, "models": self.models,
+                                                  "observers": self.observer_marks}, ensure_ascii=False, indent=1),
                                      encoding="utf-8")
         except OSError:
             pass
+
+    def mark_observer(self, well: int, kind: str) -> None:
+        """Ручное решение инженера: obs — наблюдательная, prod — эксплуатационная, auto — убрать пометку."""
+        marks = self.observer_marks.setdefault(self.project_id(), {})
+        if kind == "auto":
+            marks.pop(str(well), None)
+        elif kind in observers.MANUAL:
+            marks[str(well)] = kind
+        else:
+            raise ValueError("Вид скважины: obs, prod или auto.")
+        self._save()
+
+    def observers_payload(self) -> dict:
+        assert self.atlas is not None and self.store is not None
+        return observers.observers(self.atlas, np.unique(self.store.well).tolist(), self.xy()[0], self.observer_marks.get(self.project_id(), {}))
 
     def set_models(self, ids: List[str]) -> None:
         self.models = list(ids)
