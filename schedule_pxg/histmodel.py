@@ -299,6 +299,40 @@ def schedule_history(paths: Sequence[str]) -> pd.DataFrame:
     return df.drop_duplicates(["well", "date", "kind"], keep="last").reset_index(drop=True)
 
 
+def detect_hist_unit(hist: pd.DataFrame, summary: Summary, daily: Optional[pd.DataFrame], project=None,
+                     unit_k: Optional[float] = None) -> Tuple[float, str]:
+    """Поправка единиц истории (множитель 1, 0,001 или 1000) по порядку величины: шапка файла может врать (м³ вместо тыс. м³).
+    Сравниваем объём истории за период, покрытый моделью, с эталоном узла учёта, а без него — с объёмом модели.
+    Возвращает (множитель, причина); нет с чем сравнить — множитель 1."""
+    if not len(hist):
+        return 1.0, "истории нет"
+    t0 = summary.start
+    a, b = t0.date(), summary.dates[-1].date() - dt.timedelta(days=1)
+    d = pd.to_datetime(hist["date"]).dt.normalize()
+    h = float(hist.loc[(d >= pd.Timestamp(a)) & (d <= pd.Timestamp(b)) & (hist["rate"] > 0), "rate"].sum())
+    ref, what = None, ""
+    if daily is not None and len(daily):
+        dd = pd.to_datetime(daily["Дата"]).dt.normalize()
+        ref = float(daily.loc[(dd >= pd.Timestamp(a)) & (dd <= pd.Timestamp(b)), "Объем"].sum())
+        what = "эталоном узла учёта"
+    if not ref:
+        edges = np.array([(x - t0).total_seconds() / 86400.0 for x in summary.dates])
+        ref = 0.0
+        for kind in (PROD, INJ):
+            wells, _tot, _dates = _model_series(summary, kind, unit_k)
+            ref += sum(_integrate(r, edges, 0.0, float(edges[-1])) for r in wells.values())
+        what = "объёмом модели"
+    if h <= 0 or ref <= 0:
+        return 1.0, "сравнить не с чем (нет объёма за период модели): единицы как в источнике"
+    ratio = ref / h
+    k = min((1.0, 1e-3, 1e3), key=lambda c: abs(math.log10(ratio / c)))
+    off = abs(math.log10(ratio / k))
+    note = "объём истории за период модели %.3g м³, %s %.3g м³ (отношение %.3g)" % (h, what, ref, ratio)
+    if k == 1.0:
+        return 1.0, "единицы как в источнике: " + note
+    return k, "%s: порядок величины не совпадает, поправка ×%g%s" % (note, k, "" if off < 0.5 else " (сомнительно: отношение далеко от круглого числа)")
+
+
 def view(project, model_path: str, body: Optional[dict] = None) -> dict:
     """Сравнение для экрана: история и эталон проекта против сводки модели. Присланные настройки, сезоны и исключения
     запоминаются в проекте (`project.histmodel`), без них берутся прежние; вернуть автоподсказку сезонов — `seasons: []`.
@@ -307,7 +341,7 @@ def view(project, model_path: str, body: Optional[dict] = None) -> dict:
     from . import atlas_data, results, sources
     body = body or {}
     saved = project.histmodel
-    for k in ("settings", "seasons", "excluded", "unit_k", "schedule_path", "atlas_project", "atlas_storage"):
+    for k in ("settings", "seasons", "excluded", "unit_k", "schedule_path", "atlas_project", "atlas_storage", "hist_unit"):
         if k in body:
             saved[k] = body[k]
     notes: List[str] = []
@@ -344,13 +378,30 @@ def view(project, model_path: str, body: Optional[dict] = None) -> dict:
     if not len(own_daily) and atlas is not None and len(atlas[1]):
         daily = atlas[1]
         source += "; эталон — «БД по учету газа» из %s" % atlas[2]
-    out = compare(hist, results.load_summary(model_path), project, daily, saved.get("seasons") or None, saved.get("settings"),
-                  saved.get("excluded") or [], float(saved["unit_k"]) if saved.get("unit_k") else None, groups)
+    summary = results.load_summary(model_path)
+    unit_k = float(saved["unit_k"]) if saved.get("unit_k") else None
+    mode = str(saved.get("hist_unit") or "auto").replace(",", ".").strip()
+    if mode in ("", "auto"):
+        hk, why = detect_hist_unit(hist, summary, daily, project, unit_k)
+        mode = "auto"
+    else:
+        try:
+            hk = float(mode)
+        except ValueError:
+            raise ValueError("Множитель единиц истории не число: «%s»" % mode)
+        if hk <= 0:
+            raise ValueError("Множитель единиц истории должен быть больше нуля")
+        why = "задано вручную"
+    if hk != 1.0:
+        hist = hist.assign(rate=hist["rate"] * hk)
+    out = compare(hist, summary, project, daily, saved.get("seasons") or None, saved.get("settings"),
+                  saved.get("excluded") or [], unit_k, groups)
+    out["hist_unit"] = {"mode": mode, "factor": hk, "reason": why}
     out["notes"] = notes + out["notes"]
     out["history_source"] = source
     out["atlas"] = atlas_info
     out["saved"] = {"seasons": saved.get("seasons") or [], "excluded": saved.get("excluded") or [], "unit_k": saved.get("unit_k"),
-                    "schedule_path": manual, "atlas_project": saved.get("atlas_project") or ""}
+                    "schedule_path": manual, "hist_unit": "" if mode == "auto" else mode, "atlas_project": saved.get("atlas_project") or ""}
     if daily is None or not len(daily):
         out["notes"].append("Эталонный суточный объём не задан: итог по сезону сравнивается с историей по скважинам")
     return out

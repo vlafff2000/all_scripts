@@ -17,15 +17,16 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
   const [pick, setPick] = useState('')
   const [sched, setSched] = useState('')
   const [atlasProj, setAtlasProj] = useState('')
+  const [hu, setHu] = useState('auto')               // единицы истории: auto, 1, 0.001, 1000 или свой множитель
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const model = modelId || models[0]?.id || ''
 
   const body = (extra: Partial<HmBody> = {}): HmBody => ({ model, settings: { rel_pct: Number(rel.replace(',', '.')) || 5, abs_k: Number(abs.replace(',', '.')) || 1 },
-    unit_k: Number(unitK.replace(',', '.')) || null, schedule_path: sched, atlas_project: atlasProj, ...extra })
+    unit_k: Number(unitK.replace(',', '.')) || null, schedule_path: sched, atlas_project: atlasProj, hist_unit: hu, ...extra })
   const run = async (extra: Partial<HmBody> = {}) => {
     setBusy(true); setMsg('')
-    try { const r = await histModel(body(extra)); setRes(r); setRel(String(r.settings.rel_pct)); setAbs(String(r.settings.abs_k)); setSched(r.saved.schedule_path || ''); setAtlasProj(r.saved.atlas_project || '') } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
+    try { const r = await histModel(body(extra)); setRes(r); setRel(String(r.settings.rel_pct)); setAbs(String(r.settings.abs_k)); setSched(r.saved.schedule_path || ''); setAtlasProj(r.saved.atlas_project || ''); setHu(r.saved.hist_unit || 'auto') } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
   }
   const excluded = res?.saved.excluded || []
   const toggle = (key: string, well: string, all: boolean) => {
@@ -80,6 +81,12 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
         <button disabled={busy} onClick={async () => { const r = await pickFile(sched); if (r.path) setSched(r.path) }}>Выбрать…</button>
       </div>
       {res && <p className="muted small">История: {res.history_source}</p>}
+      {res && <div className="row" style={{ flexWrap: 'wrap' }}><span className="muted small" title="Шапка файла может не совпадать с содержимым (например, м³ вместо тыс. м³). Авто сравнивает порядок величины истории с эталоном узла учёта (без него — с моделью)">Единицы истории:</span>
+        <select value={['auto', '1', '0.001', '1000'].includes(hu) ? hu : 'custom'} onChange={e => { const v = e.target.value === 'custom' ? '1' : e.target.value; setHu(v); run({ hist_unit: v }) }}>
+          <option value="auto">определить по порядку величины</option><option value="1">как прочитано из источника (×1)</option>
+          <option value="0.001">значения в 1000 раз больше: в источнике м³, а не тыс. м³ (÷1000)</option><option value="1000">значения в 1000 раз меньше, чем нужно (×1000)</option><option value="custom">свой множитель…</option></select>
+        {!['auto', '1', '0.001', '1000'].includes(hu) && <input style={{ width: 80 }} value={hu} onChange={e => setHu(e.target.value)} onBlur={() => run()} />}
+        <span className="small">Сейчас ×{res.hist_unit.factor}: {res.hist_unit.reason}</span></div>}
       {res && res.atlas.projects.length > 1 && <div className="row"><span className="muted small">Проект Атласа:</span>
         <select value={atlasProj} onChange={e => { setAtlasProj(e.target.value); run({ atlas_project: e.target.value }) }}><option value="">самый свежий</option>
           {res.atlas.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}

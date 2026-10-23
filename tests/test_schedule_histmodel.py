@@ -245,3 +245,33 @@ def test_history_and_reference_from_atlas(tmp_path, monkeypatch):
     monkeypatch.delenv("GAS_ATLAS_STORAGE")
     with pytest.raises(ValueError, match="Историю взять неоткуда"):
         hm.view(Project(), str(mdl), {})
+
+
+def test_hist_unit_detection_and_manual(tmp_path, monkeypatch):
+    pytest.importorskip("pyarrow")
+    from schedule_pxg import sources
+    h = _case()
+    sm = _summary()
+    assert hm.detect_hist_unit(h, sm, _daily(h)) [0] == 1.0
+    assert hm.detect_hist_unit(h.assign(rate=h["rate"] * 1000), sm, _daily(h))[0] == 1e-3          # в файле м³ вместо тыс. м³
+    assert hm.detect_hist_unit(h.assign(rate=h["rate"] / 1000), sm, _daily(h))[0] == 1e3
+    k, why = hm.detect_hist_unit(h.assign(rate=h["rate"] * 1000), sm, None)                           # без эталона — по модели
+    assert k == 1e-3 and "объёмом модели" in why
+    assert hm.detect_hist_unit(h.iloc[0:0], sm, _daily(h))[0] == 1.0
+    # через экран: Атлас хранит q в м³ (шапка «тыс. м³» врёт), ×1000 даёт ложные расхождения — авто их убирает, ручной режим главнее
+    storage = tmp_path / "st"
+    _atlas_storage(storage, h.assign(rate=h["rate"] * 1000), _daily(h))
+    monkeypatch.setenv("GAS_ATLAS_STORAGE", str(storage))
+    monkeypatch.setattr(sources, "flow_paths", lambda p: [])
+    mdl = tmp_path / "m"
+    mdl.mkdir()
+    _write_model(mdl, sm)
+    p = Project()
+    out = hm.view(p, str(mdl), {})
+    assert out["hist_unit"]["factor"] == 1e-3 and out["seasons"][0]["total"]["hist"] == 1500.0 and out["seasons"][0]["total"]["status"] == hm.OK
+    out = hm.view(p, str(mdl), {"hist_unit": "1"})
+    assert out["hist_unit"] == {"mode": "1", "factor": 1.0, "reason": "задано вручную"} and out["seasons"][0]["total"]["hist"] == 1500000.0
+    assert "расходится с эталоном" in out["seasons"][0]["total"]["why"] and out["saved"]["hist_unit"] == "1"
+    assert all(r["status"] == hm.SHORT for r in out["seasons"][0]["rows"])
+    with pytest.raises(ValueError):
+        hm.view(p, str(mdl), {"hist_unit": "много"})
