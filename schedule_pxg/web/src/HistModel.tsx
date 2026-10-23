@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
-import { HmBody, HmResult, HmSeason, ModelEntry, histModel, histModelXlsx } from './api'
+import { HmBody, HmResult, HmSeason, ModelEntry, histModel, histModelXlsx, pickFile } from './api'
 
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const bad = (s: string) => s === 'недобор' || s === 'недозакачка' || s === 'нет в модели'
@@ -15,15 +15,17 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
   const [unitK, setUnitK] = useState('')
   const [only, setOnly] = useState(true)
   const [pick, setPick] = useState('')
+  const [sched, setSched] = useState('')
+  const [atlasProj, setAtlasProj] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const model = modelId || models[0]?.id || ''
 
   const body = (extra: Partial<HmBody> = {}): HmBody => ({ model, settings: { rel_pct: Number(rel.replace(',', '.')) || 5, abs_k: Number(abs.replace(',', '.')) || 1 },
-    unit_k: Number(unitK.replace(',', '.')) || null, ...extra })
+    unit_k: Number(unitK.replace(',', '.')) || null, schedule_path: sched, atlas_project: atlasProj, ...extra })
   const run = async (extra: Partial<HmBody> = {}) => {
     setBusy(true); setMsg('')
-    try { const r = await histModel(body(extra)); setRes(r); setRel(String(r.settings.rel_pct)); setAbs(String(r.settings.abs_k)) } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
+    try { const r = await histModel(body(extra)); setRes(r); setRel(String(r.settings.rel_pct)); setAbs(String(r.settings.abs_k)); setSched(r.saved.schedule_path || ''); setAtlasProj(r.saved.atlas_project || '') } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
   }
   const excluded = res?.saved.excluded || []
   const toggle = (key: string, well: string, all: boolean) => {
@@ -72,6 +74,15 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
         {res && <button disabled={busy} onClick={() => histModelXlsx(body()).catch(e => setMsg((e as Error).message))}>Выгрузить в Excel</button>}
         {busy && <span className="muted small">считаю…</span>}
       </div>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <span className="muted small" title="Пусто — история и эталон берутся сами: из проекта Газового Атласа, а если его нет, из базы расходов проекта или файла schedule в папке модели">Файл schedule с историей (вручную):</span>
+        <input style={{ width: 360 }} placeholder="пусто — подтянется сама" value={sched} onChange={e => setSched(e.target.value)} />
+        <button disabled={busy} onClick={async () => { const r = await pickFile(sched); if (r.path) setSched(r.path) }}>Выбрать…</button>
+      </div>
+      {res && <p className="muted small">История: {res.history_source}</p>}
+      {res && res.atlas.projects.length > 1 && <div className="row"><span className="muted small">Проект Атласа:</span>
+        <select value={atlasProj} onChange={e => { setAtlasProj(e.target.value); run({ atlas_project: e.target.value }) }}><option value="">самый свежий</option>
+          {res.atlas.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
       {msg && <p className="note warn">{msg}</p>}
       {res?.notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
       {res && <>

@@ -154,7 +154,7 @@ def _key(project, name: str) -> str:
 
 def compare(hist: pd.DataFrame, summary: Summary, project=None, daily: Optional[pd.DataFrame] = None,
             seasons: Optional[Sequence[dict]] = None, settings: Optional[dict] = None, excluded: Sequence[str] = (),
-            unit_k: Optional[float] = None) -> dict:
+            unit_k: Optional[float] = None, groups: Optional[dict] = None) -> dict:
     """Сравнение история/модель/эталон: {seasons: [...], notes, settings}. Сезон: итог по объекту, группы, строки по скважинам."""
     st = dict(DEFAULTS, **{k: v for k, v in (settings or {}).items() if v not in (None, "")})
     rel, abs_k = float(st["rel_pct"]), float(st["abs_k"])
@@ -177,7 +177,8 @@ def compare(hist: pd.DataFrame, summary: Summary, project=None, daily: Optional[
     ref = None
     if daily is not None and len(daily):
         ref = daily.assign(d=pd.to_datetime(daily["Дата"]).dt.normalize()).groupby("d")["Объем"].sum()
-    gof = (project.well_group if project is not None else {})
+    gof = dict(groups or {})                        # группы из источника истории; заданные в проекте ГДМ главнее
+    gof.update(project.well_group if project is not None else {})
     out = []
     for se in seasons:
         kind = se["kind"]
@@ -266,20 +267,90 @@ def compare(hist: pd.DataFrame, summary: Summary, project=None, daily: Optional[
     return {"seasons": out, "notes": notes, "settings": st}
 
 
+def find_schedule(model_path: str) -> List[str]:
+    """Файлы schedule с историей (WCONHIST/WCONINJH) рядом с моделью: папка модели и подпапки до двух уровней вглубь
+    (INCLUDE и т.п.). Нет файлов — пустой список."""
+    import os
+    from . import history
+    folder = model_path if os.path.isdir(model_path) else os.path.dirname(model_path)
+    if not folder or not os.path.isdir(folder):
+        return []
+    found: List[str] = []
+    base = folder.rstrip("\\/").count(os.sep)
+    for root, dirs, files in os.walk(folder):
+        if root.rstrip("\\/").count(os.sep) - base >= 2:
+            dirs[:] = []
+        for n in sorted(files):
+            if os.path.splitext(n)[1].lower() in (".inc", ".sch", ".txt", ".data"):
+                path = os.path.join(root, n)
+                try:
+                    if os.path.getsize(path) < 3e8 and history.detect_format(path) == history.FORMAT_SCHEDULE:
+                        found.append(path)
+                except OSError:
+                    continue
+    return found
+
+
+def schedule_history(paths: Sequence[str]) -> pd.DataFrame:
+    """История по файлам schedule (как её читает ГДМ при импорте); одинаковые скважина+сутки+вид — последняя запись."""
+    from . import history
+    frames = [history.read_schedule(p) for p in paths]
+    df = pd.concat([f for f in frames if len(f)], ignore_index=True) if any(len(f) for f in frames) else history._empty()
+    return df.drop_duplicates(["well", "date", "kind"], keep="last").reset_index(drop=True)
+
+
 def view(project, model_path: str, body: Optional[dict] = None) -> dict:
     """Сравнение для экрана: история и эталон проекта против сводки модели. Присланные настройки, сезоны и исключения
-    запоминаются в проекте (`project.histmodel`), без них берутся прежние; вернуть автоподсказку сезонов — `seasons: []`."""
-    from . import results, sources
+    запоминаются в проекте (`project.histmodel`), без них берутся прежние; вернуть автоподсказку сезонов — `seasons: []`.
+    История: файл schedule, выбранный вручную (`schedule_path`), иначе база расходов проекта, иначе schedule из папки модели."""
+    import os
+    from . import atlas_data, results, sources
     body = body or {}
     saved = project.histmodel
-    for k in ("settings", "seasons", "excluded", "unit_k"):
+    for k in ("settings", "seasons", "excluded", "unit_k", "schedule_path", "atlas_project", "atlas_storage"):
         if k in body:
             saved[k] = body[k]
-    hist = sources.load_project_history(project)
-    daily = sources.load_daily_total(project)
+    notes: List[str] = []
+    manual = str(saved.get("schedule_path") or "").strip().strip('"')
+    own_daily = sources.load_daily_total(project)      # эталон, заданный вручную, главнее эталона Атласа
+    has_flows = bool(sources.flow_paths(project))
+    atlas = None
+    if (not manual and not has_flows) or not len(own_daily):
+        try:
+            atlas = atlas_data.load(str(saved.get("atlas_storage") or ""), str(saved.get("atlas_project") or ""))
+        except (OSError, ValueError, KeyError, ImportError) as e:
+            notes.append("Проект Атласа не прочитан (%s)" % e)
+    atlas_info = {"projects": [{"id": p["id"], "name": p["name"]} for p in atlas[3]], "selected": atlas[2]} if atlas else {"projects": [], "selected": ""}
+    if manual:
+        if not os.path.isfile(manual):
+            raise ValueError("Файл schedule не найден: %s" % manual)
+        hist, source = schedule_history([manual]), "schedule: %s" % os.path.basename(manual)
+    elif has_flows:
+        hist, source = sources.load_project_history(project), "база расходов проекта"
+    elif atlas is not None:
+        hist, source = atlas[0], atlas[2]
+    else:
+        files = find_schedule(model_path)
+        if not files:
+            raise ValueError("Историю взять неоткуда: в Атласе нет проекта с расходами, в проекте ГДМ не задана база расходов, "
+                             "а в папке модели нет файла schedule с WCONHIST/WCONINJH. Укажите файл schedule или базу расходов")
+        hist, source = schedule_history(files), "schedule из папки модели: %s" % ", ".join(os.path.basename(f) for f in files[:5])
+    if not len(hist):
+        raise ValueError("В источнике истории нет расходов по скважинам (%s)" % source)
+    groups = atlas[4] if atlas is not None else {}
+    if groups:
+        groups = {_key(project, w): g for w, g in groups.items()}
+    daily = own_daily
+    if not len(own_daily) and atlas is not None and len(atlas[1]):
+        daily = atlas[1]
+        source += "; эталон — «БД по учету газа» из %s" % atlas[2]
     out = compare(hist, results.load_summary(model_path), project, daily, saved.get("seasons") or None, saved.get("settings"),
-                  saved.get("excluded") or [], float(saved["unit_k"]) if saved.get("unit_k") else None)
-    out["saved"] = {"seasons": saved.get("seasons") or [], "excluded": saved.get("excluded") or [], "unit_k": saved.get("unit_k")}
+                  saved.get("excluded") or [], float(saved["unit_k"]) if saved.get("unit_k") else None, groups)
+    out["notes"] = notes + out["notes"]
+    out["history_source"] = source
+    out["atlas"] = atlas_info
+    out["saved"] = {"seasons": saved.get("seasons") or [], "excluded": saved.get("excluded") or [], "unit_k": saved.get("unit_k"),
+                    "schedule_path": manual, "atlas_project": saved.get("atlas_project") or ""}
     if daily is None or not len(daily):
         out["notes"].append("Эталонный суточный объём не задан: итог по сезону сравнивается с историей по скважинам")
     return out

@@ -49,6 +49,15 @@ def _summary(inj=(100.0, 50.0), prod=(80.0, 40.0), unit="SM3/DAY"):
     return Summary(dt.datetime(2020, 1, 1), cols, dates, data)
 
 
+def _write_model(mdl, sm):
+    from tests.test_tnav_results import _blk
+    (mdl / "M.SMSPEC").write_bytes(
+        _blk("STARTDAT", "INTE", [1, 1, 2020, 0, 0, 0]) + _blk("KEYWORDS", "CHAR", [c[0] for c in sm.columns]) +
+        _blk("WGNAMES", "CHAR", [c[1] or ":+:+:+:+" for c in sm.columns]) + _blk("NUMS", "INTE", [0] * len(sm.columns)) +
+        _blk("UNITS", "CHAR", [c[3] for c in sm.columns]))
+    (mdl / "M.UNSMRY").write_bytes(b"".join(_blk("MINISTEP", "INTE", [i]) + _blk("PARAMS", "REAL", r) for i, r in enumerate(sm.data)))
+
+
 def test_unit_factor():
     assert hm.unit_factor("SM3/DAY") == 1.0 and hm.unit_factor("KSM3/DAY") == 1000.0
     with pytest.raises(ValueError):
@@ -119,16 +128,11 @@ def test_api_view_saves_settings(tmp_path, monkeypatch):
     pytest.importorskip("starlette")
     from starlette.testclient import TestClient
     from schedule_pxg import api, sources
-    from tests.test_tnav_results import _blk
     mdl = tmp_path / "m"
     mdl.mkdir()
-    sm = _summary(prod=(80.0, 20.0))
-    (mdl / "M.SMSPEC").write_bytes(
-        _blk("STARTDAT", "INTE", [1, 1, 2020, 0, 0, 0]) + _blk("KEYWORDS", "CHAR", [c[0] for c in sm.columns]) +
-        _blk("WGNAMES", "CHAR", [c[1] or ":+:+:+:+" for c in sm.columns]) + _blk("NUMS", "INTE", [0] * len(sm.columns)) +
-        _blk("UNITS", "CHAR", [c[3] for c in sm.columns]))
-    (mdl / "M.UNSMRY").write_bytes(b"".join(_blk("MINISTEP", "INTE", [i]) + _blk("PARAMS", "REAL", r) for i, r in enumerate(sm.data)))
+    _write_model(mdl, _summary(prod=(80.0, 20.0)))
     h = _case()
+    monkeypatch.setattr(sources, "flow_paths", lambda p: ["x.xlsx"])
     monkeypatch.setattr(sources, "load_project_history", lambda p, *a, **k: h)
     monkeypatch.setattr(sources, "load_daily_total", lambda p, *a, **k: _daily(h))
     folder = str(tmp_path / "proj")
@@ -158,3 +162,86 @@ def test_xlsx(tmp_path):
     assert wl["H2"].value == "=G2-F2" and wl["F2"].value == 1000.0 and wl["O3"].value == "да"
     assert ws["F2"].value.startswith("=SUMIFS(Скважины!$F$2") and ws["H3"].value == 1200.0 and ws["I3"].value == "=IF(H3=\"\",\"\",G3-H3)"
     assert ws["L3"].value == "недобор"
+
+
+def _sched(h):
+    """schedule tNav: запись под DATES d относится к суткам d+1."""
+    lines = []
+    for d, g in h.groupby("date"):
+        e = d - pd.Timedelta(days=1)
+        lines.append("DATES\n %d %s %d /\n/\n" % (e.day, e.strftime("%b").upper(), e.year))
+        for kind, kw in ((hm.PROD, "WCONHIST"), (hm.INJ, "WCONINJH")):
+            r = g[g["kind"] == kind]
+            if len(r):
+                lines.append(kw + "\n" + "".join(("'%s' OPEN GRAT 1* 1* %g /\n" if kw == "WCONHIST" else "'%s' GAS OPEN %g /\n") % (x.well, x.rate)
+                                                   for x in r.itertuples()) + "/\n")
+    return "".join(lines)
+
+
+def test_history_from_model_folder_schedule(tmp_path, monkeypatch):
+    pytest.importorskip("starlette")
+    from starlette.testclient import TestClient
+    from schedule_pxg import api, sources
+    h = _case()
+    mdl = tmp_path / "m"
+    (mdl / "INCLUDE").mkdir(parents=True)
+    _write_model(mdl, _summary(prod=(80.0, 20.0)))
+    (mdl / "INCLUDE" / "sched.inc").write_text(_sched(h), encoding="utf-8")
+    (mdl / "readme.txt").write_text("не schedule", encoding="utf-8")
+    assert [os.path.basename(x) for x in hm.find_schedule(str(mdl))] == ["sched.inc"]
+    got = hm.schedule_history(hm.find_schedule(str(mdl)))
+    assert got["rate"].sum() == h["rate"].sum() and set(got["kind"]) == {hm.INJ, hm.PROD}
+    monkeypatch.setattr(sources, "flow_paths", lambda p: [])
+    monkeypatch.setattr(sources, "load_daily_total", lambda p, *a, **k: _daily(h))
+    p = Project()
+    out = hm.view(p, str(mdl), {})
+    assert "schedule из папки модели" in out["history_source"]
+    inj, prod = out["seasons"]
+    assert inj["total"]["hist"] == 1500.0 and prod["total"]["status"] == hm.SHORT
+    own = tmp_path / "own.inc"                                       # файл, выбранный вручную, главнее
+    own.write_text(_sched(h[h["kind"] == hm.INJ]), encoding="utf-8")
+    out = hm.view(p, str(mdl), {"schedule_path": str(own)})
+    assert out["history_source"] == "schedule: own.inc" and out["seasons"][0]["total"]["hist"] == 1500.0
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    _write_model(bare, _summary())
+    with pytest.raises(ValueError, match="Историю взять неоткуда"):
+        hm.view(Project(), str(bare), {})
+
+
+def _atlas_storage(root, h, daily, name="Объект"):
+    """Минимальное хранилище Атласа: manifest.json и снимок с таблицами production и gas_db (расходы — тыс. м³/сут)."""
+    import json
+    base = root / "projects" / "p1"
+    snap = base / "snapshots" / "s1"
+    snap.mkdir(parents=True)
+    prod = pd.DataFrame({"kind": h["kind"].map({hm.PROD: "withdrawal", hm.INJ: "injection"}), "well": h["well"], "date": h["date"], "q": h["rate"] / 1000.0,
+                         "group": h["well"].map({"W1": "ГСП-1", "W2": "ГСП-2"})})
+    prod.to_parquet(snap / "production.parquet")
+    gas = pd.DataFrame({"kind": "withdrawal", "date": daily["Дата"], "gas": daily["Объем"] / 1000.0})
+    gas.to_parquet(snap / "gas_db.parquet")
+    (base / "manifest.json").write_text(json.dumps({"id": "p1", "name": name, "updated": "2026-10-20", "snapshot": "s1", "revision": 1,
+                                                    "tables": {"production": len(prod), "gas_db": len(gas)}}), encoding="utf-8")
+
+
+def test_history_and_reference_from_atlas(tmp_path, monkeypatch):
+    pytest.importorskip("pyarrow")
+    from schedule_pxg import sources
+    h = _case()
+    storage = tmp_path / "st"
+    _atlas_storage(storage, h, _daily(h))
+    monkeypatch.setenv("GAS_ATLAS_STORAGE", str(storage))
+    monkeypatch.setattr(sources, "flow_paths", lambda p: [])
+    mdl = tmp_path / "m"
+    mdl.mkdir()
+    _write_model(mdl, _summary(prod=(80.0, 20.0)))
+    out = hm.view(Project(), str(mdl), {})
+    assert out["history_source"].startswith("проект Атласа «Объект»") and "эталон" in out["history_source"]
+    inj, prod = out["seasons"]
+    assert inj["total"]["hist"] == 1500.0 and prod["total"]["ref"] == 1200.0 and prod["total"]["status"] == hm.SHORT
+    assert out["atlas"]["projects"] == [{"id": "p1", "name": "Объект"}]
+    assert {r["well"]: r["group"] for r in prod["rows"]} == {"W1": "ГСП-1", "W2": "ГСП-2"} and [g["group"] for g in prod["groups"]] == ["ГСП-1", "ГСП-2"]
+    # хранилища нет — ищем schedule в папке модели, а не падаем
+    monkeypatch.delenv("GAS_ATLAS_STORAGE")
+    with pytest.raises(ValueError, match="Историю взять неоткуда"):
+        hm.view(Project(), str(mdl), {})

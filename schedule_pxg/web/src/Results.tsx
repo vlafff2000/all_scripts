@@ -97,6 +97,7 @@ export default function Results() {
   })
 
   const rpPick = () => guard(async () => { const r = await pickFile(rpPath); if (r.path) setRpPath(r.path) })
+  const rpPickFolder = () => guard(async () => { const f = await pickFolder(rpPath); if (f) setRpPath(f) })
   const rpRun = (kind: 'model' | 'restart') => guard(async () => {
     const r = await getResultsReport(rpPath, kind)
     setRpText(r.text); setRpName((rpPath.split(/[\\/]/).pop() || 'расчёт').replace(/\.[^.]*$/, '') + (kind === 'model' ? '_model.txt' : '_keywords.txt'))
@@ -143,7 +144,8 @@ export default function Results() {
           Укажите любой файл расчёта (.EGRID, .INIT, .SMSPEC, .UNSMRY, .UNRST) или папку: остальные файлы с тем же именем находятся сами.</p>
         <div className="row">
           <input style={{ width: 380 }} placeholder="путь к результатам расчёта" value={rpPath} onChange={e => setRpPath(e.target.value)} />
-          <button disabled={busy} onClick={rpPick}>Выбрать…</button>
+          <button disabled={busy} onClick={rpPick}>Выбрать файл…</button>
+          <button disabled={busy} onClick={rpPickFolder}>Выбрать папку…</button>
           <button disabled={busy || !rpPath} onClick={() => rpRun('model')}>Описать расчёт</button>
           <button disabled={busy || !rpPath} onClick={() => rpRun('restart')}>Перечислить UNRST</button>
           {rpText && <button onClick={rpSave}>Сохранить отчёт .txt</button>}

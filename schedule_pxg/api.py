@@ -1061,7 +1061,7 @@ async def results_histmodel(request: Request):
         out = await run_in_threadpool(histmodel.view, p, model, b)
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось сопоставить историю с моделью: %s" % e)
-    if any(k in b for k in ("settings", "seasons", "excluded", "unit_k")):
+    if any(k in b for k in ("settings", "seasons", "excluded", "unit_k", "schedule_path", "atlas_project", "atlas_storage")):
         p.save(FOLDER)
     return JSONResponse(out)
 
