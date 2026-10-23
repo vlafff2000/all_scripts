@@ -17,7 +17,7 @@ def test_scan_groups_by_model_name_in_subfolders(tmp_path):
     _touch(tmp_path / "x", ["M1.smspec", "M1.unsmry"])          # та же папка: регистр расширения не важен
     _touch(tmp_path / "z", ["M2.EGRID"])
     models = catalog.scan([str(tmp_path)])
-    assert [m["name"] for m in models] == ["M1", "M1", "M2"]
+    assert sorted(m["name"] for m in models) == sorted(["M1 (x)", "M1 (%s)" % tmp_path.name, "M2"])
     deep = next(m for m in models if m["folder"].endswith(os.path.join("x", "y")))
     assert deep["summary"] and deep["indicators"] and deep["missing"] == []
     flat = next(m for m in models if m["folder"].endswith("x") and not m["folder"].endswith("y"))
@@ -30,3 +30,24 @@ def test_scan_skips_missing_and_duplicate_roots(tmp_path):
     _touch(tmp_path, ["A.SMSPEC", "A.UNSMRY"])
     assert len(catalog.scan([str(tmp_path), str(tmp_path), str(tmp_path / "нет"), ""])) == 1
     assert catalog.scan([]) == []
+
+
+def test_name_from_data_file_not_result_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    _touch(tmp_path / "proj", ["GAS_V3.data"])
+    _touch(tmp_path / "proj" / "result", ["result.SMSPEC", "result.UNSMRY"])
+    _touch(tmp_path / "other" / "result", ["RESULT.EGRID"])          # .data нет: берётся папка выше
+    _touch(tmp_path / "third" / "M7", ["M7.SMSPEC"])                  # обычный префикс файлов
+    names = {os.path.basename(os.path.dirname(os.path.dirname(m["id"]))) if m["name"] != "M7" else "third": m["name"]
+             for m in catalog.scan([str(tmp_path)])}
+    assert names == {"proj": "GAS_V3", "other": "other", "third": "M7"}
+
+
+def test_manual_name_wins(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    _touch(tmp_path / "a", ["M1.SMSPEC"])
+    mid = catalog.scan([str(tmp_path)])[0]["id"]
+    catalog.save_name(mid, "Моя модель")
+    assert catalog.scan([str(tmp_path)])[0]["name"] == "Моя модель"
+    catalog.save_name(mid, "")
+    assert catalog.scan([str(tmp_path)])[0]["name"] == "M1"

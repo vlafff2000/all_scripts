@@ -129,8 +129,8 @@ def test_models_catalog_and_select(tmp_path, monkeypatch):
     r = c.post("/api/models/folders", json={"folders": [str(root), str(root), ""]}).json()
     assert r["folders"] == [str(root)]
     names = {(m["name"], m["folder"].replace(str(root), "")) for m in r["models"]}
-    assert names == {("Base", "/a/base"), ("Gas", "/a/gas_v2"), ("Gas", "/b")}
-    gas = next(m for m in r["models"] if m["name"] == "Gas" and m["summary"])
+    assert names == {("Base", "/a/base"), ("Gas (a)", "/a/gas_v2"), ("Gas (runs)", "/b")}
+    gas = next(m for m in r["models"] if m["name"].startswith("Gas") and m["summary"])
     assert gas["indicators"] is False and "EGRID" in gas["missing"] and gas["selected"] is False
     sel = c.post("/api/models/select", json={"selected": [gas["id"]]}).json()
     assert [m["id"] for m in sel["models"] if m["selected"]] == [gas["id"]]

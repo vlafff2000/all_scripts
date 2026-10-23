@@ -205,6 +205,15 @@ async def models_select(request: Request):
     return JSONResponse(await run_in_threadpool(tnav_models.view, PROJECT.models))
 
 
+async def models_rename(request: Request):
+    """Имя модели вручную (пустое — вернуть автоматическое)."""
+    b = await request.json()
+    mid = str(b.get("id") or "").strip()
+    if mid:
+        await run_in_threadpool(tnav_models.catalog.save_name, mid, str(b.get("name") or ""))
+    return JSONResponse(await run_in_threadpool(tnav_models.view, PROJECT.models))
+
+
 async def model_keywords(request: Request):
     """Скважинные векторы модели (по первой выбранной, если ?model= не задан)."""
     path = request.query_params.get("model") or (PROJECT.models[0] if PROJECT.models else "")
@@ -330,6 +339,7 @@ def build_app() -> Starlette:
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
         Route("/api/models/select", models_select, methods=["POST"]),
+        Route("/api/models/rename", models_rename, methods=["POST"]),
         Route("/api/model-keywords", model_keywords),
         Route("/api/model-values", model_values),
         Route("/api/summary", summary),
