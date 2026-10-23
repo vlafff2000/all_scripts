@@ -12,36 +12,112 @@ interface Track { title: string; sub: string; gwc: { label: string; z: number | 
 
 const W = 150, PAD = 8, AXIS = 56, HEAD = 46
 
-/** Одна скважина: ось глубины (а.о., вниз — меньше) и треки с общей шкалой 0…1; перфорация — полоса слева. */
-function WellLog({ name, tracks, perf, zMin, zMax, h }: { name: string; tracks: Track[]; perf: { top: number | null; bottom: number | null } | null; zMin: number; zMax: number; h: number }) {
+type Mode = 'tvdss' | 'md'
+interface Hover { z: number; cx: number; cy: number; x: number }
+
+/** Одна скважина: ось глубины (а.о. или MD) и треки с общей шкалой 0…1; перфорация — полоса слева.
+ *  Колесо — масштаб около курсора, перетаскивание — сдвиг, двойной щелчок — сброс; шкала общая у всех скважин, подсказка по наведению. */
+function WellLog({ name, tracks, perf, zMin, zMax, h, mode, alt, hz, onHover, onView, onReset }: {
+  name: string; tracks: Track[]; perf: { top: number | null; bottom: number | null } | null; zMin: number; zMax: number; h: number
+  mode: Mode; alt: number | null; hz: number | null; onHover: (z: number | null) => void; onView: (lo: number, hi: number) => void; onReset: () => void
+}) {
+  const md = mode === 'md' && alt !== null
+  const toD = (z: number) => (md ? (alt as number) - z : z)            // отметка а.о. → значение на оси
+  const toZ = (d: number) => (md ? (alt as number) - d : d)
   const y = (z: number) => HEAD + ((zMax - z) / (zMax - zMin)) * h
-  const step = [1, 2, 5, 10, 20, 50, 100].find(s => (zMax - zMin) / s <= 14) || 100
+  const dLo = Math.min(toD(zMin), toD(zMax)), dHi = Math.max(toD(zMin), toD(zMax))
+  const step = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500].find(s => (dHi - dLo) / s <= 14) || 500
   const ticks: number[] = []
-  for (let z = Math.ceil(zMin / step) * step; z <= zMax; z += step) ticks.push(z)
+  for (let d = Math.ceil(dLo / step) * step; d <= dHi; d += step) ticks.push(Math.round(d / step) * step)
   const width = AXIS + 16 + tracks.length * (W + PAD)
+  const svg = useRef<SVGSVGElement>(null)
+  const drag = useRef<{ y0: number; lo: number; hi: number } | null>(null)
+  const [tip, setTip] = useState<Hover | null>(null)
+  const clip = 'clip-' + name.replace(/[^a-zA-Z0-9_-]/g, '_')
+  const live = useRef({ zMin, zMax, h, onView })
+  live.current = { zMin, zMax, h, onView }
+  const zAt = (clientY: number) => {
+    const r = svg.current!.getBoundingClientRect()
+    return zMax - ((clientY - r.top - HEAD) / h) * (zMax - zMin)
+  }
+  useEffect(() => {
+    const el = svg.current
+    if (!el) return
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const { zMin: lo, zMax: hi, h: hh, onView: set } = live.current
+      const r = el.getBoundingClientRect()
+      const zc = hi - ((e.clientY - r.top - HEAD) / hh) * (hi - lo)
+      const f = e.deltaY > 0 ? 1.25 : 0.8
+      set(zc - (zc - lo) * f, zc + (hi - zc) * f)
+    }
+    el.addEventListener('wheel', wheel, { passive: false })
+    return () => el.removeEventListener('wheel', wheel)
+  }, [])
+  const down = (e: React.PointerEvent) => { drag.current = { y0: e.clientY, lo: zMin, hi: zMax }; (e.target as Element).setPointerCapture?.(e.pointerId); setTip(null) }
+  const move = (e: React.PointerEvent) => {
+    const r = svg.current!.getBoundingClientRect()
+    if (drag.current) {
+      const dz = ((e.clientY - drag.current.y0) / h) * (drag.current.hi - drag.current.lo)
+      onView(drag.current.lo + dz, drag.current.hi + dz)
+      return
+    }
+    const inside = e.clientY - r.top >= HEAD && e.clientY - r.top <= HEAD + h
+    if (!inside) { setTip(null); onHover(null); return }
+    const z = zAt(e.clientY)
+    setTip({ z, cx: e.clientX, cy: e.clientY, x: e.clientX - r.left })
+    onHover(z)
+  }
+  const leave = () => { setTip(null); onHover(null) }
+  const near = 4 / h * (zMax - zMin)
+  const lines = (z: number): string[] => {
+    const out: string[] = []
+    if (perf && perf.top !== null && perf.bottom !== null && z <= Math.max(perf.top, perf.bottom) && z >= Math.min(perf.top, perf.bottom))
+      out.push('Перфорация: ' + fmt(perf.top) + ' … ' + fmt(perf.bottom) + ' м а.о.')
+    tracks.forEach(t => {
+      const bar = t.bars.find(b => z <= Math.max(b.top, b.bottom) && z >= Math.min(b.top, b.bottom))
+      const g = t.gwc.filter(q => q.z !== null && Math.abs((q.z as number) - z) <= near)
+      const parts = [bar ? `${t.sub.startsWith('Sg') ? 'Sg' : 'Кг'} ${fmt(bar.v, 2)} (${fmt(bar.top)} … ${fmt(bar.bottom)})` : '', ...g.map(q => `${q.label} ${fmt(q.z)}`)].filter(Boolean)
+      if (parts.length) out.push(t.title + ' · ' + t.sub + ': ' + parts.join('; '))
+    })
+    return out
+  }
+  const hline = hz !== null && hz >= zMin && hz <= zMax ? y(hz) : null
   return (
-    <svg width={width} height={HEAD + h + 8} role="img" aria-label={'Планшет скважины ' + name} style={{ background: 'var(--chart-surface)', border: '1px solid var(--line)', borderRadius: 6 }}>
+    <>
+    <svg ref={svg} width={width} height={HEAD + h + 8} role="img" aria-label={'Планшет скважины ' + name}
+      style={{ background: 'var(--chart-surface)', border: '1px solid var(--line)', borderRadius: 6, cursor: drag.current ? 'grabbing' : 'crosshair', touchAction: 'none' }}
+      onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null }} onPointerLeave={leave} onDoubleClick={onReset}>
+      <defs><clipPath id={clip}><rect x={AXIS} y={HEAD} width={width - AXIS} height={h} /></clipPath></defs>
       <text x={6} y={14} fill="var(--chart-ink)" fontWeight={700} fontSize={13}>Скв. {name}</text>
-      {ticks.map(z => <g key={z}><line x1={AXIS} x2={width} y1={y(z)} y2={y(z)} stroke="var(--chart-grid)" /><text x={AXIS - 6} y={y(z) + 4} textAnchor="end" fontSize={11} fill="var(--chart-muted)">{z}</text></g>)}
-      <text x={6} y={HEAD - 6} fontSize={10} fill="var(--chart-muted)">м, а.о.</text>
+      {ticks.map(d => { const z = toZ(d); return <g key={d}><line x1={AXIS} x2={width} y1={y(z)} y2={y(z)} stroke="var(--chart-grid)" />
+        <text x={AXIS - 6} y={y(z) + 4} textAnchor="end" fontSize={11} fill="var(--chart-muted)">{d.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}</text></g> })}
+      <text x={6} y={HEAD - 6} fontSize={10} fill="var(--chart-muted)">{md ? 'м, MD' : 'м, а.о.'}</text>
+      <g clipPath={`url(#${clip})`}>
       {perf && perf.top !== null && perf.bottom !== null && <g>
-        <rect x={AXIS + 2} width={9} y={y(Math.max(perf.top, perf.bottom))} height={Math.max(2, Math.abs(y(perf.top) - y(perf.bottom)))} fill="var(--chart-accent)" opacity={0.85}>
-          <title>{'Перфорация: ' + fmt(perf.top) + ' … ' + fmt(perf.bottom) + ' м'}</title></rect></g>}
+        <rect x={AXIS + 2} width={9} y={y(Math.max(perf.top, perf.bottom))} height={Math.max(2, Math.abs(y(perf.top) - y(perf.bottom)))} fill="var(--chart-accent)" opacity={0.85} /></g>}
       {tracks.map((t, i) => {
         const x0 = AXIS + 16 + i * (W + PAD)
         return <g key={i}>
-          <text x={x0} y={HEAD - 20} fontSize={11} fontWeight={700} fill="var(--chart-ink)">{t.title}</text>
-          <text x={x0} y={HEAD - 8} fontSize={10} fill="var(--chart-muted)">{t.sub}</text>
           <rect x={x0} y={HEAD} width={W} height={h} fill="none" stroke="var(--chart-axis)" />
-          {t.bars.map((b, k) => <rect key={k} x={x0} width={Math.max(0, Math.min(1, b.v)) * W} y={y(b.top)} height={Math.max(1, y(b.bottom) - y(b.top))} fill="var(--map-gas)" opacity={0.8} stroke="var(--chart-surface)" strokeWidth={0.5}>
-            <title>{fmt(b.top) + ' … ' + fmt(b.bottom) + ' м: ' + fmt(b.v, 2)}</title></rect>)}
+          {t.bars.map((b, k) => <rect key={k} x={x0} width={Math.max(0, Math.min(1, b.v)) * W} y={y(b.top)} height={Math.max(1, y(b.bottom) - y(b.top))} fill="var(--map-gas)" opacity={0.8} stroke="var(--chart-surface)" strokeWidth={0.5} />)}
           {t.gwc.map((g, k) => g.z === null ? null : <g key={k}>
             <line x1={x0} x2={x0 + W} y1={y(g.z)} y2={y(g.z)} stroke="var(--map-water)" strokeWidth={2.5} strokeDasharray={k ? '5 3' : undefined} />
-            <text x={x0 + W - 3} y={y(g.z) - 3} textAnchor="end" fontSize={10} fill="var(--chart-ink)">{g.label + ' ' + fmt(g.z)}</text></g>)}
+            <text x={x0 + W - 3} y={y(g.z) - 3} textAnchor="end" fontSize={10} fill="var(--chart-ink)">{g.label + ' ' + fmt(md ? toD(g.z) : g.z)}</text></g>)}
           {t.note && <text x={x0 + 4} y={HEAD + 14} fontSize={10} fill="var(--chart-muted)">{t.note}</text>}
         </g>
       })}
+      {hline !== null && <line x1={AXIS} x2={width} y1={hline} y2={hline} stroke="var(--chart-ink)" strokeDasharray="3 3" opacity={0.6} />}
+      </g>
+      {tracks.map((t, i) => { const x0 = AXIS + 16 + i * (W + PAD)
+        return <g key={'h' + i}><text x={x0} y={HEAD - 20} fontSize={11} fontWeight={700} fill="var(--chart-ink)">{t.title}</text>
+          <text x={x0} y={HEAD - 8} fontSize={10} fill="var(--chart-muted)">{t.sub}</text></g> })}
     </svg>
+    {tip && <div role="tooltip" style={{ position: 'fixed', left: tip.cx + 14, top: tip.cy + 14, zIndex: 30, pointerEvents: 'none', maxWidth: 360, fontSize: 12,
+      background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 6, padding: '6px 8px', boxShadow: '0 4px 14px var(--shadow)' }}>
+      <b>Скв. {name}</b><br />Отметка {fmt(tip.z)} м а.о.{alt !== null ? ' · MD ' + fmt(alt - tip.z) + ' м' : ' · MD: нет альтитуды'}
+      {lines(tip.z).map((l, i) => <div key={i}>{l}</div>)}</div>}
+    </>
   )
 }
 
@@ -94,6 +170,8 @@ export default function Planshet() {
   const [hidden, setHidden] = useState<string[]>([])                // скрытые модели
   const boxRef = useRef<HTMLDivElement>(null)
   const [notes, setNotes] = useState<string[]>([])
+  const [mode, setMode] = useState<Mode>('tvdss')
+  const [hz, setHz] = useState<number | null>(null)       // общая линия наведения у всех скважин
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -180,6 +258,9 @@ export default function Planshet() {
   const auto: [number, number] = zs.length ? [Math.floor(Math.min(...zs) / 10) * 10 - 10, Math.ceil(Math.max(...zs) / 10) * 10 + 10] : [-1000, 0]
   const zMin = zFrom !== '' && !isNaN(Number(zFrom)) ? Number(zFrom) : auto[0]
   const zMax = zTo !== '' && !isNaN(Number(zTo)) ? Number(zTo) : auto[1]
+  const setView = (lo: number, hi: number) => { setZFrom(String(Math.round(lo * 10) / 10)); setZTo(String(Math.round(hi * 10) / 10)) }
+  const resetView = () => { setZFrom(''); setZTo('') }
+  const zoom = (f: number) => { const c = (zMin + zMax) / 2; setView(c - ((zMax - zMin) / 2) * f, c + ((zMax - zMin) / 2) * f) }
   const gwcOf = (t: Track) => t.gwc.map(g => g.z).filter((z): z is number => z !== null)
   const rowsOut = wellsOut.flatMap(o => o.items.map(it => ({ it, tracks: tracksOfItem(it) })))
 
@@ -211,7 +292,7 @@ export default function Planshet() {
         <div className="row" style={{ flexWrap: 'wrap' }}>
           <button className="primary" disabled={busy || !gisFolder || !chosen.length} onClick={build}>Построить ({chosen.length})</button>
           <span className="muted small">Порог Sg:</span><input style={{ width: 60 }} value={thr} onChange={e => setThr(e.target.value)} />
-          <span className="muted small">Шкала, м от:</span><input style={{ width: 70 }} placeholder="авто" value={zFrom} onChange={e => setZFrom(e.target.value)} />
+          <span className="muted small">Шкала, м а.о. от:</span><input style={{ width: 70 }} placeholder="авто" value={zFrom} onChange={e => setZFrom(e.target.value)} />
           <span className="muted small">до:</span><input style={{ width: 70 }} placeholder="авто" value={zTo} onChange={e => setZTo(e.target.value)} />
         </div>
         {msg && <p className="note warn">{msg}</p>}
@@ -223,12 +304,17 @@ export default function Planshet() {
               {' '}свой ГВК <input style={{ width: 70 }} placeholder="м а.о." value={hand[o.well] || ''} onChange={e => setHand({ ...hand, [o.well]: e.target.value })} /></span>)}
             <button disabled={busy} onClick={build} title="Пересчитать отметки с заданными альтитудами">Применить альтитуды</button>
             {models.map(m => <label key={m.id}><input type="checkbox" checked={!hidden.includes(m.id)} onChange={() => setHidden(hidden.includes(m.id) ? hidden.filter(x => x !== m.id) : [...hidden, m.id])} /> {m.name}</label>)}
+            <select value={mode} onChange={e => setMode(e.target.value as Mode)} title="Шкала глубины">
+              <option value="tvdss">TVDSS (м а.о.)</option><option value="md">MD (от стола)</option></select>
+            <button onClick={() => zoom(0.7)} title="Приблизить">＋</button><button onClick={() => zoom(1.4)} title="Отдалить">－</button>
+            <button onClick={resetView} title="Сбросить масштаб (двойной щелчок по планшету)">Сбросить масштаб</button>
             <button onClick={() => savePng(boxRef.current, 'планшет_ГВК')}>Сохранить PNG</button>
           </div>
           <div ref={boxRef} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            {wellsOut.map((o, i) => <WellLog key={o.well} name={o.well} tracks={trackSets[i]} perf={o.perf} zMin={zMin} zMax={zMax} h={560} />)}
+            {wellsOut.map((o, i) => <WellLog key={o.well} name={o.well} tracks={trackSets[i]} perf={o.perf} zMin={zMin} zMax={zMax} h={560}
+              mode={mode} alt={o.items[0]?.fact.altitude ?? null} hz={hz} onHover={setHz} onView={setView} onReset={resetView} />)}
           </div>
-          <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус); шкала глубины и шкалы 0…1 одинаковые у всех скважин. Узкая полоса слева — перфорация.
+          <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус); шкала глубины и шкалы 0…1 одинаковые у всех скважин. Узкая полоса слева — перфорация. Колесо мыши — масштаб, перетаскивание — сдвиг, двойной щелчок — сброс; подсказка — по наведению. MD = альтитуда − отметка (для наклонной скважины приближение).
             Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — как в «Результатах расчёта → ГВК по скважинам»: сверху вниз, граница ячейки (сплошная) и интерполяция Sg (пунктир); газ — Sg выше критической SGCR из INIT, иначе порога. Порог применяется при «Построить».</p>
           {rowsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Сезон</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.filter(m => !hidden.includes(m.id)).map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
             <tbody>{rowsOut.map(({ it, tracks }) => <tr key={it.fact.well + it.fact.date}><td>{it.fact.well}</td><td>{it.fact.date || '—'}</td><td>{it.fact.season || '—'}</td><td className="num">{fmt(it.fact.altitude)}</td>
