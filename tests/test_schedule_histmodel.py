@@ -142,6 +142,8 @@ def test_api_view_saves_settings(tmp_path, monkeypatch):
     assert Project.load(folder).histmodel["settings"] == {"rel_pct": 3}
     again = c.post("/api/results/histmodel", json={"model": str(mdl)}).json()          # настройки взяты из проекта
     assert again["settings"]["rel_pct"] == 3 and again["saved"]["excluded"] == ["*|W1"]
+    x = c.post("/api/results/histmodel/xlsx", json={"model": str(mdl)})
+    assert x.status_code == 200 and x.content[:2] == b"PK"
 
 
 def test_xlsx(tmp_path):
@@ -156,5 +158,3 @@ def test_xlsx(tmp_path):
     assert wl["H2"].value == "=G2-F2" and wl["F2"].value == 1000.0 and wl["O3"].value == "да"
     assert ws["F2"].value.startswith("=SUMIFS(Скважины!$F$2") and ws["H3"].value == 1200.0 and ws["I3"].value == "=IF(H3=\"\",\"\",G3-H3)"
     assert ws["L3"].value == "недобор"
-    x = c.post("/api/results/histmodel/xlsx", json={"model": str(mdl)})
-    assert x.status_code == 200 and x.content[:2] == b"PK"
