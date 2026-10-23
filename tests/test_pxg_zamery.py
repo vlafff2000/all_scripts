@@ -268,3 +268,21 @@ def test_neighbour_wells_merged_into_one_number():
     assert set(data["Горизонт"]) == {"Щигровский"}
     assert замеры.parse_pairs("83=82; 437 → 438") == {"83": "82", "437": "438"}
     assert sorted(замеры.combine([a, b], neighbours=None)["Скважина"]) == [56, 437, 437, 438]   # выключено
+
+
+def test_parallel_equals_serial(tmp_path, monkeypatch):
+    """Файлы по ядрам дают ту же базу, что подряд."""
+    src = tmp_path / "src"
+    src.mkdir()
+    for m in range(1, 6):
+        make_book(src / ("месяц %d.xlsx" % m), day=20 + m, month=m)
+    (src / "битый.xlsx").write_bytes(b"not excel")
+    dbs = {}
+    for w in ("1", "3"):
+        monkeypatch.setenv("PXG_WORKERS", w)
+        out = tmp_path / ("out" + w)
+        run_module("База_давлений_по_замерам", {"folder": str(src), "output": "db.xlsx"}, out)
+        dbs[w] = pd.read_excel(out / "db.xlsx", sheet_name=None)
+    assert dbs["1"].keys() == dbs["3"].keys()
+    for name in dbs["1"]:
+        pd.testing.assert_frame_equal(dbs["1"][name], dbs["3"][name])

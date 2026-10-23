@@ -18,6 +18,7 @@ import sys
 import pandas as pd
 
 from pxg_core import замеры, параметры, qc
+from pxg_core.parallel import map_jobs
 
 
 def main(argv=None):
@@ -59,8 +60,7 @@ def main(argv=None):
         return 0
 
     frames, stat = [], []
-    for f in files:
-        parsed = замеры.parse_file(f, limit)
+    for f, parsed in zip(files, map_jobs(замеры.parse_job, [(f, limit) for f in files], 400)):      # файлы независимы: по ядрам
         for code, text, where in parsed.problems:
             print("⚠️ %s (%s)" % (text, where))
         print("📄 %s: %d замеров" % (os.path.basename(f), len(parsed.rows)))
