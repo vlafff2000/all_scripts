@@ -500,6 +500,17 @@ def read_well_connections(unrst_path: str, step: Optional[RestartStep] = None) -
     iwel = read_restart_keyword(unrst_path, st, "IWEL")
     if icon is None or zwel is None or iwel is None or nw <= 0:
         return {}
+    # заголовок мог описать раскладку иначе, чем записаны массивы (так у реального рестарта tNavigator): длины массивов
+    # на одно и то же число скважин (NWMAXZ) надёжнее, чем отдельные числа INTEHEAD
+    if niw > 0 and len(iwel) % niw == 0:
+        nwmax = len(iwel) // niw
+        if nwmax >= nw and len(zwel) % nwmax == 0 and len(zwel) // nwmax > 0:
+            nz = len(zwel) // nwmax
+        if nwmax >= nw and nic > 0 and nc > 0 and len(icon) % (nic * nwmax) == 0 and len(icon) // (nic * nwmax) > 0:
+            nc = len(icon) // (nic * nwmax)
+    if len(zwel) < (nw - 1) * nz + 1 or len(iwel) < nw * niw:
+        raise ValueError("Не удалось разобрать скважины рестарта: размеры ZWEL (%d), IWEL (%d) не сходятся с заголовком "
+                         "(скважин %d, ZWEL на скважину %d, IWEL на скважину %d)" % (len(zwel), len(iwel), nw, nz, niw))
     out: Dict[str, List[Cell]] = {}
     for w in range(nw):
         name = zwel[w * nz].strip()
@@ -507,6 +518,8 @@ def read_well_connections(unrst_path: str, step: Optional[RestartStep] = None) -
         cells = []
         for c in range(ncon):
             o = (w * nc + c) * nic
+            if o + 3 >= len(icon):
+                raise ValueError("Не удалось разобрать ячейки вскрытия скважины %s: размер ICON (%d) не сходится с заголовком" % (name, len(icon)))
             cells.append((icon[o + 1] - 1, icon[o + 2] - 1, icon[o + 3] - 1))
         out[name] = cells
     return out
