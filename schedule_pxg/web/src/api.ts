@@ -359,6 +359,10 @@ export interface FactWell {
 export const getPlanshetFact = (wells: string[], date: string, alts: Record<string, string> = {}) =>
   call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/fact?' + new URLSearchParams({
     wells: wells.join('|'), date, alts: Object.entries(alts).filter(([, v]) => v.trim() !== '').map(([w, v]) => w + ':' + v.trim()).join('|') }))
+export interface GisObs { well: string; date: string; season: string; packs: number }
+export const getPlanshetCatalog = () => call<{ wells: string[]; observations: GisObs[] }>('/api/planshet/catalog')
+export const getPlanshetFacts = (picks: [string, string][], alts: Record<string, string> = {}) =>
+  call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/facts', post({ picks, alts }))
 export interface ProfileCell { top: number; bottom: number; sg: number; perforated: boolean; thr: number }
 export interface ModelGwc { cell: number; interp: number; at_grid_edge: boolean; lowest_cell: number; torn: boolean }
 /** gwc — ГВК колонны прежней логикой «ГВК по скважинам» (сверху вниз), считает сервер. */

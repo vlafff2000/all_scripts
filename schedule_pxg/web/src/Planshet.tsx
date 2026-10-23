@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { MultiSelect } from '../../../pxg_core/web-ui/MultiSelect'
+import '../../../pxg_core/web-ui/multiselect.css'
 import PageHead from './PageHead'
 import GwcCompare from './GwcCompare'
-import { FactWell, ModelEntry, WellProfile, getModels, getPlanshetFact, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
+import { FactWell, GisObs, ModelEntry, WellProfile, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
 
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
@@ -67,13 +69,21 @@ function savePng(box: HTMLElement | null, name: string) {
   })
 }
 
-interface WellOut { fact: FactWell; profiles: { model: ModelEntry; p: WellProfile | null; stepDate: string; err?: string }[] }
+interface Item { fact: FactWell; profiles: { model: ModelEntry; p: WellProfile | null; stepDate: string; err?: string }[] }
+interface WellOut { well: string; perf: FactWell['perforation']; items: Item[] }
+
+const pickKey = (o: GisObs) => o.well + '|' + o.date
+const pickLabel = (o: GisObs) => 'Скв. ' + o.well + ' · ' + o.date + ' · ' + o.season
 
 export default function Planshet() {
   const [gisFolder, setGisFolder] = useState('')
   const [perfFile, setPerfFile] = useState('')
-  const [well, setWell] = useState('')
-  const [date, setDate] = useState('')
+  const [catalog, setCatalog] = useState<{ wells: string[]; observations: GisObs[] }>({ wells: [], observations: [] })
+  const [wells, setWells] = useState<string[]>([])
+  const [seasons, setSeasons] = useState<string[]>([])
+  const [allInSeason, setAllInSeason] = useState(false)             // подсказка: все замеры сезона, а не последний
+  const [manual, setManual] = useState<Record<string, boolean>>({}) // ручной выбор замеров главнее подсказки
+  const [pasted, setPasted] = useState('')
   const [thr, setThr] = useState('0.01')
   const [models, setModels] = useState<ModelEntry[]>([])
   const [wellsOut, setWellsOut] = useState<WellOut[]>([])
@@ -83,31 +93,58 @@ export default function Planshet() {
   const [hand, setHand] = useState<Record<string, string>>({})      // свой ГВК вручную по скважинам, м а.о.
   const [hidden, setHidden] = useState<string[]>([])                // скрытые модели
   const boxRef = useRef<HTMLDivElement>(null)
-  const [dates, setDates] = useState<string[]>([])
   const [notes, setNotes] = useState<string[]>([])
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
+  const loadCatalog = () => getPlanshetCatalog().then(setCatalog).catch(e => { setCatalog({ wells: [], observations: [] }); setMsg((e as Error).message) })
   useEffect(() => {
-    getSources().then(v => { setGisFolder(v.sources.gis?.folder || ''); setPerfFile(v.sources.gis?.perf_file || '') }).catch(() => undefined)
+    getSources().then(v => { setGisFolder(v.sources.gis?.folder || ''); setPerfFile(v.sources.gis?.perf_file || ''); if (v.sources.gis?.folder) loadCatalog() }).catch(() => undefined)
     getModels().then(v => setModels(v.models.filter(m => m.selected))).catch(e => setMsg((e as Error).message))
   }, [])
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
-  const saveGis = (folder: string, perf: string) => guard(async () => { await setSources({ gis: { folder, perf_file: perf } }); setGisFolder(folder); setPerfFile(perf) })
+  const saveGis = (folder: string, perf: string) => guard(async () => { await setSources({ gis: { folder, perf_file: perf } }); setGisFolder(folder); setPerfFile(perf); if (folder) await loadCatalog() })
   const pickGis = async () => { const f = await pickFolder(gisFolder); if (f) await saveGis(f, perfFile) }
   const pickPerf = async () => { const r = await pickFile(perfFile); if (r.path) await saveGis(gisFolder, r.path) }
 
-  const build = (d: string) => guard(async () => {
-    const ws = Array.from(new Set(well.split(/[;,|\s]+/).map(x => x.trim()).filter(Boolean)))
-    if (!ws.length) throw new Error('Введите номера скважин через запятую')
-    const f = await getPlanshetFact(ws, d, alts)
-    setNotes([...f.notes, ...f.rows.flatMap(r => r.notes.map(n => 'Скв. ' + r.well + ': ' + n))])
-    const all = Array.from(new Set(f.rows.flatMap(r => r.dates))).sort()
-    setDates(all)
+  // Замеры выбранных скважин; сезон = «осень/весна + год». Подсказка: без сезонов — последний замер скважины,
+  // с сезонами — последний (или все) замер скважины в каждом выбранном сезоне. Ручной выбор главнее подсказки.
+  const mine = useMemo(() => catalog.observations.filter(o => wells.includes(o.well)), [catalog, wells])
+  const seasonList = useMemo(() => Array.from(new Set(catalog.observations.map(o => o.season))), [catalog])
+  const suggested = useMemo(() => {
+    const out = new Set<string>()
+    for (const w of wells) {
+      const ws = mine.filter(o => o.well === w)
+      if (!seasons.length) { if (ws.length) out.add(pickKey(ws[ws.length - 1])); continue }
+      for (const s of seasons) {
+        const inS = ws.filter(o => o.season === s)
+        if (allInSeason) inS.forEach(o => out.add(pickKey(o))); else if (inS.length) out.add(pickKey(inS[inS.length - 1]))
+      }
+    }
+    return out
+  }, [wells, seasons, allInSeason, mine])
+  const chosen = mine.filter(o => (pickKey(o) in manual ? manual[pickKey(o)] : suggested.has(pickKey(o))))
+  const setChosen = (labels: string[]) => {
+    const next = { ...manual }
+    mine.forEach(o => { next[pickKey(o)] = labels.includes(pickLabel(o)) })
+    setManual(next)
+  }
+  const pasteWells = () => {
+    const add = pasted.split(/[;,|\s]+/).map(x => x.trim()).filter(Boolean)
+    const known = add.filter(w => catalog.wells.includes(w)), miss = add.filter(w => !catalog.wells.includes(w))
+    setWells(catalog.wells.filter(w => wells.includes(w) || known.includes(w)))
+    setPasted('')
+    setMsg(miss.length ? 'В базе ГИС нет скважин: ' + miss.join(', ') : '')
+  }
+
+  const build = () => guard(async () => {
+    if (!chosen.length) throw new Error('Выберите скважины и замеры')
+    const f = await getPlanshetFacts(chosen.map(o => [o.well, o.date] as [string, string]), alts)
+    setNotes(Array.from(new Set([...f.notes, ...f.rows.flatMap(r => r.notes.map(n => 'Скв. ' + r.well + ': ' + n))])))
     // профили моделей: один запрос на модель и дату среза сразу для всех скважин этой даты (сетка читается один раз)
-    const out: WellOut[] = f.rows.map(row => ({ fact: row, profiles: [] }))
-    const byDate: Record<string, WellOut[]> = {}
-    out.forEach(o => { (byDate[o.fact.date || d] = byDate[o.fact.date || d] || []).push(o) })
+    const items: Item[] = f.rows.map(row => ({ fact: row, profiles: [] }))
+    const byDate: Record<string, Item[]> = {}
+    items.forEach(o => { (byDate[o.fact.date] = byDate[o.fact.date] || []).push(o) })
     for (const m of models) {
       for (const [day, group] of Object.entries(byDate)) {
         try {
@@ -116,12 +153,18 @@ export default function Planshet() {
         } catch (e) { group.forEach(g => g.profiles.push({ model: m, p: null, stepDate: '', err: (e as Error).message })) }
       }
     }
+    const out: WellOut[] = []
+    items.forEach(it => {
+      let w = out.find(x => x.well === it.fact.well)
+      if (!w) { w = { well: it.fact.well, perf: it.fact.perforation, items: [] }; out.push(w) }
+      w.items.push(it)
+    })
     setWellsOut(out)
   })
 
   const handGwc = (w: string) => { const z = Number((hand[w] || '').replace(',', '.')); return hand[w] && !isNaN(z) ? [{ label: 'ручн.', z }] : [] }
-  const tracksOf = ({ fact, profiles }: WellOut): Track[] => {
-    const tr: Track[] = [{ title: 'ГИС, факт', sub: 'Кг по интервалам' + (fact.date ? ' · ' + fact.date : ''),
+  const tracksOfItem = ({ fact, profiles }: Item): Track[] => {
+    const tr: Track[] = [{ title: 'ГИС, факт', sub: (fact.season || 'замер') + (fact.date ? ' · ' + fact.date : ''),
       bars: fact.intervals.filter(i => i.kg !== null).map(i => ({ top: i.top, bottom: i.bottom, v: i.kg as number })),
       gwc: [...fact.packs.map(p => ({ label: 'ГВК', z: p.gvk })), ...handGwc(fact.well)], note: fact.intervals.length ? undefined : 'нет интервалов' }]
     profiles.filter(x => !hidden.includes(x.model.id)).forEach(({ model, p, stepDate, err }) => tr.push({
@@ -130,14 +173,15 @@ export default function Planshet() {
       gwc: p?.gwc ? [{ label: 'ГВК', z: p.gwc.cell }, { label: 'ГВК инт.', z: p.gwc.interp }] : [], note: err ? err.slice(0, 28) : p ? undefined : 'нет ячеек скважины' }))
     return tr
   }
-  const trackSets = wellsOut.map(tracksOf)
+  const trackSets = wellsOut.map(o => o.items.flatMap(tracksOfItem))
   // одна шкала глубины на все скважины: по общему диапазону данных и перфораций, если не задана вручную
   const zs = trackSets.flatMap(ts => ts.flatMap(t => [...t.bars.flatMap(b => [b.top, b.bottom]), ...t.gwc.map(g => g.z).filter((z): z is number => z !== null)]))
-    .concat(wellsOut.flatMap(o => (o.fact.perforation ? [o.fact.perforation.top, o.fact.perforation.bottom].filter((z): z is number => z !== null) : [])))
+    .concat(wellsOut.flatMap(o => (o.perf ? [o.perf.top, o.perf.bottom].filter((z): z is number => z !== null) : [])))
   const auto: [number, number] = zs.length ? [Math.floor(Math.min(...zs) / 10) * 10 - 10, Math.ceil(Math.max(...zs) / 10) * 10 + 10] : [-1000, 0]
   const zMin = zFrom !== '' && !isNaN(Number(zFrom)) ? Number(zFrom) : auto[0]
   const zMax = zTo !== '' && !isNaN(Number(zTo)) ? Number(zTo) : auto[1]
   const gwcOf = (t: Track) => t.gwc.map(g => g.z).filter((z): z is number => z !== null)
+  const rowsOut = wellsOut.flatMap(o => o.items.map(it => ({ it, tracks: tracksOfItem(it) })))
 
   return (
     <main className="workspace">
@@ -153,12 +197,19 @@ export default function Planshet() {
         <p className="muted small">Модели: {models.length ? models.map(m => m.name).join(', ') : 'не отмечены — планшет покажет только факт'}</p>
       </section>
       <section className="card">
+        <div className="row" style={{ flexWrap: 'wrap', alignItems: 'stretch' }}>
+          <MultiSelect label="Скважины" options={catalog.wells} value={wells} onChange={setWells} emptyMeaning="не выбраны" prefix="№ " />
+          <MultiSelect label="Сезоны ГИС" options={seasonList} value={seasons} onChange={setSeasons} emptyMeaning="последний замер" />
+          <MultiSelect label="Замеры" options={mine.map(pickLabel)} value={chosen.map(pickLabel)} onChange={setChosen} emptyMeaning="не выбраны" />
+          <label className="small" title="Подсказка для выбранных сезонов; отдельные замеры в списке «Замеры» правятся вручную">
+            <input type="checkbox" checked={allInSeason} onChange={e => setAllInSeason(e.target.checked)} /> все замеры сезона (иначе последний)</label>
+          <input style={{ width: 200 }} placeholder="вставить номера скважин" value={pasted} onChange={e => setPasted(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') pasteWells() }} />
+          <button disabled={!pasted.trim() || !catalog.wells.length} onClick={pasteWells}>Добавить</button>
+        </div>
+        <p className="muted small">Соседние месяцы одного сезона (например, октябрь и ноябрь) — один сезон: выберите сезон целиком, и в нём берётся последний замер каждой скважины.
+          Замеры можно отметить и вручную — ручной выбор главнее подсказки. {catalog.wells.length ? '' : 'Выберите базу ГИС, чтобы получить список скважин.'}</p>
         <div className="row" style={{ flexWrap: 'wrap' }}>
-          <input style={{ width: 240 }} placeholder="скважины через запятую" value={well} onChange={e => setWell(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') build('') }} />
-          <button className="primary" disabled={busy || !gisFolder} onClick={() => build('')}>Построить</button>
-          {dates.length > 0 && <><span className="muted small">Замер:</span>
-            <select value={date} onChange={e => { setDate(e.target.value); build(e.target.value) }}>
-              <option value="">последний у каждой скважины</option>{dates.map(d => <option key={d}>{d}</option>)}</select></>}
+          <button className="primary" disabled={busy || !gisFolder || !chosen.length} onClick={build}>Построить ({chosen.length})</button>
           <span className="muted small">Порог Sg:</span><input style={{ width: 60 }} value={thr} onChange={e => setThr(e.target.value)} />
           <span className="muted small">Шкала, м от:</span><input style={{ width: 70 }} placeholder="авто" value={zFrom} onChange={e => setZFrom(e.target.value)} />
           <span className="muted small">до:</span><input style={{ width: 70 }} placeholder="авто" value={zTo} onChange={e => setZTo(e.target.value)} />
@@ -168,20 +219,20 @@ export default function Planshet() {
         {wellsOut.length > 0 && <div style={{ overflowX: 'auto', marginTop: 12 }}>
           <div className="row small" style={{ flexWrap: 'wrap' }}>
             <span className="muted">Вручную (последнее слово за инженером):</span>
-            {wellsOut.map(o => <span key={o.fact.well}>Скв. {o.fact.well}: альтитуда <input style={{ width: 70 }} placeholder={fmt(o.fact.altitude)} value={alts[o.fact.well] || ''} onChange={e => setAlts({ ...alts, [o.fact.well]: e.target.value })} />
-              {' '}свой ГВК <input style={{ width: 70 }} placeholder="м а.о." value={hand[o.fact.well] || ''} onChange={e => setHand({ ...hand, [o.fact.well]: e.target.value })} /></span>)}
-            <button disabled={busy} onClick={() => build(date)} title="Пересчитать отметки с заданными альтитудами">Применить альтитуды</button>
+            {wellsOut.map(o => <span key={o.well}>Скв. {o.well}: альтитуда <input style={{ width: 70 }} placeholder={fmt(o.items[0]?.fact.altitude)} value={alts[o.well] || ''} onChange={e => setAlts({ ...alts, [o.well]: e.target.value })} />
+              {' '}свой ГВК <input style={{ width: 70 }} placeholder="м а.о." value={hand[o.well] || ''} onChange={e => setHand({ ...hand, [o.well]: e.target.value })} /></span>)}
+            <button disabled={busy} onClick={build} title="Пересчитать отметки с заданными альтитудами">Применить альтитуды</button>
             {models.map(m => <label key={m.id}><input type="checkbox" checked={!hidden.includes(m.id)} onChange={() => setHidden(hidden.includes(m.id) ? hidden.filter(x => x !== m.id) : [...hidden, m.id])} /> {m.name}</label>)}
             <button onClick={() => savePng(boxRef.current, 'планшет_ГВК')}>Сохранить PNG</button>
           </div>
           <div ref={boxRef} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            {wellsOut.map((o, i) => <WellLog key={o.fact.well} name={o.fact.well} tracks={trackSets[i]} perf={o.fact.perforation} zMin={zMin} zMax={zMax} h={560} />)}
+            {wellsOut.map((o, i) => <WellLog key={o.well} name={o.well} tracks={trackSets[i]} perf={o.perf} zMin={zMin} zMax={zMax} h={560} />)}
           </div>
           <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус); шкала глубины и шкалы 0…1 одинаковые у всех скважин. Узкая полоса слева — перфорация.
             Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — как в «Результатах расчёта → ГВК по скважинам»: сверху вниз, граница ячейки (сплошная) и интерполяция Sg (пунктир); газ — Sg выше критической SGCR из INIT, иначе порога. Порог применяется при «Построить».</p>
-          {wellsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.filter(m => !hidden.includes(m.id)).map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
-            <tbody>{wellsOut.map((o, i) => <tr key={o.fact.well}><td>{o.fact.well}</td><td>{o.fact.date || '—'}</td><td className="num">{fmt(o.fact.altitude)}</td>
-              {trackSets[i].map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
+          {rowsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Сезон</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.filter(m => !hidden.includes(m.id)).map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
+            <tbody>{rowsOut.map(({ it, tracks }) => <tr key={it.fact.well + it.fact.date}><td>{it.fact.well}</td><td>{it.fact.date || '—'}</td><td>{it.fact.season || '—'}</td><td className="num">{fmt(it.fact.altitude)}</td>
+              {tracks.map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
         </div>}
       </section>
       <GwcCompare models={models} thr={thr} alts={alts} />

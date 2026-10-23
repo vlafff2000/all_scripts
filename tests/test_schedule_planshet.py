@@ -84,6 +84,16 @@ def test_view_manual_altitude_wins(tmp_path):
     assert planshet.view(p, ["101"])["rows"][0]["altitude"] == 100.0
 
 
+def test_catalog_and_multi_dates(tmp_path):
+    p = Project("x")
+    planshet.set_settings(p, _folder(tmp_path), "")
+    c = planshet.catalog(p)
+    assert c["wells"] == ["101"]
+    assert [(o["date"], o["season"]) for o in c["observations"]] == [("2024-11-01", "осень 2024"), ("2025-04-10", "весна 2025")]
+    v = planshet.view(p, [], "", None, [("101", "2024-11-01"), ("101.0", "2025-04-10")])
+    assert [r["date"] for r in v["rows"]] == ["2024-11-01", "2025-04-10"]
+
+
 def _perf_book(path, header, rows, alt=None):
     import pandas as pd
     with pd.ExcelWriter(path, engine="openpyxl") as w:
