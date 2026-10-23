@@ -153,11 +153,21 @@ class Project:
             with self._lock:
                 self._cache.clear()
                 self.atlas, self.store, self._tables = atlas, store, tables
+            threading.Thread(target=self._warm_map, daemon=True).start()
             self.log.append("Готово: ГСП — %d, строк — %d (%.1f с)" % (len(store.gsp_names), len(store.well), time.time() - t0))
             self.state = "ready"
         except Exception as e:  # показываем человеку, а не роняем сервер
             self.log.append("Ошибка: %s" % e)
             self.state = "error"
+
+    def _warm_map(self) -> None:
+        """Книга карты читается в фоне сразу после загрузки проекта, чтобы первый выбор групп не ждал её."""
+        p = self.paths["map"]
+        if p and os.path.isfile(p):
+            try:
+                wellmap.read_grids(p)
+            except Exception:
+                pass  # ошибку покажет обычный запрос группы
 
     # ---------- кэш по файлам ----------
     def _memo(self, key: Tuple, mt: float, make: Callable[[], object]):
@@ -249,6 +259,9 @@ class Project:
     # ---------- расчёты для интерфейса ----------
     def season_pressure(self, which: str, gsp: str = "") -> Dict[Tuple[int, str], float]:
         """Среднее давление за сезон: по месяцу замера (как add_directions_and_pressure)."""
+        return self._memo(("season_pressure", which, gsp), 0.0, lambda: self._season_pressure(which, gsp))
+
+    def _season_pressure(self, which: str, gsp: str) -> Dict[Tuple[int, str], float]:
         df, _ = self.gsp_pressure(which, gsp) if gsp else self.pressure(which)
         if not len(df):
             return {}
@@ -272,8 +285,8 @@ class Project:
                 df[col] = v
         w = self.water()[0]
         if len(w):
-            sk = [season_of(int(m), int(y)) for m, y in zip(w["Месяц"], w["Год"])]
-            sel = w[[k == (season, KIND_NAMES[kind]) for k in sk]]
+            wk = self._memo(("water_seasons",), 0.0, lambda: [season_of(int(m), int(y)) for m, y in zip(w["Месяц"], w["Год"])])
+            sel = w[[k == (season, KIND_NAMES[kind]) for k in wk]]
             for mark in sorted(sel["Метка_замера"].unique()):
                 part = sel[sel["Метка_замера"] == mark].drop_duplicates("Скважина").set_index("Скважина")
                 df["Водный_фактор_" + mark] = df["Скважина"].map(part["Водный_фактор"])
@@ -302,6 +315,11 @@ class Project:
         return res
 
     def gsp_payload(self, gsp: str, mode: str = "auto") -> dict:
+        """Данные карты группы; готовый ответ запоминается до перезагрузки проекта или смены файла карты."""
+        mp = self.paths["map"]
+        return self._memo(("gsp_payload", gsp, mode, mp), _mtime(mp) if mp else 0.0, lambda: self._gsp_payload(gsp, mode))
+
+    def _gsp_payload(self, gsp: str, mode: str) -> dict:
         st = self.store
         assert st is not None
         lay = self.layout_for(gsp, mode)
