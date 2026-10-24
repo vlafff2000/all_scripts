@@ -275,31 +275,40 @@ class GasPoreVolume(NamedTuple):
 def gas_pore_volume(model: CellModel, porv, sg, threshold: float = DEFAULT_SG_THRESHOLD,
                     layers: Optional[Dict[str, Tuple[int, int]]] = None,
                     regions: Optional[Sequence] = None,
-                    cell_filter=None) -> GasPoreVolume:
+                    cell_filter=None, weight=None) -> GasPoreVolume:
     """Сумма PORV*Sg по ячейкам с Sg > порога.
 
     layers — пласты как {имя: (k_от, k_до)} включительно, нумерация k с 1 (как в tNav);
     regions — массив целых по активным ячейкам (FIPNUM из INIT или любой другой);
-    cell_filter — необязательная функция (i, j, k) -> bool (например, только ячейки в области).
+    cell_filter — необязательная функция (i, j, k) -> bool (например, только ячейки в области);
+    threshold — число или порог по единицам матрицы (см. tnav_results.gwc_criterion);
+    weight — что умножать на PORV, если отбор идёт по другой величине (Sg по критерию Sw); по умолчанию sg.
     Единицы — как у PORV (пластовые рм3, не стандартные).
     """
     pp = model.to_units(porv, "PORV", "sum")
     sp = model.to_units(sg, "Sg")
     if len(pp) != len(sp):
         raise ValueError("PORV и Sg: разное число частей (двойная пористость есть не в обоих массивах)")
+    wp = sp if weight is None else model.to_units(weight, "Sg")
+    if isinstance(threshold, (list, tuple)) or hasattr(threshold, "__len__"):
+        tp = model.to_units(threshold, "порог")
+        if len(tp) != len(sp):
+            raise ValueError("Порог по единицам и Sg: разное число частей (двойная пористость)")
+    else:
+        tp = [threshold] * len(sp)
     reg = model.to_units(regions, "регионы")[0] if regions is not None else None
     # сразу по всем ячейкам (numpy); суммы набираются подряд в том же порядке, что в поячеечном цикле, поэтому совпадают до последнего знака
     rep = model._rep
     kk = rep // (model.grid.ni * model.grid.nj)
     regs = np.trunc(np.asarray(reg, dtype=np.float64)).astype(np.int64) if reg is not None else None
     vs, ks_, rs = [], [], []
-    for porv_u, sg_u in zip(pp, sp):
+    for porv_u, sg_u, thr_u, w_u in zip(pp, sp, tp, wp):
         s_ = np.asarray(sg_u, dtype=np.float64)
-        idx = np.flatnonzero(s_ > threshold)
+        idx = np.flatnonzero(s_ > np.asarray(thr_u, dtype=np.float64))
         if cell_filter is not None and len(idx):
             ii, jj = rep[idx] % model.grid.ni, (rep[idx] // model.grid.ni) % model.grid.nj
             idx = idx[[bool(cell_filter(int(a_), int(b_), int(c_))) for a_, b_, c_ in zip(ii, jj, kk[idx])]]
-        vs.append(np.asarray(porv_u, dtype=np.float64)[idx] * s_[idx])
+        vs.append(np.asarray(porv_u, dtype=np.float64)[idx] * np.asarray(w_u, dtype=np.float64)[idx])
         ks_.append(kk[idx])
         if regs is not None:
             rs.append(regs[idx])
@@ -323,6 +332,9 @@ def gwc_map(model: CellModel, sg, threshold: float = DEFAULT_SG_THRESHOLD,
             which: str = "lowest") -> Dict[Tuple[int, int], float]:
     """ГВК по колоннам: {(i, j): глубина}. Колонны без газа в карту не попадают.
 
+    sg — величина для сравнения (Sg или 1 − Sw по критерию, см. tnav_results.gwc_criterion), threshold — число
+    или порог по единицам матрицы.
+
     Идём сверху вниз (k растёт). Газовая ячейка, под которой следующая ячейка колонны ниже порога,
     даёт переход; глубина — линейная интерполяция Sg между центрами двух ячеек до значения порога.
     Если под газовой ячейкой нет активной соседней (низ сетки, разрыв), контакт — подошва ячейки
@@ -330,6 +342,8 @@ def gwc_map(model: CellModel, sg, threshold: float = DEFAULT_SG_THRESHOLD,
     which: "lowest" — самый глубокий переход в колонне (по умолчанию), "highest" — самый верхний.
     """
     sg = model.to_units(sg, "Sg")[0]          # при двойной пористости ГВК по матрице
+    if hasattr(threshold, "__len__"):
+        threshold = model.to_units(threshold, "порог")[0]
     if which not in ("lowest", "highest"):
         raise ValueError("which: 'lowest' или 'highest'")
     out: Dict[Tuple[int, int], float] = {}
@@ -340,7 +354,8 @@ def gwc_map(model: CellModel, sg, threshold: float = DEFAULT_SG_THRESHOLD,
     # то же, что поколонный цикл, но сразу по всем ячейкам колонн (numpy); арифметика та же и в том же порядке
     sga = np.asarray(sg, dtype=np.float64)
     s_all = sga[u]
-    gas = s_all > threshold
+    t_all = np.broadcast_to(np.asarray(threshold, dtype=np.float64), sga.shape)[u]
+    gas = s_all > t_all
     layer = model.grid.ni * model.grid.nj
     kk = g // layer
     has_next = np.zeros(n, dtype=bool)
@@ -358,7 +373,7 @@ def gwc_map(model: CellModel, sg, threshold: float = DEFAULT_SG_THRESHOLD,
         s_a, s_b = s_all[a_], s_all[b_]
         z_a, z_b = model.centre_many(g[a_]), model.centre_many(g[b_])
         with np.errstate(divide="ignore", invalid="ignore"):
-            z[hn] = z_a + (s_a - threshold) / (s_a - s_b) * (z_b - z_a)
+            z[hn] = z_a + (s_a - t_all[a_]) / (s_a - s_b) * (z_b - z_a)
     if (~hn).any():
         z[~hn] = model.bottom_many(g[sel[~hn]])
     ni = model.grid.ni
@@ -423,12 +438,14 @@ def pick_step(steps: Sequence[RestartStep], date: dt.datetime) -> RestartStep:
 
 def _indicator_row(model: CellModel, st: RestartStep, ctx):
     """Показатели одного шага рестарта (None — в нём нет SGAS); ctx — то, что общее для всех шагов."""
-    unrst_path, sgas, threshold, porv, layers, regions = ctx
-    sg = read_restart_keyword(unrst_path, st, sgas)
-    if sg is None:
+    from .gwc_criterion import step_arrays
+    unrst_path, sgas, prep, porv, layers, regions = ctx
+    arrs = step_arrays(model, unrst_path, st, prep, sgas)
+    if arrs is None:
         return None
-    return (st.date, gas_pore_volume(model, porv, sg, threshold, layers, regions),
-            gwc_stats(model, gwc_map(model, sg, threshold)))
+    q, thr, sg = arrs
+    return (st.date, gas_pore_volume(model, porv, q, thr, layers, regions, weight=sg),
+            gwc_stats(model, gwc_map(model, q, thr)))
 
 
 def indicators_over_time(model: CellModel, init_path: str, unrst_path: str,
@@ -436,17 +453,21 @@ def indicators_over_time(model: CellModel, init_path: str, unrst_path: str,
                          layers: Optional[Dict[str, Tuple[int, int]]] = None,
                          region_key: Optional[str] = None,
                          steps: Optional[Sequence[RestartStep]] = None,
-                         egrid_path: Optional[str] = None, workers: Optional[int] = None):
+                         egrid_path: Optional[str] = None, workers: Optional[int] = None,
+                         criterion=None):
     """По каждой дате рестарта: (дата, GasPoreVolume, GwcStats). Куб читается по одному шагу.
 
+    criterion — ``tnav_results.gwc_criterion.Criterion``; без него газ = Sg > threshold (как раньше).
     С egrid_path шаги считаются параллельно на всех ядрах (``tnav_results.parallel``), результат тот же.
     """
     from .parallel import map_steps
+    from .gwc_criterion import LOGIC_SG, Criterion, prepare
     need = ["PORV"] + ([region_key] if region_key else [])
     init = read_init(init_path, need)
     porv = [v for part in model.to_units(init["PORV"], "PORV", "sum") for v in part]   # один раз, по единицам
     regions = init.get(region_key) if region_key else None
-    ctx = (unrst_path, sgas, threshold, porv, layers, regions)
+    prep = prepare(model, init_path, criterion or Criterion(LOGIC_SG, threshold, threshold))
+    ctx = (unrst_path, sgas, prep, porv, layers, regions)
     rows = map_steps(_indicator_row, model, list(steps if steps is not None else iter_restart_steps(unrst_path)),
                      ctx, egrid_path, workers)
     return [r for r in rows if r is not None]
