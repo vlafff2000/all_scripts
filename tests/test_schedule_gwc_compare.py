@@ -100,3 +100,23 @@ def test_profiles_for_slices_same_on_several_processes(tmp_path, monkeypatch):
     one = parallel.map_jobs(planshet._profile_job, jobs, workers=1)
     many = parallel.map_jobs(planshet._profile_job, jobs, workers=3)
     assert many == one and all(x.get("OBS1") for x in one)
+
+
+def test_compare_combos_rows_series_and_share_only_for_one(monkeypatch):
+    from schedule_pxg import planshet
+    from tnav_results.gwc_criterion import Criterion
+    calls = []
+
+    def fake_view(p, model_path, wells, thr, slices=None, excluded=(), alts=None, criterion=None, share=True):
+        calls.append((model_path, share))
+        return {"rows": [{"key": "OBS1|2026-01-01", "well": "OBS1", "delta": 0.5}], "skipped": {"газа нет": 1}, "notes": [model_path]}
+
+    monkeypatch.setattr(planshet, "compare_view", fake_view)
+    combos = [("/m/A.EGRID", Criterion("sg", 0.01, 0.01)), ("/m/B.EGRID", Criterion("sg_sgcr", 0.1, 0.01))]
+    out = planshet.compare_combos(None, combos, [])
+    assert [r["key"] for r in out["rows"]] == ["0|OBS1|2026-01-01", "1|OBS1|2026-01-01"]
+    assert out["rows"][0]["series"] == "A · Sg > 0.01" and out["rows"][1]["series"] == "B · Sg > SGCR + 0.1"
+    assert out["skipped"] == {"газа нет": 2} and [s["model"] for s in out["series"]] == ["A.EGRID", "B.EGRID"]
+    assert all(not share for _, share in calls)                    # «Карты» видят только одиночное сравнение
+    planshet.compare_combos(None, combos[:1], [])
+    assert calls[-1][1] is True

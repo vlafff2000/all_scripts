@@ -199,7 +199,7 @@ def _profile_job(job):
 
 
 def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float = 0.01, slices: Optional[Dict[str, str]] = None,
-                 excluded: Sequence[str] = (), alts: Optional[Dict[str, float]] = None, criterion=None) -> dict:
+                 excluded: Sequence[str] = (), alts: Optional[Dict[str, float]] = None, criterion=None, share: bool = True) -> dict:
     """Сравнение факта ГИС с моделью по всем замерам выбранных скважин (пусто — все скважины базы ГИС)."""
     import datetime as dt
     from . import gwc_compare, results, sources
@@ -237,9 +237,32 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
     out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names},
                               profiles_many)
     out["notes"] = notes
-    try:                                    # «Карты» читают последнее сравнение; нет прав на запись — не помеха расчёту
-        from tnav_results import gwc_share
-        gwc_share.save(os.path.basename(model_path), thr, out["rows"], not list(wells), criterion)
-    except OSError:
-        pass
+    if share:
+        try:                                # «Карты» читают последнее сравнение; нет прав на запись — не помеха расчёту
+            from tnav_results import gwc_share
+            gwc_share.save(os.path.basename(model_path), thr, out["rows"], not list(wells), criterion)
+        except OSError:
+            pass
     return out
+
+
+def compare_combos(p: Project, combos: Sequence[tuple], wells: Sequence[str], slices: Optional[Dict[str, str]] = None,
+                   excluded: Sequence[str] = (), alts: Optional[Dict[str, float]] = None) -> dict:
+    """Сравнение по сочетаниям «модель × критерий»: combos — [(путь модели, Criterion)].
+
+    Строки всех сочетаний в одном списке; у каждой есть series (модель · критерий), ключ начинается с номера сочетания.
+    Файл для «Карт» пишется только при одном сочетании: тогда это и есть сравнение, которое видно на картах.
+    """
+    from tnav_results import gwc_criterion as gc
+    rows, skipped, notes, series = [], {}, [], []
+    for n, (model_path, crit) in enumerate(combos):
+        thr = crit.value if crit.logic == "sg" else crit.fallback
+        name = "%s · %s" % (os.path.splitext(os.path.basename(model_path))[0], gc.label(crit))
+        res = compare_view(p, model_path, wells, thr, slices, excluded, alts, crit, share=len(combos) == 1)
+        for r in res["rows"]:
+            rows.append({**r, "series": name, "key": "%d|%s" % (n, r["key"])})
+        for k, v in res["skipped"].items():
+            skipped[k] = skipped.get(k, 0) + v
+        notes += res["notes"]
+        series.append({"key": n, "name": name, "model": os.path.basename(model_path), "criterion": gc.to_dict(crit), "formula": gc.formula(crit)})
+    return {"rows": rows, "skipped": skipped, "notes": notes, "series": series}

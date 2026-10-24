@@ -377,10 +377,12 @@ export const getWellProfile = (model: string, wells: string[], date: string, sgr
 
 export interface CompareRow {
   key: string; well: string; group: string; date: string; season: string; slice: string; slice_why: string; pack: string; label: string
-  fact: number; model: number | null; delta: number | null; status: string; excluded: boolean
+  fact: number; model: number | null; delta: number | null; status: string; excluded: boolean; series?: string
 }
-export interface CompareResult { rows: CompareRow[]; skipped: Record<string, number>; notes: string[] }
-export const comparePlanshet = (body: { model: string; wells: string[]; thr: number; slices: Record<string, string>; alts: Record<string, string>; criterion?: CriterionCfg }) =>
+export interface CompareSeries { key: number; name: string; model: string; criterion: CriterionCfg; formula: string }
+export interface CompareResult { rows: CompareRow[]; skipped: Record<string, number>; notes: string[]; series: CompareSeries[] }
+/** Сочетания «модель × критерий»: models — список, variants — список критериев (без них берётся criterion). */
+export const comparePlanshet = (body: { models: string[]; variants?: CriterionCfg[]; wells: string[]; thr: number; slices: Record<string, string>; alts: Record<string, string>; criterion?: CriterionCfg }) =>
   call<CompareResult>('/api/planshet/compare', post(body))
 
 export interface HmRow { key: string; well: string; group: string; hist: number; model: number; diff: number; hist_avg: number; model_avg: number; diff_avg: number
