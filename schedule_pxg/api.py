@@ -780,15 +780,20 @@ async def sources_set(request: Request):
 async def planshet_compare(request: Request):
     """Сравнение ГВК факт/модель: {model, wells?, thr?, slices?{«скв|дата замера»: дата среза}, excluded?[ключи], alts?{скв: м}}."""
     b = await request.json()
-    model = _clean(b.get("model"))
-    if not model:
+    models = [m for m in (_clean(x) for x in (b.get("models") or [b.get("model")])) if m]
+    if not models:
         return _err("Модель с результатами не выбрана", 404)
     try:
+        from tnav_results import gwc_criterion as gc
         alts = {str(k): float(str(v).replace(",", ".")) for k, v in (b.get("alts") or {}).items() if str(v).strip()}
-        crit = results.criterion_from(b.get("criterion"))
+        default = gc.Criterion("sg_sgcr", 0.0, float(b.get("thr") or 0.01))      # без критерия — прежнее: Sg > SGCR из INIT
+        crits = [gc.validate(gc.from_dict(v, default)) for v in (b.get("variants") or [])] or [gc.validate(gc.from_dict(b.get("criterion"), default))]
+        combos = [(m, c) for m in models for c in crits]
+        if len(combos) > gc.MAX_VARIANTS:
+            return _err("Сочетаний модель × критерий: %d, больше %d. Уменьшите число моделей или вариантов" % (len(combos), gc.MAX_VARIANTS))
         return JSONResponse(await run_in_threadpool(
-            planshet.compare_view, _project(), model, [str(w) for w in b.get("wells") or []], float(b.get("thr") or 0.01),
-            b.get("slices") or {}, b.get("excluded") or [], alts, crit))
+            planshet.compare_combos, _project(), combos, [str(w) for w in b.get("wells") or []],
+            b.get("slices") or {}, b.get("excluded") or [], alts))
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось сравнить ГВК: %s" % e)
 
