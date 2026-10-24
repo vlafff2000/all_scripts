@@ -24,7 +24,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, histmodel, historymode, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
+from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, histmodel, historymode, model_compare, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .gdi_adapt import export_charts
 from .project import Project
 
@@ -1086,6 +1086,33 @@ async def results_series(request: Request):
     return JSONResponse({"keyword": kw, "series": {o: {"dates": [str(d.date()) for d, _ in r], "values": [v for _, v in r]} for o, r in data.items()}})
 
 
+async def results_compare_pressure(request: Request):
+    """Сравнение моделей по давлению замерного фонда: {models: [{name, path}], measured: [{well, date, p}], keyword?, tolerance_days?, excluded?}."""
+    b = await request.json()
+    models = [m for m in (b.get("models") or []) if isinstance(m, dict) and _clean(m.get("path"))]
+    if not models:
+        return _err("Не выбрана ни одна модель с результатами", 404)
+    kw = (_clean(b.get("keyword")) or "WBHP").upper()
+    if kw not in ("WBHP", "WBP", "WBP4", "WBP9"):
+        return _err("Вид давления должен быть WBHP, WBP, WBP4 или WBP9")
+
+    def run():
+        series = {}
+        for m in models:
+            name = _clean(m.get("name")) or os.path.basename(_clean(m.get("path")).rstrip("\\/"))
+            path = _clean(m["path"])
+            if not results.find_files(path):
+                raise ValueError("В папке модели нет файлов сводки: %s" % name)
+            series[name] = results.series(results.load_summary(path), kw)
+        return model_compare.compare(b.get("measured") or [], series, tolerance_days=b.get("tolerance_days", model_compare.DEFAULT_TOLERANCE_DAYS),
+                                     excluded=b.get("excluded") or [], series_kind=kw)
+
+    try:
+        return JSONResponse(await run_in_threadpool(run))
+    except (ValueError, OSError, KeyError, TypeError) as e:
+        return _err("Не удалось сравнить давления: %s" % e)
+
+
 async def results_histmodel(request: Request):
     """История/модель по газу: {model, settings?, seasons?, excluded?, unit_k?}; присланное запоминается в проекте."""
     b = await request.json()
@@ -1492,6 +1519,7 @@ def build_app() -> Starlette:
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
         Route("/api/criterion/presets", criterion_presets),
+        Route("/api/results/compare/pressure", results_compare_pressure, methods=["POST"]),
         Route("/api/results/histmodel", results_histmodel, methods=["POST"]),
         Route("/api/results/histmodel/xlsx", results_histmodel_xlsx, methods=["POST"]),
         Route("/api/results/wellgwc", results_well_gwc),
