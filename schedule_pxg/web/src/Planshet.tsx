@@ -3,7 +3,8 @@ import { MultiSelect } from '../../../pxg_core/web-ui/MultiSelect'
 import '../../../pxg_core/web-ui/multiselect.css'
 import PageHead from './PageHead'
 import GwcCompare from './GwcCompare'
-import { FactWell, GisObs, ModelEntry, WellProfile, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
+import CriterionPicker from './CriterionPicker'
+import { CriterionCfg, FactWell, GisObs, ModelEntry, WellProfile, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
 
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
@@ -160,7 +161,7 @@ export default function Planshet() {
   const [allInSeason, setAllInSeason] = useState(false)             // подсказка: все замеры сезона, а не последний
   const [manual, setManual] = useState<Record<string, boolean>>({}) // ручной выбор замеров главнее подсказки
   const [pasted, setPasted] = useState('')
-  const [thr, setThr] = useState('0.01')
+  const [crit, setCrit] = useState<CriterionCfg>({ logic: 'sg_sgcr', value: 0, fallback: 0.01 })
   const [models, setModels] = useState<ModelEntry[]>([])
   const [wellsOut, setWellsOut] = useState<WellOut[]>([])
   const [zFrom, setZFrom] = useState('')
@@ -226,7 +227,7 @@ export default function Planshet() {
     for (const m of models) {
       for (const [day, group] of Object.entries(byDate)) {
         try {
-          const r = await getWellProfile(m.id, group.map(g => g.fact.well), day, thr.replace(',', '.'))
+          const r = await getWellProfile(m.id, group.map(g => g.fact.well), day, '', crit)
           group.forEach(g => g.profiles.push({ model: m, p: r.rows.find(x => x.well === g.fact.well) || null, stepDate: r.step_date }))
         } catch (e) { group.forEach(g => g.profiles.push({ model: m, p: null, stepDate: '', err: (e as Error).message })) }
       }
@@ -291,7 +292,7 @@ export default function Planshet() {
           Замеры можно отметить и вручную — ручной выбор главнее подсказки. {catalog.wells.length ? '' : 'Выберите базу ГИС, чтобы получить список скважин.'}</p>
         <div className="row" style={{ flexWrap: 'wrap' }}>
           <button className="primary" disabled={busy || !gisFolder || !chosen.length} onClick={build}>Построить ({chosen.length})</button>
-          <span className="muted small">Порог Sg:</span><input style={{ width: 60 }} value={thr} onChange={e => setThr(e.target.value)} />
+          <CriterionPicker value={crit} onChange={setCrit} />
           <span className="muted small">Шкала, м а.о. от:</span><input style={{ width: 70 }} placeholder="авто" value={zFrom} onChange={e => setZFrom(e.target.value)} />
           <span className="muted small">до:</span><input style={{ width: 70 }} placeholder="авто" value={zTo} onChange={e => setZTo(e.target.value)} />
         </div>
@@ -321,7 +322,7 @@ export default function Planshet() {
               {tracks.map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
         </div>}
       </section>
-      <GwcCompare models={models} thr={thr} alts={alts} />
+      <GwcCompare models={models} criterion={crit} alts={alts} />
     </main>
   )
 }

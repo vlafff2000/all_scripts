@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
-import { CompareResult, CompareRow, ModelEntry, comparePlanshet } from './api'
+import { CompareResult, CompareRow, CriterionCfg, ModelEntry, comparePlanshet } from './api'
 
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 
@@ -15,7 +15,7 @@ function stat(d: number[]): Stat | null {
     mae: d.reduce((a, b) => a + Math.abs(b), 0) / n, rmse: Math.sqrt(d.reduce((a, b) => a + b * b, 0) / n), min: s[0], max: s[n - 1], share: d.filter(x => Math.abs(x) < 1).length / n }
 }
 
-export default function GwcCompare({ models, thr, alts }: { models: ModelEntry[]; thr: string; alts: Record<string, string> }) {
+export default function GwcCompare({ models, criterion, alts }: { models: ModelEntry[]; criterion: CriterionCfg; alts: Record<string, string> }) {
   const [modelId, setModelId] = useState('')
   const [wells, setWells] = useState('')
   const [res, setRes] = useState<CompareResult | null>(null)
@@ -29,7 +29,8 @@ export default function GwcCompare({ models, thr, alts }: { models: ModelEntry[]
   const run = async (sl: Record<string, string>) => {
     setBusy(true); setMsg('')
     try {
-      setRes(await comparePlanshet({ model, wells: wells.split(/[;,|\s]+/).map(x => x.trim()).filter(Boolean), thr: Number(thr.replace(',', '.')) || 0.01, slices: sl, alts }))
+      const thr = criterion.logic === 'sg' ? criterion.value : criterion.fallback
+      setRes(await comparePlanshet({ model, wells: wells.split(/[;,|\s]+/).map(x => x.trim()).filter(Boolean), thr, slices: sl, alts, criterion }))
     } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
   }
   const setSlice = (r: CompareRow, v: string) => { const sl = { ...slices }; const k = r.well + '|' + r.date; if (v) sl[k] = v; else delete sl[k]; setSlices(sl); run(sl) }

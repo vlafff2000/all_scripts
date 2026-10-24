@@ -192,13 +192,14 @@ def _profile_job(job):
     """Профили скважин на одну дату среза (для процессов): {скважина: ячейки колонны}."""
     import datetime as dt
     from . import results
-    model_path, day, wells, thr = job
-    rows, _info = results.well_profile(model_path, dt.datetime.combine(dt.date.fromisoformat(day), dt.time()), wells, thr)
+    model_path, day, wells, thr, *rest = job
+    criterion = rest[0] if rest else None
+    rows, _info = results.well_profile(model_path, dt.datetime.combine(dt.date.fromisoformat(day), dt.time()), wells, thr, criterion)
     return {r["well"]: r["cells"] for r in rows}
 
 
 def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float = 0.01, slices: Optional[Dict[str, str]] = None,
-                 excluded: Sequence[str] = (), alts: Optional[Dict[str, float]] = None) -> dict:
+                 excluded: Sequence[str] = (), alts: Optional[Dict[str, float]] = None, criterion=None) -> dict:
     """Сравнение факта ГИС с моделью по всем замерам выбранных скважин (пусто — все скважины базы ГИС)."""
     import datetime as dt
     from . import gwc_compare, results, sources
@@ -219,7 +220,7 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
         notes.append("Эталонный суточный объём не задан: срез модели взят на дату замера")
 
     def profiles(day, ws):
-        rows, _info = results.well_profile(model_path, dt.datetime.combine(day, dt.time()), ws, thr)
+        rows, _info = results.well_profile(model_path, dt.datetime.combine(day, dt.time()), ws, thr, criterion)
         return {r["well"]: r["cells"] for r in rows}
 
     def profiles_many(by_date):
@@ -230,7 +231,7 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
         except (OSError, KeyError):
             mb = 500.0
         # срезы независимы: каждая дата считается в своём процессе (сетка из дискового кэша), порядок и результат те же
-        got = map_jobs(_profile_job, [(model_path, d.isoformat(), list(by_date[d]), thr) for d in days], mb)
+        got = map_jobs(_profile_job, [(model_path, d.isoformat(), list(by_date[d]), thr, criterion) for d in days], mb)
         return dict(zip(days, got))
 
     out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names},
@@ -238,7 +239,7 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
     out["notes"] = notes
     try:                                    # «Карты» читают последнее сравнение; нет прав на запись — не помеха расчёту
         from tnav_results import gwc_share
-        gwc_share.save(os.path.basename(model_path), thr, out["rows"], not list(wells))
+        gwc_share.save(os.path.basename(model_path), thr, out["rows"], not list(wells), criterion)
     except OSError:
         pass
     return out

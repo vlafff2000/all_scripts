@@ -19,11 +19,11 @@ def share_path() -> str:
     return os.path.join(os.path.dirname(folders_path()), "gwc_compare.json")
 
 
-def save(model: str, thr: float, rows: List[dict], wells_all: bool) -> None:
+def save(model: str, thr: float, rows: List[dict], wells_all: bool, criterion=None) -> None:
     """Пишет строки сравнения; wells_all=False — сравнение по части скважин (в «Картах» это видно в пояснении)."""
     path = share_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    data = {"model": model, "thr": thr, "saved": dt.datetime.now().isoformat(timespec="seconds"), "wells_all": bool(wells_all),
+    data = {"model": model, "thr": thr, "criterion": criterion, "saved": dt.datetime.now().isoformat(timespec="seconds"), "wells_all": bool(wells_all),
             "rows": [{k: r.get(k) for k in KEYS} for r in rows]}
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
