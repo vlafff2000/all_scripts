@@ -60,6 +60,9 @@ export const gisAllDepth = pref<'cell' | 'interp'>('gsp.gisAllDepth', 'cell', ra
 export const gisAllPreset = pref<string>('gsp.gisAllPreset', 'sg_sgcr', raw => String(raw || 'sg_sgcr'))
 export const gisAllOutlier = pref<string>('gsp.gisAllOutlier', '10', raw => String(raw ?? '10'))
 export const gisAllExcl = pref<string>('gsp.gisAllExcl', '', raw => String(raw || ''))
+/** Несколько вариантов критерия сразу (изолинии разными цветами) и их набор, «пресет:значения;…». */
+export const gisAllMulti = pref<boolean>('gsp.gisAllMulti', false)
+export const gisAllSpec = pref<string>('gsp.gisAllSpec', 'sg_sgcr:0;0,1', raw => String(raw || 'sg_sgcr:0;0,1'))
 export const gisIsoReach = pref<string>('gsp.gisIsoReach', '1.5', raw => String(raw || '1.5'))
 export const modelKeyword = pref<string>('gsp.modelKeyword', 'WBHP', raw => String(raw || 'WBHP'))
 export const modelAgg = pref<string>('gsp.modelAgg', 'mean', raw => String(raw || 'mean'))

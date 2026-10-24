@@ -174,6 +174,32 @@ async def gis_model_wells(request: Request):
         return _err("ГВК по всем скважинам не построен (%s: %s). Подробности в логе (кнопка «Лог»)." % (type(e).__name__, str(e)[:300] or "без текста"), 500)
 
 
+async def gis_model_wells_variants(request: Request):
+    """ГВК всех скважин по нескольким критериям: ?model=, ?date=, ?spec=[["sg_sgcr",[0,0.1]],...] (пресет и значения запаса)."""
+    from . import model_gwc
+    from tnav_results import gwc_criterion as gc
+    q = request.query_params
+    path = q.get("model") or ""
+    if not path:
+        return _err("Модель для ГВК по всем скважинам не выбрана.", 404)
+    try:
+        spec = json.loads(q.get("spec") or "[]")
+        items = gc.variants([(str(pid), [float(v) for v in vals]) for pid, vals in spec])
+    except (ValueError, TypeError) as e:
+        return _err("Варианты критерия не разобраны: %s" % e)
+    try:
+        with runlog.timed("Карты: ГВК модели по критериям", модель=os.path.basename(path), вариантов=len(items)) as t:
+            r = await run_in_threadpool(model_gwc.all_wells_variants, path, q.get("date") or "", items)
+            t["вариантов_посчитано"] = len(r["variants"])
+        return JSONResponse(r)
+    except (ValueError, OSError, KeyError, IndexError) as e:
+        runlog.log.warning("ГВК по критериям не построен (%s): %s", path, e, exc_info=True)
+        return _err("ГВК по критериям не построен: %s" % e)
+    except Exception as e:
+        runlog.log.exception("ГВК по критериям: непредвиденная ошибка (%s)", path)
+        return _err("ГВК по критериям не построен (%s: %s). Подробности в логе (кнопка «Лог»)." % (type(e).__name__, str(e)[:300] or "без текста"), 500)
+
+
 async def client_log(request: Request):
     """Сбой или пустой результат, замеченный в окне (изолинии, кровля): пишется в лог, чтобы разработчик видел причину, а не «ничего нет»."""
     try:
@@ -382,6 +408,7 @@ def build_app() -> Starlette:
         Route("/api/gis/values", gis_values),
         Route("/api/gis/model", gis_model),
         Route("/api/gis/model-wells", gis_model_wells),
+        Route("/api/gis/model-wells-variants", gis_model_wells_variants),
         Route("/api/observers", observers_get),
         Route("/api/observers/mark", observers_mark, methods=["POST"]),
         Route("/api/roof", roof),

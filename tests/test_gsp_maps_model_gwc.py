@@ -35,3 +35,14 @@ def test_missing_restart_is_an_error(tmp_path):
     anchor = _egrid(tmp_path / "M.EGRID")
     with pytest.raises(ValueError):
         model_gwc.all_wells(anchor, None, _crit(0.3))
+
+
+def test_variants_return_one_result_per_criterion(tmp_path):
+    from tnav_results import gwc_criterion as gc
+    anchor = _egrid(tmp_path / "M.EGRID")
+    _unrst(tmp_path / "M.UNRST", [SG, SG], [PORV, PORV], with_wells=True)
+    items = gc.variants([("sg_threshold", [0.3, 0.95])])
+    r = model_gwc.all_wells_variants(anchor, None, items)
+    assert [v["label"] for v in r["variants"]] == [it.label for it in items]
+    assert len(r["variants"][0]["points"]) == 1 and r["variants"][1]["points"] == []
+    assert r["date"] == "2026-02-01"

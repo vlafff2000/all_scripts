@@ -1,5 +1,5 @@
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
-import type { GisModelWells } from './allWells'
+import type { GisModelWells, GisVariants } from './allWells'
 export interface FileCheck { id: string; label: string; path: string; ok: boolean; info: string }
 export interface AtlasProject { id: string; name: string; updated: string; demo: boolean; tables: Record<string, number> }
 export interface AtlasInfo { storage: string; fromEnv: boolean; project: string; chosen: boolean; url: string; projects: AtlasProject[] }
@@ -128,6 +128,8 @@ export interface GisValues { values: Record<string, number>; dates: Record<strin
 export interface GisModel { model: Record<string, number>; delta: Record<string, number>; dates: Record<string, string>; info: string; warnings: string[] }
 export const getGisModel = (pack: string, season: string) => call<GisModel>('/api/gis/model?' + new URLSearchParams({ pack, season }))
 /** ГВК всех скважин модели на шаге рестарта у даты («» — последний); preset — пресет критерия «газ». */
+/** ГВК всех скважин модели по нескольким критериям (варианты из настройки, см. parseSpec). */
+export const getGisModelWellsVariants = (model: string, date: string, spec: [string, number[]][]) => call<GisVariants>('/api/gis/model-wells-variants?' + new URLSearchParams({ model, date, spec: JSON.stringify(spec) }))
 export const getGisModelWells = (model: string, date: string, preset: string) => call<GisModelWells>('/api/gis/model-wells?' + new URLSearchParams({ model, date, preset }))
 /** Кровля пласта из модели: растр отметок (а.о.) верха ячеек слоя; строки идут по возрастанию Y, пропуск — null. */
 export interface RoofGrid { x0: number; y0: number; dx: number; dy: number; nx: number; ny: number; z: (number | null)[][]; layers: number; note: string; mapaxes?: boolean }
