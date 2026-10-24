@@ -4,14 +4,25 @@ import '../../../pxg_core/web-ui/multiselect.css'
 import PageHead from './PageHead'
 import GwcCompare from './GwcCompare'
 import CriterionPicker from './CriterionPicker'
-import { CriterionCfg, FactWell, GisObs, ModelEntry, WellProfile, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
+import { CriterionCfg, CriterionPreset, FactWell, GisObs, ModelEntry, WellProfile, getCriterionPresets, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
 
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
 
-interface Track { title: string; sub: string; gwc: { label: string; z: number | null }[]; bars: { top: number; bottom: number; v: number }[]; note?: string }
+interface Track { title: string; sub: string; gwc: { label: string; z: number | null }[]; bars: { top: number; bottom: number; v: number }[]; note?: string; color?: string }
 
 const W = 150, PAD = 8, AXIS = 56, HEAD = 46
+
+/** Цвет линии ГВК модели — по порядку модели в «Результатах расчёта»; факт остаётся цветом воды. */
+const SERIES = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#8c564b', '#e377c2']
+const seriesColor = (i: number) => SERIES[(i < 0 ? 0 : i) % SERIES.length]
+const wrapText = (s: string, n: number) => {
+  const out: string[] = []
+  let cur = ''
+  s.split(' ').forEach(w => { if (cur && (cur + ' ' + w).length > n) { out.push(cur); cur = w } else cur = cur ? cur + ' ' + w : w })
+  if (cur) out.push(cur)
+  return out
+}
 
 type Mode = 'tvdss' | 'md'
 interface Hover { z: number; cx: number; cy: number; x: number }
@@ -103,7 +114,7 @@ function WellLog({ name, tracks, perf, zMin, zMax, h, mode, alt, hz, onHover, on
           <rect x={x0} y={HEAD} width={W} height={h} fill="none" stroke="var(--chart-axis)" />
           {t.bars.map((b, k) => <rect key={k} x={x0} width={Math.max(0, Math.min(1, b.v)) * W} y={y(b.top)} height={Math.max(1, y(b.bottom) - y(b.top))} fill="var(--map-gas)" opacity={0.8} stroke="var(--chart-surface)" strokeWidth={0.5} />)}
           {t.gwc.map((g, k) => g.z === null ? null : <g key={k}>
-            <line x1={x0} x2={x0 + W} y1={y(g.z)} y2={y(g.z)} stroke="var(--map-water)" strokeWidth={2.5} strokeDasharray={k ? '5 3' : undefined} />
+            <line x1={x0} x2={x0 + W} y1={y(g.z)} y2={y(g.z)} stroke={t.color || 'var(--map-water)'} strokeWidth={2.5} strokeDasharray={k ? '5 3' : undefined} />
             <text x={x0 + W - 3} y={y(g.z) - 3} textAnchor="end" fontSize={10} fill="var(--chart-ink)">{g.label + ' ' + fmt(md ? toD(g.z) : g.z)}</text></g>)}
           {t.note && <text x={x0 + 4} y={HEAD + 14} fontSize={10} fill="var(--chart-muted)">{t.note}</text>}
         </g>
@@ -119,6 +130,29 @@ function WellLog({ name, tracks, perf, zMin, zMax, h, mode, alt, hz, onHover, on
       <b>Скв. {name}</b><br />Отметка {fmt(tip.z)} м а.о.{alt !== null ? ' · MD ' + fmt(alt - tip.z) + ' м' : ' · MD: нет альтитуды'}
       {lines(tip.z).map((l, i) => <div key={i}>{l}</div>)}</div>}
     </>
+  )
+}
+
+/** Выносная легенда справа от планшетов (тоже SVG, попадает в PNG): цвет каждой модели, критерий газа текстом, смысл линий. */
+function Legend({ entries, criterion }: { entries: { color: string; text: string }[]; criterion: string }) {
+  const crit = wrapText('Критерий газа: ' + criterion, 34)
+  const rowsTop = HEAD + 14
+  const critTop = rowsTop + (entries.length + 1) * 18 + 16
+  const ruleTop = critTop + crit.length * 14 + 14
+  const height = ruleTop + 2 * 18 + 16
+  return (
+    <svg width={250} height={Math.max(height, HEAD + 200)} role="img" aria-label="Легенда планшета"
+      style={{ background: 'var(--chart-surface)', border: '1px solid var(--line)', borderRadius: 6, flex: '0 0 auto' }}>
+      <text x={8} y={HEAD - 20} fontSize={11} fontWeight={700} fill="var(--chart-ink)">Легенда</text>
+      {[{ color: 'var(--map-water)', text: 'ГВК факт (ГИС по пачкам)' }, ...entries].map((e, i) => <g key={i}>
+        <line x1={8} x2={36} y1={rowsTop + i * 18 - 4} y2={rowsTop + i * 18 - 4} stroke={e.color} strokeWidth={2.5} />
+        <text x={42} y={rowsTop + i * 18} fontSize={11} fill="var(--chart-ink)">{e.text}</text></g>)}
+      {crit.map((line, i) => <text key={'c' + i} x={8} y={critTop + i * 14} fontSize={10} fill="var(--chart-muted)">{line}</text>)}
+      <line x1={8} x2={36} y1={ruleTop} y2={ruleTop} stroke="var(--chart-ink)" strokeWidth={2} />
+      <text x={42} y={ruleTop + 4} fontSize={10} fill="var(--chart-muted)">граница ячейки модели</text>
+      <line x1={8} x2={36} y1={ruleTop + 18} y2={ruleTop + 18} stroke="var(--chart-ink)" strokeWidth={2} strokeDasharray="5 3" />
+      <text x={42} y={ruleTop + 22} fontSize={10} fill="var(--chart-muted)">интерполяция Sg</text>
+    </svg>
   )
 }
 
@@ -162,6 +196,8 @@ export default function Planshet() {
   const [manual, setManual] = useState<Record<string, boolean>>({}) // ручной выбор замеров главнее подсказки
   const [pasted, setPasted] = useState('')
   const [crit, setCrit] = useState<CriterionCfg>({ logic: 'sg_sgcr', value: 0, fallback: 0.01 })
+  const [built, setBuilt] = useState<CriterionCfg | null>(null)     // критерий, с которым построен планшет (легенда показывает его, а не текущий выбор)
+  const [presets, setPresets] = useState<CriterionPreset[]>([])
   const [models, setModels] = useState<ModelEntry[]>([])
   const [wellsOut, setWellsOut] = useState<WellOut[]>([])
   const [zFrom, setZFrom] = useState('')
@@ -180,6 +216,7 @@ export default function Planshet() {
   useEffect(() => {
     getSources().then(v => { setGisFolder(v.sources.gis?.folder || ''); setPerfFile(v.sources.gis?.perf_file || ''); if (v.sources.gis?.folder) loadCatalog() }).catch(() => undefined)
     getModels().then(v => setModels(v.models.filter(m => m.selected))).catch(e => setMsg((e as Error).message))
+    getCriterionPresets().then(r => setPresets(r.presets)).catch(() => undefined)
   }, [])
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   const saveGis = (folder: string, perf: string) => guard(async () => { await setSources({ gis: { folder, perf_file: perf } }); setGisFolder(folder); setPerfFile(perf); if (folder) await loadCatalog() })
@@ -238,16 +275,21 @@ export default function Planshet() {
       if (!w) { w = { well: it.fact.well, perf: it.fact.perforation, items: [] }; out.push(w) }
       w.items.push(it)
     })
+    setBuilt(crit)
     setWellsOut(out)
   })
 
   const handGwc = (w: string) => { const z = Number((hand[w] || '').replace(',', '.')); return hand[w] && !isNaN(z) ? [{ label: 'ручн.', z }] : [] }
+  const critText = (c: CriterionCfg) => {
+    const p = presets.find(x => x.logic === c.logic && x.value === c.value && x.fallback === c.fallback)
+    return p ? p.formula : 'ручной: ' + c.logic + ', порог ' + c.value + ', SGCR нет — ' + c.fallback
+  }
   const tracksOfItem = ({ fact, profiles }: Item): Track[] => {
     const tr: Track[] = [{ title: 'ГИС, факт', sub: (fact.season || 'замер') + (fact.date ? ' · ' + fact.date : ''),
       bars: fact.intervals.filter(i => i.kg !== null).map(i => ({ top: i.top, bottom: i.bottom, v: i.kg as number })),
       gwc: [...fact.packs.map(p => ({ label: 'ГВК', z: p.gvk })), ...handGwc(fact.well)], note: fact.intervals.length ? undefined : 'нет интервалов' }]
     profiles.filter(x => !hidden.includes(x.model.id)).forEach(({ model, p, stepDate, err }) => tr.push({
-      title: model.name, sub: err ? 'ошибка' : 'Sg · шаг ' + (stepDate || '—'),
+      title: model.name, sub: err ? 'ошибка' : 'Sg · шаг ' + (stepDate || '—'), color: seriesColor(models.findIndex(m => m.id === model.id)),
       bars: (p?.cells || []).map(c => ({ top: c.top, bottom: c.bottom, v: c.sg })),
       gwc: p?.gwc ? [{ label: 'ГВК', z: p.gwc.cell }, { label: 'ГВК инт.', z: p.gwc.interp }] : [], note: err ? err.slice(0, 28) : p ? undefined : 'нет ячеек скважины' }))
     return tr
@@ -314,9 +356,10 @@ export default function Planshet() {
           <div ref={boxRef} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
             {wellsOut.map((o, i) => <WellLog key={o.well} name={o.well} tracks={trackSets[i]} perf={o.perf} zMin={zMin} zMax={zMax} h={560}
               mode={mode} alt={o.items[0]?.fact.altitude ?? null} hz={hz} onHover={setHz} onView={setView} onReset={resetView} />)}
+            <Legend criterion={critText(built ?? crit)} entries={models.filter(m => !hidden.includes(m.id)).map(m => ({ color: seriesColor(models.indexOf(m)), text: 'Модель ' + m.name }))} />
           </div>
           <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус); шкала глубины и шкалы 0…1 одинаковые у всех скважин. Узкая полоса слева — перфорация. Колесо мыши — масштаб, перетаскивание — сдвиг, двойной щелчок — сброс; подсказка — по наведению. MD = альтитуда − отметка (для наклонной скважины приближение).
-            Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у модели — как в «Результатах расчёта → ГВК по скважинам»: сверху вниз, граница ячейки (сплошная) и интерполяция Sg (пунктир); газ — Sg выше критической SGCR из INIT, иначе порога. Порог применяется при «Построить».</p>
+            Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у каждой модели — свой цвет (легенда справа): сверху вниз, граница ячейки (сплошная) и интерполяция Sg (пунктир). Газ — по критерию, который указан в легенде; критерий применяется при «Построить».</p>
           {rowsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Сезон</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.filter(m => !hidden.includes(m.id)).map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
             <tbody>{rowsOut.map(({ it, tracks }) => <tr key={it.fact.well + it.fact.date}><td>{it.fact.well}</td><td>{it.fact.date || '—'}</td><td>{it.fact.season || '—'}</td><td className="num">{fmt(it.fact.altitude)}</td>
               {tracks.map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
