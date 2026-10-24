@@ -49,7 +49,7 @@ PXG_BASE_MODULES = {
 GSP_MAPS_MODULES = {'api', 'atlas_source', 'gis_source', 'inputs', 'model_gwc', 'models', 'observers', 'project', 'roof', 'store', 'wellmap'}
 SCHEDULE_MODULES = {
     'adapt_view', 'api', 'averaging', 'avg_view', 'charts', 'checks', 'control', 'daily', 'dataquality', 'forecast',
-    'atlas_data', 'gwc_compare', 'histmodel', 'history', 'historymode', 'outages', 'planshet', 'project', 'results', 'scenarios', 'sources', 'strategy',
+    'atlas_data', 'gwc_compare', 'histmodel', 'history', 'historymode', 'model_compare', 'outages', 'planshet', 'project', 'results', 'scenarios', 'sources', 'strategy',
     'strategy_ops', 'techmap', 'totals', 'wizard',
 }
 
