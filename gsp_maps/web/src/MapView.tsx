@@ -4,6 +4,7 @@ import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, grou
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
+import { AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells } from './allWells'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, gwcContour, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcContour, type IsoResult, type RoofRaster } from './model'
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
@@ -19,8 +20,10 @@ export interface GisPicker {
   obs: { on: boolean; data: Observers | null; onToggle: (v: boolean) => void; onMark: (well: number, kind: 'obs' | 'prod' | 'auto') => void }
   source: 'fact' | 'model' | 'delta'; modelInfo: string; error?: string
   gwc: { on: boolean; mode: 'plane' | 'idw' }
+  /** ГВК по всем скважинам модели (выключено по умолчанию): модель, срез, способ и глубина, порог Sg, порог подсказки о выбросе, исключённые скважины. */
+  allWells: { on: boolean; model: string; models: TnavModel[]; date: string; dates: string[]; mode: AwMode; depth: AwDepth; preset: string; presets: { id: string; title: string }[]; outlier: string; excl: Set<string>; data: GisModelWells | null; err: string; fact: Record<string, number> | null }
   roof: { on: boolean; model: string; layer: string; step: string; models: TnavModel[]; note: string; grid: RoofRaster | null }
-  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string; gwcOn?: boolean; gwcMode?: 'plane' | 'idw' }) => void
+  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string; gwcOn?: boolean; gwcMode?: 'plane' | 'idw'; awOn?: boolean; awModel?: string; awDate?: string; awMode?: AwMode; awDepth?: AwDepth; awPreset?: string; awOutlier?: string; awToggle?: string; awReset?: boolean }) => void
 }
 /** Растр кровли в координатах карты (Y вниз): z по строкам, NaN — нет значения. */
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
@@ -153,7 +156,7 @@ function ObserverControls({ obs }: { obs: GisPicker['obs'] }) {
     </div>}
   </>
 }
-function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, obs, source, modelInfo, roof, gwc, gwcNote, error, onChange }: GisPicker & { gwcNote: string }) {
+function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, obs, source, modelInfo, roof, gwc, gwcNote, allWells: aw, awNote, error, onChange }: GisPicker & { gwcNote: string; awNote: string }) {
   const [well, setWell] = useState('')
   if (!catalog) return error ? <p className="note warning">{error}</p> : <p className="muted">Читаю базу ГИС…</p>
   if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
@@ -181,6 +184,20 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
       <select value={iso.reach} onChange={e => onChange({ isoReach: e.target.value })} aria-label="Радиус доверия">
         {[['1', 'Радиус доверия: 1 расстояние между скважинами'], ['1.5', 'Радиус доверия: 1,5'], ['2.5', 'Радиус доверия: 2,5'], ['4', 'Радиус доверия: 4']].map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
       <span className="muted">За краем области скважин изолинии не строятся; чем дальше от скважин, тем бледнее заливка.{isoNote ? ' ' + isoNote : ''}</span>
+    </div>}
+    <label className="check"><input type="checkbox" checked={aw.on} onChange={e => onChange({ awOn: e.target.checked })} /> ГВК по всем скважинам модели</label>
+    {aw.on && <div className="gis-pin">
+      <select value={aw.model} onChange={e => onChange({ awModel: e.target.value })} aria-label="Модель для ГВК по всем скважинам">
+        <option value="">Выберите модель…</option>{aw.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+      <select value={aw.date} onChange={e => onChange({ awDate: e.target.value })} aria-label="Срез модели">
+        {(aw.dates.length ? aw.dates : [aw.date]).filter(Boolean).map(d => <option key={d} value={d}>Срез модели: {d}</option>)}</select>
+      <select value={aw.mode} onChange={e => onChange({ awMode: e.target.value as AwMode })} aria-label="Способ ГВК">{AW_MODES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+      <select value={aw.depth} onChange={e => onChange({ awDepth: e.target.value as AwDepth })} aria-label="Глубина ГВК">{AW_DEPTHS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+      <select value={aw.preset} onChange={e => onChange({ awPreset: e.target.value })} aria-label="Критерий газа">
+        {aw.presets.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select>
+      <label className="muted">Подсказка о выбросе, м от соседей <input type="number" min={0} value={aw.outlier} onChange={e => onChange({ awOutlier: e.target.value })} aria-label="Порог выброса" style={{ width: 64 }} /></label>
+      {aw.excl.size > 0 && <button type="button" onClick={() => onChange({ awReset: true })}>Вернуть исключённые ({aw.excl.size})</button>}
+      <span className="muted">{awNote}</span>
     </div>}
     <ObserverControls obs={obs} />
     <label className="check"><input type="checkbox" checked={roof.on} onChange={e => onChange({ roofOn: e.target.checked })} /> Кровля пласта из модели</label>
@@ -365,9 +382,36 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const unit = g.layout.mode === 'xy' && !spread ? 'м' : ''
   const K = fit.s * view.k
   // изолинии показателя ГИС: только на карте в координатах (не на схеме с разнесёнными скважинами)
+  // ГВК по всем скважинам модели: колонны модели в координатах карты (Y с минусом, как у кровли); исключённые — вне изолиний
+  const awAll = useMemo((): AwPoint[] => (gis?.allWells.on && gis.allWells.data ? gis.allWells.data.points.map(p => ({ w: p.w, n: p.n, x: p.x, y: -p.y, v: awValue(p, gis.allWells.mode, gis.allWells.depth), torn: p.torn })) : []),
+    [gis?.allWells.on, gis?.allWells.data, gis?.allWells.mode, gis?.allWells.depth])
+  const awOk = useMemo(() => awAll.filter(p => !gis?.allWells.excl.has(p.w)), [awAll, gis?.allWells.excl])
+  const awRad = Math.max((Number(gis?.iso.reach) || 1.5) * spacing, 1e-9)
+  const awDev = useMemo(() => awDeviation(awOk, awRad), [awOk, awRad])
+  const awOut = Math.max(0, Number(gis?.allWells.outlier) || 0)
+  const awRes = useMemo(() => awResidual(awOk, gis?.allWells.fact ?? null), [awOk, gis?.allWells.fact])
+  const awOutN = awOk.filter(p => !p.torn && awDev.has(p.w) && Math.abs(awDev.get(p.w) as number) > awOut).length
+  const awTornN = awOk.filter(p => p.torn).length
+  const awNote = !gis?.allWells.on ? '' : gis.allWells.err ? 'ГВК по всем скважинам не получен: ' + gis.allWells.err
+    : !gis.allWells.data ? 'Выберите модель: точки строятся по колоннам всех скважин модели.'
+    : [`Точек с газом ${awAll.length}, без газа ${gis.allWells.data.no_gas.length}, исключено ${awAll.length - awOk.length}. ${gis.allWells.data.criterion}; критическая величина из ${gis.allWells.data.sgr_source}.`,
+      awRes.n ? `Невязка к ГИС (${awRes.n} скв.): медиана ${fmt1(awRes.median ?? 0)} м, средний модуль ${fmt1(awRes.mae ?? 0)} м.` : 'Невязки к ГИС нет: нет совпавших скважин или не выбран показатель ГВК.',
+      `Подсказки: разрыв контакта ${awTornN}, резкий выброс ${awOutN}. Клик по скважине исключает её из изолиний.`].join(' ')
+  // изолинии показателя ГИС: только на карте в координатах (не на схеме с разнесёнными скважинами)
   const iso = useMemo((): IsoResult | null => {
     if (options.paint !== 'gis' || !gis?.iso.on) return null
     const note = (text: string): IsoResult => ({ lines: [], conf: [], step: 0, note: text })
+    if (gis.allWells.on) {
+      if (spread) return note('На схеме с разнесёнными скважинами изолинии не строятся: выключите «Разнести скважины».')
+      if (awOk.length < 3) return note(`Изолиний нет: у модели после исключений ${awOk.length} скважин с газом (нужно не меньше трёх).`)
+      const vs = awOk.map(p => p.v)
+      const step = Number(gis.iso.step) || niceLevelStep((Math.max(...vs) - Math.min(...vs)) || 1)
+      try {
+        return isolines(awOk.map(p => ({ x: p.x, y: p.y, v: p.v })), spacing, step, Number(gis.iso.reach) || 1.5)
+      } catch (e) {
+        return note('Изолинии не построены из-за ошибки: ' + String((e as Error)?.message || e))
+      }
+    }
     if (!gis.paint) return note('Изолиний нет: для выбранной пачки, показателя и сезона нет значений по скважинам.')
     if (spread) return note('На схеме с разнесёнными скважинами изолинии не строятся: выключите «Разнести скважины».')
     try {
@@ -379,7 +423,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     } catch (e) {
       return note('Изолинии не построены из-за ошибки: ' + String((e as Error)?.message || e))
     }
-  }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, placed, spacing, spread])
+  }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, gis?.allWells.on, awOk, placed, spacing, spread])
   // изолинии кровли из модели: тонкие линии под скважинами, шаг подбирается или задаётся; любой исход объясняется на экране
   const roofRes = useMemo((): { lines: ReturnType<typeof contourLines> | null; warn: string } => {
     const r = gis?.roof.grid
@@ -680,6 +724,17 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               {iso.lines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
                 <text x={l.at[0]} y={l.at[1]} fontSize={11 / K} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{fmt1(l.level)}</text></g>)}
             </g>}
+            {gis?.allWells.on && awAll.length > 0 && <g aria-label="Скважины модели с ГВК">
+              {awAll.map(p => {
+                const ex = gis.allWells.excl.has(p.w), dev = awDev.get(p.w), bad = !ex && (p.torn || (dev !== undefined && Math.abs(dev) > awOut))
+                const tag = ex ? ' · исключена' : p.torn ? ' · разрыв контакта' : dev !== undefined && bad ? ` · ${dev > 0 ? '+' : ''}${fmt1(dev)} м от соседей` : ''
+                return <g key={p.w} style={{ cursor: 'pointer' }} onClick={e => { e.stopPropagation(); gis.onChange({ awToggle: p.w }) }}>
+                  <title>{`${p.w}: ${fmt1(p.v)} м${tag}. Клик — исключить или вернуть`}</title>
+                  <circle cx={p.x} cy={p.y} r={4 / K} fill={ex ? pal.muted : bad ? pal.accent : pal.ink} opacity={ex ? 0.35 : 1} stroke={pal.bg} strokeWidth={1 / K} />
+                  {(bad || ex) && <text x={p.x} y={p.y - 7 / K} fontSize={10 / K} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{p.w}{tag}</text>}
+                </g>
+              })}
+            </g>}
             {layer}
             {obsLayer}
           </g>
@@ -756,7 +811,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
             </>}
-            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} gwcNote={gwc?.note ?? ''} roof={{ ...gis.roof, note: [gis.roof.note, roofWarn].filter(Boolean).join(' ') }} />}
+            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} gwcNote={gwc?.note ?? ''} awNote={awNote} roof={{ ...gis.roof, note: [gis.roof.note, roofWarn].filter(Boolean).join(' ') }} />}
             {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
             {!paintData && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
