@@ -148,6 +148,27 @@ async def gis_model(request: Request):
         return _err("ГВК модели не прочитан (%s: %s). Подробности в логе (кнопка «Лог»)." % (type(e).__name__, str(e)[:300] or "без текста"), 500)
 
 
+async def gis_model_wells(request: Request):
+    """ГВК всех скважин модели на шаге рестарта у даты (?model=путь к файлу модели, ?date=ГГГГ-ММ-ДД, ?thr=порог Sg); пусто — последний шаг."""
+    from . import model_gwc
+    q = request.query_params
+    path = q.get("model") or ""
+    if not path:
+        return _err("Модель для ГВК по всем скважинам не выбрана.", 404)
+    try:
+        thr = float(q.get("thr") or 0.01)
+        with runlog.timed("Карты: ГВК модели по всем скважинам", модель=os.path.basename(path)) as t:
+            r = await run_in_threadpool(model_gwc.all_wells, path, q.get("date") or "", thr)
+            t["скважин_с_газом"] = len(r["points"])
+        return JSONResponse(r)
+    except (ValueError, OSError, KeyError, IndexError) as e:
+        runlog.log.warning("ГВК по всем скважинам не построен (%s): %s", path, e, exc_info=True)
+        return _err("ГВК по всем скважинам не построен: %s" % e)
+    except Exception as e:
+        runlog.log.exception("ГВК по всем скважинам: непредвиденная ошибка (%s)", path)
+        return _err("ГВК по всем скважинам не построен (%s: %s). Подробности в логе (кнопка «Лог»)." % (type(e).__name__, str(e)[:300] or "без текста"), 500)
+
+
 async def client_log(request: Request):
     """Сбой или пустой результат, замеченный в окне (изолинии, кровля): пишется в лог, чтобы разработчик видел причину, а не «ничего нет»."""
     try:
@@ -355,6 +376,7 @@ def build_app() -> Starlette:
         Route("/api/gis", gis_catalog),
         Route("/api/gis/values", gis_values),
         Route("/api/gis/model", gis_model),
+        Route("/api/gis/model-wells", gis_model_wells),
         Route("/api/observers", observers_get),
         Route("/api/observers/mark", observers_mark, methods=["POST"]),
         Route("/api/roof", roof),
