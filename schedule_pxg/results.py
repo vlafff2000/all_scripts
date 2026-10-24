@@ -94,7 +94,27 @@ def describe(path: str) -> dict:
     return info
 
 
-def indicators(path: str, dates: Optional[Sequence[dt.datetime]] = None, threshold: Optional[float] = None) -> Tuple[List[dict], List[str]]:
+def criterion_from(raw, default=None):
+    """Критерий газа из запроса (JSON-строка или словарь): пусто — None, и расчёт идёт прежним путём (порог или SGCR)."""
+    import json
+    from tnav_results.gwc_criterion import from_dict
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        raise ValueError("Критерий газа: неверный формат")
+    return from_dict(d, default)
+
+
+def criterion_presets() -> List[dict]:
+    """Пресеты критерия газа для выпадающего списка, с формулой текстом."""
+    from tnav_results import gwc_criterion as gc
+    return [{**p, "formula": gc.formula(gc.preset(p["id"]))} for p in gc.PRESETS]
+
+
+def indicators(path: str, dates: Optional[Sequence[dt.datetime]] = None, threshold: Optional[float] = None,
+               criterion=None) -> Tuple[List[dict], List[str]]:
     """Газонасыщенный поровый объём и ГВК (min/среднее/среднее по площади/max) по датам.
 
     dates — нужные даты (берётся ближайший шаг рестарта); без дат — все шаги UNRST. Порог Sg по умолчанию 0,01.
@@ -116,7 +136,7 @@ def indicators(path: str, dates: Optional[Sequence[dt.datetime]] = None, thresho
         all_steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
         picked = {pick_step(all_steps, d).seqnum: pick_step(all_steps, d) for d in dates}
         steps = [picked[k] for k in sorted(picked)]
-    rows = indicators_over_time(model, f["INIT"], f["UNRST"], th, steps=steps, egrid_path=f["EGRID"])
+    rows = indicators_over_time(model, f["INIT"], f["UNRST"], th, steps=steps, egrid_path=f["EGRID"], criterion=criterion)
     if not rows:
         raise ValueError("В UNRST нет SGAS: газонасыщенность не записана")
     out = []
@@ -127,7 +147,7 @@ def indicators(path: str, dates: Optional[Sequence[dt.datetime]] = None, thresho
 
 
 def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Optional[float] = None,
-             wells: Optional[Sequence[str]] = None) -> Tuple[List[dict], dict]:
+             wells: Optional[Sequence[str]] = None, criterion=None) -> Tuple[List[dict], dict]:
     """ГВК по скважинам (колонка ячеек вскрытия, газ = Sg выше Sgr) двумя способами и двумя глубинами, TVDSS.
 
     Sgr — SGCR из INIT, иначе число ``sgr`` (по умолчанию 0,01). Ячейки вскрытия читаются из рестарта.
@@ -149,7 +169,7 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
         all_steps = [s for s in iter_restart_steps(f["UNRST"]) if s.date is not None]
         picked = {pick_step(all_steps, d).seqnum: pick_step(all_steps, d) for d in dates}
         steps = [picked[k] for k in sorted(picked)]
-    rows, info = wells_gwc_over_time(model, f.get("INIT"), f["UNRST"], th, wells, steps, egrid_path=f["EGRID"])
+    rows, info = wells_gwc_over_time(model, f.get("INIT"), f["UNRST"], th, wells, steps, egrid_path=f["EGRID"], criterion=criterion)
     if not info["wells"]:
         raise ValueError("В рестарте не найдены ячейки вскрытия скважин (или имена не совпали)")
     if not rows:
@@ -186,7 +206,7 @@ def _dated_steps(unrst: str) -> list:
     return _STEPS_CACHE["steps"]
 
 
-def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Optional[float] = None) -> Tuple[List[dict], dict]:
+def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Optional[float] = None, criterion=None) -> Tuple[List[dict], dict]:
     """Газонасыщенность вдоль колонны скважин на шаге рестарта, ближайшем к дате (для планшета), TVDSS."""
     from tnav_results.indicators import pick_step
     from tnav_results.well_gwc import wells_profile_at
@@ -202,7 +222,7 @@ def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Option
     step = pick_step(steps, date)
     from tnav_results.indicators import DEFAULT_SG_THRESHOLD
     profiles, missing = wells_profile_at(_cached_model(f["EGRID"]), f["UNRST"], step, list(wells), init_path=f.get("INIT"),
-                                         fallback_sgr=DEFAULT_SG_THRESHOLD if sgr is None else float(sgr))
+                                         fallback_sgr=DEFAULT_SG_THRESHOLD if sgr is None else float(sgr), criterion=criterion)
     # gwc — прежняя логика column_gwc (сверху вниз, граница ячейки и интерполяция), как в «ГВК по скважинам»
     rows = [{"well": p.well, "date": str(p.date.date()) if p.date else "", "column": list(p.column), "columns": p.columns,
              "gwc": ({"cell": p.gwc.top_down.cell, "interp": p.gwc.top_down.interp, "at_grid_edge": p.gwc.top_down.at_grid_edge,

@@ -198,11 +198,16 @@ export const setModelSelection = (selected: string[]) => call<ModelsView>('/api/
 export const getResults = (model: string) => call<ResultsInfo>('/api/results?' + new URLSearchParams({ model }))
 export const getResultSeries = (model: string, keyword: string, objects: string[]) =>
   call<{ keyword: string; series: Record<string, { dates: string[]; values: number[] }> }>('/api/results/series?' + new URLSearchParams({ model, keyword, objects: objects.join('|') }))
-export const getIndicators = (model: string, sg: string, dates: string[]) =>
-  call<{ rows: IndicatorRow[]; notes: string[] }>('/api/results/indicators?' + new URLSearchParams({ model, sg, dates: dates.join('|') }))
+/** Критерий газа для ГВК по модели: логика «sg» | «sg_sgcr» | «sw_swcr», порог/запас value, SGCR без INIT fallback (см. tnav_results.gwc_criterion). */
+export interface CriterionCfg { logic: string; value: number; fallback: number }
+export interface CriterionPreset extends CriterionCfg { id: string; title: string; formula: string }
+export const getCriterionPresets = () => call<{ presets: CriterionPreset[] }>('/api/criterion/presets')
+const criterionParam = (c?: CriterionCfg) => (c ? JSON.stringify(c) : '')
+export const getIndicators = (model: string, sg: string, dates: string[], criterion?: CriterionCfg) =>
+  call<{ rows: IndicatorRow[]; notes: string[] }>('/api/results/indicators?' + new URLSearchParams({ model, sg, dates: dates.join('|'), criterion: criterionParam(criterion) }))
 export interface WellGwcRow { well: string; date: string; columns: number; cell_top_down: number | null; interp_top_down: number | null; cell_lowest: number | null; interp_lowest: number | null; torn: boolean; at_grid_edge: boolean }
-export const getWellGwc = (model: string, sgr: string, dates: string[], wells: string[]) =>
-  call<{ rows: WellGwcRow[]; notes: string[]; sgr_source: string; wells: string[] }>('/api/results/wellgwc?' + new URLSearchParams({ model, sgr, dates: dates.join('|'), wells: wells.join('|') }))
+export const getWellGwc = (model: string, sgr: string, dates: string[], wells: string[], criterion?: CriterionCfg) =>
+  call<{ rows: WellGwcRow[]; notes: string[]; sgr_source: string; wells: string[] }>('/api/results/wellgwc?' + new URLSearchParams({ model, sgr, dates: dates.join('|'), wells: wells.join('|'), criterion: criterionParam(criterion) }))
 
 export const getResultsReport = (path: string, kind: 'model' | 'restart') =>
   call<{ text: string }>('/api/results/report?' + new URLSearchParams({ path, kind }))
@@ -367,15 +372,15 @@ export interface ProfileCell { top: number; bottom: number; sg: number; perforat
 export interface ModelGwc { cell: number; interp: number; at_grid_edge: boolean; lowest_cell: number; torn: boolean }
 /** gwc — ГВК колонны прежней логикой «ГВК по скважинам» (сверху вниз), считает сервер. */
 export interface WellProfile { well: string; date: string; column: number[]; columns: number; cells: ProfileCell[]; gwc: ModelGwc | null }
-export const getWellProfile = (model: string, wells: string[], date: string, sgr = '') =>
-  call<{ rows: WellProfile[]; step_date: string; missing: string[] }>('/api/results/wellprofile?' + new URLSearchParams({ model, wells: wells.join('|'), date, sgr }))
+export const getWellProfile = (model: string, wells: string[], date: string, sgr = '', criterion?: CriterionCfg) =>
+  call<{ rows: WellProfile[]; step_date: string; missing: string[] }>('/api/results/wellprofile?' + new URLSearchParams({ model, wells: wells.join('|'), date, sgr, criterion: criterionParam(criterion) }))
 
 export interface CompareRow {
   key: string; well: string; group: string; date: string; season: string; slice: string; slice_why: string; pack: string; label: string
   fact: number; model: number | null; delta: number | null; status: string; excluded: boolean
 }
 export interface CompareResult { rows: CompareRow[]; skipped: Record<string, number>; notes: string[] }
-export const comparePlanshet = (body: { model: string; wells: string[]; thr: number; slices: Record<string, string>; alts: Record<string, string> }) =>
+export const comparePlanshet = (body: { model: string; wells: string[]; thr: number; slices: Record<string, string>; alts: Record<string, string>; criterion?: CriterionCfg }) =>
   call<CompareResult>('/api/planshet/compare', post(body))
 
 export interface HmRow { key: string; well: string; group: string; hist: number; model: number; diff: number; hist_avg: number; model_avg: number; diff_avg: number

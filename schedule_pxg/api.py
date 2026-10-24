@@ -785,9 +785,10 @@ async def planshet_compare(request: Request):
         return _err("Модель с результатами не выбрана", 404)
     try:
         alts = {str(k): float(str(v).replace(",", ".")) for k, v in (b.get("alts") or {}).items() if str(v).strip()}
+        crit = results.criterion_from(b.get("criterion"))
         return JSONResponse(await run_in_threadpool(
             planshet.compare_view, _project(), model, [str(w) for w in b.get("wells") or []], float(b.get("thr") or 0.01),
-            b.get("slices") or {}, b.get("excluded") or [], alts))
+            b.get("slices") or {}, b.get("excluded") or [], alts, crit))
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось сравнить ГВК: %s" % e)
 
@@ -1122,6 +1123,10 @@ async def results_histmodel_xlsx(request: Request):
                     headers={"Content-Disposition": "attachment; filename*=UTF-8''%s" % quote("История_и_модель.xlsx")})
 
 
+async def criterion_presets(request: Request):
+    return JSONResponse({"presets": results.criterion_presets()})
+
+
 async def results_indicators(request: Request):
     path = _model_path(request, _project())
     if not path:
@@ -1129,7 +1134,8 @@ async def results_indicators(request: Request):
     try:
         dates = [dt.datetime.strptime(d, "%Y-%m-%d") for d in (request.query_params.get("dates") or "").split("|") if d]
         sg = request.query_params.get("sg")
-        rows, notes = await run_in_threadpool(results.indicators, path, dates, float(sg) if sg else None)
+        crit = results.criterion_from(request.query_params.get("criterion"))
+        rows, notes = await run_in_threadpool(results.indicators, path, dates, float(sg) if sg else None, crit)
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось посчитать показатели: %s" % e)
     return JSONResponse({"rows": rows, "notes": notes})
@@ -1143,7 +1149,8 @@ async def results_well_gwc(request: Request):
         dates = [dt.datetime.strptime(d, "%Y-%m-%d") for d in (request.query_params.get("dates") or "").split("|") if d]
         sgr = request.query_params.get("sgr")
         wells = [w.strip() for w in (request.query_params.get("wells") or "").split("|") if w.strip()]
-        rows, info = await run_in_threadpool(results.well_gwc, path, dates, float(sgr) if sgr else None, wells)
+        crit = results.criterion_from(request.query_params.get("criterion"))
+        rows, info = await run_in_threadpool(results.well_gwc, path, dates, float(sgr) if sgr else None, wells, crit)
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось посчитать ГВК по скважинам: %s" % e)
     return JSONResponse({"rows": rows, **info})
@@ -1159,7 +1166,8 @@ async def results_well_profile(request: Request):
         if not wells:
             return _err("Не выбраны скважины")
         sgr = request.query_params.get("sgr")
-        rows, info = await run_in_threadpool(results.well_profile, path, date, wells, float(sgr) if sgr else None)
+        crit = results.criterion_from(request.query_params.get("criterion"))
+        rows, info = await run_in_threadpool(results.well_profile, path, date, wells, float(sgr) if sgr else None, crit)
     except (ValueError, OSError, KeyError) as e:
         return _err("Не удалось построить профили скважин: %s" % e)
     return JSONResponse({"rows": rows, **info})
@@ -1478,6 +1486,7 @@ def build_app() -> Starlette:
         Route("/api/results/attach", results_attach, methods=["POST"]),
         Route("/api/results/series", results_series),
         Route("/api/results/indicators", results_indicators),
+        Route("/api/criterion/presets", criterion_presets),
         Route("/api/results/histmodel", results_histmodel, methods=["POST"]),
         Route("/api/results/histmodel/xlsx", results_histmodel_xlsx, methods=["POST"]),
         Route("/api/results/wellgwc", results_well_gwc),
