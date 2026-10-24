@@ -46,3 +46,18 @@ export function awResidual(pts: AwPoint[], fact: Record<string, number> | null):
   const d = fact ? pts.filter(p => p.n !== null && fact[String(p.n)] !== undefined).map(p => p.v - fact[String(p.n)]) : []
   return { n: d.length, median: median(d), mae: d.length ? d.reduce((a, b) => a + Math.abs(b), 0) / d.length : null }
 }
+
+/** Варианты критерия из строки настройки «sg_sgcr:0;0,1 | sg_threshold:0,01» → [пресет, [значения]] для /api/gis/model-wells-variants. */
+export function parseSpec(raw: string): [string, number[]][] {
+  const out: [string, number[]][] = []
+  for (const part of raw.split(';').map(s => s.trim()).filter(Boolean)) {
+    const [id, vals = ''] = part.split(':').map(s => s.trim())
+    const nums = vals.split(',').map(s => s.trim().replace(',', '.')).filter(Boolean).map(Number)
+    if (!id || !nums.length || nums.some(n => !Number.isFinite(n))) throw new Error(`Вариант «${part}»: нужны пресет и числа через запятую, например «sg_sgcr:0;0,1»`)
+    out.push([id, nums])
+  }
+  if (!out.length) throw new Error('Задайте хотя бы один вариант, например «sg_sgcr:0;0,1»')
+  return out
+}
+
+export interface GisVariants { model: string; dates: string[]; date: string; presets: { id: string; title: string }[]; variants: { label: string; criterion: string; points: ModelWell[]; no_gas: string[]; sgr_source: string }[] }

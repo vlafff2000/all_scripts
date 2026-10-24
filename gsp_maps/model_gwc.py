@@ -16,8 +16,9 @@ import threading
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
+from pxg_core import runlog
 from tnav_results.files import iter_restart_steps
-from tnav_results.gwc_criterion import Criterion, formula, prepare, preset, step_arrays, DEFAULT_WELL_PRESET, PRESETS, per_unit
+from tnav_results.gwc_criterion import Criterion, Variant, formula, prepare, preset, step_arrays, DEFAULT_WELL_PRESET, PRESETS, per_unit, run_variants
 from tnav_results.indicators import pick_step, read_well_connections
 from tnav_results.well_gwc import column_gwc, wells_gwc_over_time
 
@@ -105,3 +106,22 @@ def all_wells(anchor: str, date: Optional[str] = None, criterion: Optional[Crite
             "no_gas": sorted(w for w in conn if conn[w] and w not in used), "sgr_source": info.get("sgr_source", ""),
             "criterion": formula(crit), "model": os.path.basename(anchor),
             "presets": [{"id": p["id"], "title": p["title"]} for p in PRESETS], "note": "" if points else "В выбранном шаге нет скважин с газом в колоннах вскрытия."}
+
+
+def all_wells_variants(anchor: str, date: Optional[str], items: List[Variant]) -> dict:
+    """ГВК всех скважин по нескольким критериям (варианты из `gwc_criterion.variants`): каждый — отдельный расчёт на шаге рестарта.
+
+    Ответ: variants — по порядку вариантов {label, criterion, points, no_gas, sgr_source}; остальное как у `all_wells`.
+    Каждый вариант — полный проход по рестарту, поэтому число вариантов ограничено в `gwc_criterion`.
+    """
+    base = {}
+
+    def one(crit: Criterion) -> dict:
+        r = all_wells(anchor, date, crit)
+        base.update({k: r[k] for k in ("dates", "date", "model", "presets")})
+        return {"criterion": r["criterion"], "points": r["points"], "no_gas": r["no_gas"], "sgr_source": r["sgr_source"]}
+
+    done = run_variants(items, one, lambda n, total, label: runlog.log.info("Карты: ГВК по критериям, вариант %d из %d: %s", n, total, label))
+    out = {"variants": [{"label": it.label, **res} for it, res in done]}
+    out.update(base)
+    return out
