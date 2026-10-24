@@ -14,6 +14,7 @@ import datetime as dt
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from .files import RestartStep, iter_restart_steps, read_init, read_restart_keyword
+from .gwc_criterion import DEFAULT_WELL_PRESET, Criterion, Prepared, per_unit, preset, prepare, step_arrays
 from .indicators import Cell, CellModel, DEFAULT_SG_THRESHOLD, read_well_connections
 
 
@@ -102,33 +103,43 @@ def well_gwc(model: CellModel, sg: Sequence[float], thr: Sequence[float], well: 
 
 def _step_wells_gwc(model: CellModel, st: RestartStep, ctx) -> List[WellGwc]:
     """ГВК выбранных скважин на одном шаге рестарта (пусто — нет SGAS)."""
-    unrst_path, sgas, thr, want = ctx
-    sg = read_restart_keyword(unrst_path, st, sgas)
-    if sg is None:
+    unrst_path, sgas, prep, want = ctx
+    arrs = step_arrays(model, unrst_path, st, prep, sgas)
+    if arrs is None:
         return []
-    sg = model.to_units(sg, sgas)[0]
+    q, thr, _sg = arrs
+    q = model.to_units(q, sgas)[0]
+    thr = per_unit(thr, len(q))
     # ячейки вскрытия берутся на том же шаге, что и насыщенность: скважина могла быть пробурена или перфорирована позже
     conn = read_well_connections(unrst_path, st)
-    return [well_gwc(model, sg, thr, w, cells, st.date) for w, cells in conn.items()
+    return [well_gwc(model, q, thr, w, cells, st.date) for w, cells in conn.items()
             if cells and (want is None or w in want)]
+
+
+def _well_criterion(criterion: Optional[Criterion], fallback_sgr: float) -> Criterion:
+    """Без критерия — прежнее поведение: Sg > SGCR из INIT, а если её нет — число fallback_sgr."""
+    if criterion is not None:
+        return criterion
+    return Criterion(preset(DEFAULT_WELL_PRESET).logic, preset(DEFAULT_WELL_PRESET).value, fallback_sgr)
 
 
 def wells_gwc_over_time(model: CellModel, init_path: Optional[str], unrst_path: str, fallback_sgr: float = DEFAULT_SG_THRESHOLD,
                         wells: Optional[Sequence[str]] = None, steps: Optional[Sequence[RestartStep]] = None,
                         sgas: str = "SGAS", egrid_path: Optional[str] = None,
-                        workers: Optional[int] = None) -> Tuple[List[WellGwc], Dict[str, object]]:
+                        workers: Optional[int] = None, criterion: Optional[Criterion] = None) -> Tuple[List[WellGwc], Dict[str, object]]:
     """ГВК выбранных скважин (пусто — все) по датам рестарта. Возвращает строки и сведения: источник Sgr, скважины без ячеек.
 
+    criterion — критерий «газ» (tnav_results.gwc_criterion); без него — Sg > SGCR, как раньше.
     С egrid_path шаги считаются параллельно на всех ядрах (``tnav_results.parallel``), результат тот же.
     """
     from .parallel import map_steps
     want = set(wells) if wells else None
-    thr, src = sgr_by_units(model, init_path, fallback_sgr)
+    prep = prepare(model, init_path, _well_criterion(criterion, fallback_sgr))
     per_step = map_steps(_step_wells_gwc, model, list(steps if steps is not None else iter_restart_steps(unrst_path)),
-                         (unrst_path, sgas, thr, want), egrid_path, workers)
+                         (unrst_path, sgas, prep, want), egrid_path, workers)
     out: List[WellGwc] = [r for rows in per_step for r in rows]
     used = {r.well for r in out}
-    return out, {"sgr_source": src, "wells": sorted(used), "missing": sorted(want - used) if want else []}
+    return out, {"sgr_source": prep.source, "wells": sorted(used), "missing": sorted(want - used) if want else []}
 
 
 class ProfileCell(NamedTuple):
@@ -168,13 +179,19 @@ def well_profile(model: CellModel, sg: Sequence[float], well: str, cells: Sequen
 
 def wells_profile_at(model: CellModel, unrst_path: str, step: RestartStep, wells: Sequence[str],
                      sgas: str = "SGAS", init_path: Optional[str] = None,
-                     fallback_sgr: float = DEFAULT_SG_THRESHOLD) -> Tuple[List[WellProfile], List[str]]:
-    """Профили Sg выбранных скважин на одном шаге рестарта и список скважин без ячеек."""
-    sg = read_restart_keyword(unrst_path, step, sgas)
-    if sg is None:
+                     fallback_sgr: float = DEFAULT_SG_THRESHOLD,
+                     criterion: Optional[Criterion] = None) -> Tuple[List[WellProfile], List[str]]:
+    """Профили Sg выбранных скважин на одном шаге рестарта и список скважин без ячеек.
+
+    criterion — критерий «газ»; величина по профилю — та же, что сравнивается с порогом (Sg или 1 − Sw).
+    """
+    prep = prepare(model, init_path, _well_criterion(criterion, fallback_sgr))
+    arrs = step_arrays(model, unrst_path, step, prep, sgas)
+    if arrs is None:
         return [], list(wells)
+    sg, thr, _raw = arrs
     sg = model.to_units(sg, sgas)[0]
-    thr, _src = sgr_by_units(model, init_path, fallback_sgr)
+    thr = per_unit(thr, len(sg))
     conn = read_well_connections(unrst_path, step)
     out: List[WellProfile] = []
     missing: List[str] = []
