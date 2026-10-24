@@ -11,7 +11,7 @@ fallback — критическая насыщенность, если в INIT �
 """
 from __future__ import annotations
 
-from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from .files import RestartStep, read_init, read_restart_keyword
 from .indicators import CellModel, DEFAULT_SG_THRESHOLD
@@ -161,3 +161,64 @@ def step_arrays(model: CellModel, unrst_path: str, step: RestartStep, prep: Prep
 def per_unit(thr: Union[float, Sequence[float]], n: int) -> List[float]:
     """Порог как список по единицам (для колонн, где сравниваются ячейки поэлементно)."""
     return [float(thr)] * n if not isinstance(thr, (list, tuple)) and not hasattr(thr, "__len__") else list(thr)
+
+
+# ---------------------------------------------------------------- варианты: несколько критериев сразу
+
+MAX_VARIANTS = 12     # верхняя граница: каждый вариант — полный проход по рестарту (на всех ядрах)
+
+
+class Variant(NamedTuple):
+    label: str            # подпись на графике и в таблице: пресет и число
+    criterion: Criterion
+
+
+def label(c: Criterion) -> str:
+    """Короткая подпись варианта: что сравниваем и с каким числом."""
+    c = validate(c)
+    if c.logic == LOGIC_SG:
+        return "Sg > %g" % c.value
+    if c.logic == LOGIC_SG_SGCR:
+        return "Sg > SGCR + %g" % c.value
+    return "Sw < SWCR − %g" % c.value
+
+
+def variants(spec: Sequence[Tuple[str, Sequence[float]]]) -> List[Variant]:
+    """Варианты по пресетам: [(id пресета, [значения value])] → список без повторов, не больше MAX_VARIANTS.
+
+    Значение подставляется вместо value пресета; fallback пресета сохраняется. Одинаковые критерии схлопываются.
+    """
+    out: List[Variant] = []
+    seen = set()
+    for preset_id, values in spec:
+        base = preset(preset_id)
+        for v in values:
+            c = validate(base._replace(value=v))
+            if c in seen:
+                continue
+            seen.add(c)
+            out.append(Variant(label(c), c))
+    if not out:
+        raise ValueError("Нет вариантов: задайте хотя бы одно значение для пресета")
+    if len(out) > MAX_VARIANTS:
+        raise ValueError("Вариантов %d, больше %d: уменьшите число значений" % (len(out), MAX_VARIANTS))
+    return out
+
+
+def run_variants(items: Sequence[Variant], fn: Callable[[Criterion], object],
+                 progress: Optional[Callable[[int, int, str], None]] = None) -> List[Tuple[Variant, object]]:
+    """Считает fn(критерий) по каждому варианту по очереди; каждый проход уже идёт на всех ядрах (tnav_results.parallel).
+
+    progress(номер, всего, подпись) — для видимого хода расчёта. Ошибка одного варианта останавливает пакет с его подписью.
+    """
+    if len(items) > MAX_VARIANTS:
+        raise ValueError("Вариантов больше %d" % MAX_VARIANTS)
+    out: List[Tuple[Variant, object]] = []
+    for n, it in enumerate(items, 1):
+        if progress:
+            progress(n, len(items), it.label)
+        try:
+            out.append((it, fn(it.criterion)))
+        except ValueError as e:
+            raise ValueError("Вариант «%s»: %s" % (it.label, e))
+    return out

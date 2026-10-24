@@ -119,3 +119,26 @@ def test_wells_criterion_margin_moves_contact(tmp_path):
     # порог 0,01: колонна (0,0) газовая в слоях 1–2 (Sg 0,8 и 0,6) → подошва слоя 2; порог 0,71: только слой 1
     assert base[0].date == dt.datetime(2026, 1, 1) and base[0].cell_top_down == -1020.0
     assert margin[0].cell_top_down == -1010.0
+
+
+def test_variants_expand_dedupe_and_limit():
+    items = gc.variants([("sg_threshold", [0.01, "0,02", 0.01]), ("sg_sgcr_margin", [0.1])])
+    assert [v.label for v in items] == ["Sg > 0.01", "Sg > 0.02", "Sg > SGCR + 0.1"]
+    assert items[1].criterion == Criterion("sg", 0.02, 0.01)               # fallback пресета сохранён
+    with pytest.raises(ValueError):
+        gc.variants([("sg_threshold", [])])
+    with pytest.raises(ValueError):
+        gc.variants([("sg_threshold", [i / 100 for i in range(1, gc.MAX_VARIANTS + 2)])])
+
+
+def test_run_variants_reports_progress_and_names_failing_variant(tmp_path):
+    items = gc.variants([("sg_threshold", [0.1, 0.2])])
+    seen = []
+    out = gc.run_variants(items, lambda c: c.value * 10, progress=lambda n, t, lab: seen.append((n, t, lab)))
+    assert [r for _, r in out] == pytest.approx([1.0, 2.0])
+    assert seen == [(1, 2, "Sg > 0.1"), (2, 2, "Sg > 0.2")]
+
+    def boom(c):
+        raise ValueError("нет SWAT")
+    with pytest.raises(ValueError, match="Sg > 0.1.*нет SWAT"):
+        gc.run_variants(items, boom)
