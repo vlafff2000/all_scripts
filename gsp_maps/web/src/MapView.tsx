@@ -21,9 +21,9 @@ export interface GisPicker {
   source: 'fact' | 'model' | 'delta'; modelInfo: string; error?: string
   gwc: { on: boolean; mode: 'plane' | 'idw' }
   /** ГВК по всем скважинам модели (выключено по умолчанию): модель, срез, способ и глубина, порог Sg, порог подсказки о выбросе, исключённые скважины. */
-  allWells: { on: boolean; model: string; models: TnavModel[]; date: string; dates: string[]; mode: AwMode; depth: AwDepth; thr: string; outlier: string; excl: Set<string>; data: GisModelWells | null; err: string; fact: Record<string, number> | null }
+  allWells: { on: boolean; model: string; models: TnavModel[]; date: string; dates: string[]; mode: AwMode; depth: AwDepth; preset: string; presets: { id: string; title: string }[]; outlier: string; excl: Set<string>; data: GisModelWells | null; err: string; fact: Record<string, number> | null }
   roof: { on: boolean; model: string; layer: string; step: string; models: TnavModel[]; note: string; grid: RoofRaster | null }
-  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string; gwcOn?: boolean; gwcMode?: 'plane' | 'idw'; awOn?: boolean; awModel?: string; awDate?: string; awMode?: AwMode; awDepth?: AwDepth; awThr?: string; awOutlier?: string; awToggle?: string; awReset?: boolean }) => void
+  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string; gwcOn?: boolean; gwcMode?: 'plane' | 'idw'; awOn?: boolean; awModel?: string; awDate?: string; awMode?: AwMode; awDepth?: AwDepth; awPreset?: string; awOutlier?: string; awToggle?: string; awReset?: boolean }) => void
 }
 /** Растр кровли в координатах карты (Y вниз): z по строкам, NaN — нет значения. */
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
@@ -193,7 +193,8 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
         {(aw.dates.length ? aw.dates : [aw.date]).filter(Boolean).map(d => <option key={d} value={d}>Срез модели: {d}</option>)}</select>
       <select value={aw.mode} onChange={e => onChange({ awMode: e.target.value as AwMode })} aria-label="Способ ГВК">{AW_MODES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
       <select value={aw.depth} onChange={e => onChange({ awDepth: e.target.value as AwDepth })} aria-label="Глубина ГВК">{AW_DEPTHS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
-      <label className="muted">Порог Sg: газ выше <input type="number" step="0.01" min={0} value={aw.thr} onChange={e => onChange({ awThr: e.target.value })} aria-label="Порог Sg" style={{ width: 72 }} /></label>
+      <select value={aw.preset} onChange={e => onChange({ awPreset: e.target.value })} aria-label="Критерий газа">
+        {aw.presets.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select>
       <label className="muted">Подсказка о выбросе, м от соседей <input type="number" min={0} value={aw.outlier} onChange={e => onChange({ awOutlier: e.target.value })} aria-label="Порог выброса" style={{ width: 64 }} /></label>
       {aw.excl.size > 0 && <button type="button" onClick={() => onChange({ awReset: true })}>Вернуть исключённые ({aw.excl.size})</button>}
       <span className="muted">{awNote}</span>
@@ -393,7 +394,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const awTornN = awOk.filter(p => p.torn).length
   const awNote = !gis?.allWells.on ? '' : gis.allWells.err ? 'ГВК по всем скважинам не получен: ' + gis.allWells.err
     : !gis.allWells.data ? 'Выберите модель: точки строятся по колоннам всех скважин модели.'
-    : [`Точек с газом ${awAll.length}, без газа ${gis.allWells.data.no_gas.length}, исключено ${awAll.length - awOk.length}. Порог Sg ${gis.allWells.data.thr} (${gis.allWells.data.sgr_source === 'SGCR' ? 'Sgr из INIT' : 'одно число'}).`,
+    : [`Точек с газом ${awAll.length}, без газа ${gis.allWells.data.no_gas.length}, исключено ${awAll.length - awOk.length}. ${gis.allWells.data.criterion}; критическая величина из ${gis.allWells.data.sgr_source}.`,
       awRes.n ? `Невязка к ГИС (${awRes.n} скв.): медиана ${fmt1(awRes.median ?? 0)} м, средний модуль ${fmt1(awRes.mae ?? 0)} м.` : 'Невязки к ГИС нет: нет совпавших скважин или не выбран показатель ГВК.',
       `Подсказки: разрыв контакта ${awTornN}, резкий выброс ${awOutN}. Клик по скважине исключает её из изолиний.`].join(' ')
   // изолинии показателя ГИС: только на карте в координатах (не на схеме с разнесёнными скважинами)

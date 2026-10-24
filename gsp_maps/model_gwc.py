@@ -16,9 +16,10 @@ import threading
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
-from tnav_results.files import iter_restart_steps, read_restart_keyword
-from tnav_results.indicators import DEFAULT_SG_THRESHOLD, pick_step, read_well_connections
-from tnav_results.well_gwc import column_gwc, sgr_by_units, wells_gwc_over_time
+from tnav_results.files import iter_restart_steps
+from tnav_results.gwc_criterion import Criterion, formula, prepare, preset, step_arrays, DEFAULT_WELL_PRESET, PRESETS, per_unit
+from tnav_results.indicators import pick_step, read_well_connections
+from tnav_results.well_gwc import column_gwc, wells_gwc_over_time
 
 from .models import well_number
 from .roof import _model
@@ -56,9 +57,10 @@ def _dates(unrst: str) -> List[Tuple[int, dt.datetime]]:
     return out
 
 
-def all_wells(anchor: str, date: Optional[str] = None, thr: float = DEFAULT_SG_THRESHOLD) -> dict:
+def all_wells(anchor: str, date: Optional[str] = None, criterion: Optional[Criterion] = None) -> dict:
     """ГВК всех скважин модели на шаге рестарта, ближайшем к `date` (ГГГГ-ММ-ДД; пусто — последний шаг).
 
+    criterion — критерий «газ» (tnav_results.gwc_criterion); без него — пресет ГВК по скважинам (Sg > SGCR).
     anchor — любой файл модели (тот же стем, что у EGRID/INIT/UNRST). Ответ:
     dates — даты всех шагов; date — выбранный шаг; points — скважины с газом:
     {w, n, x, y, td, tdi, lo, loi, torn, edge, cols}; n — номер скважины «Карт» (как в tNavigator-привязке), None — нет цифр: td/lo — ГВК по границе ячейки (сверху вниз / самый нижний газ), tdi/loi — по
@@ -78,15 +80,18 @@ def all_wells(anchor: str, date: Optional[str] = None, thr: float = DEFAULT_SG_T
     else:
         seq = dated[-1][0]
     st = next(s for s in iter_restart_steps(unrst) if s.seqnum == seq)
-    rows, info = wells_gwc_over_time(m, _sibling(anchor, ".INIT"), unrst, thr, steps=[st])
+    init = _sibling(anchor, ".INIT")
+    crit = criterion or preset(DEFAULT_WELL_PRESET)
+    prep = prepare(m, init, crit)
+    rows, info = wells_gwc_over_time(m, init, unrst, crit.fallback, steps=[st], criterion=crit)
     conn = read_well_connections(unrst, st)
-    sg = m.to_units(read_restart_keyword(unrst, st, "SGAS"), "SGAS")[0] if rows else None
-    thr_units = sgr_by_units(m, _sibling(anchor, ".INIT"), thr)[0] if rows else None
+    arrs = step_arrays(m, unrst, st, prep) if rows else None
+    q, thr_units = (m.to_units(arrs[0], "SGAS")[0], per_unit(arrs[1], m.n_active)) if arrs else (None, None)
     points: List[dict] = []
     for r in rows:
         zc: Dict[Tuple[int, int], float] = {}                       # колонна с газом -> глубина центра её первой ячейки вскрытия
         for i, j, k in conn.get(r.well, []):
-            if (i, j) not in zc and column_gwc(m, sg, thr_units, (i, j)) is not None:
+            if (i, j) not in zc and column_gwc(m, q, thr_units, (i, j)) is not None:
                 zc[(i, j)] = m.centre((i, j, k))
         if not zc or r.cell_top_down is None:
             continue
@@ -98,5 +103,5 @@ def all_wells(anchor: str, date: Optional[str] = None, thr: float = DEFAULT_SG_T
     used = {p["w"] for p in points}
     return {"dates": [d.date().isoformat() for _, d in dated], "date": st.date.date().isoformat(), "points": points,
             "no_gas": sorted(w for w in conn if conn[w] and w not in used), "sgr_source": info.get("sgr_source", ""),
-            "thr": thr, "model": os.path.basename(anchor),
-            "note": "" if points else "В выбранном шаге нет скважин с газом в колоннах вскрытия."}
+            "criterion": formula(crit), "model": os.path.basename(anchor),
+            "presets": [{"id": p["id"], "title": p["title"]} for p in PRESETS], "note": "" if points else "В выбранном шаге нет скважин с газом в колоннах вскрытия."}

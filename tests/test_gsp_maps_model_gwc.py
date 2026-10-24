@@ -4,29 +4,34 @@ import pytest
 
 from gsp_maps import model_gwc
 from tests.test_tnav_indicators import PORV, SG, _egrid, _unrst
+from tnav_results.gwc_criterion import Criterion
+
+
+def _crit(thr):
+    return Criterion("sg", thr, 0.01)
 
 
 def test_all_wells_points_dates_and_nearest_step(tmp_path):
     anchor = _egrid(tmp_path / "M.EGRID")
     _unrst(tmp_path / "M.UNRST", [SG, SG], [PORV, PORV], with_wells=True)     # OBS1: колонны (0,0) с газом и (0,1) без
-    r = model_gwc.all_wells(anchor, None, 0.3)
+    r = model_gwc.all_wells(anchor, None, _crit(0.3))
     assert r["dates"] == ["2026-01-01", "2026-02-01"] and r["date"] == "2026-02-01"
     assert [p["w"] for p in r["points"]] == ["OBS1"] and r["no_gas"] == []
     p = r["points"][0]
     assert p["td"] == -1020.0 and p["cols"] == 1 and p["torn"] is False and p["edge"] is False
     assert p["x"] == pytest.approx(50.0) and p["y"] == pytest.approx(50.0)     # центр колонны (0,0), COORD модели
-    near = model_gwc.all_wells(anchor, "2026-01-10", 0.3)
+    near = model_gwc.all_wells(anchor, "2026-01-10", _crit(0.3))
     assert near["date"] == "2026-01-01"
 
 
 def test_no_gas_above_threshold_is_explained(tmp_path):
     anchor = _egrid(tmp_path / "M.EGRID")
     _unrst(tmp_path / "M.UNRST", [SG], [PORV], with_wells=True)
-    r = model_gwc.all_wells(anchor, None, 0.95)
+    r = model_gwc.all_wells(anchor, None, _crit(0.95))
     assert r["points"] == [] and r["note"]
 
 
 def test_missing_restart_is_an_error(tmp_path):
     anchor = _egrid(tmp_path / "M.EGRID")
     with pytest.raises(ValueError):
-        model_gwc.all_wells(anchor, None, 0.3)
+        model_gwc.all_wells(anchor, None, _crit(0.3))

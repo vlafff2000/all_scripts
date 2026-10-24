@@ -149,16 +149,21 @@ async def gis_model(request: Request):
 
 
 async def gis_model_wells(request: Request):
-    """ГВК всех скважин модели на шаге рестарта у даты (?model=путь к файлу модели, ?date=ГГГГ-ММ-ДД, ?thr=порог Sg); пусто — последний шаг."""
+    """ГВК всех скважин модели на шаге рестарта у даты (?model=путь к файлу модели, ?date=ГГГГ-ММ-ДД).
+    Критерий «газ»: ?preset=id пресета или ?logic=&value=&fallback= (настройки); пусто — пресет ГВК по скважинам."""
     from . import model_gwc
+    from tnav_results import gwc_criterion as gc
     q = request.query_params
     path = q.get("model") or ""
     if not path:
         return _err("Модель для ГВК по всем скважинам не выбрана.", 404)
     try:
-        thr = float(q.get("thr") or 0.01)
+        if q.get("logic"):
+            crit = gc.from_dict({"logic": q.get("logic"), "value": q.get("value") or 0, "fallback": q.get("fallback") or 0.01})
+        else:
+            crit = gc.preset(q.get("preset") or gc.DEFAULT_WELL_PRESET)
         with runlog.timed("Карты: ГВК модели по всем скважинам", модель=os.path.basename(path)) as t:
-            r = await run_in_threadpool(model_gwc.all_wells, path, q.get("date") or "", thr)
+            r = await run_in_threadpool(model_gwc.all_wells, path, q.get("date") or "", crit)
             t["скважин_с_газом"] = len(r["points"])
         return JSONResponse(r)
     except (ValueError, OSError, KeyError, IndexError) as e:

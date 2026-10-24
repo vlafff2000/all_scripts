@@ -5,7 +5,7 @@ import type { IsoPoint } from './model'
 
 /** Скважина с газом в колонне: td/lo — по границе ячейки (сверху вниз / самый нижний газ), tdi/loi — по интерполяции Sg. */
 export interface ModelWell { w: string; n: number | null; x: number; y: number; td: number; tdi: number; lo: number; loi: number; torn: boolean; edge: boolean; cols: number }
-export interface GisModelWells { dates: string[]; date: string; points: ModelWell[]; no_gas: string[]; sgr_source: string; thr: number; model: string; note: string }
+export interface GisModelWells { dates: string[]; date: string; points: ModelWell[]; no_gas: string[]; sgr_source: string; criterion: string; presets: { id: string; title: string }[]; model: string; note: string }
 
 /** Способ контакта: сверху вниз (от кровли газа) или самый нижний газ; глубина: по границе ячейки или по интерполяции Sg. */
 export type AwMode = 'td' | 'lo'

@@ -57,7 +57,7 @@ export const gisAllModel = pref<string>('gsp.gisAllModel', '', raw => String(raw
 export const gisAllDate = pref<string>('gsp.gisAllDate', '', raw => String(raw || ''))
 export const gisAllMode = pref<'td' | 'lo'>('gsp.gisAllMode', 'td', raw => (raw === 'lo' ? 'lo' : 'td'))
 export const gisAllDepth = pref<'cell' | 'interp'>('gsp.gisAllDepth', 'cell', raw => (raw === 'interp' ? 'interp' : 'cell'))
-export const gisAllThr = pref<string>('gsp.gisAllThr', '0.01', raw => String(raw || '0.01'))
+export const gisAllPreset = pref<string>('gsp.gisAllPreset', 'sg_sgcr', raw => String(raw || 'sg_sgcr'))
 export const gisAllOutlier = pref<string>('gsp.gisAllOutlier', '10', raw => String(raw ?? '10'))
 export const gisAllExcl = pref<string>('gsp.gisAllExcl', '', raw => String(raw || ''))
 export const gisIsoReach = pref<string>('gsp.gisIsoReach', '1.5', raw => String(raw || '1.5'))
