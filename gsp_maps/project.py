@@ -11,7 +11,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from pxg_core import workspace
+from pxg_core import runlog, workspace
 
 from . import atlas_source, gis_source, inputs, observers, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
@@ -155,8 +155,13 @@ class Project:
             self.log.append("Читаю проект Атласа «%s»…" % atlas.name)
             store = Store.from_raw(atlas.flow_arrays())
             store.path = atlas.key
-            tables = {"periods": atlas.periods(), "water": atlas.water(),
-                      "press_gsp": atlas.pressure(True), "press_obj": atlas.pressure(False), "geo": atlas.geo()}
+            tables = {}
+            for key, read in (("periods", atlas.periods), ("water", atlas.water), ("press_gsp", lambda: atlas.pressure(True)),
+                              ("press_obj", lambda: atlas.pressure(False)), ("geo", atlas.geo)):
+                try:    # сбой одной таблицы не должен лишать данных остальные: причина — в журнале окна
+                    tables[key] = read()
+                except Exception as e:
+                    self.log.append("Таблица «%s» не прочитана: %s: %s" % (key, type(e).__name__, e))
             with self._lock:
                 self._cache.clear()
                 self.atlas, self.store, self._tables = atlas, store, tables
@@ -164,7 +169,8 @@ class Project:
             self.log.append("Готово: ГСП — %d, строк — %d (%.1f с)" % (len(store.gsp_names), len(store.well), time.time() - t0))
             self.state = "ready"
         except Exception as e:  # показываем человеку, а не роняем сервер
-            self.log.append("Ошибка: %s" % e)
+            self.log.append("Ошибка: %s: %s" % (type(e).__name__, e))
+            runlog.action("Карты: проект Атласа не открылся", error="%s: %s" % (type(e).__name__, e), project=pid)
             self.state = "error"
 
     def _warm_map(self) -> None:
@@ -240,6 +246,14 @@ class Project:
             out[g] = {"grid": grid, "xy": has_xy}
         return out
 
+    def _why_closed(self) -> str:
+        """Почему проект Атласа не открыт: последняя строка журнала загрузки (ошибка), иначе общая фраза."""
+        if self.state == "error" and self.log:
+            return self.log[-1]
+        if self.state == "loading":
+            return "идёт чтение проекта Атласа…"
+        return self.log[0] if self.log else "проект Атласа не открыт: нажмите «Обновить из Атласа»"
+
     def check(self) -> List[dict]:
         """Чеклист источников: что из нужного есть в проекте Атласа. Недостающее загружается в Атласе, не здесь."""
         out = []
@@ -256,7 +270,7 @@ class Project:
         for key, label in atlas_source.SOURCES:
             n, info = counts[key]
             if a is None:
-                out.append({"id": key, "label": label, "path": "", "ok": False, "info": "проект Атласа не открыт"})
+                out.append({"id": key, "label": label, "path": "", "ok": False, "info": self._why_closed()})
             elif n:
                 out.append({"id": key, "label": label, "path": "", "ok": True, "info": info or ("записей: %d" % n)})
             else:
