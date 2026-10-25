@@ -127,6 +127,22 @@ def model_perforations(model_path: str, wells: Sequence[str], day: str = "") -> 
     return out
 
 
+def model_perfs(models: Sequence[str], picks: Sequence[tuple]) -> dict:
+    """Перфорации каждой модели по каждой паре (скважина, дата) — для сравнения моделей с разными интервалами.
+    Ответ: {rows: [{model, well, date, intervals, notes}]}; ошибка чтения одной модели не мешает остальным (текст в notes)."""
+    rows = []
+    for m in models:
+        for w, day in picks:
+            try:
+                got = model_perforations(m, [w], day).get(_key(w))
+            except (ValueError, OSError, KeyError) as e:
+                rows.append({"model": m, "well": w, "date": day, "intervals": [], "notes": ["не прочитано: %s" % e]})
+                continue
+            rows.append({"model": m, "well": w, "date": day, "intervals": (got or {}).get("intervals", []),
+                         "notes": (got or {}).get("notes") or ["скважины нет в модели"]})
+    return {"rows": rows}
+
+
 def abs_depth(depth: Optional[float], altitude: Optional[float]) -> Optional[float]:
     return None if depth is None or altitude is None else altitude - depth
 

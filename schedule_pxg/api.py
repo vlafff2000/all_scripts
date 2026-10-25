@@ -822,6 +822,19 @@ async def planshet_catalog(request: Request):
         return _err("Не удалось прочитать базу ГИС: %s" % e)
 
 
+async def planshet_model_perfs(request: Request):
+    """Перфорации скважин из входных файлов моделей на дату замера: {models: [путь, …], picks: [[скважина, дата], …]}."""
+    b = await request.json()
+    picks = [(str(w), str(d)) for w, d in b.get("picks") or []]
+    models = [str(m) for m in b.get("models") or [] if str(m).strip()]
+    if not picks or not models:
+        return _err("Не выбраны скважины или модели")
+    try:
+        return JSONResponse(await run_in_threadpool(planshet.model_perfs, models, picks))
+    except (ValueError, OSError, KeyError) as e:
+        return _err("Не удалось прочитать перфорации модели: %s" % e)
+
+
 async def planshet_facts(request: Request):
     """Факт по выбранным замерам: {picks: [[скважина, дата], …], alts: {скважина: м}}."""
     b = await request.json()
@@ -1517,6 +1530,7 @@ def build_app() -> Starlette:
         Route("/api/planshet/fact", planshet_fact),
         Route("/api/planshet/catalog", planshet_catalog),
         Route("/api/planshet/facts", planshet_facts, methods=["POST"]),
+        Route("/api/planshet/model-perfs", planshet_model_perfs, methods=["POST"]),
         Route("/api/planshet/compare", planshet_compare, methods=["POST"]),
         Route("/api/sources/build", sources_build, methods=["POST"]),
         Route("/api/averaging", averaging_get),
