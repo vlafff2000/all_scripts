@@ -48,6 +48,9 @@ export function awResidual(pts: AwPoint[], fact: Record<string, number> | null):
 }
 
 /** Варианты критерия из строки настройки «sg_sgcr:0;0,1 | sg_threshold:0,01» → [пресет, [значения]] для /api/gis/model-wells-variants. */
+/** «Посчитать по всем опциям»: каждый пресет критерия с несколькими значениями, 8 вариантов (не больше 12). */
+export const ALL_CRITERION_SPEC = 'sg_threshold:0.01,0.05;sg_sgcr:0,0.05,0.1;sg_sgcr_margin:0.1;sw_swcr:0,0.05'
+
 export function parseSpec(raw: string): [string, number[]][] {
   const out: [string, number[]][] = []
   for (const part of raw.split(';').map(s => s.trim()).filter(Boolean)) {
