@@ -47,7 +47,14 @@ export const gisRoofStep = pref<string>('gsp.gisRoofStep', '', raw => String(raw
 export const gisObservers = pref<boolean>('gsp.gisObservers', true)
 /** Контур ГВК по кровле: включён ли и поверхность ГВК (плоскость по скважинам или по скважинам как есть). */
 export const gisGwc = pref<boolean>('gsp.gisGwc', false)
-export const gisGwcMode = pref<'plane' | 'idw'>('gsp.gisGwcMode', 'plane', raw => (raw === 'idw' ? 'idw' : 'plane'))
+export const gisGwcMode = pref<'unified' | 'plane' | 'idw'>('gsp.gisGwcMode', 'unified', raw => (raw === 'idw' || raw === 'plane' ? raw : 'unified'))
+/** Единый контур: σ (м, разность ГВК скважины с кровлью), степень близости, сглаживание (в средних расстояниях), радиус влияния (в них же),
+ *  исключённые инженером скважины («12,GSP-3»). */
+export const gisGwcPar = pref<{ sigma: number; power: number; smooth: number; reach: number }>('gsp.gisGwcPar', { sigma: 15, power: 2, smooth: 0.5, reach: 3 }, raw => {
+  const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>, n = (k: string, d: number) => (Number.isFinite(Number(o[k])) && o[k] !== '' && o[k] !== null ? Number(o[k]) : d)
+  return { sigma: Math.max(n('sigma', 15), 0.1), power: Math.max(n('power', 2), 0.5), smooth: Math.max(n('smooth', 0.5), 0), reach: Math.max(n('reach', 3), 0.1) }
+})
+export const gisGwcExcl = pref<string>('gsp.gisGwcExcl', '', raw => String(raw || ''))
 export const gisIso = pref<boolean>('gsp.gisIso', false)
 export const gisIsoStep = pref<string>('gsp.gisIsoStep', '', raw => String(raw || ''))
 /** ГВК по всем скважинам модели (выключено по умолчанию): включено, модель, срез («» — последний шаг), способ и глубина,

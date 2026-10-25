@@ -389,6 +389,24 @@ export function niceLevelStep(range: number): number {
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p
 }
 /** Изолинии растра (марширующие квадраты): клетки с пропуском в углах пропускаются; линии по уровням, кратным шагу. */
+export function contourSegments(z: ArrayLike<number>, nx: number, ny: number, x0: number, y0: number, dx: number, dy: number, level: number): [[number, number], [number, number]][] {
+  const out: [[number, number], [number, number]][] = []
+  const cross = (ax: number, ay: number, av: number, bx: number, by: number, bv: number): [number, number] => { const t = (level - av) / (bv - av); return [ax + t * (bx - ax), ay + t * (by - ay)] }
+  for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    const a = z[j * nx + i], b = z[j * nx + i + 1], c = z[(j + 1) * nx + i + 1], e = z[(j + 1) * nx + i]
+    if (!(Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(e))) continue
+    const k = (a >= level ? 1 : 0) | (b >= level ? 2 : 0) | (c >= level ? 4 : 0) | (e >= level ? 8 : 0)
+    if (k === 0 || k === 15) continue
+    const X = x0 + i * dx, Y = y0 + j * dy
+    const T = () => cross(X, Y, a, X + dx, Y, b), R = () => cross(X + dx, Y, b, X + dx, Y + dy, c), B = () => cross(X, Y + dy, e, X + dx, Y + dy, c), Lf = () => cross(X, Y, a, X, Y + dy, e)
+    const segs: [() => [number, number], () => [number, number]][] = {
+      1: [[Lf, T]], 2: [[T, R]], 3: [[Lf, R]], 4: [[R, B]], 5: [[Lf, T], [B, R]], 6: [[T, B]], 7: [[Lf, B]],
+      8: [[Lf, B]], 9: [[T, B]], 10: [[Lf, B], [T, R]], 11: [[R, B]], 12: [[Lf, R]], 13: [[T, R]], 14: [[Lf, T]],
+    }[k] as [() => [number, number], () => [number, number]][]
+    for (const [p, q] of segs) out.push([p(), q()])
+  }
+  return out
+}
 export function contourLines(z: ArrayLike<number>, nx: number, ny: number, x0: number, y0: number, dx: number, dy: number, step: number, lo: number, hi: number): IsoResult['lines'] {
   const lines: IsoResult['lines'] = []
   const f = (v: number) => v.toFixed(1)
@@ -396,20 +414,7 @@ export function contourLines(z: ArrayLike<number>, nx: number, ny: number, x0: n
   for (let L = Math.ceil(lo / step) * step; L <= hi + 1e-9; L += step) {
     const level = Math.round(L / step) * step
     let d = '', at: [number, number] | null = null
-    const cross = (ax: number, ay: number, av: number, bx: number, by: number, bv: number): [number, number] => { const t = (level - av) / (bv - av); return [ax + t * (bx - ax), ay + t * (by - ay)] }
-    for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
-      const a = z[j * nx + i], b = z[j * nx + i + 1], c = z[(j + 1) * nx + i + 1], e = z[(j + 1) * nx + i]
-      if (!(Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(e))) continue
-      const k = (a >= level ? 1 : 0) | (b >= level ? 2 : 0) | (c >= level ? 4 : 0) | (e >= level ? 8 : 0)
-      if (k === 0 || k === 15) continue
-      const X = x0 + i * dx, Y = y0 + j * dy
-      const T = () => cross(X, Y, a, X + dx, Y, b), R = () => cross(X + dx, Y, b, X + dx, Y + dy, c), B = () => cross(X, Y + dy, e, X + dx, Y + dy, c), Lf = () => cross(X, Y, a, X, Y + dy, e)
-      const segs: [() => [number, number], () => [number, number]][] = {
-        1: [[Lf, T]], 2: [[T, R]], 3: [[Lf, R]], 4: [[R, B]], 5: [[Lf, T], [B, R]], 6: [[T, B]], 7: [[Lf, B]],
-        8: [[Lf, B]], 9: [[T, B]], 10: [[Lf, B], [T, R]], 11: [[R, B]], 12: [[Lf, R]], 13: [[T, R]], 14: [[Lf, T]],
-      }[k] as [() => [number, number], () => [number, number]][]
-      for (const [p, q] of segs) { const P = p(), Q = q(); d += `M${f(P[0])} ${f(P[1])}L${f(Q[0])} ${f(Q[1])}`; at = at ?? [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2] }
-    }
+    for (const [P, Q] of contourSegments(z, nx, ny, x0, y0, dx, dy, level)) { d += `M${f(P[0])} ${f(P[1])}L${f(Q[0])} ${f(Q[1])}`; at = at ?? [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2] }
     if (d && at) lines.push({ level, d, at })
   }
   return lines
@@ -493,4 +498,94 @@ export function gwcContour(wells: IsoPoint[], roof: RoofRaster, spacing: number,
   const line = contourLines(D, roof.nx, roof.ny, roof.x0, roof.y0, roof.dx, roof.dy, 1, 0, 0)
   if (!line.length) return { d: '', at: null, note: 'Кровля нигде не пересекает ГВК в радиусе доверия: контур не построен (проверьте слой кровли и радиус).', surface }
   return { d: line[0].d, at: line[0].at, note: '', surface }
+}
+
+/** Единый контур ГВК залежи (как контуры газоносности на рис. 5.40 отчёта авторского надзора): гладкая поверхность ГВК по всем
+ *  замерам, линия — там, где кровля пласта (растр модели) пересекает эту поверхность; внутри линии газ. Не кружки вокруг скважин.
+ *  Вклад скважины в поверхность: 1/(d²+ε²)^(p/2) · exp(−(Δ/σ)²), где d — расстояние до точки, ε = сглаживание·среднее расстояние между
+ *  скважинами, Δ — разность между кровлей в самой скважине и её ГВК (скважина с ГВК далеко от кровли у себя не на контуре и почти не
+ *  влияет). Из контура остаются только линии не дальше `reach` средних расстояний от скважины с заметным вкладом (чтобы не рисовать
+ *  пересечения на другой структуре, где замеров нет). Все параметры задаёт инженер, авто — подсказка. */
+export interface GwcWell extends IsoPoint { w: string }
+export interface GwcParams { sigma: number; power: number; smooth: number; reach: number }
+export interface GwcShare { w: string; v: number; delta: number | null; share: number }
+export interface GwcUnified { d: string; at: [number, number] | null; note: string; surface: string; shares: GwcShare[]; closed: number; open: number }
+export const GWC_DEFAULTS: GwcParams = { sigma: 15, power: 2, smooth: 0.5, reach: 3 }
+export function roofAt(r: RoofRaster, x: number, y: number): number {
+  const fi = (x - r.x0) / r.dx, fj = (y - r.y0) / r.dy
+  const i = Math.floor(fi), j = Math.floor(fj)
+  if (i < 0 || j < 0 || i >= r.nx - 1 || j >= r.ny - 1) return NaN
+  const a = r.z[j * r.nx + i], b = r.z[j * r.nx + i + 1], c = r.z[(j + 1) * r.nx + i], e = r.z[(j + 1) * r.nx + i + 1]
+  if (!(Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(e))) return NaN
+  const u = fi - i, t = fj - j
+  return (a * (1 - u) + b * u) * (1 - t) + (c * (1 - u) + e * u) * t
+}
+/** Закрывает узкие дыры растра кровли (пустые колонны между ячейками, до двух клеток): значение — среднее соседей; широкие дыры остаются. */
+export function fillRoofGaps(r: RoofRaster, rounds = 2): RoofRaster {
+  let z = Float64Array.from(r.z)
+  for (let n = 0; n < rounds; n++) {
+    const next = Float64Array.from(z)
+    for (let j = 0; j < r.ny; j++) for (let i = 0; i < r.nx; i++) {
+      if (Number.isFinite(z[j * r.nx + i])) continue
+      const nb = [[i - 1, j], [i + 1, j], [i, j - 1], [i, j + 1]].filter(([a, b]) => a >= 0 && b >= 0 && a < r.nx && b < r.ny && Number.isFinite(z[b * r.nx + a])).map(([a, b]) => z[b * r.nx + a])
+      if (nb.length >= 2) next[j * r.nx + i] = nb.reduce((p, q) => p + q, 0) / nb.length
+    }
+    z = next
+  }
+  return { ...r, z }
+}
+type Pt = [number, number]
+function chain(segs: [Pt, Pt][]): { pts: Pt[]; closed: boolean }[] {
+  const key = (p: Pt) => p[0].toFixed(3) + ',' + p[1].toFixed(3)
+  const at = new Map<string, number[]>()
+  segs.forEach(([p, q], i) => { for (const k of [key(p), key(q)]) { const l = at.get(k); if (l) l.push(i); else at.set(k, [i]) } })
+  const used = new Array(segs.length).fill(false)
+  const take = (k: string): number => { for (const i of at.get(k) ?? []) if (!used[i]) return i; return -1 }
+  const out: { pts: Pt[]; closed: boolean }[] = []
+  const walk = (pts: Pt[], forward: boolean) => {
+    for (;;) {
+      const i = take(key(forward ? pts[pts.length - 1] : pts[0]))
+      if (i < 0) return
+      used[i] = true
+      const [p, q] = segs[i], tail = forward ? pts[pts.length - 1] : pts[0]
+      const next = key(p) === key(tail) ? q : p
+      if (forward) pts.push(next); else pts.unshift(next)
+    }
+  }
+  for (let s = 0; s < segs.length; s++) {
+    if (used[s]) continue
+    used[s] = true
+    const pts: Pt[] = [segs[s][0], segs[s][1]]
+    walk(pts, true); walk(pts, false)
+    out.push({ pts, closed: pts.length > 3 && key(pts[0]) === key(pts[pts.length - 1]) })
+  }
+  return out
+}
+export function gwcUnified(wells: GwcWell[], roofRaw: RoofRaster, spacing: number, par: GwcParams): GwcUnified {
+  const roof = fillRoofGaps(roofRaw)
+  const none = (note: string): GwcUnified => ({ d: '', at: null, note, surface: '', shares: [], closed: 0, open: 0 })
+  if (!wells.length) return none('Нет скважин с ГВК для контура (все исключены или нет значений).')
+  const sigma = Math.max(par.sigma, 1e-6), eps2 = Math.pow(Math.max(par.smooth, 0) * spacing, 2) + 1e-12
+  // вес по близости ГВК скважины к кровле в ней; без кровли в точке скважины вес 1 (скважина помечается пустой разностью)
+  const fw = wells.map(w => { const rz = roofAt(roof, w.x, w.y); const delta = Number.isFinite(rz) ? rz - w.v : null; return { delta, f: Math.max(delta === null ? 1 : Math.exp(-Math.pow(delta / sigma, 2)), 1e-9) } })
+  const weights = (x: number, y: number): number[] => wells.map((w, i) => fw[i].f * Math.pow((x - w.x) ** 2 + (y - w.y) ** 2 + eps2, -par.power / 2))
+  const surf = (x: number, y: number) => { const k = weights(x, y); let s = 0, t = 0; k.forEach((q, i) => { s += q; t += q * wells[i].v }); return t / s }
+  const D = new Float64Array(roof.nx * roof.ny).fill(NaN)
+  for (let j = 0; j < roof.ny; j++) for (let i = 0; i < roof.nx; i++) {
+    const r = roof.z[j * roof.nx + i]
+    if (Number.isFinite(r)) D[j * roof.nx + i] = r - surf(roof.x0 + i * roof.dx, roof.y0 + j * roof.dy)
+  }
+  const near = wells.filter((_, i) => fw[i].f > 0.05), rad = Math.max(par.reach * spacing, 1e-9)
+  const lines = chain(contourSegments(D, roof.nx, roof.ny, roof.x0, roof.y0, roof.dx, roof.dy, 0))
+    .filter(l => l.pts.length > 2 && l.pts.some(p => near.some(w => Math.hypot(w.x - p[0], w.y - p[1]) <= rad)))
+  const surface = `поверхность ГВК по ${wells.length} скв., вес по близости и по разности ГВК с кровлей (σ ${par.sigma} м, степень ${par.power}, сглаживание ${par.smooth})`
+  if (!lines.length) return { ...none('Кровля не пересекает поверхность ГВК рядом со скважинами: контур не построен (проверьте слой кровли, σ и радиус влияния).'), surface }
+  // реальный вклад: средняя доля веса скважины вдоль построенного контура
+  const acc = new Array(wells.length).fill(0); let n = 0
+  for (const l of lines) for (const p of l.pts) { const k = weights(p[0], p[1]), s = k.reduce((a, b) => a + b, 0); k.forEach((q, i) => { acc[i] += q / s }); n++ }
+  const shares = wells.map((w, i) => ({ w: w.w, v: w.v, delta: fw[i].delta, share: acc[i] / n })).sort((a, b) => b.share - a.share)
+  const f1 = (v: number) => v.toFixed(1)
+  const d = lines.map(l => 'M' + l.pts.map(p => `${f1(p[0])} ${f1(p[1])}`).join('L') + (l.closed ? 'Z' : '')).join('')
+  const first = lines[0].pts[Math.floor(lines[0].pts.length / 2)]
+  return { d, at: first, note: '', surface, shares, closed: lines.filter(l => l.closed).length, open: lines.filter(l => !l.closed).length }
 }

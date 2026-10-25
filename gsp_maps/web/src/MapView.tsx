@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, gwcContour, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcContour, type IsoResult, type RoofRaster } from './model'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
 
 /** Цвета вариантов критерия: одинаковы на карте, в списке вариантов панели и в подписях изолиний. */
 export const AW_COLORS = ['#d62728', '#1f77b4', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#393b79', '#e7ba52']
@@ -22,11 +22,11 @@ export interface GisPicker {
   /** Наблюдательные скважины (вне групп): свой флажок показа, ручное отнесение к наблюдательным/эксплуатационным. */
   obs: { on: boolean; data: Observers | null; onToggle: (v: boolean) => void; onMark: (well: number, kind: 'obs' | 'prod' | 'auto') => void }
   source: 'fact' | 'model' | 'delta'; modelInfo: string; error?: string
-  gwc: { on: boolean; mode: 'plane' | 'idw' }
+  gwc: { on: boolean; mode: 'unified' | 'plane' | 'idw'; par: GwcParams; excl: Set<string> }
   /** ГВК по всем скважинам модели (выключено по умолчанию): модель, срез, способ и глубина, порог Sg, порог подсказки о выбросе, исключённые скважины. */
   allWells: { on: boolean; model: string; models: TnavModel[]; date: string; dates: string[]; mode: AwMode; depth: AwDepth; preset: string; presets: { id: string; title: string }[]; outlier: string; excl: Set<string>; data: GisModelWells | null; err: string; fact: Record<string, number> | null; multi: boolean; spec: string; variants: GisVariants | null; variantsErr: string; variantsBusy: boolean }
   roof: { on: boolean; model: string; layer: string; step: string; models: TnavModel[]; note: string; grid: RoofRaster | null }
-  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string; gwcOn?: boolean; gwcMode?: 'plane' | 'idw'; awOn?: boolean; awModel?: string; awDate?: string; awMode?: AwMode; awDepth?: AwDepth; awPreset?: string; awMulti?: boolean; awSpec?: string; awOutlier?: string; awToggle?: string; awReset?: boolean }) => void
+  onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string; gwcOn?: boolean; gwcMode?: 'unified' | 'plane' | 'idw'; gwcPar?: Partial<GwcParams>; gwcToggle?: string; gwcReset?: boolean; awOn?: boolean; awModel?: string; awDate?: string; awMode?: AwMode; awDepth?: AwDepth; awPreset?: string; awMulti?: boolean; awSpec?: string; awOutlier?: string; awToggle?: string; awReset?: boolean }) => void
 }
 /** Растр кровли в координатах карты (Y вниз): z по строкам, NaN — нет значения. */
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
@@ -159,7 +159,7 @@ function ObserverControls({ obs }: { obs: GisPicker['obs'] }) {
     </div>}
   </>
 }
-function GisControls({ catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, obs, source, modelInfo, roof, gwc, gwcNote, allWells: aw, awNote, error, onChange }: GisPicker & { gwcNote: string; awNote: string }) {
+function GisControls({ gwcShares, catalog, pack, metric, season, against, pins, options, dates, iso, isoNote, obs, source, modelInfo, roof, gwc, gwcNote, allWells: aw, awNote, error, onChange }: GisPicker & { gwcNote: string; gwcShares: GwcUnified['shares']; awNote: string }) {
   const [well, setWell] = useState('')
   if (!catalog) return error ? <p className="note warning">{error}</p> : <p className="muted">Читаю базу ГИС…</p>
   if (!catalog.packs.length) return <p className="muted">{catalog.note || 'В проекте Атласа нет базы ГИС.'}</p>
@@ -219,9 +219,22 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
       <span className="muted">{roof.note || 'Кровля — верх ячеек выбранного слоя модели: слой задаёте вы.'}</span>
       <label className="check"><input type="checkbox" checked={gwc.on} onChange={e => onChange({ gwcOn: e.target.checked })} /> Контур ГВК по кровле</label>
       {gwc.on && <>
-        <select value={gwc.mode} onChange={e => onChange({ gwcMode: e.target.value as 'plane' | 'idw' })} aria-label="Поверхность ГВК">
-          <option value="plane">Поверхность ГВК: плоскость по скважинам</option><option value="idw">Поверхность ГВК: по скважинам как есть</option></select>
-        <span className="muted">Контур — где кровля пересекает ГВК замерных скважин, в радиусе доверия из настройки изолиний. {gwcNote}</span></>}
+        <select value={gwc.mode} onChange={e => onChange({ gwcMode: e.target.value as 'unified' | 'plane' | 'idw' })} aria-label="Поверхность ГВК">
+          <option value="unified">Единый контур залежи (как на рис. 5.40)</option>
+          <option value="plane">Вокруг скважин: плоскость по скважинам</option><option value="idw">Вокруг скважин: по скважинам как есть</option></select>
+        {gwc.mode === 'unified' && <div className="gis-pin">
+          {([['sigma', 'σ, м', 'Насколько ГВК скважины может отличаться от кровли в ней, чтобы скважина влияла на контур: дальше — почти не влияет'], ['power', 'Степень', 'Чем больше, тем сильнее вес близких скважин'], ['smooth', 'Сглаживание', 'В средних расстояниях между скважинами: больше — глаже поверхность ГВК'], ['reach', 'Радиус влияния', 'В средних расстояниях: линии дальше этого от скважин с вкладом не рисуются']] as const).map(([k, t, hint]) =>
+            <label key={k} className="muted" title={hint}>{t} <input key={String(gwc.par[k])} type="text" inputMode="decimal" defaultValue={String(gwc.par[k])} style={{ width: 52 }} aria-label={t}
+              onBlur={e => { const v = Number(e.target.value.replace(',', '.')); if (Number.isFinite(v) && v !== gwc.par[k]) onChange({ gwcPar: { [k]: v } }) }}
+              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} /></label>)}
+          <button type="button" className="quiet" onClick={() => onChange({ gwcPar: { sigma: 15, power: 2, smooth: 0.5, reach: 3 } })}>Параметры по умолчанию</button></div>}
+        {gwc.mode === 'unified' && gwcShares.length > 0 && <div className="gis-pin" aria-label="Вклад скважин в контур">
+          <span className="muted">Вклад скважин (клик — исключить):</span>
+          {gwcShares.slice(0, 12).map(s => <button key={s.w} type="button" className="quiet" title={s.delta === null ? 'Кровли в точке скважины нет' : `Кровля в скважине выше ГВК на ${s.delta.toFixed(1)} м`} onClick={() => onChange({ gwcToggle: s.w })}>{s.w} {(s.share * 100).toFixed(0)}%</button>)}
+          {gwcShares.length > 12 && <span className="muted">и ещё {gwcShares.length - 12} с малым вкладом</span>}</div>}
+        {gwc.mode === 'unified' && gwc.excl.size > 0 && <div className="gis-pin"><span className="muted">Исключены: </span>{[...gwc.excl].map(w => <button key={w} type="button" className="quiet" title="Вернуть в расчёт" onClick={() => onChange({ gwcToggle: w })}>{w} ↩</button>)}
+          <button type="button" className="quiet" onClick={() => onChange({ gwcReset: true })}>Вернуть все</button></div>}
+        <span className="muted">{gwc.mode === 'unified' ? 'Контур — линия, где кровля пласта пересекает гладкую поверхность ГВК по всем замерам; газ внутри. Обведены скважины, давшие вклад.' : 'Контур — где кровля пересекает ГВК замерных скважин, в радиусе доверия из настройки изолиний.'} {gwcNote}</span></>}
     </div>}
     {source === 'fact' && multi.length > 0 && !against && <div className="gis-pin">
       <span className="muted">В сезоне несколько замеров: по умолчанию последний, другой можно выбрать.</span>
@@ -483,14 +496,19 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const gwc = useMemo(() => {
     if (options.paint !== 'gis' || !gis?.gwc.on || !gis.roof.on) return null
     const r = gis.roof.grid
-    const miss = (note: string) => ({ d: '', at: null, note, surface: '' } as GwcContour)
+    const miss = (note: string) => ({ d: '', at: null, note, surface: '', shares: [] as GwcUnified['shares'], excluded: [] as string[] })
     if (!r) return miss('Нужна кровля из модели: включите её и выберите модель и слой.')
     if (gis.source === 'delta' || (gis.source === 'fact' && (gis.metric !== 'gvk_abs_m' || gis.against))) return miss('Контур строится по значениям ГВК: выберите показатель «ГВК, м а.о.» без сравнения сезонов или «ГВК модели».')
     if (spread) return miss('На схеме с разнесёнными скважинами контур не строится.')
+    if (gis.gwc.mode === 'unified') {
+      const all = placed.filter(p => gis.paint?.vals.has(p.well)).map(p => ({ w: String(p.well), x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
+      const res = gwcUnified(all.filter(p => !gis.gwc.excl.has(p.w)), r, spacing, gis.gwc.par)
+      return { ...res, note: res.note || `${res.surface}. Линий: ${res.closed} замкнутых${res.open ? `, ${res.open} незамкнутых (упираются в край кровли)` : ''}.`, shares: res.shares, excluded: all.filter(p => gis.gwc.excl.has(p.w)).map(p => p.w) }
+    }
     const pts = placed.filter(p => gis.paint?.vals.has(p.well)).map(p => ({ x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
     const res = gwcContour(pts, r, spacing, Number(gis.iso.reach) || 1.5, gis.gwc.mode)
-    return { ...res, note: res.note || res.surface + '.' }
-  }, [options.paint, gis?.gwc.on, gis?.gwc.mode, gis?.roof.on, gis?.roof.grid, gis?.source, gis?.metric, gis?.against, gis?.paint, gis?.iso.reach, placed, spacing, spread])
+    return { ...res, note: res.note || res.surface + '.', shares: [] as GwcUnified['shares'], excluded: [] as string[] }
+  }, [options.paint, gis?.gwc.on, gis?.gwc.mode, gis?.gwc.par, gis?.gwc.excl, gis?.roof.on, gis?.roof.grid, gis?.source, gis?.metric, gis?.against, gis?.paint, gis?.iso.reach, placed, spacing, spread])
   const gwcWarn = gwc && !gwc.d ? gwc.note : ''
   useEffect(() => { if (gwcWarn) reportIssue('контур ГВК', gwcWarn) }, [gwcWarn])
   const roofWarn = roofRes.warn
@@ -748,8 +766,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 <text x={l.at[0]} y={l.at[1]} fontSize={9.5 / K} textAnchor="middle" fill={pal.muted} stroke={pal.bg} strokeWidth={2.5 / K} paintOrder="stroke">{fmt1(l.level)}</text></g>)}
             </g>}
             {gwc?.d && <g aria-label="Контур ГВК по кровле">
-              <path d={gwc.d} fill="none" stroke={pal.accent} strokeWidth={3} strokeDasharray="7 4" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
-              {gwc.at && <text x={gwc.at[0]} y={gwc.at[1]} fontSize={12 / K} fontWeight={700} textAnchor="middle" fill={pal.accent} stroke={pal.bg} strokeWidth={3.5 / K} paintOrder="stroke">ГВК</text>}
+              {gis?.gwc.mode === 'unified' && <path d={gwc.d} fill="none" stroke={pal.bg} strokeWidth={6} strokeLinejoin="round" opacity={0.85} vectorEffect="non-scaling-stroke" />}
+              <path d={gwc.d} fill="none" stroke={gis?.gwc.mode === 'unified' ? '#d9480f' : pal.accent} strokeWidth={3} strokeDasharray={gis?.gwc.mode === 'unified' ? undefined : '7 4'} strokeLinejoin="round" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+              {gwc.shares.length > 0 && gwc.shares.map(s => { const q = placed.find(z => String(z.well) === s.w); return q && s.share >= 0.03 ? <circle key={s.w} cx={q.x} cy={q.y} r={halo * (0.5 + 2.5 * Math.sqrt(s.share))} fill="none" stroke={pal.accent} strokeWidth={1.4} opacity={0.9} vectorEffect="non-scaling-stroke"><title>{`Скв. ${s.w}: вклад в контур ${(s.share * 100).toFixed(0)}%`}</title></circle> : null })}
+              {gwc.at && <text x={gwc.at[0]} y={gwc.at[1]} fontSize={12 / K} fontWeight={700} textAnchor="middle" fill={gis?.gwc.mode === 'unified' ? '#d9480f' : pal.accent} stroke={pal.bg} strokeWidth={3.5 / K} paintOrder="stroke">ГВК</text>}
             </g>}
             {iso && <g aria-label="Изолинии">
               {iso.conf.map((c, i) => <path key={'c' + i} d={c.d} fill={pal.accent} opacity={c.a} stroke="none" />)}
@@ -851,7 +871,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
             </>}
-            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} gwcNote={gwc?.note ?? ''} awNote={awNote} roof={{ ...gis.roof, note: [gis.roof.note, roofWarn].filter(Boolean).join(' ') }} />}
+            {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} gwcNote={gwc?.note ?? ''} gwcShares={gwc?.shares ?? []} awNote={awNote} roof={{ ...gis.roof, note: [gis.roof.note, roofWarn].filter(Boolean).join(' ') }} />}
             {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
             {!paintData && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
