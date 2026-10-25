@@ -106,3 +106,17 @@ def test_depths():
     out = P.add_depths(rows, g)
     assert (out[0].top_ao, out[0].bottom_ao) == (-1010.0, -1030.0)
     assert out[1].top_ao is None
+
+
+def test_base_model_params(tmp_path):
+    from tnav_results import base_model
+    f = tmp_path / "M.data"
+    f.write_text("WELSPECS\n 'A1' 'ГСП-1' 5 6 1* GAS /\n/\nWELLTRACK 'A1'\n 1000.5 2000.5 -150.0 0.0\n 1000.5 2000.5 1000.0 1150.0 /\n"
+                 "COMPDAT\n 'A1' 1* 1* 2 3 OPEN /\n/\nCOMPDAT\n 'B' 1* 1* 2 3 OPEN /\n/\n", encoding="utf-8")
+    r = base_model.well_params(str(f))
+    a = r["wells"]["A1"]
+    assert (a["group"], a["i"], a["j"], a["x"], a["y"], a["altitude"]) == ("ГСП-1", 5, 6, 1000.5, 2000.5, 150.0)
+    assert a["intervals"][0]["k1"] == 2 and "WELLTRACK" in a["sources"]["x"]
+    assert "B" not in r["wells"] and any("нет I" in n for n in r["notes"])        # без I,J и WELSPECS запись пропущена с заметкой
+    cmp = base_model.compare(r["wells"], {"A1": 148.0, "B": 1.0})
+    assert [(c["well"], c["ok"], c["diff"]) for c in cmp] == [("A1", False, 2.0)]

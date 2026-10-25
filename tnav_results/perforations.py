@@ -26,7 +26,7 @@ MONTHS = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6, "JUL": 7, 
 
 # ключевые слова, которые читаются, даже если стоят в одной строке с данными; число записей: 1 — одна, 0 — до пустой «/»
 KNOWN = {"START": 1, "DATES": 0, "TSTEP": 1, "INCLUDE": 1, "IMPORT": 1, "WELSPECS": 0, "COMPDAT": 0, "COMPDATL": 0,
-         "COMPDATMD": 0, "WELOPEN": 0}
+         "COMPDATMD": 0, "WELOPEN": 0, "WELLTRACK": 1}
 
 
 class PermEvent(NamedTuple):
@@ -76,6 +76,7 @@ class PerfResult(NamedTuple):
     start: Optional[dt.datetime]
     files: List[str]
     notes: List[str]
+    tracks: Optional[Dict[str, List[Tuple[float, float, float, float]]]] = None   # WELLTRACK: скважина → точки (X, Y, Z, MD)
 
 
 # ---------------------------------------------------------------- токены
@@ -170,6 +171,7 @@ class _State:
         self.files: List[str] = []
         self.notes: List[str] = []
         self.heads: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
+        self.tracks: Dict[str, List[Tuple[float, float, float, float]]] = {}
 
 
 def _read_records(toks: List[_Tok], pos: int, single: bool) -> Tuple[List[Tuple[List[str], int]], int]:
@@ -267,6 +269,14 @@ def _parse_file(path: str, st: _State, seen: Tuple[str, ...], depth: int = 0) ->
                 st.notes.append("%s: INCLUDE-файл не найден: %s" % (fname, name))
             else:
                 _parse_file(real, st, seen, depth + 1)
+        elif key == "WELLTRACK" and recs:
+            v = _values(recs[0][0])
+            nums = [_float(x) for x in v[1:]]
+            pts = [tuple(nums[n:n + 4]) for n in range(0, len(nums) - 3, 4)]
+            if v and v[0] and pts and all(None not in q for q in pts):
+                st.tracks[v[0]] = pts
+            else:
+                st.notes.append("%s: WELLTRACK %s не разобран (ожидаются четвёрки X Y Z MD)" % (fname, v[0] if v else "?"))
         elif key == "WELSPECS":
             for r, ln in recs:
                 v = _values(r)
@@ -361,7 +371,7 @@ def read_perforations(path: str) -> PerfResult:
         _parse_file(f, st, ())
     if not st.events and files:
         st.notes.append("в файлах модели нет COMPDAT/COMPDATL/COMPDATMD")
-    return PerfResult(st.events, st.wells, st.start, st.files, st.notes)
+    return PerfResult(st.events, st.wells, st.start, st.files, st.notes, st.tracks)
 
 
 # ---------------------------------------------------------------- состояние на дату
