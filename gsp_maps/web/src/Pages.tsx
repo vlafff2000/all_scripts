@@ -184,6 +184,7 @@ export function DataPage({ app, setApp, mode, setMode, gsp, onReload }: { app: A
       </section>
       <section className="card">
         <h2>Что загружено в проекте Атласа</h2>
+        {app.state !== 'ready' && app.log.length > 0 && <pre className="log">{app.log.join('\n')}</pre>}
         <ul className="checklist">{app.checks.map(c => (
           <li key={c.id} className={c.ok ? 'ok' : 'bad'}><span aria-hidden="true">{c.ok ? '✓' : '✗'}</span> <b>{c.label}</b> <span className="muted">· {c.info}</span></li>))}</ul>
         {missing > 0 && app.atlas.projects.length > 0 && <p className="muted">Не хватает {missing}: загрузите в Атласе, в «Источниках» файл получит роль автоматически (расходы, давления «Пересчёт_давлений», «БД замеров воды», «Глубины_перфораций», файл координат XY).</p>}
