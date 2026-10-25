@@ -203,10 +203,34 @@ def test_base_model_of_atlas_is_default_and_manual_choice_overrides(tmp_path, mo
     z = array("f", [1000.0] * 4 + [1010.0] * 4)
     grid = Grid(1, 1, 1, [1], array("f"), z, None)
     monkeypatch.setattr(planshet, "_model_perf_source", lambda path: (tp.read_perforations(path), grid))
-    monkeypatch.setattr(atlas_data, "base_model", lambda *a: str(data))
+    monkeypatch.setattr(atlas_data, "base_model_info", lambda *a: (str(data), ""))
     p = Project()
     planshet.set_settings(p, _folder(tmp_path))
     row = planshet.view(p, ["101"], "2025-04-10")["rows"][0]
     assert row["perforation"]["source"] == "model"                       # перфорация из базовой модели Атласа без выбора в ГДМ
     planshet.set_settings(p, planshet.settings(p)["folder"], "", None, "-")
     assert planshet.view(p, ["101"], "2025-04-10")["rows"][0]["perforation"] is None      # «только файл», а файла нет
+
+
+def test_data_dir_from_manual_setting_or_atlas_base_model(tmp_path, monkeypatch):
+    from array import array
+    from tnav_results import Grid, perforations as tp
+    from schedule_pxg import atlas_data
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "M.data").write_text("WELSPECS\n '101' 'G' 1 1 1* GAS /\n/\nCOMPDAT\n '101' 1* 1* 1 1 OPEN /\n/\n", encoding="utf-8")
+    grid = Grid(1, 1, 1, [1], array("f"), array("f", [1000.0] * 4 + [1010.0] * 4), None)
+    seen = []
+    monkeypatch.setattr(planshet, "_model_perf_source", lambda path, data_dir="": (seen.append((path, data_dir)), (tp.read_perforations(data_dir or path), grid))[1])
+    monkeypatch.setattr(atlas_data, "base_model_info", lambda *a: ("/res/BASE.EGRID", str(inputs)))
+    monkeypatch.setattr(os.path, "exists", lambda p: True)
+    p = Project()
+    planshet.set_settings(p, _folder(tmp_path))
+    planshet.view(p, ["101"], "2025-04-10")
+    assert seen[-1] == ("/res/BASE.EGRID", str(inputs))                       # папка .data из базовой модели Атласа
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "M.data").write_text((inputs / "M.data").read_text("utf-8"), encoding="utf-8")
+    planshet.set_settings(p, planshet.settings(p)["folder"], "", None, "/res/X.EGRID", str(other))
+    planshet.view(p, ["101"], "2025-04-10")
+    assert seen[-1] == ("/res/X.EGRID", str(other))                           # ручная папка главнее
