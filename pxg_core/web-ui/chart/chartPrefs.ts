@@ -71,6 +71,8 @@ export const tableBars = pref<boolean>('atlas.table.bars', true)
 export const zoomSync = pref<boolean>('atlas.chart.zoomSync', true)
 
 /** Ручные границы шкал Y по графикам (ключ — заголовок и подписи осей): помнятся между запусками. */
+/** Основной интервал делений осей по графикам (ключ как у savedRanges): ось → шаг. */
+export const savedSteps = pref<Record<string, Partial<Record<'x' | 'y' | 'y2', { n: number; unit: 'num' | 'year' | 'month' | 'week' | 'day' }>>>>('atlas.chart.steps', {})
 export const savedRanges = pref<Record<string, { y: [number, number] | null; y2: [number, number] | null }>>('atlas.chart.ranges', {})
 /** Личный вид рядов по графикам («Настройка»): ключ графика → ключ ряда → вид. Помнится между запусками. */
 export const chartLooks = pref<Record<string, Record<string, Look>>>('atlas.chart.looks', {})

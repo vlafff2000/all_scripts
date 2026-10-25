@@ -164,3 +164,6 @@
   .cs-body { grid-template-columns: 1fr; }
   .cs-list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 120px; }
 }
+.axis-editor .axis-step span { display: flex; gap: 4px; }
+.axis-editor .axis-step span input { flex: 1; min-width: 0; }
+.axis-editor select { font: inherit; padding: 4px 4px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
