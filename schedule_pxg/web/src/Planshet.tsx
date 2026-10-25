@@ -226,7 +226,7 @@ export default function Planshet() {
   }, [])
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   const saveGis = (folder: string, perf: string) => guard(async () => { await setSources({ gis: { folder, perf_file: perf } }); setGisFolder(folder); setPerfFile(perf); if (folder) await loadCatalog() })
-  const savePerfModel = (id: string) => guard(async () => { await setSources({ gis: { folder: gisFolder, perf_file: perfFile, perf_model: id } }); setPerfModel(id); setMsg(id ? 'Перфорации будут взяты из модели; нажмите «Построить» ещё раз' : 'Перфорации снова из файла; нажмите «Построить» ещё раз') })
+  const savePerfModel = (id: string) => guard(async () => { await setSources({ gis: { folder: gisFolder, perf_file: perfFile, perf_model: id } }); setPerfModel(id); setMsg(id ? 'Перфорации будут взяты из модели; нажмите «Построить» ещё раз' : 'Выбор снят; нажмите «Построить» ещё раз') })
   const pickGis = async () => { const f = await pickFolder(gisFolder); if (f) await saveGis(f, perfFile) }
   const pickPerf = async () => { const r = await pickFile(perfFile); if (r.path) await saveGis(gisFolder, r.path) }
 
@@ -333,10 +333,10 @@ export default function Planshet() {
         <div className="row"><span className="small" style={{ width: 120 }}>Перфорации:</span><span title={perfFile}>{perfFile ? tail(perfFile) : <span className="muted">не выбран</span>}</span>
           <button disabled={busy} onClick={pickPerf}>Выбрать файл…</button>{perfFile && <button disabled={busy} onClick={() => saveGis(gisFolder, '')}>Убрать</button>}</div>
         <div className="row"><span className="small" style={{ width: 120 }}>Из модели:</span>
-          <select disabled={busy} value={perfModel} onChange={e => savePerfModel(e.target.value)} title="Интервалы COMPDAT из входного файла модели на дату замера; если в модели скважины нет — берётся файл">
-            <option value="">не брать (только файл)</option>
+          <select disabled={busy} value={perfModel} onChange={e => savePerfModel(e.target.value)} title="Интервалы COMPDAT из входного файла модели на дату замера; по умолчанию — базовая модель проекта Атласа (раздел «Импорт»); если в модели скважины нет — берётся файл">
+            <option value="">базовая модель проекта Атласа</option><option value="-">не брать (только файл)</option>
             {allModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
-          <span className="muted small">COMPDAT из .data на дату замера; главнее файла, для скважин вне модели остаётся файл</span></div>
+          <span className="muted small">COMPDAT из .data на дату замера; по умолчанию — базовая модель из «Импорта» Атласа; главнее файла, для скважин вне модели остаётся файл</span></div>
         <p className="muted small">Модели: {models.length ? models.map(m => m.name).join(', ') : 'не отмечены — планшет покажет только факт'}</p>
       </section>
       <section className="card">
