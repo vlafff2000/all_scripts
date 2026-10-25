@@ -55,3 +55,14 @@ def test_manual_mark_is_saved_per_project(tmp_path, monkeypatch):
     assert Project().observer_marks == {"a" * 32: {"77": "obs"}}
     with pytest.raises(ValueError):
         p.mark_observer(1, "x")
+
+
+def test_missing_saved_project_asks_to_choose_instead_of_failing(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
+    root = write_project(tmp_path / "s", {"response": pd.DataFrame({"well": ["1"], "date": pd.to_datetime(["2023-01-10"]),
+                                                                    "horizon": "", "pressure": [1.0]})})
+    from gsp_maps.project import Project
+    p = Project()
+    p.paths["atlas_storage"], p.paths["atlas_project"] = str(root), "6fdbf2d715f44ffc91a26405662dbead"
+    p.start_loading()
+    assert p.state == "idle" and "не найден" in p.log[0] and "Выберите" in p.log[0]
