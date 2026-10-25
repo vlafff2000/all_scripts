@@ -24,37 +24,40 @@ def atlas(tmp_path):
     return atlas_source.AtlasData(root, "a" * 32)
 
 
-def test_wells_outside_groups_with_gis_or_pressure(atlas):
-    r = observers.observers(atlas, [11, 12], {13: (10.0, 30.0), 20: (20.0, 40.0)}, {})
+def _open(tmp_path, settings=None):
+    gis = pd.DataFrame({"well": ["11", "13", "14", "15"], "date": pd.to_datetime(["2022-10-01"] * 4), "season": "осень", "pack": "нижняя",
+                        "gvk_abs_m": [-1500.0, -1510.0, -1520.0, -1530.0]})
+    resp = pd.DataFrame({"well": ["20", "13"], "date": pd.to_datetime(["2023-02-10"] * 2), "horizon": "", "pressure": [100.0, 98.0]})
+    geo = pd.DataFrame({"well": ["13", "15", "20"], "x": [10.0, 5.0, 20.0], "y": [30.0, 6.0, 40.0], "altitude": [1.0, 2.0, 3.0],
+                        "perf_top": [float("nan"), float("nan"), -1400.0], "perf_bottom": [float("nan"), float("nan"), -1450.0]})
+    root = write_project(tmp_path / "s", {"gis_packs": gis, "response": resp, "well_geo": geo}, settings=settings)
+    return atlas_source.AtlasData(root, "a" * 32)
+
+
+XY = {13: (10.0, 30.0), 15: (5.0, 6.0), 20: (20.0, 40.0)}
+
+
+def test_hint_splits_observation_and_geophysical(tmp_path):
+    r = observers.observers(_open(tmp_path), [11, 12], XY)
     got = {w["well"]: w for w in r["wells"]}
-    assert set(got) == {13, 20} and got[13]["why"] == ["ГИС", "давление"] and got[20]["why"] == ["давление"]
-    assert [w["well"] for w in r["missing"]] == [14]                # без координат — в списке, а не пропуск
-    assert 11 not in got                                             # скважина группы — не наблюдательная
+    assert got[13]["fund"] == "observation" and got[20]["fund"] == "observation"       # давление / перфорация: связь с пластом
+    assert got[15]["fund"] == "geophysical" and "только ГИС" in got[15]["why"][0]       # ГИС без перфораций и давлений
+    assert [w["well"] for w in r["missing"]] == [14] and r["missing"][0]["fund"] == "geophysical"
+    assert 11 not in got                                                                   # скважина группы — эксплуатационная
 
 
-def test_manual_choice_beats_auto(atlas):
-    r = observers.observers(atlas, [11, 12], {13: (10.0, 30.0)}, {"13": "prod", "11": "obs", "12": "obs"})
+def test_atlas_manual_fund_beats_hint(tmp_path):
+    settings = {"well_funds": {"13": "production", "15": "observation", "11": "geophysical", "20": "control"}}
+    r = observers.observers(_open(tmp_path, settings), [11, 12], XY)
     wells = {w["well"]: w for w in r["wells"] + r["missing"]}
-    assert 13 not in wells and r["forcedProd"] == [13]               # инженер отнёс к эксплуатационным
-    assert wells[11]["manual"] and wells[12]["manual"] and wells[12]["why"] == ["вручную"]
+    assert 13 not in wells and 20 not in wells                       # эксплуатационная и контрольная не рисуются
+    assert wells[15]["fund"] == "observation" and wells[15]["manual"]
+    assert wells[11]["fund"] == "geophysical" and wells[11]["manual"]  # инженер перекинул даже скважину группы
 
 
-def test_empty_is_a_note(atlas):
-    r = observers.observers(atlas, [11, 13, 14, 20], {}, {})
-    assert r["wells"] == [] and r["missing"] == [] and r["note"]
-
-
-def test_manual_mark_is_saved_per_project(tmp_path, monkeypatch):
-    monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
-    from gsp_maps.project import Project
-    p = Project()
-    p.paths["atlas_project"] = "a" * 32
-    p.mark_observer(77, "obs")
-    p.mark_observer(78, "prod")
-    p.mark_observer(78, "auto")
-    assert Project().observer_marks == {"a" * 32: {"77": "obs"}}
-    with pytest.raises(ValueError):
-        p.mark_observer(1, "x")
+def test_empty_is_a_note(tmp_path):
+    r = observers.observers(_open(tmp_path), [11, 13, 14, 15, 20], {})
+    assert r["wells"] == [] and r["missing"] == [] and "Фонды скважин" in r["note"]
 
 
 def test_missing_saved_project_asks_to_choose_instead_of_failing(tmp_path, monkeypatch):

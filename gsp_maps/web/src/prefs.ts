@@ -45,6 +45,8 @@ export const gisRoofLayer = pref<string>('gsp.gisRoofLayer', '1', raw => String(
 export const gisRoofStep = pref<string>('gsp.gisRoofStep', '', raw => String(raw || ''))
 /** Показывать ли наблюдательные скважины (вне групп) в режиме «ГИС и ГВК». */
 export const gisObservers = pref<boolean>('gsp.gisObservers', true)
+/** Показывать ли геофизические скважины (ГИС без перфораций) в режиме «ГИС и ГВК». */
+export const gisGeophys = pref<boolean>('gsp.gisGeophys', true)
 /** Контур ГВК по кровле: включён ли и поверхность ГВК (плоскость по скважинам или по скважинам как есть). */
 export const gisGwc = pref<boolean>('gsp.gisGwc', false)
 export const gisGwcMode = pref<'unified' | 'plane' | 'idw'>('gsp.gisGwcMode', 'unified', raw => (raw === 'idw' || raw === 'plane' ? raw : 'unified'))

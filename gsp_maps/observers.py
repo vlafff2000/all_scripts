@@ -1,19 +1,18 @@
-"""Наблюдательные скважины: есть в ГИС или в замерах давления, но не входят ни в одну группу эксплуатационных скважин.
+"""Наблюдательные и геофизические скважины для карты: фонды берутся из проекта Атласа («Фонды скважин», ``settings.well_funds``).
 
-Определение — только подсказка: инженер вручную относит скважину к наблюдательным («obs») или к эксплуатационным («prod»),
-ручной выбор важнее автоопределения. Положение — XY из проекта Атласа; без координат скважина попадает в список «нет координат».
+Ручной выбор инженера в Атласе важнее автоопределения; без него действует подсказка (та же, что в Атласе, с видимой причиной):
+в группах — эксплуатационная; вне групп с перфорацией или замерами давления — наблюдательная; вне групп, только ГИС без перфораций —
+геофизическая (ГИС с замером ГВК, но без связи с пластом). Положение — XY из проекта Атласа; без координат скважина — в списке «нет координат».
 """
 from __future__ import annotations
 
 from typing import Dict, Iterable, List, Set, Tuple
 
-import numpy as np
-import pandas as pd
-
 from . import gis_source
 from .atlas_source import AtlasData
 
-MANUAL = ("obs", "prod")
+OBS, GEO = "observation", "geophysical"
+LABEL = {OBS: "наблюдательная", GEO: "геофизическая"}
 
 
 def _well(v) -> int | None:
@@ -34,29 +33,50 @@ def pressure_wells(atlas: AtlasData) -> Set[int]:
     return {int(w) for w in df["Скважина"] if int(w) > 0} if len(df) else set()
 
 
-def observers(atlas: AtlasData, group_wells: Iterable[int], xy: Dict[int, Tuple[float, float]], manual: Dict[str, str]) -> dict:
-    """{wells: [{well, why, manual, x, y}], missing: [...], forced_prod: [...]}; why — ГИС / давление / вручную."""
+def manual_funds(atlas: AtlasData) -> Dict[int, str]:
+    saved = (atlas.manifest.get("settings") or {}).get("well_funds") or {}
+    out = {}
+    for w, f in saved.items():
+        n = _well(w)
+        if n is not None and isinstance(f, str):
+            out[n] = f
+    return out
+
+
+def hint(gis: bool, pressure: bool, perforated: bool) -> Tuple[str, str]:
+    """Для скважины вне групп: (фонд, причина)."""
+    if perforated:
+        return OBS, "вне групп, перфорация есть"
+    if pressure:
+        return OBS, "вне групп, есть замеры давления"
+    if gis:
+        return GEO, "вне групп, только ГИС, перфораций нет"
+    return "", ""
+
+
+def observers(atlas: AtlasData, group_wells: Iterable[int], xy: Dict[int, Tuple[float, float]]) -> dict:
+    """{wells: [{well, fund, why, manual, x, y}], missing: [...]}; fund — observation | geophysical."""
     grouped = {int(w) for w in group_wells}
-    forced = {int(w): k for w, k in manual.items() if k in MANUAL and str(w).lstrip("-").isdigit()}
-    why: Dict[int, List[str]] = {}
-    for label, wells in (("ГИС", gis_wells(atlas)), ("давление", pressure_wells(atlas))):
-        for w in wells:
-            if w not in grouped:
-                why.setdefault(w, []).append(label)
-    for w, k in forced.items():
-        if k == "obs":
-            why.setdefault(w, [])
-            if "вручную" not in why[w]:
-                why[w].append("вручную")
-    out, missing = [], []
-    for w in sorted(why):
-        if forced.get(w) == "prod":
+    manual = manual_funds(atlas)
+    gis, press = gis_wells(atlas), pressure_wells(atlas)
+    perf = set(atlas.geo()[2])
+    out: List[dict] = []
+    missing: List[dict] = []
+    for w in sorted(gis | press | set(manual)):
+        fund = manual.get(w, "")
+        if fund:
+            why = "выбрано в Атласе"
+        elif w in grouped:
             continue
-        row = {"well": w, "why": why[w], "manual": forced.get(w) == "obs", "inGroup": w in grouped}
+        else:
+            fund, why = hint(w in gis, w in press, w in perf)
+        if fund not in LABEL:     # эксплуатационные и контрольные на этом слое не рисуются
+            continue
+        row = {"well": w, "fund": fund, "why": [why], "manual": w in manual}
         if w in xy:
             row["x"], row["y"] = xy[w]
             out.append(row)
         else:
             missing.append(row)
-    return {"wells": out, "missing": missing, "forcedProd": sorted(w for w, k in forced.items() if k == "prod"),
-            "note": "" if (out or missing) else "Наблюдательных скважин не найдено: все скважины ГИС и замеров давления входят в группы."}
+    return {"wells": out, "missing": missing,
+            "note": "" if (out or missing) else "Наблюдательных и геофизических скважин не найдено. Фонды настраиваются в Атласе, вкладка «Фонды скважин»."}
