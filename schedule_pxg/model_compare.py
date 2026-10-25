@@ -109,3 +109,29 @@ def compare(measured: Iterable[Mapping], models: Mapping[str, Series], tolerance
                            wells={w: _stats(d) for w, d in sorted(by_well.items())})
     return {"keyword": series_kind, "tolerance_days": tol, "models": names, "rows": rows, "stats": stats,
             "excluded_count": sum(1 for r in rows if r["excluded"])}
+
+
+def dynamics(models: Mapping[str, Sequence[Mapping]], key: str, base: Optional[str] = None) -> dict:
+    """Динамика показателя по датам у каждой модели (второй этап плана: газонасыщенный поровый объём, ГВК).
+
+    models — {имя: [строки results.indicators с полями date и key]}; base — модель, относительно которой считается Δ
+    по общим датам (по умолчанию первая). Для каждой модели — изменение от первой даты к последней (абсолютное и в процентах).
+    Порог Sg и критерий газа задаются при расчёте строк (`results.indicators`), здесь только сопоставление.
+    """
+    names = list(models)
+    if base is not None and base not in models:
+        raise ValueError("Базовой модели нет в списке: %s" % base)
+    ref_name = base or (names[0] if names else None)
+    ref = {str(r["date"]): r.get(key) for r in models.get(ref_name, [])} if ref_name else {}
+    out: Dict[str, dict] = {}
+    for name in names:
+        pts = [(str(r["date"]), r.get(key)) for r in models[name] if r.get(key) is not None]
+        pts.sort()
+        change = None
+        if len(pts) >= 2 and pts[0][1]:
+            change = {"from": pts[0][0], "to": pts[-1][0], "delta": pts[-1][1] - pts[0][1],
+                      "percent": (pts[-1][1] - pts[0][1]) / abs(pts[0][1]) * 100.0}
+        out[name] = {"points": [{"date": d, "value": v, "diff_to_base": (None if name == ref_name or ref.get(d) is None else v - ref[d])}
+                                for d, v in pts],
+                     "change": change}
+    return {"key": key, "base": ref_name, "models": names, "series": out}

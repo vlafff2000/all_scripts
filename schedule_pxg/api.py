@@ -1113,6 +1113,40 @@ async def results_compare_pressure(request: Request):
         return _err("Не удалось сравнить давления: %s" % e)
 
 
+async def results_compare_volume(request: Request):
+    """Динамика газонасыщенного порового объёма (и ГВК) по моделям: {models: [{name, path}], dates?, sg?, criterion?, base?}."""
+    b = await request.json()
+    models = [m for m in (b.get("models") or []) if isinstance(m, dict) and _clean(m.get("path"))]
+    if not models:
+        return _err("Не выбрана ни одна модель с результатами", 404)
+    dates = []
+    for d in b.get("dates") or []:
+        try:
+            dates.append(dt.datetime.fromisoformat(str(d)[:10]))
+        except ValueError:
+            return _err("Дата должна быть в формате ГГГГ-ММ-ДД: %s" % d)
+    crit = results.criterion_from(b.get("criterion"))
+    sg = b.get("sg")
+
+    def run():
+        series, notes = {}, []
+        for m in models:
+            name = _clean(m.get("name")) or os.path.basename(_clean(m["path"]).rstrip("\\/"))
+            path = _clean(m["path"])
+            if not results.find_files(path):
+                raise ValueError("В папке модели нет файлов сводки: %s" % name)
+            rows, mnotes = results.indicators(path, dates or None, float(sg) if sg not in (None, "") else None, crit)
+            series[name] = rows
+            notes += ["%s: %s" % (name, x) for x in mnotes]
+        return {"volume": model_compare.dynamics(series, "gas_pore_volume", b.get("base")),
+                "gwc": model_compare.dynamics(series, "gwc_mean_area", b.get("base")), "notes": notes}
+
+    try:
+        return JSONResponse(await run_in_threadpool(run))
+    except (ValueError, OSError, KeyError, TypeError) as e:
+        return _err("Не удалось сравнить объёмы: %s" % e)
+
+
 async def results_histmodel(request: Request):
     """История/модель по газу: {model, settings?, seasons?, excluded?, unit_k?}; присланное запоминается в проекте."""
     b = await request.json()
@@ -1520,6 +1554,7 @@ def build_app() -> Starlette:
         Route("/api/results/indicators", results_indicators),
         Route("/api/criterion/presets", criterion_presets),
         Route("/api/results/compare/pressure", results_compare_pressure, methods=["POST"]),
+        Route("/api/results/compare/volume", results_compare_volume, methods=["POST"]),
         Route("/api/results/histmodel", results_histmodel, methods=["POST"]),
         Route("/api/results/histmodel/xlsx", results_histmodel_xlsx, methods=["POST"]),
         Route("/api/results/wellgwc", results_well_gwc),
