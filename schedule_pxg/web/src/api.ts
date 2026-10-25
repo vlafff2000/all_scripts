@@ -171,13 +171,13 @@ export const copyStrategy = (name: string, index: number, table: StrategyTable, 
 export const loadStrategy = (name: string, path: string) => call<{ state: AppState; report: string[] }>('/api/strategy/load', post({ name, path }))
 export const downloadStrategy = (name: string) => download('/api/strategy/xlsx', { name }, 'strategy.xlsx')
 export interface SourcesView {
-  sources: { flows?: { paths: string[]; template: string; kind_default: string }; groups?: { mode: 'file' | 'column'; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder?: string; perf_file?: string } }
+  sources: { flows?: { paths: string[]; template: string; kind_default: string }; groups?: { mode: 'file' | 'column'; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder?: string; perf_file?: string; perf_model?: string } }
   wells: number; groups: number; withoutGroup: number; techmaps: number
   daily: { days: number; from: string; to: string; error?: string } | null
 }
 export interface SourcesCheck extends SourcesView { summary: string; issues: { level: string; message: string; well: string }[] }
 export const getSources = () => call<SourcesView>('/api/sources')
-export const setSources = (body: { flows?: { paths: string[]; template?: string; kind_default?: string }; groups?: { mode: string; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder: string; perf_file: string } }) =>
+export const setSources = (body: { flows?: { paths: string[]; template?: string; kind_default?: string }; groups?: { mode: string; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder: string; perf_file: string; perf_model?: string } }) =>
   call<SourcesView>('/api/sources/set', post(body))
 export const buildSources = () => call<SourcesCheck>('/api/sources/build', post({}))
 /** Папка выгрузок Базы ПХГ: сервер находит базу расходов по имени и ставит её источником. */
@@ -369,7 +369,7 @@ export interface FactInterval { top: number; bottom: number; kg: number | null; 
 export interface FactPack { pack: string; gvk: number | null; label: string; top: number | null; bottom: number | null }
 export interface FactWell {
   well: string; date: string; dates: string[]; season?: string; altitude: number | null
-  intervals: FactInterval[]; packs: FactPack[]; notes: string[]; perforation: { top: number | null; bottom: number | null } | null
+  intervals: FactInterval[]; packs: FactPack[]; notes: string[]; perforation: { top: number | null; bottom: number | null; source?: string; intervals?: { top: number; bottom: number; k1: number; k2: number; i: number; j: number; source: string }[] } | null
 }
 export const getPlanshetFact = (wells: string[], date: string, alts: Record<string, string> = {}) =>
   call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/fact?' + new URLSearchParams({

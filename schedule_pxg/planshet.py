@@ -24,10 +24,14 @@ def settings(p: Project) -> dict:
     return dict(p.sources.get("gis") or {})
 
 
-def set_settings(p: Project, folder: str = "", perf_file: str = "", perf_mode: Optional[str] = None) -> None:
+def set_settings(p: Project, folder: str = "", perf_file: str = "", perf_mode: Optional[str] = None,
+                 perf_model: Optional[str] = None) -> None:
     """Папка выгрузки базы ГИС и файл перфораций; пустое значение — убрать. perf_mode: "" — по умолчанию, "ao" — столбцы
-    без подписи это а.о., "md" — положительные значения без подписи это глубина от стола; None — не менять."""
+    без подписи это а.о., "md" — положительные значения без подписи это глубина от стола; None — не менять.
+    perf_model: модель (путь к файлу результатов), из входных файлов которой берутся перфорации вместо файла; "" — вернуть файл."""
     cur = settings(p)
+    if perf_model is not None:
+        cur["perf_model"] = perf_model.strip()
     cur["folder"], cur["perf_file"] = folder.strip(), perf_file.strip()
     if perf_mode is not None:
         cur["perf_mode"] = perf_mode if perf_mode in ("ao", "md") else ""
@@ -66,6 +70,61 @@ def _key(well) -> str:
 
 def _num(v) -> Optional[float]:
     return None if v is None or v != v else float(v)
+
+
+_MODEL_CACHE: Dict[tuple, tuple] = {}
+
+
+def _model_perf_source(model_path: str):
+    """Перфорации из .data модели и её сетка; кэш по размеру и дате файлов (чтение .data на большой модели не мгновенное)."""
+    from tnav_results import perforations as tp
+    from tnav_results.grid_cache import read_egrid_cached
+    files = tp.find_data_files(model_path)
+    stamp = tuple((f, os.path.getmtime(f), os.path.getsize(f)) for f in files[:1])
+    hit = _MODEL_CACHE.get((model_path, stamp))
+    if hit:
+        return hit
+    from . import results
+    egrid = results.find_files(model_path).get("EGRID")
+    res = tp.read_perforations(model_path)
+    grid = read_egrid_cached(egrid) if egrid else None
+    _MODEL_CACHE.clear()
+    _MODEL_CACHE[(model_path, stamp)] = (res, grid)
+    return res, grid
+
+
+def model_perforations(model_path: str, wells: Sequence[str], day: str = "") -> Dict[str, dict]:
+    """Перфорации скважин из модели (COMPDAT и др.) на дату замера: {скв: {intervals: [{top, bottom, k1, k2, i, j, source}], notes}}.
+    Отметки — а.о. по ячейкам сетки EGRID (верх ячейки K1 … низ ячейки K2). Скважины, которых нет в модели, в ответе отсутствуют."""
+    import datetime as dt
+    from tnav_results import perforations as tp
+    res, grid = _model_perf_source(model_path)
+    when = None
+    if day:
+        try:
+            when = dt.datetime.combine(dt.date.fromisoformat(day), dt.time(23, 59, 59))
+        except ValueError:
+            when = None
+    names: Dict[str, str] = {}
+    for e in res.events:
+        names.setdefault(_key(e.well), e.well)
+    out: Dict[str, dict] = {}
+    for w in wells:
+        name = names.get(_key(w))
+        if name is None:
+            continue
+        rows = tp.add_depths(tp.perforations_at(res, when, wells=[name]), grid)
+        notes = list(res.notes)
+        ivs = []
+        for r in rows:
+            if r.top_ao is None:
+                notes.append("Интервал %s не показан: задан по MD или вне сетки (%s)" % (name, r.source))
+                continue
+            ivs.append({"top": r.top_ao, "bottom": r.bottom_ao, "k1": r.k1, "k2": r.k2, "i": r.i, "j": r.j, "source": r.source})
+        if grid is None:
+            notes.append("В модели нет EGRID: отметки интервалов посчитать нельзя")
+        out[_key(w)] = {"intervals": ivs, "notes": notes}
+    return out
 
 
 def abs_depth(depth: Optional[float], altitude: Optional[float]) -> Optional[float]:
@@ -167,7 +226,10 @@ def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[s
     tables = load_tables(s["folder"])
     perf = perforations(s["perf_file"]) if s.get("perf_file") else {}
     notes: List[str] = []
-    if not s.get("perf_file"):
+    pm = s.get("perf_model") or ""
+    if pm:
+        notes.append("Перфорации берутся из модели %s (входной файл .data); для скважин, которых там нет, — из файла" % os.path.basename(pm))
+    elif not s.get("perf_file"):
         notes.append("Файл перфораций не выбран: перфорации на планшете не показаны")
     rows = []
     for w, day in (list(picks) if picks else [(w, date) for w in wells]):
@@ -177,7 +239,15 @@ def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[s
         if mine is None and pf and pf.get("altitude") is not None and f["altitude"] is None:
             f = fact(tables, w, day, pf["altitude"])
         f["perforation"] = None
-        if pf and pf["rows"]:
+        mp = model_perforations(pm, [w], f.get("date") or day).get(_key(w)) if pm else None
+        if mp is not None and mp["intervals"]:
+            iv = mp["intervals"]
+            f["perforation"] = {"top": max(x["top"] for x in iv), "bottom": min(x["bottom"] for x in iv), "intervals": iv, "source": "model"}
+            f["notes"].append("Перфорация: из модели %s на %s, интервалов %d (%s)" % (os.path.basename(pm), f.get("date") or "конец расчёта", len(iv), iv[0]["source"]))
+            f["notes"].extend(mp["notes"])
+        elif pm and mp is not None:
+            f["notes"].append("Перфорация: в модели %s у скважины нет открытых интервалов на %s, взято из файла" % (os.path.basename(pm), f.get("date") or "конец расчёта"))
+        if f["perforation"] is None and pf and pf["rows"]:
             pair, src = perforation_abs(pf["rows"], f["altitude"], s.get("perf_mode", ""))
             if pair is not None:
                 f["perforation"] = {"top": pair[0], "bottom": pair[1]}
