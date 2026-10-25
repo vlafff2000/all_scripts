@@ -7,6 +7,9 @@ import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, gwcContour, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcContour, type IsoResult, type RoofRaster } from './model'
 
+/** Цвета вариантов критерия: одинаковы на карте, в списке вариантов панели и в подписях изолиний. */
+export const AW_COLORS = ['#d62728', '#1f77b4', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#393b79', '#e7ba52']
+
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
 /** Параметр Атласа на карте: список параметров, выбор и агрегация, готовая раскраска (считает страница). */
 export interface AtlasPicker { items: ParamItem[]; pick: string; agg: string; onPick: (pick: string, agg: string) => void; paint: PaintData | null }
@@ -201,7 +204,7 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
       {aw.multi && <>
         <input type="text" value={aw.spec} onChange={e => onChange({ awSpec: e.target.value })} aria-label="Варианты критерия" style={{ width: 260 }} placeholder="sg_sgcr:0;0,1" />
         <span className="muted">Пресет и значения запаса через запятую, варианты через «;». Не больше 12. {aw.variantsBusy ? 'Считаю варианты…' : aw.variantsErr ? 'Ошибка: ' + aw.variantsErr : ''}</span>
-        {aw.variants && !aw.variantsBusy && <ul className="muted" style={{ margin: 0, paddingLeft: 18 }}>{aw.variants.variants.map(v => <li key={v.label}>{v.label}: точек {v.points.length}, без газа {v.no_gas.length}</li>)}</ul>}</>}
+        {aw.variants && !aw.variantsBusy && <ul className="muted" style={{ margin: 0, paddingLeft: 18 }}>{aw.variants.variants.map((v, i) => <li key={v.label}><span aria-hidden="true" style={{ color: AW_COLORS[i % AW_COLORS.length], fontWeight: 700 }}>━━ </span>{v.label}: точек {v.points.length}, без газа {v.no_gas.length}</li>)}</ul>}</>}
       {aw.excl.size > 0 && <button type="button" onClick={() => onChange({ awReset: true })}>Вернуть исключённые ({aw.excl.size})</button>}
       <span className="muted">{awNote}</span>
     </div>}
@@ -399,7 +402,6 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const awOutN = awOk.filter(p => !p.torn && awDev.has(p.w) && Math.abs(awDev.get(p.w) as number) > awOut).length
   const awTornN = awOk.filter(p => p.torn).length
   // несколько вариантов: изолинии каждого критерия своим цветом, подпись — вариант; исключения и способ/глубина — общие
-  const awColors = ['#d62728', '#1f77b4', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#393b79', '#e7ba52']
   const awMultiIso = useMemo(() => {
     if (!gis?.allWells.on || !gis.allWells.multi || !gis.allWells.variants || gis.allWells.variantsBusy) return []
     const v = gis.allWells.variants.variants
@@ -409,9 +411,18 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return v.map((x, i) => {
       const pts = x.points.filter(p => !gis.allWells.excl.has(p.w)).map(p => ({ x: p.x, y: -p.y, v: awValue(p, gis.allWells.mode, gis.allWells.depth) }))
       const res = pts.length >= 3 ? isolines(pts, spacing, step, Number(gis.iso.reach) || 1.5) : null
-      return { label: x.label, color: awColors[i % awColors.length], res }
+      return { label: x.label, color: AW_COLORS[i % AW_COLORS.length], res }
     })
   }, [gis?.allWells.on, gis?.allWells.multi, gis?.allWells.variants, gis?.allWells.variantsBusy, gis?.allWells.mode, gis?.allWells.depth, gis?.allWells.excl, gis?.iso.step, gis?.iso.reach, spacing])
+  // подписи уровней всех вариантов: жадно, пропуская подпись, если рядом (в пределах двух шагов сетки) уже стоит другая
+  const awLabels = useMemo(() => {
+    const kept: { x: number; y: number; t: string; c: string }[] = []
+    for (const m of awMultiIso) for (const l of m.res?.lines ?? []) {
+      const [x, y] = l.at
+      if (kept.every(k => Math.hypot(k.x - x, k.y - y) >= spacing * 2)) kept.push({ x, y, t: fmt1(l.level), c: m.color })
+    }
+    return kept
+  }, [awMultiIso, spacing])
   const awNote = !gis?.allWells.on ? '' : gis.allWells.err ? 'ГВК по всем скважинам не получен: ' + gis.allWells.err
     : !gis.allWells.data ? 'Выберите модель: точки строятся по колоннам всех скважин модели.'
     : [`Точек с газом ${awAll.length}, без газа ${gis.allWells.data.no_gas.length}, исключено ${awAll.length - awOk.length}. ${gis.allWells.data.criterion}; критическая величина из ${gis.allWells.data.sgr_source}.`,
@@ -760,8 +771,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               {awMultiIso.map(m => m.res && <g key={m.label}>
                 {m.res.conf.map((c, i) => <path key={'c' + i} d={c.d} fill={m.color} opacity={c.a * 0.3} stroke="none" />)}
                 {m.res.lines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={m.color} strokeWidth={1.6} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
-                  <text x={l.at[0]} y={l.at[1]} fontSize={10 / K} textAnchor="middle" fill={m.color} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{m.label}: {fmt1(l.level)}</text></g>)}
+                  </g>)}
               </g>)}
+              {awLabels.map((l, i) => <text key={i} x={l.x} y={l.y} fontSize={10 / K} textAnchor="middle" fill={l.c} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{l.t}</text>)}
             </g>}
             {layer}
             {obsLayer}
