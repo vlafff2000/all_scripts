@@ -68,3 +68,28 @@ def test_negative_tolerance_is_refused():
     except ValueError:
         return
     raise AssertionError("ожидалась ошибка")
+
+
+def test_dynamics_change_and_diff_to_base():
+    rows = {
+        "A": [{"date": "2023-01-01", "gas_pore_volume": 100.0}, {"date": "2023-07-01", "gas_pore_volume": 80.0}],
+        "B": [{"date": "2023-01-01", "gas_pore_volume": 110.0}, {"date": "2023-04-01", "gas_pore_volume": 95.0},
+              {"date": "2023-07-01", "gas_pore_volume": 90.0}],
+    }
+    out = mc.dynamics(rows, "gas_pore_volume")
+    assert out["base"] == "A"
+    assert out["series"]["A"]["change"] == {"from": "2023-01-01", "to": "2023-07-01", "delta": -20.0, "percent": -20.0}
+    b_points = out["series"]["B"]["points"]
+    assert [p["diff_to_base"] for p in b_points] == [10.0, None, 10.0]
+    assert out["series"]["A"]["points"][0]["diff_to_base"] is None
+
+
+def test_dynamics_skips_missing_and_rejects_unknown_base():
+    rows = {"A": [{"date": "2023-01-01", "gwc_mean_area": None}, {"date": "2023-02-01", "gwc_mean_area": -2000.0}]}
+    out = mc.dynamics(rows, "gwc_mean_area")
+    assert out["series"]["A"]["change"] is None and len(out["series"]["A"]["points"]) == 1
+    try:
+        mc.dynamics(rows, "gwc_mean_area", base="Z")
+    except ValueError:
+        return
+    raise AssertionError("ожидалась ошибка")
