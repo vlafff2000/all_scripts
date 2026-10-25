@@ -14,6 +14,8 @@ from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from typing import Any, Callable, List, Optional, Sequence
 
+from pxg_core import progress
+
 log = logging.getLogger(__name__)
 
 MIN_PARALLEL_STEPS = 4      # меньше шагов — запуск процессов дороже самого расчёта
@@ -44,6 +46,17 @@ def _run(job) -> Any:
     return fn(_STATE["model"], step, _STATE["ctx"])
 
 
+def _each(call, items, total=None) -> List[Any]:
+    """Результаты по порядку; после каждого шага отмечается ход задачи (шкала выполнения в окне)."""
+    items = items if total is not None else list(items)
+    progress.report(0, total if total is not None else len(items), "шаги модели")
+    out = []
+    for it in items:
+        out.append(it if call is None else call(it))
+        progress.advance()
+    return out
+
+
 def map_steps(fn: Callable, model, steps: Sequence, ctx: Any = None, egrid_path: Optional[str] = None,
               workers: Optional[int] = None) -> List[Any]:
     """[fn(model, шаг, ctx) для каждого шага] по порядку. fn — функция верхнего уровня модуля (picklable).
@@ -55,15 +68,15 @@ def map_steps(fn: Callable, model, steps: Sequence, ctx: Any = None, egrid_path:
     name = getattr(fn, "__name__", "шаг")
     t0 = time.perf_counter()
     if n < 2 or len(steps) < MIN_PARALLEL_STEPS or not egrid_path:
-        res = [fn(model, s, ctx) for s in steps]
+        res = _each(lambda s: fn(model, s, ctx), steps)
         log.info("%s: %d шагов в одном процессе, %.2f с", name, len(steps), time.perf_counter() - t0)
         return res
     log.info("%s: %d шагов на %d процессах", name, len(steps), n)
     try:
         with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn"), initializer=_init, initargs=(egrid_path, ctx)) as ex:
-            res = list(ex.map(_run, [(fn, s) for s in steps], chunksize=1))
+            res = _each(None, ex.map(_run, [(fn, s) for s in steps], chunksize=1), len(steps))
     except (BrokenProcessPool, MemoryError, PermissionError):      # процесс убит (нехватка памяти) или не запустился: те же шаги подряд
         log.exception("%s: %d процессов не справились, считаем в одном", name, n)
-        res = [fn(model, s, ctx) for s in steps]
+        res = _each(lambda s: fn(model, s, ctx), steps)
     log.info("%s: %d шагов готово за %.2f с (%d процессов)", name, len(steps), time.perf_counter() - t0, n)
     return res
