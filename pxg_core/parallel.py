@@ -16,6 +16,7 @@ from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from typing import Any, List, Optional, Sequence
 
+from . import progress
 from .workers import default_workers as _workers
 
 MB_PER_WORKER = 500         # Excel-файл с pandas: порядка полугигабайта на процесс
@@ -41,19 +42,32 @@ def _call(job):
     return res, list(rf.DATE_ISSUES), buf.getvalue()
 
 
+def _each(call, items) -> List[Any]:
+    """Результаты по порядку; после каждого отмечается ход задачи (шкала выполнения в окне)."""
+    items = list(items)
+    progress.report(0, len(items))
+    out = []
+    for it in items:
+        out.append(call(it))
+        progress.advance()
+    return out
+
+
 def map_module_function(module_path: str, func: str, arg_list: Sequence[tuple], local: Any, workers: Optional[int] = None) -> List[Any]:
     """[module.func(*args) для args из arg_list] по порядку (local — та же функция в этом процессе для малого числа файлов); вывод печатается, замечания по датам копятся как при обычном вызове."""
     from pxg_core import расходы_файлы as rf
     arg_list = list(arg_list)
     n = min(default_workers() if workers is None else max(1, workers), len(arg_list))
     if n < 2 or len(arg_list) < MIN_PARALLEL_ITEMS:
-        return [local(*a) for a in arg_list]
+        return _each(lambda a: local(*a), arg_list)
     out = []
+    progress.report(total=len(arg_list), text="файлы")
     with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as ex:
         for res, issues, text in ex.map(_call, [(module_path, func, a) for a in arg_list], chunksize=1):
             print(text, end="")
             rf.DATE_ISSUES.extend(issues)
             out.append(res)
+            progress.advance()
     return out
 
 
@@ -66,10 +80,15 @@ def map_jobs(fn, jobs: Sequence[Any], mb_per_worker: float = 0.0, workers: Optio
     jobs = list(jobs)
     n = min(_workers(mb_per_worker) if workers is None else max(1, workers), len(jobs))
     if n < 2 or len(jobs) < MIN_PARALLEL_ITEMS:
-        return [fn(j) for j in jobs]
+        return _each(fn, jobs)
     try:
+        progress.report(0, len(jobs))
         with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as ex:
-            return list(ex.map(fn, jobs, chunksize=1))
+            out = []
+            for res in ex.map(fn, jobs, chunksize=1):
+                out.append(res)
+                progress.advance()
+            return out
     except (BrokenProcessPool, MemoryError, PermissionError):      # процесс убит (нехватка памяти) или не запустился: те же расчёты подряд
         logging.getLogger(__name__).exception("%d процессов не справились, считаем в одном", n)
         return [fn(j) for j in jobs]

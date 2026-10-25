@@ -27,7 +27,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
-from . import workspace
+from . import progress, workspace
 from .workers import available_mb, default_workers
 
 MAX_BYTES = 2 * 1024 ** 2
@@ -188,7 +188,8 @@ def timed(label: str, **info: Any) -> Iterator[dict]:
     extra: dict = {}
     start = time.perf_counter()
     try:
-        yield extra
+        with progress.task(label):             # шкала выполнения в окне: задача видна, пока идёт этап
+            yield extra
     except Exception:
         log.exception("этап «%s» завершился ошибкой за %.2f с%s", label, time.perf_counter() - start, _fmt(info))
         raise
@@ -308,6 +309,7 @@ async def open_dir(request: Request):
 
 def routes() -> List[Route]:
     return [
+        *progress.routes(),
         Route("/api/log", info),
         Route("/api/log/info", info),
         Route("/api/log/download", download),
