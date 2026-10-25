@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
 import HistModel from './HistModel'
 import ModelCompare from './ModelCompare'
+import ModelDynamics from './ModelDynamics'
 import { IndicatorRow, ModelsView, ResultsInfo, getIndicators, getModels, getResultSeries, getWellGwc, WellGwcRow, getResults, getResultsReport, pickFile, pickFolder, setModelFolders, setModelSelection } from './api'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
@@ -155,6 +156,7 @@ export default function Results() {
       </section>
       <HistModel models={models.filter(m => m.selected)} />
       <ModelCompare models={models.filter(m => m.selected)} />
+      <ModelDynamics models={models.filter(m => m.selected)} />
       {chosen.length > 0 && <section className="card">
         <h3>Показатели по выбранным моделям</h3>
         <div className="row">
