@@ -5,9 +5,11 @@ import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
 
 /** Цвета вариантов критерия: одинаковы на карте, в списке вариантов панели и в подписях изолиний. */
+/** Кровля пласта: от синего (глубже) к светло-жёлтому (выше). */
+const ROOF_STOPS = ['#9cc3e4', '#c7dfe9', '#e8efd9', '#f6e9bf']
 export const AW_COLORS = ['#d62728', '#1f77b4', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#393b79', '#e7ba52']
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
@@ -470,12 +472,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     }
   }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, gis?.allWells.on, awOk, placed, spacing, spread])
   // изолинии кровли из модели: тонкие линии под скважинами, шаг подбирается или задаётся; любой исход объясняется на экране
-  const roofRes = useMemo((): { lines: ReturnType<typeof contourLines> | null; warn: string } => {
-    const r = gis?.roof.grid
-    if (options.paint !== 'gis' || !gis?.roof.on || !r) return { lines: null, warn: '' }
+  const roofRes = useMemo((): { lines: ReturnType<typeof contourLines> | null; fill: { d: string; c: string }[]; step: number; warn: string } => {
+    const r0 = gis?.roof.grid
+    if (options.paint !== 'gis' || !gis?.roof.on || !r0) return { lines: null, fill: [], step: 0, warn: '' }
+    const r = fillRoofGaps(r0)
     try {
       const v = Array.from(r.z).filter(Number.isFinite)
-      if (!v.length) return { lines: null, warn: 'Кровля: в выбранном слое нет ячеек — укажите другой слой.' }
+      if (!v.length) return { lines: null, fill: [], step: 0, warn: 'Кровля: в выбранном слое нет ячеек — укажите другой слой.' }
       const lo = Math.min(...v), hi = Math.max(...v)
       const rx1 = r.x0 + (r.nx - 1) * r.dx, ry1 = r.y0 + (r.ny - 1) * r.dy
       const wx = placed.map(p => p.x), wy = placed.map(p => p.y)
@@ -486,9 +489,18 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       const step = Number(gis.roof.step) || niceLevelStep((hi - lo) || 1)
       const lines = contourLines(r.z, r.nx, r.ny, r.x0, r.y0, r.dx, r.dy, step, lo, hi)
       if (!warn && !lines.length) warn = `Кровля построена, но изолиний нет: отметки ${fmt1(lo)}…${fmt1(hi)} м почти не меняются при шаге ${step} м — уменьшите шаг или выберите другой слой.`
-      return { lines, warn }
+      // заливка по глубине: чем глубже кровля, тем синее; 24 ступени цвета, ячейки одной ступени — один путь
+      const bands: string[] = new Array(24).fill('')
+      for (let j = 0; j < r.ny; j++) for (let i = 0; i < r.nx; i++) {
+        const z = r.z[j * r.nx + i]
+        if (!Number.isFinite(z)) continue
+        const b = Math.min(23, Math.floor(((z - lo) / ((hi - lo) || 1)) * 24))
+        bands[b] += `M${(r.x0 + (i - 0.5) * r.dx).toFixed(1)} ${(r.y0 + (j - 0.5) * r.dy).toFixed(1)}h${r.dx.toFixed(1)}v${r.dy.toFixed(1)}h${(-r.dx).toFixed(1)}z`
+      }
+      const fill = bands.map((d, b) => ({ d, c: rampColor(ROOF_STOPS, (b + 0.5) / 24) })).filter(x => x.d)
+      return { lines, fill, step, warn }
     } catch (e) {
-      return { lines: null, warn: 'Кровля не нарисована из-за ошибки: ' + String((e as Error)?.message || e) }
+      return { lines: null, fill: [], step: 0, warn: 'Кровля не нарисована из-за ошибки: ' + String((e as Error)?.message || e) }
     }
   }, [options.paint, gis?.roof.on, gis?.roof.step, gis?.roof.grid, placed, g.layout.mode])
   const roofLines = roofRes.lines
@@ -776,8 +788,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
             <g opacity={0.07} fill={pal.accent}>{placed.map(q => <circle key={q.well} cx={q.x} cy={q.y} r={halo} />)}</g>
             {roofLines && <g aria-label="Кровля пласта">
-              {roofLines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={pal.muted} strokeWidth={0.9} opacity={0.8} vectorEffect="non-scaling-stroke" />
-                <text x={l.at[0]} y={l.at[1]} fontSize={9.5 / K} textAnchor="middle" fill={pal.muted} stroke={pal.bg} strokeWidth={2.5 / K} paintOrder="stroke">{fmt1(l.level)}</text></g>)}
+              {roofRes.fill.map((f, k) => <path key={'f' + k} d={f.d} fill={f.c} opacity={0.55} stroke={f.c} strokeWidth={0.6} vectorEffect="non-scaling-stroke" />)}
+              {roofLines.map(l => { const idx = Math.round(l.level / (roofRes.step || 1)) % 5 === 0; return <g key={l.level}><path d={l.d} fill="none" stroke={pal.ink} strokeWidth={idx ? 1.7 : 1} opacity={idx ? 0.85 : 0.55} vectorEffect="non-scaling-stroke" />
+                <text x={l.at[0]} y={l.at[1]} fontSize={(idx ? 12 : 11) / K} fontWeight={idx ? 700 : 500} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{fmt1(l.level)}</text></g> })}
             </g>}
             {gwc?.d && <g aria-label="Контур ГВК по кровле">
               {gis?.gwc.mode === 'unified' && <path d={gwc.d} fill="none" stroke={pal.bg} strokeWidth={6} strokeLinejoin="round" opacity={0.85} vectorEffect="non-scaling-stroke" />}
