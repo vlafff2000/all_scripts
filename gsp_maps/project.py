@@ -130,6 +130,13 @@ class Project:
             if not pid or root is None:
                 self.state, self.log = "idle", []
                 return
+            known = {p["id"]: p for p in self.atlas_projects()}
+            if pid not in known:
+                # сохранённый проект исчез из хранилища (перенос, другая папка, пересоздание): выбор остаётся за инженером
+                self.state = "idle"
+                self.log = ["Проект Атласа %s не найден в хранилище %s. Выберите проект из списка (в нём %d)."
+                            % (pid, root, len(known))]
+                return
             if self.atlas is not None and self.atlas.pid == pid:
                 try:
                     fresh = atlas_source.AtlasData(root, pid).key == self.atlas.key
