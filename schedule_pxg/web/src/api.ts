@@ -171,13 +171,13 @@ export const copyStrategy = (name: string, index: number, table: StrategyTable, 
 export const loadStrategy = (name: string, path: string) => call<{ state: AppState; report: string[] }>('/api/strategy/load', post({ name, path }))
 export const downloadStrategy = (name: string) => download('/api/strategy/xlsx', { name }, 'strategy.xlsx')
 export interface SourcesView {
-  sources: { flows?: { paths: string[]; template: string; kind_default: string }; groups?: { mode: 'file' | 'column'; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder?: string; perf_file?: string; perf_model?: string } }
+  sources: { flows?: { paths: string[]; template: string; kind_default: string }; groups?: { mode: 'file' | 'column'; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder?: string; perf_file?: string; perf_model?: string; perf_data_dir?: string } }
   wells: number; groups: number; withoutGroup: number; techmaps: number
   daily: { days: number; from: string; to: string; error?: string } | null
 }
 export interface SourcesCheck extends SourcesView { summary: string; issues: { level: string; message: string; well: string }[] }
 export const getSources = () => call<SourcesView>('/api/sources')
-export const setSources = (body: { flows?: { paths: string[]; template?: string; kind_default?: string }; groups?: { mode: string; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder: string; perf_file: string; perf_model?: string } }) =>
+export const setSources = (body: { flows?: { paths: string[]; template?: string; kind_default?: string }; groups?: { mode: string; path: string }; daily_total?: { path: string; unit: string }; gis?: { folder: string; perf_file: string; perf_model?: string; perf_data_dir?: string } }) =>
   call<SourcesView>('/api/sources/set', post(body))
 export const buildSources = () => call<SourcesCheck>('/api/sources/build', post({}))
 /** Папка выгрузок Базы ПХГ: сервер находит базу расходов по имени и ставит её источником. */

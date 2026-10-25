@@ -194,6 +194,7 @@ export default function Planshet() {
   const [gisFolder, setGisFolder] = useState('')
   const [perfFile, setPerfFile] = useState('')
   const [perfModel, setPerfModel] = useState('')                     // перфорации из входного файла этой модели (главнее файла); пусто — из файла
+  const [perfDataDir, setPerfDataDir] = useState('')                 // папка с .data вручную; пусто — из базовой модели проекта или рядом с результатами
   const [allModels, setAllModels] = useState<ModelEntry[]>([])
   const [catalog, setCatalog] = useState<{ wells: string[]; observations: GisObs[] }>({ wells: [], observations: [] })
   const [wells, setWells] = useState<string[]>([])
@@ -220,13 +221,15 @@ export default function Planshet() {
 
   const loadCatalog = () => getPlanshetCatalog().then(setCatalog).catch(e => { setCatalog({ wells: [], observations: [] }); setMsg((e as Error).message) })
   useEffect(() => {
-    getSources().then(v => { setGisFolder(v.sources.gis?.folder || ''); setPerfFile(v.sources.gis?.perf_file || ''); setPerfModel(v.sources.gis?.perf_model || ''); if (v.sources.gis?.folder) loadCatalog() }).catch(() => undefined)
+    getSources().then(v => { setGisFolder(v.sources.gis?.folder || ''); setPerfFile(v.sources.gis?.perf_file || ''); setPerfModel(v.sources.gis?.perf_model || ''); setPerfDataDir(v.sources.gis?.perf_data_dir || ''); if (v.sources.gis?.folder) loadCatalog() }).catch(() => undefined)
     getModels().then(v => { setAllModels(v.models); setModels(v.models.filter(m => m.selected)) }).catch(e => setMsg((e as Error).message))
     getCriterionPresets().then(r => setPresets(r.presets)).catch(() => undefined)
   }, [])
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
-  const saveGis = (folder: string, perf: string) => guard(async () => { await setSources({ gis: { folder, perf_file: perf } }); setGisFolder(folder); setPerfFile(perf); if (folder) await loadCatalog() })
-  const savePerfModel = (id: string) => guard(async () => { await setSources({ gis: { folder: gisFolder, perf_file: perfFile, perf_model: id } }); setPerfModel(id); setMsg(id ? 'Перфорации будут взяты из модели; нажмите «Построить» ещё раз' : 'Выбор снят; нажмите «Построить» ещё раз') })
+  const saveGis = (folder: string, perf: string) => guard(async () => { await setSources({ gis: { folder, perf_file: perf, perf_model: perfModel, perf_data_dir: perfDataDir } }); setGisFolder(folder); setPerfFile(perf); if (folder) await loadCatalog() })
+  const savePerfModel = (id: string) => guard(async () => { await setSources({ gis: { folder: gisFolder, perf_file: perfFile, perf_model: id, perf_data_dir: perfDataDir } }); setPerfModel(id); setMsg(id ? 'Перфорации будут взяты из модели; нажмите «Построить» ещё раз' : 'Выбор снят; нажмите «Построить» ещё раз') })
+  const savePerfDataDir = (dir: string) => guard(async () => { await setSources({ gis: { folder: gisFolder, perf_file: perfFile, perf_model: perfModel, perf_data_dir: dir } }); setPerfDataDir(dir); setMsg('Папка с .data сохранена; нажмите «Построить» ещё раз') })
+  const pickPerfDataDir = async () => { const f = await pickFolder(perfDataDir); if (f) await savePerfDataDir(f) }
   const pickGis = async () => { const f = await pickFolder(gisFolder); if (f) await saveGis(f, perfFile) }
   const pickPerf = async () => { const r = await pickFile(perfFile); if (r.path) await saveGis(gisFolder, r.path) }
 
@@ -337,6 +340,8 @@ export default function Planshet() {
             <option value="">базовая модель проекта Атласа</option><option value="-">не брать (только файл)</option>
             {allModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
           <span className="muted small">COMPDAT из .data на дату замера; по умолчанию — базовая модель из «Импорта» Атласа; главнее файла, для скважин вне модели остаётся файл</span></div>
+        <div className="row"><span className="small" style={{ width: 120 }}>Папка с .data:</span><span title={perfDataDir}>{perfDataDir ? tail(perfDataDir) : <span className="muted">как у базовой модели проекта или рядом с результатами</span>}</span>
+          <button disabled={busy} onClick={pickPerfDataDir}>Выбрать папку…</button>{perfDataDir && <button disabled={busy} onClick={() => savePerfDataDir('')}>Сбросить</button>}</div>
         <p className="muted small">Модели: {models.length ? models.map(m => m.name).join(', ') : 'не отмечены — планшет покажет только факт'}</p>
       </section>
       <section className="card">

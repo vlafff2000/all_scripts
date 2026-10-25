@@ -73,13 +73,17 @@ def load(storage: str = "", project_id: str = ""):
     return hist, daily, "проект Атласа «%s»" % data.name, found, well_groups(data)
 
 
-def base_model(storage: str = "", project_id: str = "") -> str:
-    """Базовая модель проекта Атласа (раздел «Импорт»): путь к файлу результатов модели или пустая строка.
+def base_model_info(storage: str = "", project_id: str = "") -> Tuple[str, str]:
+    """(базовая модель, папка с её .data) проекта Атласа (раздел «Импорт»); пустые строки — не заданы.
     Проект выбирается как для расходов (самый свежий не демонстрационный с расходами, если не задан)."""
     from gsp_maps import atlas_source
     found, root = projects(storage)
     if not found:
-        return ""
+        return "", ""
     pid = project_id if any(p["id"] == project_id for p in found) else atlas_source.default_project(found) or found[0]["id"]
-    data = atlas_source.AtlasData(atlas_source.storage_root(storage), pid)
-    return str((data.manifest.get("settings") or {}).get("base_model") or "").strip().strip('"')
+    cfg = atlas_source.AtlasData(atlas_source.storage_root(storage), pid).manifest.get("settings") or {}
+    return tuple(str(cfg.get(k) or "").strip().strip('"') for k in ("base_model", "base_model_data"))  # type: ignore[return-value]
+
+
+def base_model(storage: str = "", project_id: str = "") -> str:
+    return base_model_info(storage, project_id)[0]
