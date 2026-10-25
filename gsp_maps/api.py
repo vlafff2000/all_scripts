@@ -163,7 +163,7 @@ async def gis_model_wells(request: Request):
         else:
             crit = gc.preset(q.get("preset") or gc.DEFAULT_WELL_PRESET)
         with runlog.timed("Карты: ГВК модели по всем скважинам", модель=os.path.basename(path)) as t:
-            r = await run_in_threadpool(model_gwc.all_wells, path, q.get("date") or "", crit)
+            r = await run_in_threadpool(model_gwc.all_wells, path, q.get("date") or "", crit, PROJECT.xy()[0], q.get("frame") or "auto")
             t["скважин_с_газом"] = len(r["points"])
         return JSONResponse(r)
     except (ValueError, OSError, KeyError, IndexError) as e:
@@ -189,7 +189,7 @@ async def gis_model_wells_variants(request: Request):
         return _err("Варианты критерия не разобраны: %s" % e)
     try:
         with runlog.timed("Карты: ГВК модели по критериям", модель=os.path.basename(path), вариантов=len(items)) as t:
-            r = await run_in_threadpool(model_gwc.all_wells_variants, path, q.get("date") or "", items)
+            r = await run_in_threadpool(model_gwc.all_wells_variants, path, q.get("date") or "", items, PROJECT.xy()[0], q.get("frame") or "auto")
             t["вариантов_посчитано"] = len(r["variants"])
         return JSONResponse(r)
     except (ValueError, OSError, KeyError, IndexError) as e:
@@ -238,7 +238,7 @@ async def roof(request: Request):
     try:
         layer = int(q.get("layer") or 1)
         with runlog.timed("Карты: кровля пласта из модели", модель=os.path.basename(path), слой=layer) as t:
-            r = await run_in_threadpool(roof_mod.roof_grid, path, layer)
+            r = await run_in_threadpool(roof_mod.roof_grid, path, layer, 110, PROJECT.xy()[0], q.get("frame") or "auto")
             t["колонн_в_растре"] = sum(1 for row in r["z"] for v in row if v is not None)
         return JSONResponse(r)
     except (ValueError, OSError, KeyError, IndexError) as e:

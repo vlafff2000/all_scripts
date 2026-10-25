@@ -65,3 +65,31 @@ def test_client_log_endpoint_writes_to_log(caplog):
     with caplog.at_level("WARNING"):
         r = TestClient(api.build_app()).post("/api/client-log", json={"where": "кровля", "text": "вне карты скважин"})
     assert r.status_code == 200 and any("вне карты скважин" in x.getMessage() for x in caplog.records)
+
+
+def _egrid_with_mapaxes(path):
+    """Та же сетка 2×2×3, но с MAPAXES: сдвиг на (5000, 7000) без поворота (ось Y вверх)."""
+    from tests.test_tnav_results import _blk
+    path.write_bytes(open(_egrid(path), "rb").read() + _blk("MAPAXES", "REAL", [5000.0, 8000.0, 5000.0, 7000.0, 6000.0, 7000.0]))
+    return str(path)
+
+
+def test_roof_follows_wells_between_coord_and_mapaxes(tmp_path):
+    anchor = _egrid_with_mapaxes(tmp_path / "M.EGRID")
+    roof._cache.clear()
+    in_map = {1: (5100.0, 7100.0), 2: (5050.0, 7150.0)}       # скважины в системе карты
+    in_coord = {1: (100.0, 100.0), 2: (50.0, 150.0)}          # скважины в системе COORD
+    r = roof.roof_grid(anchor, 1, wells_xy=in_map)
+    assert r["frame"] == "map" and r["x0"] == pytest.approx(5050.0) and r["y0"] == pytest.approx(7050.0) and "применён" in r["note"]
+    c = roof.roof_grid(anchor, 1, wells_xy=in_coord)
+    assert c["frame"] == "coord" and c["x0"] == pytest.approx(50.0) and "не применён" in c["note"]
+    assert roof.roof_grid(anchor, 1)["frame"] == "coord"                       # скважин нет — прежнее поведение
+    assert roof.roof_grid(anchor, 1, wells_xy=in_coord, frame="map")["frame"] == "map"     # принудительно
+    assert roof.roof_grid(anchor, 1, wells_xy=in_map, frame="coord")["frame"] == "coord"
+
+
+def test_roof_without_mapaxes_stays_in_coord(tmp_path):
+    _egrid(tmp_path / "M.EGRID")
+    roof._cache.clear()
+    r = roof.roof_grid(str(tmp_path / "M.EGRID"), 1, wells_xy={1: (5100.0, 7100.0)}, frame="map")
+    assert r["frame"] == "coord" and r["x0"] == pytest.approx(50.0)
