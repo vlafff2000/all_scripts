@@ -374,6 +374,9 @@ export interface FactWell {
 export const getPlanshetFact = (wells: string[], date: string, alts: Record<string, string> = {}) =>
   call<{ rows: FactWell[]; notes: string[] }>('/api/planshet/fact?' + new URLSearchParams({
     wells: wells.join('|'), date, alts: Object.entries(alts).filter(([, v]) => v.trim() !== '').map(([w, v]) => w + ':' + v.trim()).join('|') }))
+export interface ModelPerfRow { model: string; well: string; date: string; intervals: { top: number; bottom: number; k1: number; k2: number; source: string }[]; notes: string[] }
+export const getModelPerfs = (models: string[], picks: [string, string][]) =>
+  call<{ rows: ModelPerfRow[] }>('/api/planshet/model-perfs', post({ models, picks }))
 export interface GisObs { well: string; date: string; season: string; packs: number }
 export const getPlanshetCatalog = () => call<{ wells: string[]; observations: GisObs[] }>('/api/planshet/catalog')
 export const getPlanshetFacts = (picks: [string, string][], alts: Record<string, string> = {}) =>

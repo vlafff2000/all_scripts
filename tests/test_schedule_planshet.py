@@ -174,3 +174,21 @@ def test_perforations_from_model(tmp_path, monkeypatch):
     assert planshet.settings(p)["perf_model"] == "M.EGRID"
     planshet.set_settings(p, planshet.settings(p)["folder"], "", None, "")
     assert "perf_model" not in planshet.settings(p)
+
+
+def test_model_perfs_compare(tmp_path, monkeypatch):
+    from array import array
+    from tnav_results import Grid, perforations as tp
+    z = array("f")
+    for k in range(3):
+        z.extend([1000.0 + 10 * k] * 4)
+        z.extend([1010.0 + 10 * k] * 4)
+    grid = Grid(1, 1, 3, [1] * 3, array("f"), z, None)
+    a, b = tmp_path / "A.data", tmp_path / "B.data"
+    head = "WELSPECS\n '101' 'G' 1 1 1* GAS /\n/\nCOMPDAT\n"
+    a.write_text(head + " '101' 1* 1* 1 1 OPEN /\n/\n", encoding="utf-8")
+    b.write_text(head + " '101' 1* 1* 2 3 OPEN /\n/\n", encoding="utf-8")
+    monkeypatch.setattr(planshet, "_model_perf_source", lambda path: (tp.read_perforations(path), grid))
+    out = planshet.model_perfs([str(a), str(b), str(tmp_path / "C.data")], [("101", "2025-01-01")])["rows"]
+    assert [(r["intervals"][0]["top"], r["intervals"][0]["bottom"]) for r in out[:2]] == [(-1000.0, -1010.0), (-1010.0, -1030.0)]
+    assert out[2]["intervals"] == [] and out[2]["notes"]

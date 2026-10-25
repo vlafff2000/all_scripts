@@ -4,12 +4,12 @@ import '../../../pxg_core/web-ui/multiselect.css'
 import PageHead from './PageHead'
 import GwcCompare from './GwcCompare'
 import CriterionPicker from './CriterionPicker'
-import { CriterionCfg, CriterionPreset, FactWell, GisObs, ModelEntry, WellProfile, getCriterionPresets, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
+import { CriterionCfg, CriterionPreset, FactWell, GisObs, ModelEntry, WellProfile, getCriterionPresets, getModelPerfs, ModelPerfRow, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
 
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
 
-interface Track { title: string; sub: string; gwc: { label: string; z: number | null }[]; bars: { top: number; bottom: number; v: number }[]; note?: string; color?: string }
+interface Track { title: string; sub: string; gwc: { label: string; z: number | null }[]; bars: { top: number; bottom: number; v: number }[]; note?: string; color?: string; perf?: { top: number; bottom: number }[] }
 
 const W = 150, PAD = 8, AXIS = 56, HEAD = 46
 
@@ -87,6 +87,8 @@ function WellLog({ name, tracks, perf, zMin, zMax, h, mode, alt, hz, onHover, on
     if (perf && perf.top !== null && perf.bottom !== null && z <= Math.max(perf.top, perf.bottom) && z >= Math.min(perf.top, perf.bottom))
       out.push('Перфорация: ' + fmt(perf.top) + ' … ' + fmt(perf.bottom) + ' м а.о.')
     tracks.forEach(t => {
+      const pf = (t.perf || []).filter(q => z <= Math.max(q.top, q.bottom) && z >= Math.min(q.top, q.bottom))
+      if (pf.length) out.push(t.title + ': перфорация ' + pf.map(q => fmt(q.top) + ' … ' + fmt(q.bottom)).join('; ') + ' м а.о.')
       const bar = t.bars.find(b => z <= Math.max(b.top, b.bottom) && z >= Math.min(b.top, b.bottom))
       const g = t.gwc.filter(q => q.z !== null && Math.abs((q.z as number) - z) <= near)
       const parts = [bar ? `${t.sub.startsWith('Sg') ? 'Sg' : 'Кг'} ${fmt(bar.v, 2)} (${fmt(bar.top)} … ${fmt(bar.bottom)})` : '', ...g.map(q => `${q.label} ${fmt(q.z)}`)].filter(Boolean)
@@ -117,6 +119,7 @@ function WellLog({ name, tracks, perf, zMin, zMax, h, mode, alt, hz, onHover, on
           {t.gwc.map((g, k) => g.z === null ? null : <g key={k}>
             <line x1={x0} x2={x0 + W} y1={y(g.z)} y2={y(g.z)} stroke={t.color || 'var(--map-water)'} strokeWidth={2.5} strokeDasharray={k ? '5 3' : undefined} />
             <text x={x0 + W - 3} y={y(g.z) - 3} textAnchor="end" fontSize={10} fill="var(--chart-ink)">{g.label + ' ' + fmt(md ? toD(g.z) : g.z)}</text></g>)}
+          {t.perf && t.perf.map((q, k) => <rect key={'p' + k} x={x0 + W - 7} width={6} y={y(Math.max(q.top, q.bottom))} height={Math.max(2, Math.abs(y(q.top) - y(q.bottom)))} fill={t.color || 'var(--chart-accent)'} opacity={0.9} stroke="var(--chart-surface)" strokeWidth={0.5} />)}
           {t.note && <text x={x0 + 4} y={HEAD + 14} fontSize={10} fill="var(--chart-muted)">{t.note}</text>}
         </g>
       })}
@@ -181,7 +184,7 @@ function savePng(box: HTMLElement | null, name: string) {
   })
 }
 
-interface Item { fact: FactWell; profiles: { model: ModelEntry; p: WellProfile | null; stepDate: string; err?: string }[] }
+interface Item { fact: FactWell; perfs: Record<string, ModelPerfRow>; profiles: { model: ModelEntry; p: WellProfile | null; stepDate: string; err?: string }[] }
 interface WellOut { well: string; perf: FactWell['perforation']; items: Item[] }
 
 const pickKey = (o: GisObs) => o.well + '|' + o.date
@@ -262,7 +265,7 @@ export default function Planshet() {
     const f = await getPlanshetFacts(chosen.map(o => [o.well, o.date] as [string, string]), alts)
     setNotes(Array.from(new Set([...f.notes, ...f.rows.flatMap(r => r.notes.map(n => 'Скв. ' + r.well + ': ' + n))])))
     // профили моделей: один запрос на модель и дату среза сразу для всех скважин этой даты (сетка читается один раз)
-    const items: Item[] = f.rows.map(row => ({ fact: row, profiles: [] }))
+    const items: Item[] = f.rows.map(row => ({ fact: row, perfs: {}, profiles: [] }))
     const byDate: Record<string, Item[]> = {}
     items.forEach(o => { (byDate[o.fact.date] = byDate[o.fact.date] || []).push(o) })
     for (const m of models) {
@@ -272,6 +275,13 @@ export default function Planshet() {
           group.forEach(g => g.profiles.push({ model: m, p: r.rows.find(x => x.well === g.fact.well) || null, stepDate: r.step_date }))
         } catch (e) { group.forEach(g => g.profiles.push({ model: m, p: null, stepDate: '', err: (e as Error).message })) }
       }
+    }
+    // перфорации каждой модели из её входных файлов (COMPDAT) на дату замера — чтобы сравнивать модели с разными интервалами
+    if (models.length) {
+      try {
+        const r = await getModelPerfs(models.map(m => m.id), items.map(o => [o.fact.well, o.fact.date] as [string, string]))
+        r.rows.forEach(x => { const it = items.find(o => o.fact.well === x.well && o.fact.date === x.date); if (it) it.perfs[x.model] = x })
+      } catch (e) { setMsg('Перфорации моделей не прочитаны: ' + (e as Error).message) }
     }
     const out: WellOut[] = []
     items.forEach(it => {
@@ -288,13 +298,13 @@ export default function Planshet() {
     const p = presets.find(x => x.logic === c.logic && x.value === c.value && x.fallback === c.fallback)
     return p ? p.formula : 'ручной: ' + c.logic + ', порог ' + c.value + ', SGCR нет — ' + c.fallback
   }
-  const tracksOfItem = ({ fact, profiles }: Item): Track[] => {
+  const tracksOfItem = ({ fact, perfs, profiles }: Item): Track[] => {
     const tr: Track[] = [{ title: 'ГИС, факт', sub: (fact.season || 'замер') + (fact.date ? ' · ' + fact.date : ''),
       bars: fact.intervals.filter(i => i.kg !== null).map(i => ({ top: i.top, bottom: i.bottom, v: i.kg as number })),
       gwc: [...fact.packs.map(p => ({ label: 'ГВК', z: p.gvk })), ...handGwc(fact.well)], note: fact.intervals.length ? undefined : 'нет интервалов' }]
     profiles.filter(x => !hidden.includes(x.model.id)).forEach(({ model, p, stepDate, err }) => tr.push({
       title: model.name, sub: err ? 'ошибка' : 'Sg · шаг ' + (stepDate || '—'), color: seriesColor(models.findIndex(m => m.id === model.id)),
-      bars: (p?.cells || []).map(c => ({ top: c.top, bottom: c.bottom, v: c.sg })),
+      bars: (p?.cells || []).map(c => ({ top: c.top, bottom: c.bottom, v: c.sg })), perf: (perfs[model.id]?.intervals || []).map(q => ({ top: q.top, bottom: q.bottom })),
       gwc: p?.gwc ? [{ label: 'ГВК', z: p.gwc.cell }, { label: 'ГВК инт.', z: p.gwc.interp }] : [], note: err ? err.slice(0, 28) : p ? undefined : 'нет ячеек скважины' }))
     return tr
   }

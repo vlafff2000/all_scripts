@@ -345,8 +345,11 @@ def read_perforations(path: str) -> PerfResult:
     """Перфорации по входному файлу модели. path — .data (или include-файл с COMPDAT) либо файл результатов: тогда .data ищется
     через ``find_data_files`` и, если их несколько, читается первый (остальные — в notes)."""
     st = _State()
-    if path.lower().endswith((".data", ".inc", ".include", ".sch", ".schedule", ".txt")) and os.path.isfile(path):
-        files = [path]
+    if path.lower().endswith((".data", ".inc", ".include", ".sch", ".schedule", ".txt")):
+        files = [path]                    # входной файл назван прямо: не подменять его соседним .data
+        if not os.path.isfile(path):
+            st.notes.append("файл не найден: %s" % path)
+            files = []
     else:
         files = find_data_files(path)
         if not files:
