@@ -192,3 +192,21 @@ def test_model_perfs_compare(tmp_path, monkeypatch):
     out = planshet.model_perfs([str(a), str(b), str(tmp_path / "C.data")], [("101", "2025-01-01")])["rows"]
     assert [(r["intervals"][0]["top"], r["intervals"][0]["bottom"]) for r in out[:2]] == [(-1000.0, -1010.0), (-1010.0, -1030.0)]
     assert out[2]["intervals"] == [] and out[2]["notes"]
+
+
+def test_base_model_of_atlas_is_default_and_manual_choice_overrides(tmp_path, monkeypatch):
+    from array import array
+    from tnav_results import Grid, perforations as tp
+    from schedule_pxg import atlas_data
+    data = tmp_path / "B.data"
+    data.write_text("WELSPECS\n '101' 'G' 1 1 1* GAS /\n/\nCOMPDAT\n '101' 1* 1* 1 1 OPEN /\n/\n", encoding="utf-8")
+    z = array("f", [1000.0] * 4 + [1010.0] * 4)
+    grid = Grid(1, 1, 1, [1], array("f"), z, None)
+    monkeypatch.setattr(planshet, "_model_perf_source", lambda path: (tp.read_perforations(path), grid))
+    monkeypatch.setattr(atlas_data, "base_model", lambda *a: str(data))
+    p = Project()
+    planshet.set_settings(p, _folder(tmp_path))
+    row = planshet.view(p, ["101"], "2025-04-10")["rows"][0]
+    assert row["perforation"]["source"] == "model"                       # перфорация из базовой модели Атласа без выбора в ГДМ
+    planshet.set_settings(p, planshet.settings(p)["folder"], "", None, "-")
+    assert planshet.view(p, ["101"], "2025-04-10")["rows"][0]["perforation"] is None      # «только файл», а файла нет

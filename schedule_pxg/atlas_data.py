@@ -71,3 +71,15 @@ def load(storage: str = "", project_id: str = ""):
     else:
         daily = pd.DataFrame(columns=["Дата", "Объем"])
     return hist, daily, "проект Атласа «%s»" % data.name, found, well_groups(data)
+
+
+def base_model(storage: str = "", project_id: str = "") -> str:
+    """Базовая модель проекта Атласа (раздел «Импорт»): путь к файлу результатов модели или пустая строка.
+    Проект выбирается как для расходов (самый свежий не демонстрационный с расходами, если не задан)."""
+    from gsp_maps import atlas_source
+    found, root = projects(storage)
+    if not found:
+        return ""
+    pid = project_id if any(p["id"] == project_id for p in found) else atlas_source.default_project(found) or found[0]["id"]
+    data = atlas_source.AtlasData(atlas_source.storage_root(storage), pid)
+    return str((data.manifest.get("settings") or {}).get("base_model") or "").strip().strip('"')

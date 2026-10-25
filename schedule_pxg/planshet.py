@@ -28,7 +28,8 @@ def set_settings(p: Project, folder: str = "", perf_file: str = "", perf_mode: O
                  perf_model: Optional[str] = None) -> None:
     """Папка выгрузки базы ГИС и файл перфораций; пустое значение — убрать. perf_mode: "" — по умолчанию, "ao" — столбцы
     без подписи это а.о., "md" — положительные значения без подписи это глубина от стола; None — не менять.
-    perf_model: модель (путь к файлу результатов), из входных файлов которой берутся перфорации вместо файла; "" — вернуть файл."""
+    perf_model: модель (путь к файлу результатов), из входных файлов которой берутся перфорации вместо файла; "" — базовая модель проекта Атласа (по умолчанию),
+    "-" — не брать из моделей, только файл."""
     cur = settings(p)
     if perf_model is not None:
         cur["perf_model"] = perf_model.strip()
@@ -243,6 +244,17 @@ def view(p: Project, wells: Sequence[str], date: str = "", alts: Optional[Dict[s
     perf = perforations(s["perf_file"]) if s.get("perf_file") else {}
     notes: List[str] = []
     pm = s.get("perf_model") or ""
+    if pm == "-":                       # инженер явно отказался от моделей: только файл
+        pm = ""
+    elif not pm:                        # по умолчанию — базовая модель проекта Атласа (раздел «Импорт»)
+        try:
+            from . import atlas_data
+            pm = atlas_data.base_model()
+        except (OSError, ValueError, KeyError, ImportError):
+            pm = ""
+        if pm and not os.path.exists(pm):
+            notes.append("Базовая модель проекта Атласа не найдена на диске: %s" % pm)
+            pm = ""
     if pm:
         notes.append("Перфорации берутся из модели %s (входной файл .data); для скважин, которых там нет, — из файла" % os.path.basename(pm))
     elif not s.get("perf_file"):
