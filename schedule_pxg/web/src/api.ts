@@ -202,6 +202,10 @@ export interface PressureModelCell { value: number | null; diff: number | null; 
 export interface PressureRow { key: string; well: string; date: string; fact: number | null; excluded: boolean; hint: string; models: Record<string, PressureModelCell> }
 export interface PressureCompare { keyword: string; tolerance_days: number; models: string[]; rows: PressureRow[]; stats: Record<string, PressureStat>; excluded_count: number }
 export const comparePressure = (b: unknown) => call<PressureCompare>('/api/results/compare/pressure', post(b))
+/** Динамика показателя по датам у каждой модели (см. schedule_pxg/model_compare.py: dynamics). */
+export interface DynamicsPoint { date: string; value: number; diff_to_base: number | null }
+export interface Dynamics { key: string; base: string | null; models: string[]; series: Record<string, { points: DynamicsPoint[]; change: { from: string; to: string; delta: number; percent: number } | null }> }
+export const compareVolume = (b: unknown) => call<{ volume: Dynamics; gwc: Dynamics; notes: string[] }>('/api/results/compare/volume', post(b))
 export const getResultSeries = (model: string, keyword: string, objects: string[]) =>
   call<{ keyword: string; series: Record<string, { dates: string[]; values: number[] }> }>('/api/results/series?' + new URLSearchParams({ model, keyword, objects: objects.join('|') }))
 /** Критерий газа для ГВК по модели: логика «sg» | «sg_sgcr» | «sw_swcr», порог/запас value, SGCR без INIT fallback (см. tnav_results.gwc_criterion). */
