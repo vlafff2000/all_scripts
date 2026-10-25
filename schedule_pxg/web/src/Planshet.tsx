@@ -30,7 +30,7 @@ interface Hover { z: number; cx: number; cy: number; x: number }
 /** Одна скважина: ось глубины (а.о. или MD) и треки с общей шкалой 0…1; перфорация — полоса слева.
  *  Колесо — масштаб около курсора, перетаскивание — сдвиг, двойной щелчок — сброс; шкала общая у всех скважин, подсказка по наведению. */
 function WellLog({ name, tracks, perf, zMin, zMax, h, mode, alt, hz, onHover, onView, onReset }: {
-  name: string; tracks: Track[]; perf: { top: number | null; bottom: number | null } | null; zMin: number; zMax: number; h: number
+  name: string; tracks: Track[]; perf: FactWell['perforation']; zMin: number; zMax: number; h: number
   mode: Mode; alt: number | null; hz: number | null; onHover: (z: number | null) => void; onView: (lo: number, hi: number) => void; onReset: () => void
 }) {
   const md = mode === 'md' && alt !== null
@@ -107,7 +107,8 @@ function WellLog({ name, tracks, perf, zMin, zMax, h, mode, alt, hz, onHover, on
       <text x={6} y={HEAD - 6} fontSize={10} fill="var(--chart-muted)">{md ? 'м, MD' : 'м, а.о.'}</text>
       <g clipPath={`url(#${clip})`}>
       {perf && perf.top !== null && perf.bottom !== null && <g>
-        <rect x={AXIS + 2} width={9} y={y(Math.max(perf.top, perf.bottom))} height={Math.max(2, Math.abs(y(perf.top) - y(perf.bottom)))} fill="var(--chart-accent)" opacity={0.85} /></g>}
+        {(perf.intervals && perf.intervals.length ? perf.intervals : [perf]).map((iv, n) =>
+          <rect key={n} x={AXIS + 2} width={9} y={y(Math.max(iv.top ?? 0, iv.bottom ?? 0))} height={Math.max(2, Math.abs(y(iv.top ?? 0) - y(iv.bottom ?? 0)))} fill="var(--chart-accent)" opacity={0.85} />)}</g>}
       {tracks.map((t, i) => {
         const x0 = AXIS + 16 + i * (W + PAD)
         return <g key={i}>
@@ -189,6 +190,8 @@ const pickLabel = (o: GisObs) => 'Скв. ' + o.well + ' · ' + o.date + ' · ' 
 export default function Planshet() {
   const [gisFolder, setGisFolder] = useState('')
   const [perfFile, setPerfFile] = useState('')
+  const [perfModel, setPerfModel] = useState('')                     // перфорации из входного файла этой модели (главнее файла); пусто — из файла
+  const [allModels, setAllModels] = useState<ModelEntry[]>([])
   const [catalog, setCatalog] = useState<{ wells: string[]; observations: GisObs[] }>({ wells: [], observations: [] })
   const [wells, setWells] = useState<string[]>([])
   const [seasons, setSeasons] = useState<string[]>([])
@@ -214,12 +217,13 @@ export default function Planshet() {
 
   const loadCatalog = () => getPlanshetCatalog().then(setCatalog).catch(e => { setCatalog({ wells: [], observations: [] }); setMsg((e as Error).message) })
   useEffect(() => {
-    getSources().then(v => { setGisFolder(v.sources.gis?.folder || ''); setPerfFile(v.sources.gis?.perf_file || ''); if (v.sources.gis?.folder) loadCatalog() }).catch(() => undefined)
-    getModels().then(v => setModels(v.models.filter(m => m.selected))).catch(e => setMsg((e as Error).message))
+    getSources().then(v => { setGisFolder(v.sources.gis?.folder || ''); setPerfFile(v.sources.gis?.perf_file || ''); setPerfModel(v.sources.gis?.perf_model || ''); if (v.sources.gis?.folder) loadCatalog() }).catch(() => undefined)
+    getModels().then(v => { setAllModels(v.models); setModels(v.models.filter(m => m.selected)) }).catch(e => setMsg((e as Error).message))
     getCriterionPresets().then(r => setPresets(r.presets)).catch(() => undefined)
   }, [])
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
   const saveGis = (folder: string, perf: string) => guard(async () => { await setSources({ gis: { folder, perf_file: perf } }); setGisFolder(folder); setPerfFile(perf); if (folder) await loadCatalog() })
+  const savePerfModel = (id: string) => guard(async () => { await setSources({ gis: { folder: gisFolder, perf_file: perfFile, perf_model: id } }); setPerfModel(id); setMsg(id ? 'Перфорации будут взяты из модели; нажмите «Построить» ещё раз' : 'Перфорации снова из файла; нажмите «Построить» ещё раз') })
   const pickGis = async () => { const f = await pickFolder(gisFolder); if (f) await saveGis(f, perfFile) }
   const pickPerf = async () => { const r = await pickFile(perfFile); if (r.path) await saveGis(gisFolder, r.path) }
 
@@ -318,6 +322,11 @@ export default function Planshet() {
           <button disabled={busy} onClick={pickGis}>Выбрать папку…</button></div>
         <div className="row"><span className="small" style={{ width: 120 }}>Перфорации:</span><span title={perfFile}>{perfFile ? tail(perfFile) : <span className="muted">не выбран</span>}</span>
           <button disabled={busy} onClick={pickPerf}>Выбрать файл…</button>{perfFile && <button disabled={busy} onClick={() => saveGis(gisFolder, '')}>Убрать</button>}</div>
+        <div className="row"><span className="small" style={{ width: 120 }}>Из модели:</span>
+          <select disabled={busy} value={perfModel} onChange={e => savePerfModel(e.target.value)} title="Интервалы COMPDAT из входного файла модели на дату замера; если в модели скважины нет — берётся файл">
+            <option value="">не брать (только файл)</option>
+            {allModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+          <span className="muted small">COMPDAT из .data на дату замера; главнее файла, для скважин вне модели остаётся файл</span></div>
         <p className="muted small">Модели: {models.length ? models.map(m => m.name).join(', ') : 'не отмечены — планшет покажет только факт'}</p>
       </section>
       <section className="card">

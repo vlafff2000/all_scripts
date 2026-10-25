@@ -149,3 +149,28 @@ def test_perf_mode_setting_survives_source_save():
     assert p.sources["gis"] == {"folder": "a", "perf_file": "c", "perf_mode": "md"}
     planshet.set_settings(p, "a", "c", "")
     assert "perf_mode" not in p.sources["gis"]
+
+
+def test_perforations_from_model(tmp_path, monkeypatch):
+    from array import array
+    from tnav_results import Grid, perforations as tp
+    data = tmp_path / "M.data"
+    data.write_text("START\n 1 JAN 2024 /\nWELSPECS\n '101' 'G' 1 1 1* GAS /\n/\nCOMPDAT\n '101' 1* 1* 2 3 OPEN /\n/\n"
+                    "DATES\n 1 FEB 2025 /\n/\nWELOPEN\n '101' SHUT /\n/\n", encoding="utf-8")
+    z = array("f")
+    for k in range(3):
+        z.extend([1000.0 + 10 * k] * 4)
+        z.extend([1010.0 + 10 * k] * 4)
+    grid = Grid(1, 1, 3, [1] * 3, array("f"), z, None)
+    monkeypatch.setattr(planshet, "_model_perf_source", lambda path: (tp.read_perforations(str(data)), grid))
+    got = planshet.model_perforations("M.EGRID", ["101.0", "555"], "2024-11-01")
+    assert list(got) == ["101"] and [(i["top"], i["bottom"]) for i in got["101"]["intervals"]] == [(-1010.0, -1030.0)]
+    assert planshet.model_perforations("M.EGRID", ["101"], "2025-04-10")["101"]["intervals"] == []     # после WELOPEN SHUT
+    p = Project()
+    planshet.set_settings(p, _folder(tmp_path), "", None, "M.EGRID")
+    v = planshet.view(p, ["101"], "2024-11-01")
+    assert v["rows"][0]["perforation"]["source"] == "model"
+    assert any("из модели" in n for n in v["rows"][0]["notes"])
+    assert planshet.settings(p)["perf_model"] == "M.EGRID"
+    planshet.set_settings(p, planshet.settings(p)["folder"], "", None, "")
+    assert "perf_model" not in planshet.settings(p)
