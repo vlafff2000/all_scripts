@@ -196,6 +196,12 @@ export const getModels = () => call<ModelsView>('/api/models')
 export const setModelFolders = (folders: string[]) => call<ModelsView>('/api/models/folders', post({ folders }))
 export const setModelSelection = (selected: string[]) => call<ModelsView>('/api/models/select', post({ selected }))
 export const getResults = (model: string) => call<ResultsInfo>('/api/results?' + new URLSearchParams({ model }))
+/** Сравнение моделей по давлению замерного фонда (см. schedule_pxg/model_compare.py). */
+export interface PressureStat { n: number; mean: number | null; mean_abs: number | null; max_abs: number | null; wells: Record<string, Omit<PressureStat, 'wells'>> }
+export interface PressureModelCell { value: number | null; diff: number | null; gap_days: number | null; hint: string }
+export interface PressureRow { key: string; well: string; date: string; fact: number | null; excluded: boolean; hint: string; models: Record<string, PressureModelCell> }
+export interface PressureCompare { keyword: string; tolerance_days: number; models: string[]; rows: PressureRow[]; stats: Record<string, PressureStat>; excluded_count: number }
+export const comparePressure = (b: unknown) => call<PressureCompare>('/api/results/compare/pressure', post(b))
 export const getResultSeries = (model: string, keyword: string, objects: string[]) =>
   call<{ keyword: string; series: Record<string, { dates: string[]; values: number[] }> }>('/api/results/series?' + new URLSearchParams({ model, keyword, objects: objects.join('|') }))
 /** Критерий газа для ГВК по модели: логика «sg» | «sg_sgcr» | «sw_swcr», порог/запас value, SGCR без INIT fallback (см. tnav_results.gwc_criterion). */
