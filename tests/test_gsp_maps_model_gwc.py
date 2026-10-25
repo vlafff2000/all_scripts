@@ -46,3 +46,15 @@ def test_variants_return_one_result_per_criterion(tmp_path):
     assert [v["label"] for v in r["variants"]] == [it.label for it in items]
     assert len(r["variants"][0]["points"]) == 1 and r["variants"][1]["points"] == []
     assert r["date"] == "2026-02-01"
+
+
+def test_points_are_in_map_frame_when_wells_are_there(tmp_path):
+    from tests.test_gsp_maps_roof import _egrid_with_mapaxes
+    from gsp_maps import roof
+    roof._cache.clear()
+    anchor = _egrid_with_mapaxes(tmp_path / "M.EGRID")
+    _unrst(tmp_path / "M.UNRST", [SG], [PORV], with_wells=True)
+    p = model_gwc.all_wells(anchor, None, _crit(0.3), {1: (5050.0, 7050.0)})["points"][0]
+    assert p["x"] == pytest.approx(5050.0) and p["y"] == pytest.approx(7050.0)         # центр колонны (0,0) со сдвигом MAPAXES
+    q = model_gwc.all_wells(anchor, None, _crit(0.3), {1: (50.0, 50.0)})
+    assert q["points"][0]["x"] == pytest.approx(50.0) and q["frame"] == "coord"
