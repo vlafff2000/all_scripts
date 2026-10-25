@@ -498,9 +498,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const r = gis.roof.grid
     const miss = (note: string) => ({ d: '', at: null, note, surface: '', shares: [] as GwcUnified['shares'], excluded: [] as string[] })
     if (!r) return miss('Нужна кровля из модели: включите её и выберите модель и слой.')
-    if (gis.source === 'delta' || (gis.source === 'fact' && (gis.metric !== 'gvk_abs_m' || gis.against))) return miss('Контур строится по значениям ГВК: выберите показатель «ГВК, м а.о.» без сравнения сезонов или «ГВК модели».')
+    if (gis.allWells.on && gis.allWells.multi) return miss('Контуры вариантов критерия показаны каждый своим цветом (список вариантов ниже).')
+    if (!gis.allWells.on && (gis.source === 'delta' || (gis.source === 'fact' && (gis.metric !== 'gvk_abs_m' || gis.against)))) return miss('Контур строится по значениям ГВК: выберите показатель «ГВК, м а.о.» без сравнения сезонов или «ГВК модели».')
     if (spread) return miss('На схеме с разнесёнными скважинами контур не строится.')
     if (gis.gwc.mode === 'unified') {
+      if (gis.allWells.on) {
+        const res = gwcUnified(awOk.map(p => ({ w: p.w, x: p.x, y: p.y, v: p.v })), r, spacing, gis.gwc.par)
+        return { ...res, note: res.note || `${res.surface}. Линий: ${res.closed} замкнутых${res.open ? `, ${res.open} незамкнутых` : ''}. Точки — все скважины модели; исключить скважину — клик по ней на карте.`, shares: [] as GwcUnified['shares'], excluded: [] as string[] }
+      }
       const all = placed.filter(p => gis.paint?.vals.has(p.well)).map(p => ({ w: String(p.well), x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
       const res = gwcUnified(all.filter(p => !gis.gwc.excl.has(p.w)), r, spacing, gis.gwc.par)
       return { ...res, note: res.note || `${res.surface}. Линий: ${res.closed} замкнутых${res.open ? `, ${res.open} незамкнутых (упираются в край кровли)` : ''}.`, shares: res.shares, excluded: all.filter(p => gis.gwc.excl.has(p.w)).map(p => p.w) }
@@ -508,7 +513,16 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const pts = placed.filter(p => gis.paint?.vals.has(p.well)).map(p => ({ x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
     const res = gwcContour(pts, r, spacing, Number(gis.iso.reach) || 1.5, gis.gwc.mode)
     return { ...res, note: res.note || res.surface + '.', shares: [] as GwcUnified['shares'], excluded: [] as string[] }
-  }, [options.paint, gis?.gwc.on, gis?.gwc.mode, gis?.gwc.par, gis?.gwc.excl, gis?.roof.on, gis?.roof.grid, gis?.source, gis?.metric, gis?.against, gis?.paint, gis?.iso.reach, placed, spacing, spread])
+  }, [options.paint, gis?.gwc.on, gis?.gwc.mode, gis?.gwc.par, gis?.gwc.excl, gis?.allWells.on, gis?.allWells.multi, awOk, gis?.roof.on, gis?.roof.grid, gis?.source, gis?.metric, gis?.against, gis?.paint, gis?.iso.reach, placed, spacing, spread])
+  // варианты критерия: единый контур каждого варианта своим цветом (те же цвета, что у изолиний вариантов)
+  const gwcMulti = useMemo(() => {
+    if (options.paint !== 'gis' || !gis?.gwc.on || !gis.roof.on || !gis.roof.grid || spread || gis.gwc.mode !== 'unified' || !gis.allWells.on || !gis.allWells.multi || !gis.allWells.variants || gis.allWells.variantsBusy) return []
+    const r = gis.roof.grid
+    return gis.allWells.variants.variants.map((x, i) => {
+      const pts = x.points.filter(p => !gis.allWells.excl.has(p.w)).map(p => ({ w: p.w, x: p.x, y: -p.y, v: awValue(p, gis.allWells.mode, gis.allWells.depth) }))
+      return { label: x.label, color: AW_COLORS[i % AW_COLORS.length], res: gwcUnified(pts, r, spacing, gis.gwc.par) }
+    })
+  }, [options.paint, gis?.gwc.on, gis?.gwc.mode, gis?.gwc.par, gis?.roof.on, gis?.roof.grid, gis?.allWells.on, gis?.allWells.multi, gis?.allWells.variants, gis?.allWells.variantsBusy, gis?.allWells.mode, gis?.allWells.depth, gis?.allWells.excl, spread, spacing])
   const gwcWarn = gwc && !gwc.d ? gwc.note : ''
   useEffect(() => { if (gwcWarn) reportIssue('контур ГВК', gwcWarn) }, [gwcWarn])
   const roofWarn = roofRes.warn
@@ -787,7 +801,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 </g>
               })}
             </g>}
-            {awMultiIso.length > 0 && <g aria-label="Изолинии по вариантам критерия">
+            {gwcMulti.length > 0 && <g aria-label="Контуры ГВК по вариантам критерия">
+              {gwcMulti.map(m => m.res.d && <g key={m.label}>
+                <path d={m.res.d} fill="none" stroke={pal.bg} strokeWidth={6} strokeLinejoin="round" opacity={0.85} vectorEffect="non-scaling-stroke" />
+                <path d={m.res.d} fill="none" stroke={m.color} strokeWidth={3} strokeLinejoin="round" vectorEffect="non-scaling-stroke"><title>{m.label}</title></path>
+                {m.res.at && <text x={m.res.at[0]} y={m.res.at[1]} fontSize={11 / K} fontWeight={700} textAnchor="middle" fill={m.color} stroke={pal.bg} strokeWidth={3.5 / K} paintOrder="stroke">{m.label}</text>}</g>)}
+            </g>}
+            {awMultiIso.length > 0 && !gwcMulti.some(m => m.res.d) && <g aria-label="Изолинии по вариантам критерия">
               {awMultiIso.map(m => m.res && <g key={m.label}>
                 {m.res.conf.map((c, i) => <path key={'c' + i} d={c.d} fill={m.color} opacity={c.a * 0.3} stroke="none" />)}
                 {m.res.lines.map(l => <g key={l.level}><path d={l.d} fill="none" stroke={m.color} strokeWidth={1.6} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
