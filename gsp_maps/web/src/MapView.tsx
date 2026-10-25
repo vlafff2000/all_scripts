@@ -444,6 +444,17 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       awRes.n ? `Невязка к ГИС (${awRes.n} скв.): медиана ${fmt1(awRes.median ?? 0)} м, средний модуль ${fmt1(awRes.mae ?? 0)} м.` : 'Невязки к ГИС нет: нет совпавших скважин или не выбран показатель ГВК.',
       `Подсказки: разрыв контакта ${awTornN}, резкий выброс ${awOutN}. Клик по скважине исключает её из изолиний.`].join(' ')
   // изолинии показателя ГИС: только на карте в координатах (не на схеме с разнесёнными скважинами)
+  const obsPts = useMemo(() => (options.paint === 'gis' && gis?.obs.on && !spread ? gis.obs.data?.wells.filter(o => o.x !== undefined && o.y !== undefined) ?? [] : []), [options.paint, gis?.obs.on, gis?.obs.data, spread])
+  // точки значений для изолиний и контура: скважины карты со значением и наблюдательные скважины ГИС (◆), если они показаны
+  const gisPts = useMemo(() => {
+    const vals = gis?.paint?.vals
+    if (!vals) return { pts: [] as { w: string; x: number; y: number; v: number }[], nVals: 0, nPlaced: 0, nObs: 0 }
+    const pts = placed.filter(p => vals.has(p.well)).map(p => ({ w: String(p.well), x: p.x, y: p.y, v: vals.get(p.well)!.v }))
+    const nPlaced = pts.length, have = new Set(pts.map(p => p.w))
+    for (const o of obsPts) if (vals.has(o.well) && !have.has(String(o.well))) pts.push({ w: String(o.well), x: o.x!, y: -o.y!, v: vals.get(o.well)!.v })
+    return { pts, nVals: vals.size, nPlaced, nObs: pts.length - nPlaced }
+  }, [gis?.paint, placed, obsPts])
+  const gisPtsNote = (n: number) => `Изолиний нет: из ${gisPts.nVals} скважин со значением на карте ${gisPts.nPlaced} эксплуатационных${gis?.obs.on ? ` и ${gisPts.nObs} наблюдательных` : ' (наблюдательные выключены: включите «Наблюдательные скважины (◆)»)'}, всего ${n}, нужно не меньше трёх. Остальные скважины не на карте: выберите группу или «Весь объект» либо проверьте координаты.`
   const iso = useMemo((): IsoResult | null => {
     if (options.paint !== 'gis' || !gis?.iso.on) return null
     const note = (text: string): IsoResult => ({ lines: [], conf: [], step: 0, note: text })
@@ -462,15 +473,15 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     if (!gis.paint) return note('Изолиний нет: для выбранной пачки, показателя и сезона нет значений по скважинам.')
     if (spread) return note('На схеме с разнесёнными скважинами изолинии не строятся: выключите «Разнести скважины».')
     try {
-      const pts = placed.filter(p => gis.paint!.vals.has(p.well)).map(p => ({ x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
-      if (pts.length < 3) return note(`Изолиний нет: на карте ${pts.length} из ${gis.paint.vals.size} скважин со значением (нужно не меньше трёх). Выберите группу или «Весь объект».`)
+      const pts = gisPts.pts
+      if (pts.length < 3) return note(gisPtsNote(pts.length))
       const vs = pts.map(p => p.v)
       const step = Number(gis.iso.step) || niceLevelStep((Math.max(...vs) - Math.min(...vs)) || 1)
       return isolines(pts, spacing, step, Number(gis.iso.reach) || 1.5)
     } catch (e) {
       return note('Изолинии не построены из-за ошибки: ' + String((e as Error)?.message || e))
     }
-  }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, gis?.allWells.on, awOk, placed, spacing, spread])
+  }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, gis?.allWells.on, awOk, gisPts, spacing, spread])
   // изолинии кровли из модели: тонкие линии под скважинами, шаг подбирается или задаётся; любой исход объясняется на экране
   const roofRes = useMemo((): { lines: ReturnType<typeof contourLines> | null; fill: { d: string; c: string }[]; step: number; warn: string } => {
     const r0 = gis?.roof.grid
@@ -513,19 +524,20 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     if (gis.allWells.on && gis.allWells.multi) return miss('Контуры вариантов критерия показаны каждый своим цветом (список вариантов ниже).')
     if (!gis.allWells.on && (gis.source === 'delta' || (gis.source === 'fact' && (gis.metric !== 'gvk_abs_m' || gis.against)))) return miss('Контур строится по значениям ГВК: выберите показатель «ГВК, м а.о.» без сравнения сезонов или «ГВК модели».')
     if (spread) return miss('На схеме с разнесёнными скважинами контур не строится.')
+    if (!gis.allWells.on && !gisPts.pts.length) return miss(`Контур не построен: ${gisPtsNote(0).replace('Изолиний нет: ', '').replace(', нужно не меньше трёх', '')}`)
     if (gis.gwc.mode === 'unified') {
       if (gis.allWells.on) {
         const res = gwcUnified(awOk.map(p => ({ w: p.w, x: p.x, y: p.y, v: p.v })), r, spacing, gis.gwc.par)
         return { ...res, note: res.note || `${res.surface}. Линий: ${res.closed} замкнутых${res.open ? `, ${res.open} незамкнутых` : ''}. Точки — все скважины модели; исключить скважину — клик по ней на карте.`, shares: [] as GwcUnified['shares'], excluded: [] as string[] }
       }
-      const all = placed.filter(p => gis.paint?.vals.has(p.well)).map(p => ({ w: String(p.well), x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
+      const all = gisPts.pts
       const res = gwcUnified(all.filter(p => !gis.gwc.excl.has(p.w)), r, spacing, gis.gwc.par)
       return { ...res, note: res.note || `${res.surface}. Линий: ${res.closed} замкнутых${res.open ? `, ${res.open} незамкнутых (упираются в край кровли)` : ''}.`, shares: res.shares, excluded: all.filter(p => gis.gwc.excl.has(p.w)).map(p => p.w) }
     }
-    const pts = placed.filter(p => gis.paint?.vals.has(p.well)).map(p => ({ x: p.x, y: p.y, v: gis.paint!.vals.get(p.well)!.v }))
+    const pts = gisPts.pts
     const res = gwcContour(pts, r, spacing, Number(gis.iso.reach) || 1.5, gis.gwc.mode)
     return { ...res, note: res.note || res.surface + '.', shares: [] as GwcUnified['shares'], excluded: [] as string[] }
-  }, [options.paint, gis?.gwc.on, gis?.gwc.mode, gis?.gwc.par, gis?.gwc.excl, gis?.allWells.on, gis?.allWells.multi, awOk, gis?.roof.on, gis?.roof.grid, gis?.source, gis?.metric, gis?.against, gis?.paint, gis?.iso.reach, placed, spacing, spread])
+  }, [options.paint, gis?.gwc.on, gis?.gwc.mode, gis?.gwc.par, gis?.gwc.excl, gis?.allWells.on, gis?.allWells.multi, awOk, gis?.roof.on, gis?.roof.grid, gis?.source, gis?.metric, gis?.against, gis?.paint, gis?.iso.reach, gisPts, spacing, spread])
   // варианты критерия: единый контур каждого варианта своим цветом (те же цвета, что у изолиний вариантов)
   const gwcMulti = useMemo(() => {
     if (options.paint !== 'gis' || !gis?.gwc.on || !gis.roof.on || !gis.roof.grid || spread || gis.gwc.mode !== 'unified' || !gis.allWells.on || !gis.allWells.multi || !gis.allWells.variants || gis.allWells.variantsBusy) return []
@@ -675,7 +687,6 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, rd, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
   // наблюдательные скважины (вне групп): ромбы в координатах карты; при «схеме» положения условные, поэтому они не рисуются
-  const obsPts = useMemo(() => (options.paint === 'gis' && gis?.obs.on && !spread ? gis.obs.data?.wells.filter(o => o.x !== undefined && o.y !== undefined) ?? [] : []), [options.paint, gis?.obs.on, gis?.obs.data, spread])
   const obsLayer = obsPts.length ? <g aria-label="Наблюдательные скважины">
     {obsPts.map(o => {
       const pv = paintData?.vals.get(o.well), r = rd * 0.5, x = o.x!, y = -o.y!
