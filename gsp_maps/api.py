@@ -211,21 +211,9 @@ async def client_log(request: Request):
 
 
 async def observers_get(request: Request):
-    """Наблюдательные скважины (ГИС, замеры давления; вне групп) с положением; без координат — в списке missing."""
+    """Наблюдательные и геофизические скважины (фонды из проекта Атласа) с положением; без координат — в списке missing."""
     if PROJECT.atlas is None or PROJECT.store is None:
         return _err("Данные ещё не загружены из проекта Атласа.", 409)
-    return JSONResponse(await run_in_threadpool(PROJECT.observers_payload))
-
-
-async def observers_mark(request: Request):
-    """Ручной выбор инженера: {well, kind: obs|prod|auto}."""
-    if PROJECT.atlas is None or PROJECT.store is None:
-        return _err("Данные ещё не загружены из проекта Атласа.", 409)
-    b = await request.json()
-    try:
-        PROJECT.mark_observer(int(b.get("well")), str(b.get("kind") or ""))
-    except (TypeError, ValueError) as e:
-        return _err(str(e))
     return JSONResponse(await run_in_threadpool(PROJECT.observers_payload))
 
 
@@ -410,7 +398,6 @@ def build_app() -> Starlette:
         Route("/api/gis/model-wells", gis_model_wells),
         Route("/api/gis/model-wells-variants", gis_model_wells_variants),
         Route("/api/observers", observers_get),
-        Route("/api/observers/mark", observers_mark, methods=["POST"]),
         Route("/api/roof", roof),
         Route("/api/client-log", client_log, methods=["POST"]),
         Route("/api/models", models_get),

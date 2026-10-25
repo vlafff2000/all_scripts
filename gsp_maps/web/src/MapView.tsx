@@ -22,7 +22,7 @@ export interface GisPicker {
   options: Record<string, string[]>; dates: Record<string, string>; paint: PaintData | null
   iso: { on: boolean; step: string; reach: string }; isoNote: string
   /** Наблюдательные скважины (вне групп): свой флажок показа, ручное отнесение к наблюдательным/эксплуатационным. */
-  obs: { on: boolean; data: Observers | null; onToggle: (v: boolean) => void; onMark: (well: number, kind: 'obs' | 'prod' | 'auto') => void }
+  obs: { on: boolean; geoOn: boolean; data: Observers | null; onToggle: (v: boolean) => void; onToggleGeo: (v: boolean) => void }
   source: 'fact' | 'model' | 'delta'; modelInfo: string; error?: string
   gwc: { on: boolean; mode: 'unified' | 'plane' | 'idw'; par: GwcParams; excl: Set<string> }
   /** ГВК по всем скважинам модели (выключено по умолчанию): модель, срез, способ и глубина, порог Sg, порог подсказки о выбросе, исключённые скважины. */
@@ -143,21 +143,20 @@ const ClusterGlyph = memo(function ClusterGlyph(p: { id: number; x: number; y: n
 
 function niceCoord(v: number) { return Math.round(v).toLocaleString('ru-RU') }
 
-/** Наблюдательные скважины: показ, список «нет координат» и ручное решение инженера (оно важнее автоопределения). */
+/** Показанные на карте наблюдательные (◆) и геофизические (▲) скважины: фонд задаётся в Атласе, здесь только показ. */
+function shownFunds(obs: GisPicker['obs']) {
+  return (obs.data?.wells ?? []).filter(o => (o.fund === 'geophysical' ? obs.geoOn : obs.on))
+}
 function ObserverControls({ obs }: { obs: GisPicker['obs'] }) {
-  const [add, setAdd] = useState('')
   const d = obs.data
-  const n = d ? d.wells.length + d.missing.length : 0
+  const count = (fund: string) => d ? [...d.wells, ...d.missing].filter(o => o.fund === fund).length : 0
+  const missing = d?.missing.filter(o => (o.fund === 'geophysical' ? obs.geoOn : obs.on)) ?? []
   return <>
-    <label className="check"><input type="checkbox" checked={obs.on} onChange={e => obs.onToggle(e.target.checked)} /> Наблюдательные скважины (◆){d ? ` · ${n}` : ''}</label>
-    {obs.on && d && <div className="gis-pin">
-      <span className="muted">{d.note || 'Наблюдательные — скважины с ГИС или замерами давления, которых нет ни в одной группе. Это подсказка: решение за вами.'}</span>
-      {d.missing.length > 0 && <span className="muted" title="Нет X, Y в проекте Атласа">Нет координат: {d.missing.map(m => m.well).join(', ')}</span>}
-      {[...d.wells, ...d.missing].map(o => <span key={o.well} className="muted">{o.well} ({o.why.join(', ') || '—'}){o.manual ? ' · вручную' : ''}{' '}
-        <button type="button" className="quiet" onClick={() => obs.onMark(o.well, 'prod')}>→ эксплуатационная</button>{o.manual && <> <button type="button" className="quiet" onClick={() => obs.onMark(o.well, 'auto')}>Авто</button></>}</span>)}
-      {d.forcedProd.length > 0 && <span className="muted">Отнесены к эксплуатационным: {d.forcedProd.map(w => <button key={w} type="button" className="quiet" title="Вернуть автоопределение" onClick={() => obs.onMark(w, 'auto')}>{w} ↩</button>)}</span>}
-      <input value={add} onChange={e => setAdd(e.target.value.replace(/\D/g, ''))} placeholder="Номер скважины" aria-label="Номер скважины" style={{ width: 120 }} />
-      <button type="button" className="quiet" disabled={!add} onClick={() => { obs.onMark(Number(add), 'obs'); setAdd('') }}>Сделать наблюдательной</button>
+    <label className="check"><input type="checkbox" checked={obs.on} onChange={e => obs.onToggle(e.target.checked)} /> Наблюдательные скважины (◆){d ? ` · ${count('observation')}` : ''}</label>
+    <label className="check"><input type="checkbox" checked={obs.geoOn} onChange={e => obs.onToggleGeo(e.target.checked)} /> Геофизические скважины (▲){d ? ` · ${count('geophysical')}` : ''}</label>
+    {(obs.on || obs.geoOn) && d && <div className="gis-pin">
+      <span className="muted">{d.note || 'Фонд скважин (эксплуатационная, наблюдательная, геофизическая) настраивается в Атласе, вкладка «Фонды скважин». Подсказка программы показывает причину, решение за вами.'}</span>
+      {missing.length > 0 && <span className="muted" title="Нет X, Y в проекте Атласа">Нет координат: {missing.map(m => m.well).join(', ')}</span>}
     </div>}
   </>
 }
@@ -282,14 +281,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const [frameAll, setFrameAll] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
   const { placed, spacing, far } = geo
-  const obsBox = frameAll && gis?.obs.on && !spread ? gis.obs.data?.wells.filter(o => o.x !== undefined) ?? [] : []
+  const obsBox = frameAll && gis && (gis.obs.on || gis.obs.geoOn) && !spread ? shownFunds(gis.obs).filter(o => o.x !== undefined) : []
   const bounds = useMemo(() => {
     const b = frameAll ? geo.boundsAll : geo.bounds
     if (!obsBox.length) return b
     const xs = obsBox.map(o => o.x!), ys = obsBox.map(o => -o.y!)
     return { x0: Math.min(b.x0, ...xs), x1: Math.max(b.x1, ...xs), y0: Math.min(b.y0, ...ys), y1: Math.max(b.y1, ...ys) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frameAll, geo, gis?.obs.data, gis?.obs.on, spread])
+  }, [frameAll, geo, gis?.obs.data, gis?.obs.on, gis?.obs.geoOn, spread])
   const rmax = useMemo(() => {
     if (geo.unit) return geo.unit
     const span = Math.max(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0, 1)
@@ -444,8 +443,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       awRes.n ? `Невязка к ГИС (${awRes.n} скв.): медиана ${fmt1(awRes.median ?? 0)} м, средний модуль ${fmt1(awRes.mae ?? 0)} м.` : 'Невязки к ГИС нет: нет совпавших скважин или не выбран показатель ГВК.',
       `Подсказки: разрыв контакта ${awTornN}, резкий выброс ${awOutN}. Клик по скважине исключает её из изолиний.`].join(' ')
   // изолинии показателя ГИС: только на карте в координатах (не на схеме с разнесёнными скважинами)
-  const obsPts = useMemo(() => (options.paint === 'gis' && gis?.obs.on && !spread ? gis.obs.data?.wells.filter(o => o.x !== undefined && o.y !== undefined) ?? [] : []), [options.paint, gis?.obs.on, gis?.obs.data, spread])
-  // точки значений для изолиний и контура: скважины карты со значением и наблюдательные скважины ГИС (◆), если они показаны
+  const obsPts = useMemo(() => (options.paint === 'gis' && gis && !spread ? shownFunds(gis.obs).filter(o => o.x !== undefined && o.y !== undefined) : []), [options.paint, gis?.obs.on, gis?.obs.geoOn, gis?.obs.data, spread])
+  // точки значений для изолиний и контура: скважины карты со значением и наблюдательные (◆) и геофизические (▲) скважины ГИС, если они показаны
   const gisPts = useMemo(() => {
     const vals = gis?.paint?.vals
     if (!vals) return { pts: [] as { w: string; x: number; y: number; v: number }[], nVals: 0, nPlaced: 0, nObs: 0 }
@@ -454,7 +453,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     for (const o of obsPts) if (vals.has(o.well) && !have.has(String(o.well))) pts.push({ w: String(o.well), x: o.x!, y: -o.y!, v: vals.get(o.well)!.v })
     return { pts, nVals: vals.size, nPlaced, nObs: pts.length - nPlaced }
   }, [gis?.paint, placed, obsPts])
-  const gisPtsNote = (n: number) => `Изолиний нет: из ${gisPts.nVals} скважин со значением на карте ${gisPts.nPlaced} эксплуатационных${gis?.obs.on ? ` и ${gisPts.nObs} наблюдательных` : ' (наблюдательные выключены: включите «Наблюдательные скважины (◆)»)'}, всего ${n}, нужно не меньше трёх. Остальные скважины не на карте: выберите группу или «Весь объект» либо проверьте координаты.`
+  const gisPtsNote = (n: number) => `Изолиний нет: из ${gisPts.nVals} скважин со значением на карте ${gisPts.nPlaced} эксплуатационных${gis?.obs.on || gis?.obs.geoOn ? ` и ${gisPts.nObs} наблюдательных и геофизических` : ' (наблюдательные и геофизические выключены: включите «Наблюдательные скважины (◆)» и «Геофизические скважины (▲)»)'}, всего ${n}, нужно не меньше трёх. Остальные скважины не на карте: выберите группу или «Весь объект» либо проверьте координаты.`
   const iso = useMemo((): IsoResult | null => {
     if (options.paint !== 'gis' || !gis?.iso.on) return null
     const note = (text: string): IsoResult => ({ lines: [], conf: [], step: 0, note: text })
@@ -686,15 +685,15 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, rd, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
-  // наблюдательные скважины (вне групп): ромбы в координатах карты; при «схеме» положения условные, поэтому они не рисуются
-  const obsLayer = obsPts.length ? <g aria-label="Наблюдательные скважины">
+  // наблюдательные (ромб) и геофизические (треугольник) скважины вне групп: в координатах карты; при «схеме» положения условные, поэтому они не рисуются
+  const obsLayer = obsPts.length ? <g aria-label="Наблюдательные и геофизические скважины">
     {obsPts.map(o => {
-      const pv = paintData?.vals.get(o.well), r = rd * 0.5, x = o.x!, y = -o.y!
+      const pv = paintData?.vals.get(o.well), r = rd * 0.5, x = o.x!, y = -o.y!, geo = o.fund === 'geophysical'
       const fill = pv && paintData ? rampColor(paintData.stops, (pv.v - paintData.lo) / (paintData.hi - paintData.lo)) : pal.surface
       return <g key={o.well}>
-        <path d={`M${x},${y - r}L${x + r},${y}L${x},${y + r}L${x - r},${y}Z`} fill={fill} stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+        <path d={geo ? `M${x},${y - r}L${x + r},${y + r * 0.8}L${x - r},${y + r * 0.8}Z` : `M${x},${y - r}L${x + r},${y}L${x},${y + r}L${x - r},${y}Z`} fill={fill} stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
         <text x={x} y={y - r - 3 / K} fontSize={10 / K} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{o.well}{pv ? ' · ' + pv.label : ''}</text>
-        <title>{`Наблюдательная скважина ${o.well} (${o.why.join(', ')})${pv ? '\n' + pv.tip : '\nНет данных ГИС для этой раскраски'}`}</title>
+        <title>{`${geo ? 'Геофизическая' : 'Наблюдательная'} скважина ${o.well} (${o.why.join(', ')}${o.manual ? ', решение инженера' : ''})${pv ? '\n' + pv.tip : '\nНет данных ГИС для этой раскраски'}`}</title>
       </g>
     })}
   </g> : null

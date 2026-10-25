@@ -136,12 +136,10 @@ export interface RoofGrid { x0: number; y0: number; dx: number; dy: number; nx: 
 export const getRoof = (model: string, layer: number) => call<RoofGrid>('/api/roof?' + new URLSearchParams({ model, layer: String(layer) }))
 /** Сбой или пустой результат в окне — в лог программы (Проект/logs/gsp_maps.log), чтобы причину можно было найти. Сам не падает. */
 export const reportIssue = (where: string, text: string) => { fetch('/api/client-log', post({ where, text })).catch(() => undefined) }
-/** Наблюдательные скважины: ГИС или замеры давления, не входят в группы; без координат — в missing. kind: obs | prod | auto (ручной выбор инженера). */
-export interface ObserverWell { well: number; why: string[]; manual: boolean; inGroup: boolean; x?: number; y?: number }
-export interface Observers { wells: ObserverWell[]; missing: ObserverWell[]; forcedProd: number[]; note: string }
+/** Наблюдательные и геофизические скважины по фондам проекта Атласа (вкладка «Фонды скважин»); без координат — в missing. */
+export interface ObserverWell { well: number; fund: 'observation' | 'geophysical'; why: string[]; manual: boolean; x?: number; y?: number }
+export interface Observers { wells: ObserverWell[]; missing: ObserverWell[]; note: string }
 export const getObservers = () => call<Observers>('/api/observers')
-export const markObserver = (well: number, kind: 'obs' | 'prod' | 'auto') =>
-  call<Observers>('/api/observers/mark', post({ well, kind }))
 export const getGis = () => call<GisCatalog>('/api/gis')
 export const getGisValues = (pack: string, metric: string, season: string, against: string, pins: Record<string, string>) =>
   call<GisValues>('/api/gis/values?' + new URLSearchParams({ pack, metric, season, against, pins: Object.entries(pins).map(([w, d]) => `${w}:${d}`).join(',') }))
