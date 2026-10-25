@@ -4,7 +4,7 @@ import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, grou
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
-import { AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
+import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, gwcContour, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcContour, type IsoResult, type RoofRaster } from './model'
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
@@ -197,6 +197,7 @@ function GisControls({ catalog, pack, metric, season, against, pins, options, da
         {aw.presets.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select>
       <label className="muted">Подсказка о выбросе, м от соседей <input type="number" min={0} value={aw.outlier} onChange={e => onChange({ awOutlier: e.target.value })} aria-label="Порог выброса" style={{ width: 64 }} /></label>
       <label className="check"><input type="checkbox" checked={aw.multi} onChange={e => onChange({ awMulti: e.target.checked })} /> Несколько вариантов критерия</label>
+      <button type="button" onClick={() => onChange({ awMulti: true, awSpec: ALL_CRITERION_SPEC })} title={'Все пресеты критерия с несколькими значениями: ' + ALL_CRITERION_SPEC}>Посчитать по всем опциям</button>
       {aw.multi && <>
         <input type="text" value={aw.spec} onChange={e => onChange({ awSpec: e.target.value })} aria-label="Варианты критерия" style={{ width: 260 }} placeholder="sg_sgcr:0;0,1" />
         <span className="muted">Пресет и значения запаса через запятую, варианты через «;». Не больше 12. {aw.variantsBusy ? 'Считаю варианты…' : aw.variantsErr ? 'Ошибка: ' + aw.variantsErr : ''}</span>
