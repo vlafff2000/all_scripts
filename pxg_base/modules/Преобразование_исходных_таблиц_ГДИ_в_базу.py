@@ -555,8 +555,9 @@ def clean_apostrophes(df):
     for col in df.columns:
         if col in integer_columns:
             # Целые числа: убираем .0 и преобразуем в int
-            df[col] = df[col].str.replace(r'\.0$', '', regex=True)
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            # (полностью пустой столбец после замены 'nan' на NaN уже float: .str к нему неприменим)
+            df[col] = df[col].astype(object).where(df[col].notna(), None).astype('string').str.replace(r'\.0$', '', regex=True)
+            df[col] = pd.to_numeric(df[col].astype(object), errors='coerce')
             # Преобразуем в Int64 (nullable integer)
             try:
                 df[col] = df[col].astype('Int64')
@@ -565,10 +566,10 @@ def clean_apostrophes(df):
 
         elif col in numeric_columns:
             # Числовые столбцы: заменяем запятые на точки для конвертации
-            df[col] = df[col].str.replace(',', '.', regex=False)
+            df[col] = df[col].astype(object).where(df[col].notna(), None).astype('string').str.replace(',', '.', regex=False)
             # Удаляем нечисловые символы (кроме точки и минуса)
             df[col] = df[col].str.replace(r'[^\d.\-eE]', '', regex=True)
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = pd.to_numeric(df[col].astype(object), errors='coerce')
 
         elif col in date_columns:
             # Даты
