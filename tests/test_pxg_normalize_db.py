@@ -221,3 +221,23 @@ def test_incomplete_base_is_reported(files, tmp_path):
     assert any("ГСП-2" in n and "ГСП-1" not in n and "ГСП-6" not in n for n in r["notes"])
     assert not any("Коэффициент нормировки доходит" in n for n in r["notes"])     # здесь коэффициенты около 1
     assert nm.completeness_notes({}, pd.Series([1.0, 3.5, float("nan")]).to_numpy())[0].startswith("Коэффициент нормировки доходит до 3.5")
+
+
+def test_overlap_day_zero_in_other_mode_does_not_zero_the_day(tmp_path):
+    """Сутки есть в «БД по учету газа» дважды: строка закачки с объёмом и строка отбора с 0 (стык сезонов).
+    Раньше строка с 0 перекрывала эталон закачки, и скважины закачки получали «ПЗРГ = 0: обнулён»."""
+    inj = pd.DataFrame(_rows("закачка", [0, 1], [("1", 300000.0), ("2", 200000.0)]))
+    db = tmp_path / "db.xlsx"
+    with pd.ExcelWriter(db) as w:
+        inj.to_excel(w, sheet_name="Закачка", index=False)
+    d = [pd.Timestamp(D0), pd.Timestamp(D0), pd.Timestamp(D0 + timedelta(days=1))]
+    gas = tmp_path / "gas.xlsx"
+    pd.DataFrame({"Режим": ["отбор", "закачка", "закачка"], "Дата": d,
+                  "Отбор из ПХГ, тыс. м³/сут": [0.0, None, None],
+                  "Закачка в ПХГ, тыс. м³/сут": [None, 550.0, 500.0]}).to_excel(gas, sheet_name="БД", index=False)
+    by_kind = nm.gas_pzrg(str(gas), by_kind=True)
+    assert list(by_kind["закачка"]["rate"]) == [550000.0, 500000.0] and list(by_kind["отбор"]["rate"]) == [0.0]
+    r = nm.normalize(str(db), "", str(tmp_path / "o"), gas_db=str(gas))
+    assert "ПЗРГ = 0: обнулён" not in r["statuses"]
+    out = pd.read_excel(r["db"], sheet_name="Закачка")
+    assert out[pd.to_datetime(out["Дата"]) == pd.Timestamp(D0)]["Суточный расход газа"].sum() == pytest.approx(550000.0)

@@ -49,17 +49,23 @@ WITHDRAW_TOTAL = "Всего по ПЗРГ - за сутки по ПХГ"       
 INJECT_TOTAL = "Закачано в ПХГ за СУТКИ, тыс.м3/сут"    # «БД по учету газа»: закачка, тыс. м³/сут
 
 
-def gas_pzrg(path: str) -> pd.DataFrame:
+def gas_pzrg(path: str, by_kind: bool = False):
     """Суточный объём по объекту из «БД по учету газа» (лист «БД») в виде таблицы (date, rate), м³/сут.
     Отбор берём из «Всего по ПЗРГ», закачку — из «Закачано в ПХГ за СУТКИ»; значения в тыс. м³ умножаем на 1000.
-    Пустые сутки в эталон не входят (по ним нормировки нет)."""
+    Пустые сутки в эталон не входят (по ним нормировки нет).
+    `by_kind=True` — словарь {"отбор": таблица, "закачка": таблица}. Одни и те же сутки могут быть в БД дважды (строка отбора
+    и строка закачки, например на стыке сезонов: в одной объём есть, в другой 0); в общей таблице одна строка перекрывала
+    другую, и сутки с объёмом получали ПЗРГ = 0. Нормировка берёт эталон каждого вида из его собственных строк."""
     db = pd.read_excel(path, sheet_name="БД")
     w = найти_столбец(db.columns, WITHDRAW, WITHDRAW_TOTAL)
     i = найти_столбец(db.columns, INJECT, INJECT_TOTAL)
     rate = np.where(db["Режим"] == "отбор", pd.to_numeric(db[w], errors="coerce"),
                     np.where(db["Режим"] == "закачка", pd.to_numeric(db[i], errors="coerce"), np.nan))
-    out = pd.DataFrame({"date": pd.to_datetime(db["Дата"], errors="coerce"), "rate": rate * 1000.0})
-    return out.dropna(subset=["date", "rate"]).sort_values("date").reset_index(drop=True)
+    out = pd.DataFrame({"date": pd.to_datetime(db["Дата"], errors="coerce"), "rate": rate * 1000.0, "kind": db["Режим"]})
+    out = out.dropna(subset=["date", "rate"]).sort_values("date", kind="stable").reset_index(drop=True)
+    if by_kind:
+        return {k: out[out["kind"] == k][["date", "rate"]].reset_index(drop=True) for k in ("отбор", "закачка")}
+    return out[["date", "rate"]]
 
 
 K_SUSPECT = 2.0     # коэффициент больше — вероятно, в базе не все ГСП (весь объём объекта уходит части скважин)
@@ -111,12 +117,12 @@ def normalize(db_file: str, pzrg_file: str, out_dir: str, window_lo: str = "", w
         raise ValueError("База уже нормирована на ПЗРГ (есть столбец «%s»): возьмите исходную базу" % history.RAW_RATE_COLUMN)
     lo, hi = historymode.parse_window(window_lo, window_hi)
     if gas_db:
-        pz = gas_pzrg(gas_db)
+        pz = gas_pzrg(gas_db, by_kind=True)
         source = gas_db
     else:
         pz = historymode.read_pzrg(pzrg_file)
         source = pzrg_file
-    if not len(pz):
+    if not (any(len(t) for t in pz.values()) if isinstance(pz, dict) else len(pz)):
         raise ValueError("Эталон суточного объёма пуст: в «БД по учету газа» нет суток с объёмом по объекту"
                          if gas_db else "В файле ПЗРГ нет дат с расходом (даты в столбце A, расход в столбце C)")
     os.makedirs(out_dir, exist_ok=True)
