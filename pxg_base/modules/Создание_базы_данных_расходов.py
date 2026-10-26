@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 import xlsxwriter
 from pxg_core.parallel import map_module_function
-from pxg_core.расходы_файлы import validate_header_dates, write_date_issues, reset_date_issues, trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent
+from pxg_core.расходы_файлы import split_combined_wells, validate_header_dates, write_date_issues, reset_date_issues, trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent
 
 
 def find_matching_sheets(file_path, expected_sheets):
@@ -313,6 +313,7 @@ def process_excel_file_intelligent(file_path, year=None, season=None, data_type=
             # Переименовываем столбцы
             df_gas = df_gas.rename(columns={'Скважины': 'Скважина'})
             df_time = df_time.rename(columns={'Скважины': 'Скважина'})
+            df_gas, df_time = split_combined_wells(df_gas, df_time, os.path.basename(file_path), original_sheet)
 
             # Объединяем через merge
             df_combined = pd.merge(

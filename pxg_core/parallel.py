@@ -2,7 +2,7 @@
 
 Модули базы запускаются как скрипты (runpy), их функции нельзя передать процессам напрямую, поэтому процесс сам загружает файл
 модуля (один раз) и вызывает функцию по имени. Вывод процесса возвращается и печатается в порядке файлов, замечания по датам
-(``DATE_ISSUES``) переносятся в основной процесс. Число процессов: PXG_WORKERS, иначе число ядер (не больше 16 и не больше, чем влезает в свободную память, см. workers.py); мало файлов — в том же процессе.
+(``DATE_ISSUES``) и разбиения «54/80» (``WELL_SPLITS``) переносятся в основной процесс. Число процессов: PXG_WORKERS, иначе число ядер (не больше 16 и не больше, чем влезает в свободную память, см. workers.py); мало файлов — в том же процессе.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _call(job):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         res = ns[func](*args)
-    return res, list(rf.DATE_ISSUES), buf.getvalue()
+    return res, list(rf.DATE_ISSUES), buf.getvalue(), list(rf.WELL_SPLITS)
 
 
 def _each(call, items) -> List[Any]:
@@ -63,9 +63,15 @@ def map_module_function(module_path: str, func: str, arg_list: Sequence[tuple], 
     out = []
     progress.report(total=len(arg_list), text="файлы")
     with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as ex:
-        for res, issues, text in ex.map(_call, [(module_path, func, a) for a in arg_list], chunksize=1):
+        for res, issues, text, splits in ex.map(_call, [(module_path, func, a) for a in arg_list], chunksize=1):
             print(text, end="")
             rf.DATE_ISSUES.extend(issues)
+            for r in splits:
+                old = next((x for x in rf.WELL_SPLITS if x['Файл'] == r['Файл'] and x['Запись'] == r['Запись']), None)
+                if old is None:
+                    rf.WELL_SPLITS.append(r)
+                else:
+                    old['Листов'] += r['Листов']
             out.append(res)
             progress.advance()
     return out

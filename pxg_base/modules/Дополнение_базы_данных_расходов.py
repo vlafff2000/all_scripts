@@ -10,7 +10,7 @@ import time
 import gc
 import warnings
 from pxg_core import параметры
-from pxg_core.расходы_файлы import trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, read_excel_safe, find_time_table_intelligent
+from pxg_core.расходы_файлы import split_combined_wells, trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, read_excel_safe, find_time_table_intelligent
 
 warnings.filterwarnings('ignore')
 
@@ -279,6 +279,7 @@ def process_excel_file_intelligent(file_path, year=None, season=None, data_type=
             # Переименовываем столбцы
             df_gas = df_gas.rename(columns={'Скважины': 'Скважина'})
             df_time = df_time.rename(columns={'Скважины': 'Скважина'})
+            df_gas, df_time = split_combined_wells(df_gas, df_time, os.path.basename(file_path), original_sheet)
 
             # Объединяем через merge
             df_combined = pd.merge(
