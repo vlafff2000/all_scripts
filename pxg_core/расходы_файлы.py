@@ -438,8 +438,92 @@ DATE_ISSUES = []                             # собранные замечан
 _decisions_cache = {}
 
 
+WELL_SPLITS = []                             # записи «54/80» (две скважины в одной строке), разбитые за запуск
+_COMBINED_PART = re.compile(r'^\d+[a-zа-я]?$', re.I)
+
+
 def reset_date_issues():
     del DATE_ISSUES[:]
+    del WELL_SPLITS[:]
+
+
+def combined_well_parts(name):
+    """«54/80» → ['54', '80']; обычное имя скважины (и всё, где после «/» не номер) → None."""
+    if not isinstance(name, str) or '/' not in name:
+        return None
+    parts = [p.strip() for p in name.split('/')]
+    if len(parts) < 2 or not all(_COMBINED_PART.match(p) for p in parts) or len(set(parts)) < len(parts):
+        return None
+    return parts
+
+
+def _well_decision(file_name, raw):
+    """Решение инженера по записи из листа «Скважины» файла PXG_DATE_FIXES: None (по умолчанию пополам),
+    'keep' (не разбивать) или список долей. Строка с пустым «Файл» относится ко всем файлам."""
+    path = os.environ.get('PXG_DATE_FIXES', '').strip()
+    if not path:
+        return None
+    if path not in _decisions_cache:
+        out = {}
+        try:
+            df = pd.read_excel(path, sheet_name='Скважины', dtype=str).fillna('')
+            for _, r in df.iterrows():
+                if str(r.get('Решение', '')).strip():
+                    out[(str(r.get('Файл', '')).strip(), str(r['Запись']).strip())] = str(r['Решение']).strip().lower()
+        except Exception:
+            pass                                     # листа нет: решений нет
+        _decisions_cache[path] = out
+    d = _decisions_cache[path]
+    return d.get((file_name, raw)) or d.get(('', raw))
+
+
+def split_combined_wells(df_gas, df_time, file_name, sheet):
+    """Записи вида «54/80» (две скважины в одной строке таблицы) → отдельные скважины.
+
+    Часовой расход делится между скважинами (по умолчанию поровну; доли можно задать в листе «Скважины» файла решений:
+    «30/70» или «не делить»), время работы у каждой скважины то же. Каждое разбиение попадает в WELL_SPLITS.
+    """
+    if df_gas is None or df_time is None or 'Скважина' not in df_gas.columns:
+        return df_gas, df_time
+    names = [n for n in df_gas['Скважина'].unique() if combined_well_parts(n)]
+    if not names:
+        return df_gas, df_time
+    gas_parts, time_parts = [df_gas[~df_gas['Скважина'].isin(names)]], [df_time[~df_time['Скважина'].isin(names)]]
+    for raw in names:
+        parts = combined_well_parts(raw)
+        decision = _well_decision(file_name, raw)
+        shares, action = [1.0 / len(parts)] * len(parts), 'разбито поровну'
+        if decision:
+            if decision.startswith(('не ', 'нет', 'оста', 'keep')):
+                shares, action = None, 'оставлено как есть'
+            else:
+                try:
+                    w = [float(x.replace(',', '.')) for x in re.split(r'[/;: ]+', decision) if x]
+                    if len(w) == len(parts) and all(x >= 0 for x in w) and sum(w) > 0:
+                        shares, action = [x / sum(w) for x in w], 'доли заданы вручную'
+                    else:
+                        raise ValueError
+                except ValueError:
+                    print('⚠️  Непонятное решение «%s» для скважины «%s» (%s): разбито поровну' % (decision, raw, file_name))
+        rec = next((r for r in WELL_SPLITS if r['Файл'] == file_name and r['Запись'] == raw), None)
+        if rec is None:
+            WELL_SPLITS.append({'Файл': file_name, 'Запись': raw, 'Скважины': ', '.join(parts), 'Что сделано': action,
+                                'Доли': '/'.join('%g' % round(x, 4) for x in shares) if shares else '',
+                                'Листов': 1, 'Решение': ''})
+        else:
+            rec['Листов'] += 1
+        g, t = df_gas[df_gas['Скважина'] == raw], df_time[df_time['Скважина'] == raw]
+        if shares is None:
+            gas_parts.append(g)
+            time_parts.append(t)
+            continue
+        for part, share in zip(parts, shares):
+            gp, tp = g.copy(), t.copy()
+            gp['Скважина'], tp['Скважина'] = part, part
+            gp['Часовой расход газа'] = gp['Часовой расход газа'] * share
+            gas_parts.append(gp)
+            time_parts.append(tp)
+    return pd.concat(gas_parts, ignore_index=True), pd.concat(time_parts, ignore_index=True)
 
 
 def expected_year(month_name, year=None, season=None):
@@ -567,10 +651,23 @@ def validate_header_dates(date_mapping, ctx, start_row, start_col, sheet_df=None
     return {k: o for k, o in zip(keys, out)}
 
 
+def _write_well_splits(xw):
+    if WELL_SPLITS:
+        cols = ['Файл', 'Запись', 'Скважины', 'Доли', 'Что сделано', 'Листов', 'Решение']
+        pd.DataFrame(WELL_SPLITS, columns=cols).to_excel(xw, sheet_name='Скважины', index=False)
+
+
 def write_date_issues(path):
     """Сохраняет «Даты_к_проверке.xlsx»: замечания, сводка по повторяющимся ошибкам и фрагменты листов."""
-    if not DATE_ISSUES:
+    if not DATE_ISSUES and not WELL_SPLITS:
         return None
+    if not DATE_ISSUES:
+        try:
+            with pd.ExcelWriter(path, engine='openpyxl') as xw:
+                _write_well_splits(xw)
+        except Exception as e:
+            print('⚠️  Не удалось сохранить %s: %s' % (path, e))
+        return path
     cols = ['Файл', 'Лист', 'Ячейка', 'Значение', 'Ожидалось', 'Что сделано', 'Предложение', 'Решение']
     main = pd.DataFrame([{c: i[c] for c in cols} for i in DATE_ISSUES], columns=cols)
     rep = main.copy()
@@ -596,6 +693,7 @@ def write_date_issues(path):
             summary.to_excel(xw, sheet_name='Сводка', index=False)
             pd.DataFrame([r + [''] * (width - len(r)) for r in rows]).to_excel(
                 xw, sheet_name='Фрагменты листов', index=False, header=False)
+            _write_well_splits(xw)
     except Exception as e:
         print('⚠️  Не удалось сохранить %s: %s' % (path, e))
         return None
