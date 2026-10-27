@@ -44,3 +44,13 @@
 .fp-rs.se::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-right: 2px solid var(--line-strong); border-bottom: 2px solid var(--line-strong); }
 .fp-row.mark { background: var(--accent-soft); }
 .fp-band { position: absolute; z-index: 2; pointer-events: none; border: 1px solid var(--accent-strong); background: color-mix(in srgb, var(--accent-strong) 18%, transparent); }
+.fp-fav { position: relative; flex: none; }
+.fp-fav > button { padding-right: 44px; }
+.fp-fa { position: absolute; right: 4px; top: 4px; display: none; gap: 2px; }
+.fp-fav:hover .fp-fa { display: flex; }
+.fp-fa i { font-style: normal; cursor: pointer; padding: 1px 4px; border-radius: 4px; background: var(--surface); font-size: 12px; color: var(--muted); }
+.fp-fa i:hover { color: var(--ink); background: var(--row-hover); }
+.fp-favadd, .fp-favedit { display: flex; gap: 4px; flex: none; padding: 2px 0; }
+.fp-favadd input, .fp-favedit input { flex: 1; min-width: 0; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 3px 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; }
+.fp-favadd button { width: auto; padding: 2px 8px; border: 1px solid var(--line-strong); }
+.fp-note.small { padding: 4px 8px; font-size: 12px; }
