@@ -22,7 +22,7 @@
 .fp-side button:hover { background: var(--row-hover); }
 .fp-side button.on { background: var(--accent-soft); color: var(--info-ink); }
 .fp-cap { font-size: 12px; color: var(--muted); padding: 8px 8px 2px; text-transform: uppercase; letter-spacing: .04em; }
-.fp-list { flex: 1; overflow: auto; outline: none; }
+.fp-list { flex: 1; overflow: auto; outline: none; position: relative; user-select: none; }
 .fp-row { display: flex; align-items: center; gap: 8px; padding: 4px 12px; cursor: default; border-bottom: 1px solid var(--line-soft); }
 .fp-row:not(.fp-th):hover { background: var(--row-hover); }
 .fp-row.sel { background: var(--accent-soft); }
@@ -42,3 +42,5 @@
 .fp-rs.nw { top: 0; left: 0; cursor: nwse-resize; } .fp-rs.se { bottom: 0; right: 0; cursor: nwse-resize; }
 .fp-rs.ne { top: 0; right: 0; cursor: nesw-resize; } .fp-rs.sw { bottom: 0; left: 0; cursor: nesw-resize; }
 .fp-rs.se::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-right: 2px solid var(--line-strong); border-bottom: 2px solid var(--line-strong); }
+.fp-row.mark { background: var(--accent-soft); }
+.fp-band { position: absolute; z-index: 2; pointer-events: none; border: 1px solid var(--accent-strong); background: color-mix(in srgb, var(--accent-strong) 18%, transparent); }
