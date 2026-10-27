@@ -65,6 +65,9 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
   const [busy, setBusy] = useState(false)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   const sizeRef = useRef<{ w: number; h: number } | null>(null)
+  const anchor = useRef(-1)
+  const dragged = useRef(false)
+  const [band, setBand] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const dirRef = useRef('')
   const box = useRef<HTMLDivElement>(null)
   const filter = opts.filter ?? DEFAULT_FILTER
@@ -138,9 +141,51 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
   const activate = (it: Item) => {
     if (!list) return
     if (it.dir) { if (!it.locked) open(join(list.path, it.name)); return }
-    if (!folderMode) { multi ? toggle(it.name) : choose(join(list.path, it.name)) }
+    if (!folderMode) { multi ? setMarked([it.name]) : choose(join(list.path, it.name)) }
   }
   const toggle = (name: string) => setMarked(m => (m.includes(name) ? m.filter(x => x !== name) : [...m, name]))
+  // выбор строки: обычный клик — только она, Ctrl/⌘ — добавить или снять, Shift — диапазон от опорной строки
+  const rowClick = (e: React.MouseEvent, i: number, it: Item) => {
+    setSel(i)
+    if (!multi || it.dir) return
+    if (e.shiftKey && anchor.current >= 0) {
+      const [a, b] = [Math.min(anchor.current, i), Math.max(anchor.current, i)]
+      const range = items.slice(a, b + 1).filter(x => !x.dir).map(x => x.name)
+      setMarked(m => (e.ctrlKey || e.metaKey ? Array.from(new Set([...m, ...range])) : range))
+    } else if (e.ctrlKey || e.metaKey) { toggle(it.name); anchor.current = i }
+    else { setMarked([it.name]); anchor.current = i }
+  }
+  const markAll = () => setMarked(items.filter(x => !x.dir).map(x => x.name))
+  // выделение рамкой: тянем мышью по списку, строки под рамкой выбираются (с Ctrl/Shift — добавляются к выбранным)
+  const bandStart = (e: React.PointerEvent) => {
+    if (!multi || e.button !== 0 || (e.target as HTMLElement).closest('.fp-th, input, button')) return
+    const el = box.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const x0 = e.clientX - r.left + el.scrollLeft, y0 = e.clientY - r.top + el.scrollTop
+    const base = e.ctrlKey || e.metaKey || e.shiftKey ? marked : []
+    let moved = false
+    const move = (ev: PointerEvent) => {
+      const x1 = ev.clientX - r.left + el.scrollLeft, y1 = ev.clientY - r.top + el.scrollTop
+      if (!moved && Math.abs(x1 - x0) + Math.abs(y1 - y0) < 5) return
+      moved = true; dragged.current = true
+      const top = Math.min(y0, y1), bottom = Math.max(y0, y1)
+      setBand({ x: Math.min(x0, x1), y: top, w: Math.abs(x1 - x0), h: bottom - top })
+      const hit: string[] = []
+      el.querySelectorAll<HTMLElement>('.fp-row[data-name]').forEach(row => {
+        if (row.dataset.dir === '1') return
+        const rt = row.offsetTop, rb = rt + row.offsetHeight
+        if (rb >= top && rt <= bottom) hit.push(row.dataset.name as string)
+      })
+      setMarked(Array.from(new Set([...base, ...hit])))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
+      setBand(null)
+      if (moved) setTimeout(() => { dragged.current = false }, 0)
+    }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
   const chooseMany = () => { if (!list) return; const files = marked.map(n => join(list.path, n)); void remember({ dir: list.path, file: files[files.length - 1] }); done(files.join('\n')) }
   const resort = (k: 'name' | 'mtime' | 'size') => {
     const d = sort === k ? !desc : false
@@ -150,9 +195,19 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { close(null); return }
+    if (multi && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && (e.target as HTMLElement).tagName !== 'INPUT') { e.preventDefault(); markAll(); return }
     if ((e.target as HTMLElement).tagName === 'INPUT' && e.key !== 'ArrowDown') return
-    if (e.key === 'ArrowDown') { e.preventDefault(); setSel(s => Math.min(items.length - 1, s + 1)); box.current?.focus() }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setSel(s => Math.max(0, s - 1)) }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const n = e.key === 'ArrowDown' ? Math.min(items.length - 1, sel + 1) : Math.max(0, sel - 1)
+      setSel(n); box.current?.focus()
+      if (multi && e.shiftKey && !items[n]?.dir) {
+        if (anchor.current < 0) anchor.current = Math.max(sel, 0)
+        const [a, b] = [Math.min(anchor.current, n), Math.max(anchor.current, n)]
+        setMarked(items.slice(a, b + 1).filter(x => !x.dir).map(x => x.name))
+      } else if (multi && !e.shiftKey && !e.ctrlKey && items[n] && !items[n].dir) { anchor.current = n; setMarked([items[n].name]) }
+    }
+    else if (multi && e.key === ' ' && items[sel] && !items[sel].dir) { e.preventDefault(); toggle(items[sel].name); anchor.current = sel }
     else if (e.key === 'Backspace' && list?.parent) { e.preventDefault(); open(list.parent) }
     else if (e.key === 'Enter') {
       e.preventDefault()
@@ -224,7 +279,7 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
               {recent.map(f => <button key={f} onClick={() => choose(f)} title={f}>🕘 {baseName(f)}</button>)}
             </>}
           </div>
-          <div className="fp-list" ref={box} tabIndex={0} role="listbox">
+          <div className="fp-list" ref={box} tabIndex={0} role="listbox" aria-multiselectable={multi} onPointerDown={bandStart}>
             <div className="fp-row fp-th">
               <span className="fp-n" onClick={() => resort('name')}>Имя{sort === 'name' ? arrow : ''}</span>
               <span className="fp-d" onClick={() => resort('mtime')}>Изменён{sort === 'mtime' ? arrow : ''}</span>
@@ -235,13 +290,16 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
             {!busy && list && !list.error && items.length === 0 && (
               <div className="fp-note">{query ? 'Ничего не найдено.' : folderMode ? 'Вложенных папок нет.' : all ? 'Папка пуста.' : 'Подходящих файлов нет. Включите «Все файлы», если нужного не видно.'}</div>)}
             {items.map((it, i) => (
-              <div key={it.name} role="option" aria-selected={i === sel}
-                className={'fp-row' + (i === sel ? ' sel' : '') + (it.locked ? ' locked' : '')}
-                onClick={() => { setSel(i); if (multi && !it.dir) toggle(it.name) }} onDoubleClick={() => (multi && !it.dir ? undefined : activate(it))}>
-                <span className="fp-n" title={it.name}>{multi && !it.dir && <input type="checkbox" readOnly checked={marked.includes(it.name)} />} {icon(it)} {it.name}{it.locked ? ' (нет доступа)' : ''}</span>
+              <div key={it.name} role="option" aria-selected={multi ? marked.includes(it.name) : i === sel} data-name={it.name} data-dir={it.dir ? '1' : '0'}
+                className={'fp-row' + (i === sel ? ' sel' : '') + (multi && marked.includes(it.name) ? ' mark' : '') + (it.locked ? ' locked' : '')}
+                onClick={e => { if (dragged.current) return; rowClick(e, i, it) }}
+                onDoubleClick={() => { if (multi && !it.dir) { setMarked([it.name]); if (list) { void remember({ dir: list.path, file: join(list.path, it.name) }); done(join(list.path, it.name)) } } else activate(it) }}>
+                <span className="fp-n" title={it.name}>{multi && !it.dir && <input type="checkbox" checked={marked.includes(it.name)}
+                  onChange={() => { toggle(it.name); anchor.current = i }} onClick={e => e.stopPropagation()} />} {icon(it)} {it.name}{it.locked ? ' (нет доступа)' : ''}</span>
                 <span className="fp-d">{it.mtime}</span>
                 <span className="fp-s">{it.dir ? '' : fmtSize(it.size)}</span>
               </div>))}
+            {band && <div className="fp-band" style={{ left: band.x, top: band.y, width: band.w, height: band.h }} />}
             {list?.truncated && <div className="fp-note">Папка читается медленно: показана только часть. Уточните поиск или нажмите «Обновить».</div>}
             {list && list.total > items.length && <div className="fp-note">Показано {items.length} из {list.total}. <button onClick={() => void more()}>Показать ещё</button></div>}
           </div>
@@ -249,8 +307,12 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
         <div className="fp-foot">
           {!folderMode && <label><input type="checkbox" checked={all} onChange={e => { setAll(e.target.checked); void load(dirRef.current, { all: e.target.checked }) }} /> Все файлы</label>}
           <label><input type="checkbox" checked={hidden} onChange={e => { setHidden(e.target.checked); void load(dirRef.current, { hidden: e.target.checked }) }} /> Скрытые</label>
+          {multi && <>
+            <button onClick={markAll} title="Ctrl+A">Выделить всё</button>
+            <button disabled={!marked.length} onClick={() => setMarked([])}>Снять</button>
+          </>}
           <span className="fp-sp" />
-          <span className="fp-pick">{folderMode ? (list?.path || '') : multi ? (marked.length ? 'Выбрано: ' + marked.length : '') : cur && !cur.dir ? cur.name : ''}</span>
+          <span className="fp-pick">{folderMode ? (list?.path || '') : multi ? (marked.length ? 'Выбрано: ' + marked.length : 'Shift, Ctrl, рамка мышью') : cur && !cur.dir ? cur.name : ''}</span>
           <button onClick={() => close(null)}>Отмена</button>
           <button className="primary" disabled={!canPick} onClick={() => (folderMode ? list && choose(list.path) : multi ? chooseMany() : cur && choose(join(list!.path, cur.name)))}>
             {folderMode ? 'Выбрать эту папку' : multi ? 'Добавить' : 'Открыть'}</button>
