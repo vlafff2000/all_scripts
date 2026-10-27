@@ -9,7 +9,7 @@
 итоговое слово за инженером, исправления вносятся прямо в «Лист1».
 
 Параметры: --folder (папка с отчётами или ZIP), --db (прежняя база для дозаписи), --groups (таблица «скважина → ГСП»),
---sposob (способ исследования, по умолчанию ДИКТ-50), --output. Строки прежней базы не перезаписываются: ручные
+--output. Строки прежней базы не перезаписываются: ручные
 правки инженера сохраняются, повторное исследование той же скважины за ту же дату пропускается и указано в «Не распознано».
 """
 from __future__ import annotations
@@ -44,10 +44,10 @@ def num(x, nd: int = 10):
     return None if x is None else round(float(x), nd)
 
 
-def rows_of_study(study: kart.Study, n: int, group, sposob: str) -> Tuple[List[list], List[tuple]]:
+def rows_of_study(study: kart.Study, n: int, group) -> Tuple[List[list], List[tuple]]:
     """Строки блока исследования и список замечаний (поле, текст) к нему."""
     notes: List[tuple] = []
-    sposob = study.sposob or sposob
+    sposob = study.sposob
     method = METHODS.get(study.method_raw.strip())
     if method is None:
         method = study.method_raw.strip().lower()
@@ -131,7 +131,7 @@ def db_keys(df: Optional[pd.DataFrame]) -> set:
             for w, d in zip(head["№скв"], head["дата"]) if not pd.isna(d)}
 
 
-def build(studies: List[kart.Study], groups: Dict[str, object], sposob: str, start: int = 1,
+def build(studies: List[kart.Study], groups: Dict[str, object], start: int = 1,
           taken: Optional[set] = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Таблица базы, замечания, режимы подробно. `taken` — исследования, уже лежащие в прежней базе."""
     taken = set(taken or ())
@@ -160,7 +160,7 @@ def build(studies: List[kart.Study], groups: Dict[str, object], sposob: str, sta
             continue
         taken.add(key)
         seen[key] = s.file
-        rows, notes = rows_of_study(s, n, groups.get(s.well), sposob)
+        rows, notes = rows_of_study(s, n, groups.get(s.well))
         wide.extend(rows)
         n += 1
         for f, t in list(s.issues) + notes:
@@ -176,13 +176,13 @@ def build(studies: List[kart.Study], groups: Dict[str, object], sposob: str, sta
     return (pd.DataFrame(wide, columns=COLUMNS), pd.DataFrame(bad, columns=UNRESOLVED_COLUMNS), pd.DataFrame(detail))
 
 
-def summary(files: int, studies: List[kart.Study], new_rows: pd.DataFrame, bad: pd.DataFrame, sposob: str, kept: int) -> pd.DataFrame:
+def summary(files: int, studies: List[kart.Study], new_rows: pd.DataFrame, bad: pd.DataFrame, kept: int) -> pd.DataFrame:
     wells = int(new_rows["№скв"].nunique()) if not new_rows.empty else 0
     rows = [["PDF-файлов обработано", files], ["Исследований добавлено", int(new_rows["№скв"].notna().sum())],
             ["Скважин", wells], ["Строк-режимов", len(new_rows)], ["Исследований в прежней базе (сохранены)", kept],
             ["Замечаний (лист «Не распознано»)", len(bad)],
             ["Столбец «% КРУ»", "пуст: в отчёте его нет (есть диаметр шайбы Dшб, см. «Режимы (подробно)»); заполняется вручную"],
-            ["Допущение: способ исследования", "из отчёта («ДИКТ» + число), если его нет — %s" % sposob],
+            ["Допущение: способ исследования", "берётся из отчёта («ДИКТ» + число); если его нет — пусто"],
             ["Допущение: Тст. затр", "равна Тст. тр: в отчёте одна температура статики Ту"],
             ["Допущение: Qmax и DPmax", "дебит и dP режима с наибольшим дебитом среди вошедших в расчёт"],
             ["Допущение: Рзаб", "давление на ИП из таблицы P(Q) на ИП, как в образце базы; другие величины — на листе «Шаблоны»"],
@@ -259,7 +259,7 @@ def main(argv=None):
     args = параметры.parse(
         "База ГДИ из PDF-отчётов «Мониторинг ГДИС»", argv,
         folder="папка с PDF-отчётами или ZIP-архив", db="прежняя база ГДИ для дозаписи, необязательно",
-        groups="таблица «скважина → ГСП» (Excel), необязательно", sposob="способ исследования, если его нет в отчёте (по умолчанию ДИКТ-50)",
+        groups="таблица «скважина → ГСП» (Excel), необязательно",
         mapping="файл сопоставления шапок с полями базы (JSON из мастера), необязательно", method="метод обработки для a и b (по умолчанию 4)",
         output="имя файла результата")
     src = параметры.clean_path(args.folder or параметры.ask("Папка с PDF-отчётами или ZIP"))
@@ -280,7 +280,6 @@ def main(argv=None):
         return 0
     db_path = параметры.ask_path("Прежняя база ГДИ для дозаписи (Enter — создать новую)", args.db if args.db is not None else "")
     groups_path = параметры.ask_path("Таблица «скважина → ГСП» (Enter — пропустить)", args.groups if args.groups is not None else "")
-    sposob = (args.sposob or "").strip() or "ДИКТ-50"
 
     print("Чтение отчётов: %d…" % len(files))
     scans = map_jobs(pdf.scan_report, files, 150.0)       # отчёты независимы: по ядрам, результат тот же, что подряд
@@ -297,7 +296,7 @@ def main(argv=None):
         groups = {**load_group_map(db_path), **groups}
         print("📚 Прежняя база: %d строк" % len(old))
     start = int(pd.to_numeric(old["№ п/п"], errors="coerce").max() or 0) + 1 if old is not None and not old.empty else 1
-    new, bad, detail = build(studies, groups, sposob, start=start, taken=db_keys(old))
+    new, bad, detail = build(studies, groups, start=start, taken=db_keys(old))
     if new.empty and old is None:
         print("⚠️ Ни одно исследование не удалось прочитать. Причины — в «Не распознано».")
     wide = pd.concat([old, new], ignore_index=True) if old is not None and not old.empty else new
@@ -305,7 +304,7 @@ def main(argv=None):
     out = (args.output or "").strip() or "БД_ГДИ_из_отчётов.xlsx"
     if not out.lower().endswith(".xlsx"):
         out += ".xlsx"
-    write(out, wide, bad, detail, summary(len(files), studies, new, bad, sposob, kept), templates)
+    write(out, wide, bad, detail, summary(len(files), studies, new, bad, kept), templates)
     print("✅ База ГДИ: %s (%d исследований добавлено, %d скважин)" % (out, int(new["№скв"].notna().sum()), new["№скв"].nunique()))
     if len(bad):
         print("⚠️ Замечаний: %d — смотрите лист «Не распознано» (пустые и спорные значения в «Лист1» выделены жёлтым)" % len(bad))

@@ -96,7 +96,7 @@ def test_unit_conversion(value, unit, dim, expected):
 
 def test_rows_match_sample_layout():
     s = study()
-    rows, notes = module.rows_of_study(s, 7, 2, "ДИКТ-50")
+    rows, notes = module.rows_of_study(s, 7, 2)
     df = pd.DataFrame(rows, columns=module.COLUMNS)
     first = df.iloc[0]
     assert first["№ п/п"] == 7 and first["№скв"] == 194 and first["ГСП"] == 2 and first["метод исслед."] == "стац"
@@ -111,10 +111,10 @@ def test_read_studies_groups_templates_and_build_lists_gaps():
     scans = [scan("gdis_2026.txt"), scan("gdis_2019.txt")]
     studies, templates = module.read_studies(scans)
     assert {s.well for s in studies} == {"194", "128"} and templates["Шаблон"].nunique() == 2
-    wide, bad, detail = module.build(studies, {"194": 1}, "ДИКТ-50")
+    wide, bad, detail = module.build(studies, {"194": 1})
     assert len(wide) == 3 + 5 and wide["№скв"].notna().sum() == 2
     assert set(bad.loc[bad["Скважина"] == "128", "Поле"]) >= {"ГСП", "режимы"}      # пустой ГСП и странные режимы — в «Не распознано»
-    wide2, bad2, _ = module.build(studies, {}, "ДИКТ-50", taken={("194", studies[0].started.date())})
+    wide2, bad2, _ = module.build(studies, {}, taken={("194", studies[0].started.date())})
     assert "дубликат" in set(bad2["Поле"])
 
 
