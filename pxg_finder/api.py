@@ -35,6 +35,16 @@ async def _body(request: Request) -> Dict[str, Any]:
     return b if isinstance(b, dict) else {}
 
 
+LAST_PING = 0.0  # когда страница в последний раз подала сигнал (для выхода после закрытия вкладки)
+
+
+async def ping(request: Request):
+    global LAST_PING
+    import time
+    LAST_PING = time.monotonic()
+    return JSONResponse({"ok": True})
+
+
 async def info(request: Request):
     return JSONResponse({"platform": sys.platform, "sep": os.sep, "home": os.path.expanduser("~"),
                          "categories": search.CATEGORIES, "colors": list(store.COLORS)})
@@ -165,6 +175,7 @@ def build_app() -> Starlette:
     routes = [
         *runlog.routes(),
         Route("/api/finder/info", info),
+        Route("/api/finder/ping", ping),
         Route("/api/finder/search", start_search, methods=["POST"]),
         Route("/api/finder/job", job_poll),
         Route("/api/finder/job/cancel", job_cancel, methods=["POST"]),

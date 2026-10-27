@@ -71,6 +71,13 @@ export default function App() {
   const reloadRoots = useCallback(() => getJson<{ roots: IndexRoot[] }>('/api/finder/index').then(r => setRoots(r.roots)).catch(() => undefined), [])
   const reloadMeta = useCallback(() => getJson<{ meta: MetaMap }>('/api/finder/meta').then(r => setMeta(r.meta)).catch(() => undefined), [])
 
+  // сигнал серверу, что страница открыта (в режиме браузера закрытие вкладки завершает сервер)
+  useEffect(() => {
+    const t = window.setInterval(() => void fetch('/api/finder/ping').catch(() => undefined), 5000)
+    void fetch('/api/finder/ping').catch(() => undefined)
+    return () => window.clearInterval(t)
+  }, [])
+
   // ---------- сохранение вида ----------
   useEffect(() => {
     if (!st) return
