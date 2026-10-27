@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Dict
 
+from pxg_core import гдис_карта as kart
 from pxg_core import гдис_pdf as pdf
 from pxg_core import qc
 from pxg_core.qc import Report
@@ -22,11 +23,17 @@ def check_gdis(values: Dict[str, str]) -> Report:
     if not files:
         rep.note("FILE", "В папке нет PDF-файлов", file=folder)
         return rep
+    scans = [pdf.scan_report(f) for f in files]
+    templates = {sc.fingerprint for sc in scans if not sc.error}
     wells = set()
-    for f in files:
-        s = pdf.parse_study(f)
+    for sc in scans:
+        if sc.error:
+            rep.warn("GDI", sc.error, file=sc.file)
+            continue
+        mapping, _src = kart.effective(sc, kart.load_saved(sc.fingerprint, (values.get("mapping") or "").strip()))
+        s = kart.build_study(sc, mapping, sc.fingerprint)
         wells.add(s.well)
         for field, text in s.issues:
             rep.warn("GDI", "%s: %s" % (field, text), file=s.file)
-    rep.saw("%d отчёт(ов), %d скважин" % (len(files), len(wells - {""})))
+    rep.saw("%d отчёт(ов), %d скважин, шаблонов отчёта: %d" % (len(files), len(wells - {""}), len(templates)))
     return rep

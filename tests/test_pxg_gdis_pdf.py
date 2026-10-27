@@ -1,4 +1,4 @@
-"""«База ГДИ из PDF-отчётов»: разбор отчёта «Мониторинг ГДИС» по координатам и сборка базы в формате образца."""
+"""«База ГДИ из PDF-отчётов»: универсальное чтение отчётов «Мониторинг ГДИС» двух шаблонов, сопоставление, единицы, база."""
 import importlib
 import os
 import sys
@@ -11,86 +11,87 @@ pytest.importorskip("pypdf")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from pxg_core import гдис_карта as kart  # noqa: E402
 from pxg_core import гдис_pdf as g  # noqa: E402
 
 module = importlib.import_module("pxg_base.modules.База_ГДИ_из_отчётов_PDF")
-
-COLS = [1641, 2069, 2496, 2924]       # Статика, Режимы 1–3 (как в настоящих отчётах)
-
-
-def _page0(well="194", method="ИД", date="16.10.2026 14:07:19", dshb_static=False):
-    items = [(1063, 620, "Отчёт о гидродинамическом исследовании"), (472, 750, "Информация об исследовании"), (532, 848, "Предприятие"), (2070, 848, "Касимовское ПХГ"),
-             (532, 1056, "Скважина"), (2070, 1056, well), (532, 1160, "Дата и время начала исследования"), (2070, 1160, date),
-             (532, 1570, "Метод исследования"), (2572, 1570, method), (532, 1793, "Внутренний диаметр НКТ"), (2572, 1793, "76"),
-             (472, 2022, "Таблица интервалов перфорации"), (502, 2340, "1"), (694, 2340, "780"), (1169, 2340, "790"),
-             (472, 2514, "Данные на режимах"), (502, 2756, "Параметр"), (1213, 2756, "Ед. изм")]
-    for x, t in zip(COLS, ["Статика", "Режим №1", "Режим №2", "Режим №3"]):
-        items.append((x, 2756, t))
-
-    def row(y, label, unit, values):
-        items.append((502, y, label))
-        items.append((1213, y, unit))
-        for x, v in zip(COLS, values):
-            if v is not None:
-                items.append((x, y, v))
-    row(2964, "Dшб", "мм", [None, "12", "16", "19"])
-    row(3484, "Дебит газа", "тыс.м³/сут", [None, "212.51", "327.14", "393.87"])
-    row(3692, "Pтруб.", "кгс/см²", ["99", "89.6", "81.1", "72"])
-    row(3796, "Pзатруб.", "кгс/см²", ["99", "98.2", "97.5", "96.4"])
-    row(3900, "Ту", "°C", ["14", "20", "20", "20"])
-    row(4696, "Pзатруб. (на ИП)", "кгс/см²", ["105.806", "104.797", "104.044", "102.86"])
-    return [(0, y, x, t) for x, y, t in items]
+DATA = os.path.join(ROOT, "tests", "data_gdis")
 
 
-def _page1(in_calc=(True, True, True, True), b="0.0028825"):
-    items = [(472, 3386, "Таблица P(Q) на ИП"), (502, 3496, "№"), (694, 3496, "Название режима"), (1547, 3496, "Время"),
-             (1950, 3496, "qg"), (2354, 3496, "P"), (2398, 3496, "ман"), (2758, 3496, "P"), (2802, 3496, "ман на"),
-             (3162, 3496, "dP"), (3566, 3496, "В")]
-    data = [("Статика", "0", "99", "105.806", ""), ("Режим 1", "212.51", "98.2", "104.797", "1.00859"),
-            ("Режим 2", "327.14", "97.5", "104.044", "1.76171"), ("Режим 3", "393.87", "96.4", "102.86", "2.94631")]
-    for i, (name, q, pm, pip, dp) in enumerate(data):
-        y = 3866 + 104 * i
-        items += [(502, y, str(i + 1)), (694, y, name), (1950, y, q), (2354, y, pm), (2758, y, pip)]
-        if dp:
-            items.append((3162, y, dp))
-        if in_calc[i]:
-            items.append((3657, y, "V"))
-    items += [(472, 4352, "Метод 4 – ∆("), (1077, 4352, "P²)/Q = a + b"),
-              (502, 4700, "Пластовое давление на уровне ИП"), (2513, 4700, "кгс/см²"), (3365, 4700, "105.806"),
-              (502, 4804, "Коэфф. фильтрац. сопротивления"), (1641, 4804, "a"), (2513, 4804, "(кгс/см²)²/(тыс.м³/сут)"), (3365, 4804, "0.33321"),
-              (502, 4908, "Коэфф. фильтрац. сопротивления"), (1641, 4908, "b"), (2513, 4908, "(кгс/см²)²/(тыс.м³/сут)²"), (3365, 4908, b)]
-    return [(1, y, x, t) for x, y, t in items]
+def scan(name, replace=None):
+    text = open(os.path.join(DATA, name), encoding="utf-8").read()
+    for a, b in (replace or {}).items():
+        text = text.replace(a, b)
+    return g.scan_pages([p.split("\n") for p in text.split("\f")], name)
 
 
-def study(**kw):
-    page1 = {k: kw.pop(k) for k in ("in_calc", "b") if k in kw}
-    return g.parse_chunks(_page0(**kw) + _page1(**page1), "194")
+def study(name="gdis_2026.txt", saved=None, **kw):
+    sc = scan(name, **kw)
+    mapping, _src = kart.effective(sc, saved)
+    return kart.build_study(sc, mapping, sc.fingerprint)
 
 
-def test_reads_regimes_by_position_with_empty_static_cell():
+def test_template_2026_values_by_position_and_empty_static_cell():
     s = study()
     assert (s.well, s.method_raw, s.a, s.b, s.p_res) == ("194", "ИД", 0.33321, 0.0028825, 105.806)
-    assert s.started.day == 16 and s.perforations == [(780.0, 790.0)]
+    assert s.started.day == 16 and s.perforations == [(780.0, 790.0)] and s.method_title == "4"
     assert [r.n for r in s.regimes] == [0, 1, 2, 3]
     assert [r.q for r in s.modes] == [212.51, 327.14, 393.87]
-    assert s.static.cells["p_tube"] == 99 and s.static.cells.get("dshb") is None   # пустая клетка статики не сдвинула режимы
+    assert s.static.cells["p_tube"] == 99 and s.static.cells.get("dshb") is None     # пустая клетка статики не сдвинула режимы
     assert s.modes[0].cells["dshb"] == 12 and s.modes[2].cells["dshb"] == 19
-    assert s.modes[1].p_ip == 104.044   # Рзаб — Pман на ИП своего режима
+    assert s.modes[1].p_ip == 104.044 and all(r.in_calc for r in s.regimes)
     assert not s.issues
 
 
-def test_regime_not_in_calc_and_negative_b_are_reported_not_dropped():
-    s = study(in_calc=(True, True, True, False), b="-0.001")
+def test_template_2019_other_headers_units_and_methods():
+    s = study("gdis_2019.txt")
+    assert s.well == "128" and s.started.year == 2019 and s.sposob == "ДИКТ-50"       # «Экспл.скв.№128», ДИКТ + 50
+    assert s.method_title == "4" and s.perforations == [(882.5, 889.0)]
+    # МПа → кгс/см²: Рпл 8,74407 МПа, a в МПа²/(тыс.м³/сут)
+    assert s.p_res == pytest.approx(89.1647, abs=1e-3)
+    assert s.a == pytest.approx(0.01248 * kart.MPA ** 2, rel=1e-6) and s.b == pytest.approx(1.405e-4 * kart.MPA ** 2, rel=1e-6)
+    assert [r.n for r in s.regimes] == [0, 1, 2, 3, 4, 5]
+    assert [r.q for r in s.modes] == [39.43, 60.806, 86.69, 118.11, 39.43]             # «Расход газа» в тыс.м³/сут
+    assert s.modes[0].p_ip == 88.8734 and s.modes[0].dp == 0.291326
+    assert s.modes[1].cells["q_table"] == pytest.approx(2.5336 * 24, rel=1e-3)       # «Дебит» в тыс.м³/ч приведён к суткам
     fields = [f for f, _ in s.issues]
-    assert "режим 3" in fields and "b" in fields
-    assert len(s.modes) == 3     # режим остался
+    assert "режимы" in fields                     # повтор режима 1 в конце: дебиты не возрастают — показано, не скрыто
 
 
-def test_unknown_method_is_flagged():
-    s = study(method="КВД")
-    rows, notes = module.rows_of_study(s, 1, 1, "ДИКТ-50")
-    assert any(f == "метод исслед." for f, _ in notes)
-    assert rows[0][4] == "квд"
+def test_fingerprint_is_template_not_well():
+    a, b = scan("gdis_2026.txt"), scan("gdis_2026.txt", {"194": "195", "16.10.2026": "17.10.2026"})
+    assert a.fingerprint == b.fingerprint != scan("gdis_2019.txt").fingerprint
+
+
+def test_manual_mapping_overrides_suggestion_and_can_switch_off():
+    sc = scan("gdis_2019.txt")
+    auto, _ = kart.effective(sc)
+    method1 = next(i for i in sc.items if i.method == "1" and i.label.startswith("Коэфф. фильтрац") and i.label.endswith("a"))
+    saved = {"a": kart.locator(method1), "sposob": kart.SKIP}
+    mapping, source = kart.effective(sc, saved)
+    s = kart.build_study(sc, mapping)
+    assert s.a == pytest.approx(0.1083 * kart.MPA ** 2, rel=1e-6) and source["a"] == "вручную" and auto["a"]["method"] == "4"
+    assert s.sposob == "" and source["sposob"] == "отключено"
+    assert s.method_title == "1" and any(f == "метод" for f, _ in s.issues)           # a и b не из метода 4 — предупреждение
+
+
+def test_mapping_store_by_template(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXG_HOME", str(tmp_path))
+    sc = scan("gdis_2026.txt")
+    mapping, _ = kart.effective(sc)
+    mapping["q"] = kart.locator(next(i for i in sc.items if i.label == "Дебит газа"))
+    kart.save(sc.fingerprint, mapping, "Мониторинг ГДИС")
+    again, source = kart.effective(sc, kart.load_saved(sc.fingerprint))
+    assert source["q"] == "вручную" and again["q"]["label"] == kart.norm("Дебит газа")
+    assert kart.load_saved("другой-шаблон") == {}
+
+
+@pytest.mark.parametrize("value,unit,dim,expected", [
+    (8.74407, "МПа", "pressure", 89.1647), (89.0, "кгс/см²", "pressure", 89.0), (1.6429, "тыс.м³/ч", "flow", 39.43),
+    (50.0, "м³/сут", "flow", 0.05), (20.0, "°C", "temp", 20.0), (293.15, "°K", "temp", 20.0),
+    (0.01248, "МПа²/(тыс.м³/сут)", "coef_a", 1.2977), (0.33, "(кгс/см²)²/(тыс.м³/сут)", "coef_a", 0.33)])
+def test_unit_conversion(value, unit, dim, expected):
+    assert kart.convert(value, unit, dim)[0] == pytest.approx(expected, rel=1e-3)
 
 
 def test_rows_match_sample_layout():
@@ -102,17 +103,19 @@ def test_rows_match_sample_layout():
     assert (first["a"], first["b"], first["Рпл, \nна ИП кгс/см2"]) == (0.33321, 0.0028825, 105.806)
     assert (first["Рст. тр, кгс/см2"], first["Рст. затр, кгс/см2"], first["Туст. ˚С"]) == (99, 99, 20)
     assert df["№скв"].notna().sum() == 1 and list(df["№ режима"]) == [1, 2, 3]
-    # Qmax и DPmax — режим с наибольшим дебитом; DP = Рпл − Рзаб
     assert first["Qmax тыс.м3/сут"] == 393.87 and first["DPmax кгс/см2"] == pytest.approx(2.9463, abs=1e-4)
     assert df["Рзаб, кгс/см2"].tolist() == [104.797, 104.044, 102.86]
 
 
-def test_build_lists_missing_group_and_skips_taken_duplicate():
-    s = study()
-    wide, bad, detail = module.build([s], {}, "ДИКТ-50")
-    assert "ГСП" in set(bad["Поле"]) and len(wide) == 3 and len(detail) == 3
-    wide2, bad2, _ = module.build([s], {}, "ДИКТ-50", taken={("194", s.started.date())})
-    assert wide2.empty and "дубликат" in set(bad2["Поле"])
+def test_read_studies_groups_templates_and_build_lists_gaps():
+    scans = [scan("gdis_2026.txt"), scan("gdis_2019.txt")]
+    studies, templates = module.read_studies(scans)
+    assert {s.well for s in studies} == {"194", "128"} and templates["Шаблон"].nunique() == 2
+    wide, bad, detail = module.build(studies, {"194": 1}, "ДИКТ-50")
+    assert len(wide) == 3 + 5 and wide["№скв"].notna().sum() == 2
+    assert set(bad.loc[bad["Скважина"] == "128", "Поле"]) >= {"ГСП", "режимы"}      # пустой ГСП и странные режимы — в «Не распознано»
+    wide2, bad2, _ = module.build(studies, {}, "ДИКТ-50", taken={("194", studies[0].started.date())})
+    assert "дубликат" in set(bad2["Поле"])
 
 
 def test_group_map_normalizes_names(tmp_path):
@@ -121,7 +124,7 @@ def test_group_map_normalizes_names(tmp_path):
     assert module.load_group_map(str(f)) == {"37": 1, "59": 1, "98": 2}
 
 
-def test_pdf_reader_gets_chunks_with_coordinates(tmp_path):
+def test_pdf_reader_gives_text_grid_and_marks_foreign_pdf(tmp_path):
     pypdf = pytest.importorskip("pypdf")
     from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
     writer = pypdf.PdfWriter()
@@ -136,7 +139,5 @@ def test_pdf_reader_gets_chunks_with_coordinates(tmp_path):
     with open(path, "wb") as f:
         writer.write(f)
     assert g.is_pdf(str(path)) and g.find_reports(str(tmp_path)) == [str(path)]
-    got = {(round(x), t) for _p, _y, x, t in g.read_chunks(str(path))}
-    assert (100, "Skvazhina 194") in got
-    study = g.parse_study(str(path))     # PDF не тот: причина записана, исключения нет
-    assert any(f == "файл" for f, _ in study.issues)
+    assert any("Skvazhina 194" in ln for p in g.layout_pages(str(path)) for ln in p)
+    assert g.scan_report(str(path)).error        # не отчёт ГДИ: причина записана, исключения нет
