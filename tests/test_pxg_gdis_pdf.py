@@ -171,3 +171,14 @@ def test_wizard_api_lists_templates_and_saves_choice(tmp_path, monkeypatch):
     assert rows["a"]["source"] == "вручную" and rows["a"]["current"]["method"] == "2" and again["saved"]
     assert rows["sposob"]["source"] == "отключено" and rows["sposob"]["current"] is None
     assert c.post("/api/gdis/templates", json={"folder": str(folder / "нет")}).status_code == 404
+
+
+def test_kru_percent_is_read_when_report_has_it():
+    s = study(replace={"Dшб                   мм                        12           16           19":
+                       "Dшб                   мм                        12           16           19\n"
+                       "КРУ                   %                         30           40           50"})
+    assert [r.cells.get("kru") for r in s.modes] == [30, 40, 50]
+    rows, _ = module.rows_of_study(s, 1, 2)
+    assert [r[16] for r in rows] == [30, 40, 50] and rows[0][5] in (None, "")
+    s0 = study()
+    assert all(r[16] is None for r in module.rows_of_study(s0, 1, 2)[0])
