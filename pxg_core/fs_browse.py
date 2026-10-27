@@ -192,6 +192,29 @@ def set_last(directory: str = "", file: str = "") -> Dict[str, Any]:
     return get_last()
 
 
+def get_win() -> Dict[str, int]:
+    """Запомненный размер окна проводника (общий для всех приложений)."""
+    with _lock:
+        w = _read_settings().get("win")
+    if isinstance(w, dict) and all(isinstance(w.get(k), int) for k in ("w", "h")):
+        return {"w": w["w"], "h": w["h"]}
+    return {}
+
+
+def set_win(w: Any, h: Any) -> Dict[str, int]:
+    try:
+        w, h = int(w), int(h)
+    except (TypeError, ValueError):
+        return get_win()
+    if not (300 <= w <= 10000 and 200 <= h <= 10000):
+        return get_win()
+    with _lock:
+        data = _read_settings()
+        data["win"] = {"w": w, "h": h}
+        _write_settings(data)
+    return {"w": w, "h": h}
+
+
 # ---------- быстрые места ----------
 
 def _win_drives() -> List[Dict[str, str]]:
@@ -532,6 +555,18 @@ async def _file(request: Request):
     return FileResponse(path, media_type="application/octet-stream")
 
 
+async def _win(request: Request) -> JSONResponse:
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        return JSONResponse(set_win(body.get("w"), body.get("h")))
+    return JSONResponse(get_win())
+
+
 def routes() -> List[Route]:
     return [
         Route("/api/fs/file", _file),
@@ -539,4 +574,5 @@ def routes() -> List[Route]:
         Route("/api/fs/places", _places),
         Route("/api/fs/stat", _stat, methods=["POST"]),
         Route("/api/fs/last", _last, methods=["GET", "POST"]),
+        Route("/api/fs/win", _win, methods=["GET", "POST"]),
     ]

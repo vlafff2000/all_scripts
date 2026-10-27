@@ -180,3 +180,13 @@ def test_stat_route(home):
     c = TestClient(Starlette(routes=fs_browse.routes()))
     r = c.post("/api/fs/stat", json={"path": str(home), "names": ["t.xlsx"]}).json()
     assert r["stats"]["t.xlsx"]["size"] == 5
+
+
+def test_window_size_remembered(home):
+    from starlette.applications import Starlette
+    c = TestClient(Starlette(routes=fs_browse.routes()))
+    assert c.get("/api/fs/win").json() == {}
+    assert c.post("/api/fs/win", json={"w": 1200, "h": 700}).json() == {"w": 1200, "h": 700}
+    assert c.post("/api/fs/win", json={"w": 5, "h": "x"}).json() == {"w": 1200, "h": 700}
+    assert c.get("/api/fs/win").json() == {"w": 1200, "h": 700}
+    assert fs_browse.get_last() == {"dir": "", "recent": []}
