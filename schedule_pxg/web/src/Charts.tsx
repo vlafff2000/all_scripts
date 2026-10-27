@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { colorOfGroup, groupColors, groupKey } from '../../../pxg_core/web-ui/groupColors'
 import PageHead from './PageHead'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { dayNum, isoOfDay, mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
@@ -31,11 +32,14 @@ function build(data: ChartsView, by: string, cum: boolean, shown: string, multi:
   const season = by === 'season'
   const labels = Array.from(new Set(data.scenarios.flatMap(sc => sc.series.map(s => s.label))))
   const kinds = new Set(data.scenarios.flatMap(sc => sc.series.map(s => s.kind)))
+  // ряд-группа красится сквозным цветом группы (как во всех программах), остальные — по порядку
+  const gcol = groupColors(data.targets.groups)
+  const isGroup = (label: string) => Object.keys(gcol).some(g => groupKey(g) === groupKey(label))
   const series = data.scenarios.flatMap((sc, si) => sc.series.filter(s => !multi || s.label === shown).map(s => {
     const pts = toPoints(s, cum, season)
     return mkSeries({
       name: multi ? sc.name + (kinds.size > 1 ? ' · ' + s.kind : '') : s.label + (kinds.size > 1 ? ' · ' + s.kind : ''),
-      slot: multi ? si : labels.indexOf(s.label), dashed: s.kind === 'отбор' && !season,
+      slot: multi ? si : labels.indexOf(s.label), color: !multi && isGroup(s.label) ? colorOfGroup(s.label, gcol) : undefined, dashed: s.kind === 'отбор' && !season,
       x: pts.map(p => (season ? p[0] : isoOfDay(p[0]))), y: pts.map(p => p[1]),
     })
   }))
