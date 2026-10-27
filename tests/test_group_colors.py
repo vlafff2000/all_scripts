@@ -34,3 +34,13 @@ def test_override_is_remembered_and_wins(tmp_path, monkeypatch):
     assert gc.group_colors(['ГСП-1', 'ГСП-2'])['ГСП-1'] == gc.PALETTES[2][0]
     with pytest.raises(ValueError):
         gc.set_override('ГСП-1', 'red')
+
+
+def test_chart_colors_do_not_depend_on_which_groups_are_on_the_chart():
+    gc.set_known_groups([f'ГСП-{i}' for i in range(1, 10)])
+    try:
+        part = gc.colors_for(['ГСП 3', 'ГСП 7'])
+        whole = gc.group_colors([f'ГСП-{i}' for i in range(1, 10)], {})
+        assert part == {'ГСП 3': whole['ГСП-3'], 'ГСП 7': whole['ГСП-7']}
+    finally:
+        gc.set_known_groups([])

@@ -124,3 +124,18 @@ def color_of(group, colors: Mapping[str, str]) -> str:
         if group_key(name) == k:
             return c
     return NO_GROUP_COLOR
+
+
+_known: list[str] = []
+
+
+def set_known_groups(groups: Iterable) -> None:
+    """Запомнить полный список групп открытого объекта: цвета графиков считаются по нему, а не по группам, попавшим на график."""
+    _known[:] = sort_groups(groups)
+
+
+def colors_for(names: Iterable) -> dict[str, str]:
+    """Цвета для групп конкретного графика: {название: цвет}. Палитра по полному списку (``set_known_groups``) плюс эти группы."""
+    names = [str(n) for n in names]
+    full = group_colors([*_known, *names])
+    return {n: color_of(n, full) if group_key(n) != group_key(NO_GROUP) else NO_GROUP_COLOR for n in dict.fromkeys(names)}
