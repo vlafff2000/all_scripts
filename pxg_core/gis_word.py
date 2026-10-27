@@ -21,7 +21,9 @@ import pandas as pd
 from . import gis, word_doc
 
 NUM = r"\d+(?:[.,]\d+)?"
-_SPAN = re.compile(r"(?<![\w.,])(" + NUM + r")\s*[-–—]\s*(" + NUM + r")(?![\d.,])")
+_SPAN = re.compile(r"(?<![\w.,\-])(" + NUM + r")\s*[-–—:]\s*(" + NUM + r")(?![\d.,])")
+_KG_FORM = re.compile(r"^\s*(" + NUM + r")\s*[-–—]\s*(" + NUM + r")\s*,?\s*Кг\s*(~?" + NUM + r")\s*%?\s*(.*)$", re.I)
+_TOK = re.compile(r"~?-?" + NUM)
 _NUM = re.compile(r"-?" + NUM)
 _DATE = re.compile(r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})")
 _WELL = re.compile(r"скв(?:ажина|ажины|\.)?\s*(?:№\s*)?([\w][\w\-/]*)", re.I)
@@ -30,6 +32,7 @@ _TOTAL = re.compile(r"суммарн|средневзвеш|итого", re.I)
 _INCL = re.compile(r"отклонени|инклин|вертикал", re.I)
 _HORIZON = re.compile(r"^([A-Za-z][A-Za-z0-9\-]*)")
 _DASHES = re.compile(r"^[\s\-_=–—]{6,}$")
+_DASH_RUN = re.compile(r"[\-_=–—]{6,}")
 
 MD, INCL = "по стволу (MD)", "с учётом отклонения от оси ствола"
 FIELDS = (("date", r"дат"), ("method", r"метод"), ("interval", r"^интервал"), ("bottom", r"забо"), ("nkt", r"нкт"),
@@ -56,11 +59,14 @@ class DataRow:
     abs_from: Optional[float]
     abs_to: Optional[float]
     h: Optional[float]
-    kg: float             # доля единицы
+    kg: Optional[float]   # доля единицы; None — Кг в заключении не определён (см. text)
     gvk_depth: Optional[float] = None
     gvk_abs: Optional[float] = None
     group: int = 0        # номер группы между итоговыми строками (для сверки с «Суммарная мощность»)
     carried: bool = False
+    kg2: Optional[float] = None   # второй столбец Кг в строке (если в заключении их два), доля единицы
+    text: str = ""        # текст после чисел: «интервал вырезки», «не определ.» и т. п.
+    approx: bool = False  # Кг указан как «~20»
 
     @property
     def pack(self) -> str:
@@ -90,6 +96,7 @@ class Conclusion:
     method: str = ""
     rows: List[DataRow] = field(default_factory=list)
     unresolved: List[Tuple[int, str, str]] = field(default_factory=list)                      # строка, текст, причина
+    notes: List[str] = field(default_factory=list)                                            # пояснения в тексте заключения
     issues: List[gis.Issue] = field(default_factory=list)
     totals: List[Tuple[int, int, List[float]]] = field(default_factory=list)                  # строка, группа, числа
     error: str = ""
@@ -133,6 +140,12 @@ def load_mapping(path: str) -> Dict[str, Tuple[str, str]]:
     return out
 
 
+def _pack_note(note: str) -> str:
+    """Приписка к пачке: «2-I», «п.2-I», «п. 2-I» — одна пачка; номер без «п.» получает «п.» («str.1» → «п.1»)."""
+    note = re.sub(r"^п\.\s*", "п.", note.strip())
+    return "п." + note if re.match(r"^\d", note) else note
+
+
 def split_label(label: str, mapping: Optional[Dict[str, Tuple[str, str]]] = None) -> Tuple[str, str, bool]:
     """Метка → (горизонт, приписка, горизонт_указан). Горизонт — латинский индекс в начале; иначе метка целиком приписка."""
     text = label.strip()
@@ -141,24 +154,33 @@ def split_label(label: str, mapping: Optional[Dict[str, Tuple[str, str]]] = None
         return h, n, True
     m = _HORIZON.match(text)
     if not m:
-        return "", text.lstrip(" .,;").rstrip(" ,;"), False
+        return "", _pack_note(text.lstrip(" .,;").rstrip(" ,;")), False
     horizon = m.group(1).rstrip("-")
-    note = text[m.end():].lstrip(" .,;").rstrip(" ,;")
+    note = _pack_note(text[m.end():].lstrip(" .,;").rstrip(" ,;"))
     if mapping and _norm(horizon) in mapping:
         horizon = mapping[_norm(horizon)][0] or horizon
     return horizon, note, True
 
 
-def _parse_data_line(line: str) -> Optional[Tuple[str, List[float]]]:
-    """Строка таблицы → (метка, числа после «от - до»), если строка похожа на данные. Первая подходящая пара «от - до»."""
+def _parse_data_line(line: str) -> Optional[dict]:
+    """Строка таблицы → {label, frm, to, nums, text, colon}, если это данные. Пара «от - до» (разделитель «-», «–» или «:»),
+    за ней числа подряд (минимум два), остальное — текст («интервал вырезки», «не определ.»). Метка слева — не длиннее четырёх слов."""
     for m in _SPAN.finditer(line):
+        label = line[:m.start()].strip()
+        if len(label.split()) > 4:
+            continue
         tail = line[m.end():]
-        cleaned = re.sub(r"[:;]", " ", tail)
-        cleaned = re.sub(r"\s*м\b\.?", " ", cleaned)
-        tokens = cleaned.split()
-        if tokens and all(_NUM.fullmatch(t) for t in tokens) and len(tokens) in (2, 4, 6):
-            nums = [fnum(t) for t in tokens]
-            return line[:m.start()].strip(), [fnum(m.group(1)), fnum(m.group(2))] + nums
+        colon = ":" in tail
+        tokens = re.sub(r"[:;]", " ", tail).split()
+        nums, k = [], 0
+        while k < len(tokens) and re.fullmatch(_TOK, tokens[k]):
+            nums.append(tokens[k])
+            k += 1
+        rest = " ".join(t for t in tokens[k:] if t not in ("м", "м."))
+        rest = re.split(r"\s*Примечани", rest, maxsplit=1)[0].strip()
+        if len(nums) >= 2 and not re.search(r"[A-Za-zА-Яа-я]{3,}[^\d]*\d+[.,]\d+\s*[-–—]", rest):
+            return {"label": label, "frm": fnum(m.group(1)), "to": fnum(m.group(2)), "colon": colon, "text": rest,
+                    "nums": [(fnum(t.lstrip("~")), t.startswith("~")) for t in nums]}
     return None
 
 
@@ -203,18 +225,47 @@ def parse_text(text: str, file: str, mapping: Optional[Dict[str, Tuple[str, str]
                 group += 1
                 horizon = note = ""
             continue
+        # разделитель, слипшийся со строкой данных: «-----str,п.2-II 1253.8-...» или «... 1248.2 -1098.9 ------»
+        run = _DASH_RUN.search(line)
+        div_after = False
+        if run and re.search(r"\d+[.,]\d", line):
+            if run.start() == 0 or not line[:run.start()].strip():
+                if in_table:
+                    group += 1
+                    horizon = note = ""
+                line = line[run.end():].strip()
+            else:
+                line = (line[:run.start()] + " " + line[run.end():]).strip()
+                div_after = True
         parsed = _parse_data_line(line)
+        kgm = None if parsed else _KG_FORM.match(line)
+        if kgm:                                    # «449.6 - 451, Кг 32.8 %»
+            a, b = fnum(kgm.group(1)), fnum(kgm.group(2))
+            parsed = {"label": "", "frm": a, "to": b, "colon": False, "text": kgm.group(4).strip(),
+                      "nums": [(round(b - a, 3), False), (fnum(kgm.group(3).lstrip("~")), kgm.group(3).startswith("~"))]}
         if parsed is not None:
             in_table = True
-            label, nums = parsed
-            frm, to, rest = nums[0], nums[1], nums[2:]
-            a_from = a_to = h = gvk_d = gvk_a = None
-            if len(rest) == 6:
-                a_from, a_to, h, kg, gvk_d, gvk_a = rest
-            elif len(rest) == 4:
-                a_from, a_to, h, kg = rest
+            label, frm, to, text = parsed["label"], parsed["frm"], parsed["to"], parsed["text"]
+            vals = [v for v, _ in parsed["nums"]]
+            approx = [ap for _, ap in parsed["nums"]]
+            n = len(vals)
+            a_from = a_to = h = kg = kg2 = gvk_d = gvk_a = None
+            has_abs = parsed["colon"] or n >= 4 or (n == 3 and (vals[0] < 0 or (c.alt is not None and abs(vals[0] - (c.alt - frm)) < 0.5)))
+            if has_abs:
+                a_from, a_to = vals[0], vals[1]
+                rest, rap = vals[2:], approx[2:]
             else:
-                h, kg = rest
+                rest, rap = vals, approx
+            if rest:
+                h = rest[0]
+            if len(rest) >= 2:
+                kg = rest[1]
+            if len(rest) == 3:                    # h, Кг, второй Кг
+                kg2 = rest[2]
+            elif len(rest) == 4:                  # h, Кг, ГВК, ГВК а.о. либо h, Кг, Кг2, ГВК (редко)
+                gvk_d, gvk_a = rest[2], rest[3]
+            elif len(rest) >= 5:                  # h, Кг, Кг2, ГВК, ГВК а.о.
+                kg2, gvk_d, gvk_a = rest[2], rest[3], rest[4]
             if label:
                 hz, nt, has_h = split_label(label, mapping)
                 if has_h:
@@ -224,13 +275,21 @@ def parse_text(text: str, file: str, mapping: Optional[Dict[str, Tuple[str, str]
                 carried = False
             else:
                 carried = True
-            kgf = kg / 100.0 if (percent or kg > 1) else kg
-            row = DataRow(no, mode, label, horizon, note, frm, to, a_from, a_to, h, kgf, gvk_d, gvk_a, group, carried)
+            as_pct = percent or (kg is not None and kg > 1)
+            conv = (lambda x: None if x is None else round(x / 100.0 if as_pct else x, 6))
+            row = DataRow(no, mode, label, horizon, note, frm, to, a_from, a_to, h, conv(kg), gvk_d, gvk_a, group, carried,
+                          conv(kg2), text, bool(len(rest) >= 2 and rap[1]))
             c.rows.append(row)
             if mode == INCL:
                 c.has_incl = True
             if not horizon:
                 c.issues.append(gis.Issue("warn", "no_horizon", c.sheet, no, "Не определён горизонт (нет метки слева, наследовать нечего)", line))
+            if row.kg is None:
+                c.issues.append(gis.Issue("note", "kg_missing", c.sheet, no, "Кг в заключении не определён%s: интервал в hэф не входит" % (
+                    " («%s»)" % text if text else ""), "%g-%g" % (frm, to)))
+            if div_after:
+                group += 1
+                horizon = note = ""
             continue
         if in_table and _TOTAL.search(line):
             nums = [fnum(x) for x in _NUM.findall(line)]
@@ -256,7 +315,12 @@ def parse_text(text: str, file: str, mapping: Optional[Dict[str, Tuple[str, str]
                 continue
         if in_table or len(line) < 3:
             if re.search(r"\d", line) and (in_table and re.search(r"\d+[.,]\d", line)):
-                c.unresolved.append((no, line, "похоже на данные, но не разобрано (ожидалось: [метка] от - до [абс.] мощность Кг)"))
+                if re.match(r"\s*примечани", line, re.I) or len(re.findall(r"[А-Яа-яЁё]{3,}", line)) >= 5:
+                    c.notes.append(line)       # пояснение инженера-интерпретатора, не строка таблицы
+                else:
+                    c.unresolved.append((no, line, "похоже на данные, но не разобрано (ожидалось: [метка] от - до [абс.] мощность Кг)"))
+            elif re.match(r"\s*примечани", line, re.I):
+                c.notes.append(line)
             continue
         if (len(line) > 25 or re.search(r"\d", line)) and not re.match(r"по материалам", line, re.I):
             story.append(line)
@@ -334,7 +398,7 @@ def _check_row(c: Conclusion, r: DataRow) -> None:
     if c.alt is not None and r.abs_from is not None and r.mode == MD and abs(r.abs_from - (c.alt - r.frm)) > 0.15:
         c.issues.append(gis.Issue("warn", "abs_mismatch", c.sheet, r.line,
                                   "Абс. отметка кровли %g, по альтитуде %g - %g = %g" % (r.abs_from, c.alt, r.frm, round(c.alt - r.frm, 2)), ""))
-    if r.kg > 1.0:
+    if r.kg is not None and r.kg > 1.0:
         c.issues.append(gis.Issue("error", "kg_range", c.sheet, r.line, "Кг больше 100 %", "%g" % r.kg))
 
 
@@ -345,7 +409,7 @@ def _check_totals(c: Conclusion) -> None:
         if len(nums) < 2 or not rows:
             continue
         h = sum(r.to - r.frm for r in rows)
-        kg = sum((r.to - r.frm) * r.kg for r in rows) / h * 100 if h else 0
+        kg = sum((r.to - r.frm) * (r.kg or 0) for r in rows) / h * 100 if h else 0
         if abs(h - nums[-2]) > 0.15 or abs(kg - nums[-1]) > 0.15:
             c.issues.append(gis.Issue("note", "total_mismatch", c.sheet, line,
                                       "Итог в заключении (мощность %g, Кг %g %%) не равен сумме строк (%.1f и %.1f %%): в БД берётся сумма строк" % (nums[-2], nums[-1], h, kg), ""))
@@ -382,6 +446,16 @@ def want_mode(c: Conclusion, depth: str) -> str:
     return INCL if (depth == "incl" or c.has_incl) else MD
 
 
+def _gvk_abs(alt: Optional[float], r: DataRow) -> Optional[float]:
+    """ГВК а.о.: по альтитуде (если сходится с написанным в заключении хотя бы по модулю), иначе как написано."""
+    if alt is None:
+        return r.gvk_abs
+    calc = round(alt - r.gvk_depth, 2)
+    if r.gvk_abs is None or abs(abs(r.gvk_abs) - abs(calc)) < 0.5:
+        return calc
+    return r.gvk_abs
+
+
 def to_results(conclusions: List[Conclusion], depth: str = "md", kg_min: float = 0.0) -> Dict[str, gis.SheetResult]:
     """Заключения → `gis.SheetResult` по скважине (замер = заключение). depth: auto — с учётом отклонения, если заключение его даёт (по умолчанию), md — по стволу, incl — с отклонением."""
     by_well: Dict[str, List[Conclusion]] = defaultdict(list)
@@ -406,13 +480,14 @@ def to_results(conclusions: List[Conclusion], depth: str = "md", kg_min: float =
             seen_gvk = set()
             for r in use:
                 hi = r.to - r.frm
-                hef = hi if r.kg > kg_min else 0.0
+                hef = hi if (r.kg is not None and r.kg > kg_min) else 0.0
                 row = gis.Row(sheet=well, well=well, xl_row=r.line, block=n, label_raw=r.label, frm=r.frm, to=r.to, kp=None, kg=r.kg,
-                              pack=r.pack, color="", hi=hi, hef=hef, kg_hef=hef * r.kg, note=c.file)
+                              kg_text=(r.text or "Кг не определён") if r.kg is None else "", pack=r.pack, color="", hi=hi, hef=hef,
+                              kg_hef=hef * (r.kg or 0.0), note=r.text + (" (Кг приблизительно)" if r.approx else ""))
                 if r.gvk_depth is not None:
                     key = r.pack
                     row.gvk_label = "ГВК"
-                    row.gvk_abs = r.gvk_abs if r.gvk_abs is not None else (c.alt - r.gvk_depth if c.alt is not None else None)
+                    row.gvk_abs = _gvk_abs(c.alt, r)
                     if key in seen_gvk:
                         row.gvk_extra = True
                         row.gvk_abs = None
@@ -448,7 +523,7 @@ def wells_frame(conclusions: List[Conclusion]) -> pd.DataFrame:
             "НКТ, м": c.nkt, "Перфорация верх, м": c.perf[0] if c.perf else None, "Перфорация низ, м": c.perf[1] if c.perf else None,
             "Перфорация верх а.о., м": ao(c.perf[0]) if c.perf else None, "Перфорация низ а.о., м": ao(c.perf[1]) if c.perf else None,
             "Строк интервалов": len([r for r in c.rows if r.mode == MD]), "С учётом отклонения": "да" if c.has_incl else "",
-            "Уровни жидкости": _sentence(c.story, r"уровн"), "Описание": c.story, "Прочие поля шапки": "; ".join("%s: %s" % kv for kv in c.extra.items()),
+            "Уровни жидкости": _sentence(c.story, r"уровн"), "Описание": c.story, "Примечания": " ".join(c.notes), "Прочие поля шапки": "; ".join("%s: %s" % kv for kv in c.extra.items()),
             "Файл": c.file, "Ошибка чтения": c.error})
     return pd.DataFrame(out)
 
@@ -482,7 +557,7 @@ def unresolved_frame(conclusions: List[Conclusion]) -> pd.DataFrame:
             out.append({"Файл": c.file, "Скважина": c.sheet, "Строка": no, "Текст": text, "Почему": why})
         for r in c.rows:
             if not r.horizon:
-                out.append({"Файл": c.file, "Скважина": c.sheet, "Строка": r.line, "Текст": "%g - %g, Кг %.1f %%" % (r.frm, r.to, r.kg * 100),
+                out.append({"Файл": c.file, "Скважина": c.sheet, "Строка": r.line, "Текст": "%g - %g, Кг %s" % (r.frm, r.to, "не определён" if r.kg is None else "%.1f %%" % (r.kg * 100)),
                             "Почему": "горизонт не определён: метки слева нет, наследовать нечего (в базе Атласа без пачки не сохраняется)"})
     return pd.DataFrame(out, columns=["Файл", "Скважина", "Строка", "Текст", "Почему"])
 
@@ -500,7 +575,7 @@ def intervals_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetR
                 extra.append({"Горизонт": r.horizon, "Приписка": r.note,
                               "От а.о., м": r.abs_from if r.abs_from is not None else (None if c.alt is None else round(c.alt - r.frm, 2)),
                               "До а.о., м": r.abs_to if r.abs_to is not None else (None if c.alt is None else round(c.alt - r.to, 2)),
-                              "Мощность по заключению, м": r.h, "ГВК глубина, м": r.gvk_depth, "Глубины": r.mode, "Файл": c.file,
+                              "Мощность по заключению, м": r.h, "Кг второй столбец": r.kg2, "Текст после чисел": r.text, "ГВК глубина, м": r.gvk_depth, "Глубины": r.mode, "Файл": c.file,
                               "Метка в документе": r.label or "(унаследована)"})
     out = base.reset_index(drop=True).copy()
     if len(out) != len(extra):
@@ -515,10 +590,25 @@ def intervals_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetR
     return out[first + [c for c in rest if c not in first]].assign(Кп=None)
 
 
+def canon_horizons(conclusions: List[Conclusion]) -> None:
+    """«Str» и «str» — один горизонт: берётся написание, которое встречается чаще (подсказка; правится файлом сопоставления)."""
+    count: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for c in conclusions:
+        for r in c.rows:
+            if r.horizon:
+                count[r.horizon.lower()][r.horizon] += 1
+    best = {k: max(v, key=lambda x: (v[x], x)) for k, v in count.items()}
+    for c in conclusions:
+        for r in c.rows:
+            if r.horizon:
+                r.horizon = best[r.horizon.lower()]
+
+
 def build(conclusions: List[Conclusion], depth: str = "auto", kg_min: float = 0.0,
           mapping: Optional[Dict[str, Tuple[str, str]]] = None) -> Tuple[Dict[str, pd.DataFrame], Dict[str, gis.SheetResult]]:
     """Все листы выгрузки. Ключи: Свод, Интервалы, Замеры, Скважины, Горизонты, Не распознано, Проверка (+ Интервалы (инкл.))."""
     from . import gis_qc
+    canon_horizons(conclusions)
     results = to_results(conclusions, depth, kg_min)
     found, _dropped = gis_qc.check_results(results)
     for res in results.values():
