@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 interface Item { name: string; dir: boolean; size: number; mtime: string; ext: string; locked: boolean }
-interface Listing { path: string; parent: string; items: Item[]; total: number; truncated: boolean; error: string }
+interface Listing { path: string; parent: string; items: Item[]; total: number; truncated: boolean; error: string; network?: boolean; cached?: boolean; lazy?: boolean }
 interface Place { name: string; path: string; kind: string }
 interface Last { dir: string; recent: string[] }
 
@@ -67,21 +67,46 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
   const box = useRef<HTMLDivElement>(null)
   const filter = opts.filter ?? DEFAULT_FILTER
 
-  const load = useCallback(async (path: string, over?: { q?: string; sort?: string; desc?: boolean; hidden?: boolean; all?: boolean }) => {
+  const reqId = useRef(0)
+  const load = useCallback(async (path: string, over?: { q?: string; sort?: string; desc?: boolean; hidden?: boolean; all?: boolean }, fresh = false) => {
     const o = { q: query, sort, desc, hidden, all, ...over }
     const p = new URLSearchParams({ path, sort: o.sort, q: o.q, limit: '2000' })
     if (o.desc) p.set('desc', '1')
     if (o.hidden) p.set('hidden', '1')
     if (!o.all && !folderMode && filter) p.set('filter', filter)
     if (folderMode) p.set('kind', 'folder')
-    setBusy(true)
+    if (fresh) p.set('fresh', '1')
+    const id = ++reqId.current
+    if (!fresh) setBusy(true)
     const r = await getJson<Listing>('/api/fs/list?' + p).catch(() => null)
+    if (id !== reqId.current) return // пришёл более новый запрос
     setBusy(false)
     if (!r) return
     setList(r)
-    setSel(-1)
+    if (!fresh) setSel(-1)
     if (r.path && !r.error) { dirRef.current = r.path; setPathText(r.path) }
+    // сеть: листинг пришёл из кэша — сразу обновляем его в фоне; без stat — дочитываем размер и дату видимых строк
+    if (r.cached && !r.error) { void load(r.path, over, true); return }
+    if (r.lazy && !r.error) {
+      const names = r.items.slice(0, 300).map(i => i.name)
+      const st = await getJson<{ stats: Record<string, { size: number; mtime: string; locked?: boolean }> }>('/api/fs/stat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: r.path, names }) }).catch(() => null)
+      if (st && id === reqId.current) {
+        setList(l => l && l.path === r.path ? { ...l, lazy: false, items: l.items.map(i => st.stats[i.name] ? { ...i, ...st.stats[i.name] } : i) } : l)
+      }
+    }
   }, [query, sort, desc, hidden, all, filter, folderMode])
+
+  const more = async () => {
+    if (!list) return
+    const p = new URLSearchParams({ path: list.path, sort, q: query, limit: '2000', offset: String(list.items.length) })
+    if (desc) p.set('desc', '1')
+    if (hidden) p.set('hidden', '1')
+    if (!all && !folderMode && filter) p.set('filter', filter)
+    if (folderMode) p.set('kind', 'folder')
+    const r = await getJson<Listing>('/api/fs/list?' + p).catch(() => null)
+    if (r && !r.error) setList(l => l && l.path === r.path ? { ...l, items: [...l.items, ...r.items], total: r.total } : l)
+  }
 
   useEffect(() => {
     let live = true
@@ -149,6 +174,7 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
         </div>
         <div className="fp-bar">
           <button disabled={!list?.parent} onClick={() => list && open(list.parent)} title="Вверх (Backspace)">↑</button>
+          <button onClick={() => void load(dirRef.current, undefined, true)} title="Обновить">↻</button>
           <form onSubmit={e => { e.preventDefault(); void load(pathText.trim()) }} className="fp-path">
             <input value={pathText} onChange={e => setPathText(e.target.value)} placeholder="Вставьте путь и нажмите Enter" aria-label="Путь" />
           </form>
@@ -164,7 +190,7 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
           <div className="fp-side">
             <div className="fp-cap">Места</div>
             {places.map(p => <button key={p.path} className={list?.path === p.path ? 'on' : ''} onClick={() => open(p.path)} title={p.path}>
-              {p.kind === 'drive' ? '💽' : '📁'} {p.name}</button>)}
+              {p.kind === 'drive' ? '💽' : p.kind === 'network' ? '🌐' : '📁'} {p.name}</button>)}
             {!folderMode && recent.length > 0 && <>
               <div className="fp-cap">Недавние файлы</div>
               {recent.map(f => <button key={f} onClick={() => choose(f)} title={f}>🕘 {baseName(f)}</button>)}
@@ -188,8 +214,8 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
                 <span className="fp-d">{it.mtime}</span>
                 <span className="fp-s">{it.dir ? '' : fmtSize(it.size)}</span>
               </div>))}
-            {list?.truncated && <div className="fp-note">Папка читается медленно: показана только часть. Уточните поиск.</div>}
-            {list && list.total > items.length && <div className="fp-note">Показано {items.length} из {list.total}.</div>}
+            {list?.truncated && <div className="fp-note">Папка читается медленно: показана только часть. Уточните поиск или нажмите «Обновить».</div>}
+            {list && list.total > items.length && <div className="fp-note">Показано {items.length} из {list.total}. <button onClick={() => void more()}>Показать ещё</button></div>}
           </div>
         </div>
         <div className="fp-foot">

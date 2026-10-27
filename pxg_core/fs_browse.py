@@ -22,8 +22,117 @@ from starlette.routing import Route
 MAX_RECENT = 12
 DEFAULT_LIMIT = 500
 TIME_BUDGET = 5.0  # секунд на чтение одной папки (медленные сетевые каталоги)
+LIST_TIMEOUT = 8.0  # секунд до ответа «диск не отвечает»: зависший сетевой путь не вешает окно
+PROBE_TIMEOUT = 1.5  # секунд на проверку «папка существует» там, где диск может не отвечать
+CACHE_MAX_AGE = 600.0  # секунд, сколько хранится прежний листинг сетевой папки
+CACHE_MAX = 64
+DEAD_BACKOFF = 10.0  # секунд, в течение которых недоступный путь не опрашивается повторно
+NET_FSTYPES = {"cifs", "smb3", "smbfs", "nfs", "nfs4", "afs", "ceph", "glusterfs", "fuse.glusterfs",
+               "fuse.sshfs", "davfs", "fuse.davfs", "fuse.rclone", "fuse.gvfsd-fuse", "9p", "lustre"}
 
 _lock = threading.Lock()
+
+
+class PathTimeout(Exception):
+    """Путь не ответил за отведённое время."""
+
+
+def _with_timeout(fn, timeout: float, *args, **kw):
+    """Выполнить fn в фоновом потоке; если диск завис — PathTimeout, а окно остаётся живым."""
+    box: Dict[str, Any] = {}
+
+    def work() -> None:
+        try:
+            box["v"] = fn(*args, **kw)
+        except BaseException as e:  # noqa: BLE001 - передаём в вызывающий поток
+            box["e"] = e
+
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        raise PathTimeout()
+    if "e" in box:
+        raise box["e"]
+    return box.get("v")
+
+
+def _probe(path: str, timeout: float = PROBE_TIMEOUT, kind: str = "dir") -> bool:
+    """os.path.isdir/isfile с ограничением по времени (недоступный диск = False, не зависание)."""
+    f = os.path.isdir if kind == "dir" else os.path.isfile
+    try:
+        return bool(_with_timeout(f, timeout, path))
+    except (PathTimeout, OSError):
+        return False
+
+
+# ---------- сетевые пути ----------
+
+_mounts_cache: Dict[str, Any] = {"t": 0.0, "v": []}
+_drive_type_cache: Dict[str, int] = {}
+
+
+def _unesc(s: str) -> str:
+    return s.replace("\\040", " ").replace("\\011", "\t").replace("\\134", "\\")
+
+
+def net_mounts() -> List[Dict[str, str]]:
+    """Сетевые монтирования Linux из /proc/mounts: [{dev, path, fstype}] (читается раз в 30 с)."""
+    now = time.monotonic()
+    if now - _mounts_cache["t"] < 30 and _mounts_cache["v"] is not None and _mounts_cache["t"]:
+        return _mounts_cache["v"]
+    out: List[Dict[str, str]] = []
+    try:
+        with open("/proc/mounts", "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 3 and parts[2] in NET_FSTYPES:
+                    out.append({"dev": _unesc(parts[0]), "path": _unesc(parts[1]), "fstype": parts[2]})
+    except OSError:
+        pass
+    _mounts_cache.update(t=now, v=out)
+    return out
+
+
+def _gvfs_dirs() -> List[str]:
+    out = []
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    for base in ((("/run/user/%d/gvfs" % uid) if uid is not None else ""), os.path.join(os.path.expanduser("~"), ".gvfs")):
+        if base:
+            out.append(base)
+    return out
+
+
+def _win_drive_type(letter: str) -> int:
+    """0 — неизвестно, 2 съёмный, 3 локальный, 4 сетевой, 5 привод. Без обращения к диску."""
+    if letter in _drive_type_cache:
+        return _drive_type_cache[letter]
+    try:
+        import ctypes
+        t = int(ctypes.windll.kernel32.GetDriveTypeW(letter + ":\\"))  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        t = 0
+    _drive_type_cache[letter] = t
+    return t
+
+
+def is_network(path: str) -> bool:
+    """Сетевой ли путь: UNC и сопоставленный сетевой диск (Windows); cifs/nfs/sshfs/gvfs (Linux). Без обращения к диску."""
+    if not path:
+        return False
+    if path.startswith("\\\\") or path.startswith("//"):
+        return True
+    if os.name == "nt":
+        return len(path) >= 2 and path[1] == ":" and _win_drive_type(path[0].upper()) == 4
+    norm = path.rstrip("/") or "/"
+    for base in _gvfs_dirs():
+        if norm == base or norm.startswith(base + "/"):
+            return True
+    for m in net_mounts():
+        mp = m["path"].rstrip("/") or "/"
+        if norm == mp or norm.startswith(mp + "/"):
+            return True
+    return False
 
 
 # ---------- настройки пользователя ----------
@@ -59,9 +168,10 @@ def get_last() -> Dict[str, Any]:
     with _lock:
         data = _read_settings()
     last = data.get("last_dir") or ""
-    if not (last and os.path.isdir(last)):
+    if last and not is_network(last) and not os.path.isdir(last):
         last = ""
-    recent = [p for p in (data.get("recent") or []) if isinstance(p, str) and os.path.isfile(p)]
+    recent = [p for p in (data.get("recent") or [])
+              if isinstance(p, str) and (is_network(p) or os.path.isfile(p))]  # сетевые не опрашиваем при старте
     return {"dir": last, "recent": recent[:MAX_RECENT]}
 
 
@@ -73,7 +183,7 @@ def set_last(directory: str = "", file: str = "") -> Dict[str, Any]:
         directory = os.path.dirname(file)
     with _lock:
         data = _read_settings()
-        if directory and os.path.isdir(directory):
+        if directory and (is_network(directory) or os.path.isdir(directory)):
             data["last_dir"] = directory
         if file:
             rec = [p for p in (data.get("recent") or []) if p != file]
@@ -84,14 +194,41 @@ def set_last(directory: str = "", file: str = "") -> Dict[str, Any]:
 
 # ---------- быстрые места ----------
 
+def _win_drives() -> List[Dict[str, str]]:
+    """Диски Windows: буква, тип, UNC для сопоставленных сетевых. Маску дисков берём без обращения к ним."""
+    import ctypes
+    k = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    mask = int(k.GetLogicalDrives())
+    out = []
+    for i in range(26):
+        if not mask >> i & 1:
+            continue
+        letter = chr(65 + i)
+        t = _win_drive_type(letter)
+        unc = ""
+        if t == 4:
+            try:
+                buf = ctypes.create_unicode_buffer(1024)
+                n = ctypes.c_uint32(1024)
+                if ctypes.windll.mpr.WNetGetConnectionW(letter + ":", buf, ctypes.byref(n)) == 0:  # type: ignore[attr-defined]
+                    unc = buf.value
+            except Exception:  # noqa: BLE001
+                pass
+        out.append({"letter": letter, "type": str(t), "unc": unc})
+    return out
+
+
 def places() -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
     seen = set()
 
-    def add(name: str, path: str, kind: str = "folder") -> None:
-        if path and path not in seen and os.path.isdir(path):
-            seen.add(path)
-            out.append({"name": name, "path": path, "kind": kind})
+    def add(name: str, path: str, kind: str = "folder", check: bool = True) -> None:
+        if not path or path in seen:
+            return
+        if check and not _probe(path):
+            return
+        seen.add(path)
+        out.append({"name": name, "path": path, "kind": kind})
 
     home = os.path.expanduser("~")
     add("Домашняя", home, "home")
@@ -101,13 +238,23 @@ def places() -> List[Dict[str, str]]:
         for v in variants:
             add(name, os.path.join(home, v))
     if os.name == "nt":
-        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            drive = letter + ":\\"
-            try:
-                if os.path.exists(drive):
-                    add(letter + ":", drive, "drive")
-            except OSError:
-                pass
+        try:
+            drives = _win_drives()
+        except Exception:  # noqa: BLE001 - нет ctypes.windll: перебор букв
+            drives = [{"letter": c, "type": "0", "unc": ""} for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+        for d in drives:
+            drive = d["letter"] + ":\\"
+            if d["type"] == "4":  # сетевой: не опрашиваем (может не отвечать), ошибку покажет сам переход
+                add("%s: %s" % (d["letter"], d["unc"]) if d["unc"] else d["letter"] + ":", drive, "network", check=False)
+            elif d["type"] in ("2", "5") and d["letter"] in "AB":
+                continue
+            else:
+                try:
+                    ok = bool(_with_timeout(os.path.exists, PROBE_TIMEOUT, drive))
+                except (PathTimeout, OSError):
+                    ok = False
+                if ok:
+                    add(d["letter"] + ":", drive, "drive", check=False)
     else:
         add("Корень /", "/", "drive")
         add("/mnt", "/mnt", "drive")
@@ -115,6 +262,17 @@ def places() -> List[Dict[str, str]]:
         user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
         run_media = os.path.join("/run/media", user) if user else "/run/media"
         add(run_media, run_media, "drive")
+        for m in net_mounts():  # смонтированные cifs/nfs/sshfs: без опроса, чтобы не зависнуть
+            base = os.path.basename(m["path"].rstrip("/")) or m["path"]
+            add("%s (%s)" % (base, m["dev"]), m["path"], "network", check=False)
+        for g in _gvfs_dirs():
+            if _probe(g):
+                try:
+                    names = sorted(_with_timeout(os.listdir, PROBE_TIMEOUT, g))
+                except (PathTimeout, OSError):
+                    names = []
+                for n in names:
+                    add(n, os.path.join(g, n), "network", check=False)
     return out
 
 
@@ -124,40 +282,25 @@ def _parse_filter(filt: str) -> List[str]:
     return [("." + e.strip().lstrip(".*").lower()) for e in filt.replace(",", " ").split() if e.strip().lstrip(".*")]
 
 
-def _stat(entry: "os.DirEntry[str]") -> Optional[os.stat_result]:
-    try:
-        return entry.stat()
-    except OSError:
-        return None
+_cache: Dict[str, Any] = {}  # путь -> (время, записи); только для сетевых папок
+_dead: Dict[str, float] = {}  # путь -> когда снова можно опрашивать
 
 
-def list_dir(path: str, filt: str = "", hidden: bool = False, query: str = "", sort: str = "name",
-             desc: bool = False, offset: int = 0, limit: int = DEFAULT_LIMIT,
-             budget: float = TIME_BUDGET, only_dirs: bool = False) -> Dict[str, Any]:
-    """Содержимое папки: сначала папки, затем файлы. Ошибка доступа — поле «error», а не исключение."""
-    path = os.path.normpath(path) if path else ""
-    res = {"path": path, "parent": "", "items": [], "total": 0, "offset": offset, "truncated": False, "error": ""}
-    if not path or not os.path.isdir(path):
-        res["error"] = "Папка не найдена: %s" % (path or "—")
-        return res
-    parent = os.path.dirname(path)
-    res["parent"] = parent if parent and parent != path else ""
-    exts = _parse_filter(filt)
-    q = query.strip().lower()
-    started = time.monotonic()
-    items: List[Dict[str, Any]] = []
+def _fmt_mtime(ts: Optional[float]) -> str:
     try:
-        it = os.scandir(path)
-    except PermissionError:
-        res["error"] = "Нет доступа к папке"
-        return res
-    except OSError as e:
-        res["error"] = "Папка недоступна: %s" % (e.strerror or e)
-        return res
-    with it:
+        return dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else ""
+    except (OSError, ValueError, OverflowError):
+        return ""
+
+
+def _scan(path: str, light: bool, started: float, budget: float):
+    """Прочитать папку одним проходом scandir. light=True (сеть): без stat и проверки прав на каждый элемент."""
+    raw: List[Dict[str, Any]] = []
+    truncated = False
+    with os.scandir(path) as it:
         while True:
             if time.monotonic() - started > budget:
-                res["truncated"] = True
+                truncated = True
                 break
             try:
                 entry = next(it)
@@ -165,38 +308,154 @@ def list_dir(path: str, filt: str = "", hidden: bool = False, query: str = "", s
                 break
             except OSError:
                 break
-            name = entry.name
-            if not hidden and (name.startswith(".") or name.startswith("~$")):
-                continue
-            if q and q not in name.lower():
-                continue
             try:
-                is_dir = entry.is_dir()
+                is_dir = entry.is_dir()  # тип из записи каталога, без отдельного stat
             except OSError:
                 is_dir = False
-            if not is_dir:
-                if only_dirs:
-                    continue
-                if exts and os.path.splitext(name)[1].lower() not in exts:
-                    continue
-            st = _stat(entry)
-            accessible = True
-            if is_dir:
-                accessible = os.access(entry.path, os.R_OK | os.X_OK)
-            items.append({
-                "name": name, "dir": is_dir,
-                "size": 0 if is_dir or st is None else st.st_size,
-                "mtime": dt.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M") if st else "",
-                "ext": "" if is_dir else os.path.splitext(name)[1].lower().lstrip("."),
-                "locked": not accessible or st is None,
-            })
-    key = {"size": lambda x: x["size"], "mtime": lambda x: x["mtime"]}.get(sort, lambda x: x["name"].lower())
-    folders = sorted([x for x in items if x["dir"]], key=key, reverse=desc)
-    files = sorted([x for x in items if not x["dir"]], key=key, reverse=desc)
-    items = folders + files
-    res["total"] = len(items)
-    res["items"] = items[offset:offset + limit]
+            size = mt = None
+            locked = False
+            if not light:
+                try:
+                    st = entry.stat()
+                    size, mt = st.st_size, st.st_mtime
+                except OSError:
+                    locked = True
+                if is_dir and not locked:
+                    locked = not os.access(entry.path, os.R_OK | os.X_OK)
+            raw.append({"name": entry.name, "dir": is_dir, "size": size, "mt": mt, "locked": locked})
+    return raw, truncated
+
+
+def _fill_stats(path: str, raw: List[Dict[str, Any]], started: float, budget: float) -> bool:
+    """Дочитать размер и дату у записей без них (сеть). True — не уложились во время."""
+    for r in raw:
+        if r["mt"] is not None or r["locked"]:
+            continue
+        if time.monotonic() - started > budget:
+            return True
+        try:
+            st = os.stat(os.path.join(path, r["name"]))
+            r["size"], r["mt"] = st.st_size, st.st_mtime
+        except OSError:
+            r["locked"] = True
+    return False
+
+
+def stat_items(path: str, names: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Размер и дата для выбранных имён (окно просит для видимых строк, когда папка прочитана без stat)."""
+    path = os.path.normpath(path)
+    out: Dict[str, Dict[str, Any]] = {}
+    started = time.monotonic()
+    for n in names[:300]:
+        if time.monotonic() - started > TIME_BUDGET or os.sep in n or (os.altsep and os.altsep in n):
+            break
+        try:
+            st = os.stat(os.path.join(path, n))
+            out[n] = {"size": 0 if os.path.isdir(os.path.join(path, n)) else st.st_size, "mtime": _fmt_mtime(st.st_mtime)}
+        except OSError:
+            out[n] = {"size": 0, "mtime": "", "locked": True}
+    return out
+
+
+def list_dir(path: str, filt: str = "", hidden: bool = False, query: str = "", sort: str = "name",
+             desc: bool = False, offset: int = 0, limit: int = DEFAULT_LIMIT,
+             budget: float = TIME_BUDGET, only_dirs: bool = False, fresh: bool = False) -> Dict[str, Any]:
+    """Содержимое папки: сначала папки, затем файлы. Ошибка доступа — поле «error», а не исключение.
+
+    Сетевая папка читается «легко» (без stat на каждый элемент; размер и дата подгружаются позже) и
+    кладётся в кэш: повторное открытие мгновенное (cached=True), окно затем просит свежий листинг (fresh=True).
+    """
+    path = os.path.normpath(path) if path else ""
+    res = {"path": path, "parent": "", "items": [], "total": 0, "offset": offset, "truncated": False,
+           "error": "", "network": False, "cached": False, "lazy": False}
+    if not path:
+        res["error"] = "Папка не найдена: —"
+        return res
+    parent = os.path.dirname(path)
+    res["parent"] = parent if parent and parent != path else ""
+    net = is_network(path)
+    res["network"] = net
+    started = time.monotonic()
+    raw = None
+    truncated = False
+    if net and not fresh:
+        hit = _cache.get(path)
+        if hit and time.monotonic() - hit[0] < CACHE_MAX_AGE:
+            raw, truncated = hit[1], hit[2]
+            res["cached"] = True
+    if raw is None:
+        try:
+            raw, truncated = _scan(path, net, started, budget)
+        except PermissionError:
+            res["error"] = "Нет доступа к папке"
+            return res
+        except (FileNotFoundError, NotADirectoryError):
+            res["error"] = "Папка не найдена: %s" % path
+            return res
+        except OSError as e:
+            res["error"] = "Папка недоступна: %s" % (e.strerror or e)
+            return res
+        if net:
+            with _lock:
+                _cache[path] = (time.monotonic(), raw, truncated)
+                while len(_cache) > CACHE_MAX:
+                    _cache.pop(min(_cache, key=lambda k: _cache[k][0]))
+    exts = _parse_filter(filt)
+    q = query.strip().lower()
+    rows = []
+    for r in raw:
+        name = r["name"]
+        if not hidden and (name.startswith(".") or name.startswith("~$")):
+            continue
+        if q and q not in name.lower():
+            continue
+        if not r["dir"]:
+            if only_dirs:
+                continue
+            if exts and os.path.splitext(name)[1].lower() not in exts:
+                continue
+        rows.append(r)
+    if net and sort in ("size", "mtime"):  # сортировка по полям, которых ещё нет: дочитываем (в пределах времени)
+        if _fill_stats(path, rows, started, budget):
+            truncated = True
+    key = {"size": lambda x: x["size"] or 0, "mtime": lambda x: x["mt"] or 0}.get(sort, lambda x: x["name"].lower())
+    folders = sorted([x for x in rows if x["dir"]], key=key, reverse=desc)
+    files = sorted([x for x in rows if not x["dir"]], key=key, reverse=desc)
+    rows = folders + files
+    res["total"] = len(rows)
+    res["truncated"] = truncated
+    items = []
+    for r in rows[offset:offset + limit]:
+        name = r["name"]
+        has = r["mt"] is not None or r["size"] is not None
+        if not has and not r["locked"]:
+            res["lazy"] = True
+        items.append({
+            "name": name, "dir": r["dir"],
+            "size": 0 if r["dir"] or r["size"] is None else r["size"],
+            "mtime": _fmt_mtime(r["mt"]),
+            "ext": "" if r["dir"] else os.path.splitext(name)[1].lower().lstrip("."),
+            "locked": r["locked"],
+        })
+    res["items"] = items
     return res
+
+
+def browse(path: str, *args: Any, timeout: float = LIST_TIMEOUT, **kw: Any) -> Dict[str, Any]:
+    """list_dir с ограничением по времени: недоступный диск возвращает ошибку, а не вешает окно."""
+    path = os.path.normpath(path) if path else ""
+    now = time.monotonic()
+    if _dead.get(path, 0) > now:
+        return {"path": path, "parent": os.path.dirname(path) if os.path.dirname(path) != path else "", "items": [],
+                "total": 0, "offset": 0, "truncated": False, "network": True, "cached": False, "lazy": False,
+                "error": "Диск не отвечает. Проверьте подключение и повторите через несколько секунд."}
+    try:
+        return _with_timeout(list_dir, timeout, path, *args, **kw)
+    except PathTimeout:
+        _dead[path] = time.monotonic() + DEAD_BACKOFF
+        return {"path": path, "parent": os.path.dirname(path) if os.path.dirname(path) != path else "", "items": [],
+                "total": 0, "offset": 0, "truncated": False, "network": True, "cached": False, "lazy": False,
+                "error": "Диск не отвечает за %d с. Проверьте подключение и повторите." % int(timeout)}
 
 
 # ---------- маршруты ----------
@@ -208,19 +467,42 @@ def _int(v: Optional[str], default: int) -> int:
         return default
 
 
+def _resolve_start(path: str) -> str:
+    """Пустой путь — последняя папка или домашняя; путь к файлу — его папка (сетевые пути не опрашиваем)."""
+    if not path:
+        return get_last()["dir"] or os.path.expanduser("~")
+    if not is_network(path) and os.path.isfile(path):
+        return os.path.dirname(path)
+    return path
+
+
 async def _list(request: Request) -> JSONResponse:
     from starlette.concurrency import run_in_threadpool
     q = request.query_params
-    path = q.get("path") or ""
-    if not path:
-        path = get_last()["dir"] or os.path.expanduser("~")
-    elif os.path.isfile(path):
-        path = os.path.dirname(path)
+    path = await run_in_threadpool(_resolve_start, q.get("path") or "")
     res = await run_in_threadpool(
-        list_dir, path, q.get("filter") or "", q.get("hidden") in ("1", "true"), q.get("q") or "",
+        browse, path, q.get("filter") or "", q.get("hidden") in ("1", "true"), q.get("q") or "",
         q.get("sort") or "name", q.get("desc") in ("1", "true"), _int(q.get("offset"), 0),
-        min(_int(q.get("limit"), DEFAULT_LIMIT), 5000), TIME_BUDGET, q.get("kind") == "folder")
+        min(_int(q.get("limit"), DEFAULT_LIMIT), 5000), TIME_BUDGET, q.get("kind") == "folder",
+        q.get("fresh") in ("1", "true"))
     return JSONResponse(res)
+
+
+async def _stat(request: Request) -> JSONResponse:
+    from starlette.concurrency import run_in_threadpool
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    names = [str(n) for n in (body.get("names") or []) if isinstance(n, str)]
+    path = str(body.get("path") or "")
+    try:
+        out = await run_in_threadpool(_with_timeout, stat_items, LIST_TIMEOUT, path, names)
+    except PathTimeout:
+        out = {}
+    return JSONResponse({"stats": out})
 
 
 async def _places(request: Request) -> JSONResponse:
@@ -255,5 +537,6 @@ def routes() -> List[Route]:
         Route("/api/fs/file", _file),
         Route("/api/fs/list", _list),
         Route("/api/fs/places", _places),
+        Route("/api/fs/stat", _stat, methods=["POST"]),
         Route("/api/fs/last", _last, methods=["GET", "POST"]),
     ]
