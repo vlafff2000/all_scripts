@@ -54,6 +54,15 @@ def maps(d):
     d.ellipse((cx - 56, cy - 56, cx + 56, cy + 56), fill=(18, 110, 112, 255))
 
 
+def finder(d):
+    """Поисковик: папка с лупой."""
+    d.rounded_rectangle((170, 330, 560, 400), radius=34, fill=SOFT)
+    d.rounded_rectangle((170, 370, 854, 770), radius=70, fill=SOFT)
+    cx, cy, r = 560, 560, 170
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=WHITE, width=64)
+    d.line([(cx + 122, cy + 122), (cx + 300, cy + 300)], fill=WHITE, width=78, joint='curve')
+
+
 def gdm(d):
     """ГДМ: календарь с диаграммой Ганта."""
     d.rounded_rectangle((170, 220, 854, 830), radius=70, fill=WHITE)
@@ -104,6 +113,7 @@ def console(d):
 ICONS = {
     'pxg_base': ((46, 110, 214), (22, 52, 130), database),
     'karty': ((30, 170, 160), (14, 94, 104), maps),
+    'poiskovik': ((126, 96, 224), (62, 44, 150), finder),
     'gdm': ((246, 160, 60), (206, 84, 28), gdm),
     'perechislit_unrst': ((140, 98, 214), (70, 42, 140), restart),
     'opisat_model': ((86, 110, 138), (36, 52, 74), model),
