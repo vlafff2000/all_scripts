@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
-def serve(port: int = 8768) -> int:
+def serve(port: int = 8769) -> int:
     import uvicorn
     print("«Поисковик» открыт на http://127.0.0.1:%d (остановить: Ctrl+C)" % port)
     uvicorn.run("pxg_finder.api:app", host="127.0.0.1", port=port, log_level="warning")
@@ -17,7 +17,7 @@ def serve(port: int = 8768) -> int:
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "--server":
-        return serve(int(argv[1]) if len(argv) > 1 else 8768)
+        return serve(int(argv[1]) if len(argv) > 1 else 8769)
     from pxg_base.window import run
     from .api import build_app
     return run(browser=bool(argv and argv[0] == "--browser"), title="Поисковик", app_factory=build_app)

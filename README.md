@@ -28,7 +28,7 @@ python -m pxg_base --server                # «Работа с исходным�
 python -m gsp_maps                         # «Карты», окно приложения
 python -m gsp_maps --browser               # то же в браузере
 python -m gsp_maps --server                # только сервер, порт 8767
-python -m pxg_finder                       # «Поисковик», окно приложения (--browser, --server: порт 8768)
+python -m pxg_finder                       # «Поисковик», окно приложения (--browser, --server: порт 8769)
 ```
 
 Интерфейс (разработка): `cd pxg_base/web`, `cd gsp_maps/web` или `cd pxg_finder/web`, затем `npm install && npm run dev` (/api проксируется на сервер) и `npm run build` перед коммитом, чтобы обновить `web/dist`.
