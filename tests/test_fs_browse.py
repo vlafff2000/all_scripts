@@ -252,3 +252,21 @@ def test_parallel_stat_many_entries(home):
     assert {r["name"]: r["size"] for r in raw}["f07.xlsx"] == 7
     st = fs_browse.stat_items(str(home), ["f03.xlsx", "../x"])
     assert st["f03.xlsx"]["size"] == 3 and "../x" not in st
+
+
+def test_listing_timings_logged(home, monkeypatch, caplog):
+    import logging
+    from starlette.applications import Starlette
+    _tree(home)
+    monkeypatch.setattr(fs_browse, "_all_mounts", lambda: [(str(home), "cifs"), ("/", "ext4")])
+    fs_browse._cache.clear()
+    c = TestClient(Starlette(routes=fs_browse.routes()))
+    with caplog.at_level(logging.INFO, logger="pxg.fs"):
+        r = c.get("/api/fs/list", params={"path": str(home), "fresh": "1"}).json()
+        c.post("/api/fs/perf", json={"path": str(home), "fetch": 12, "parse": 3, "render": 40, "rows": 4})
+    t = r["t"]
+    assert t["light"] and t["entries"] == 6 and {"open_ms", "first_ms", "scandir_ms", "types_ms", "stat_ms", "sort_ms"} <= set(t)
+    text = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert "ФС=cifs" in text and "лёгкий" in text and "отрисовка 40 мс" in text
+    assert fs_browse.fs_info(str(home / "x")) == {"mount": str(home), "fstype": "cifs"}
+    fs_browse._cache.clear()

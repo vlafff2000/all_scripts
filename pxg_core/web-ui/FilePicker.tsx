@@ -88,11 +88,21 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
     if (fresh) p.set('fresh', '1')
     const id = ++reqId.current
     if (!fresh) setBusy(true)
-    const r = await getJson<Listing>('/api/fs/list?' + p).catch(() => null)
+    const t0 = performance.now()
+    let t1 = t0, t2 = t0
+    const r = await fetch('/api/fs/list?' + p).then(async resp => { t1 = performance.now(); const j = (await resp.json()) as Listing; t2 = performance.now(); return j }).catch(() => null)
     if (id !== reqId.current) return // пришёл более новый запрос
     setBusy(false)
     if (!r) return
     setList(r)
+    // тайминги окна в журнал: запрос, разбор ответа, отрисовка (только для медленных и сетевых папок)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const total = performance.now() - t0
+      if (total > 300 || r.network || r.error) {
+        void fetch('/api/fs/perf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          path: r.path, fetch: Math.round(t1 - t0), parse: Math.round(t2 - t1), render: Math.round(performance.now() - t2), rows: r.items.length, cached: !!r.cached }) }).catch(() => undefined)
+      }
+    }))
     if (!fresh) setSel(-1)
     if (r.path && !r.error) { dirRef.current = r.path; setPathText(r.path) }
     // сеть: листинг пришёл из кэша — сразу обновляем его в фоне; без stat — дочитываем размер и дату видимых строк
