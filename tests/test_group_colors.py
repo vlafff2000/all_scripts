@@ -44,3 +44,11 @@ def test_chart_colors_do_not_depend_on_which_groups_are_on_the_chart():
         assert part == {'ГСП 3': whole['ГСП-3'], 'ГСП 7': whole['ГСП-7']}
     finally:
         gc.set_known_groups([])
+
+
+def test_typescript_palettes_match_python():
+    from pathlib import Path
+    ts = (Path(__file__).resolve().parent.parent / 'pxg_core' / 'web-ui' / 'groupColors.ts').read_text(encoding='utf-8')
+    found = {int(n): tuple(re.findall(r"'(#[0-9A-Fa-f]{6})'", row))
+             for n, row in re.findall(r'^\s+(\d+): \[(.*)\],$', ts, re.M)}
+    assert found == {n: tuple(p) for n, p in gc.PALETTES.items()}

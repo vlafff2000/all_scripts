@@ -1,4 +1,5 @@
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
+import { colorOfGroup, groupColors } from '../../../pxg_core/web-ui/groupColors'
 import type { GisModelWells, GisVariants } from './allWells'
 export interface FileCheck { id: string; label: string; path: string; ok: boolean; info: string }
 export interface AtlasProject { id: string; name: string; updated: string; demo: boolean; tables: Record<string, number> }
@@ -34,7 +35,7 @@ export const saveConfig = (paths: Record<string, string>, resultsDir?: string, l
 /** Режим «весь объект»: все ГСП на одной карте. Данные собираются из обычных запросов по каждому ГСП. */
 export const ALL_GSP = 'Весь объект'
 let allGroups: string[] = []
-export const setAllGroups = (gs: string[]) => { allGroups = gs }
+export const setAllGroups = (gs: string[]) => { allGroups = gs; groupColorMap = groupColors(gs) }
 /** Набор из нескольких ГСП называется по именам через « + »; все группы сразу — «Весь объект». */
 export const GROUP_SEP = ' + '
 export const groupsOf = (name: string): string[] => (name === ALL_GSP ? allGroups : name.includes(GROUP_SEP) ? name.split(GROUP_SEP) : [name])
@@ -43,9 +44,9 @@ export const nameOf = (sel: string[]) => {
   const ordered = allGroups.filter(n => sel.includes(n))
   return ordered.length === allGroups.length && ordered.length > 1 ? ALL_GSP : ordered.join(GROUP_SEP)
 }
-/** Цвета групп: ряд Окабе–Ито, цвет группы не зависит от того, какие группы выбраны. */
-const GROUP_COLORS = ['#0072b2', '#d55e00', '#009e73', '#cc79a7', '#e69f00', '#56b4e9', '#7a5195', '#8c564b', '#6b8e23', '#b8860b', '#17becf', '#e377c2']
-export const groupColor = (name: string) => GROUP_COLORS[Math.max(0, allGroups.indexOf(name)) % GROUP_COLORS.length]
+/** Цвета групп: сквозная палитра «Атлас-N» (pxg_core/web-ui/groupColors.ts), цвет группы не зависит от того, какие группы выбраны. */
+let groupColorMap: Record<string, string> = {}
+export const groupColor = (name: string) => colorOfGroup(name, groupColorMap)
 
 function mergeGsp(list: GspData[], name: string): GspData {
   const kinds = ['Отбор', 'Закачка'] as const
