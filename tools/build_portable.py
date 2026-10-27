@@ -47,7 +47,7 @@ RUNTIMES = {
 
 # Tracked application files that go into the folder (tests, interface sources and dev scripts stay out).
 # Значки ярлыков (tools/icons) кладутся в папку icons/ рядом с запускалками.
-INCLUDE = ['pxg_base', 'gsp_maps', 'pxg_core', 'schedule_pxg', 'tnav_results', 'README.md', 'requirements.txt']
+INCLUDE = ['pxg_base', 'gsp_maps', 'pxg_finder', 'pxg_core', 'schedule_pxg', 'tnav_results', 'README.md', 'requirements.txt']
 SDIST_ONLY = {'proxy-tools', 'odfpy'}  # чистый Python, опубликован только исходниками
 SKIP_TOOLS = set()
 
@@ -70,6 +70,8 @@ WINDOWS_LAUNCHERS = {
                         'if "%FOUND%"=="0" (echo Файлы расчёта не найдены: положите их в папку %~dp0 и запустите снова.) else '
                         '"%~dp0python\\python.exe" -s -X utf8 -m tnav_results.describe_model --report-next-to "%~dp0*.EGRID" "%~dp0*.INIT" "%~dp0*.SMSPEC" "%~dp0*.UNSMRY"\r\n'
                         ':done\r\necho.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
+    'Poiskovik.bat': 'rem Поисковик: файловый менеджер (окно приложения или браузер, если окно недоступно).\r\n'
+                     '"%~dp0python\\python.exe" -s -X utf8 -m pxg_finder %*',
     'GDM.bat': 'rem ГДМ: окно приложения (или браузер, если окно недоступно).\r\n'
                       '"%~dp0python\\python.exe" -s -X utf8 -m schedule_pxg %*',
     'Sozdat_yarlyki.bat': 'rem Создаёт ярлыки со значками на рабочем столе (Remove: --remove).\r\n'
@@ -104,6 +106,7 @@ LINUX_LAUNCHERS = {
                        '  "$PY" -s -X utf8 -m tnav_results.describe_model --report-next-to "${FILES[@]}" || true\n'
                        'fi\n'
                        'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+    'poiskovik.sh': '# Поисковик в браузере.\nexec "$PY" -s -X utf8 -m pxg_finder --browser "$@"',
     'gdm.sh': '# ГДМ в браузере.\nexec "$PY" -s -X utf8 -m schedule_pxg --browser "$@"',
     'sozdat_yarlyki.sh': '# Ярлыки со значками на рабочем столе: bash sozdat_yarlyki.sh (убрать: bash sozdat_yarlyki.sh --remove).\n'
                          '"$PY" -s -X utf8 -m pxg_core.desktop_shortcuts "$@"\n'

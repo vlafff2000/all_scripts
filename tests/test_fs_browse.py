@@ -117,7 +117,7 @@ def test_routes(home):
     assert c.get("/api/fs/file").status_code == 404
 
 
-@pytest.mark.parametrize("mod", ["schedule_pxg.api", "pxg_base.api", "gsp_maps.api"])
+@pytest.mark.parametrize("mod", ["schedule_pxg.api", "pxg_base.api", "gsp_maps.api", "pxg_finder.api"])
 def test_mounted_in_apps(mod, home):
     import importlib
     app = importlib.import_module(mod).app
