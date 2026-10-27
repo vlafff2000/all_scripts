@@ -134,6 +134,27 @@ LINUX_LAUNCHERS = {
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
                 'unset PYTHONHOME PYTHONPATH\nexport PYTHONNOUSERSITE=1 PYTHONUTF8=1\nPY=python/bin/python3.13\n')
 
+# Скрипты с вопросом/результатом («Нажмите Enter…») при двойном щелчке в файловом менеджере запускаются без окна терминала
+# и выглядят как «ничего не происходит». Если терминала нет (stdin не терминал), скрипт сам открывает себя в окне терминала;
+# если терминал не найден, пишет вывод в файл и открывает его.
+LINUX_TERMINAL = ('''if [ ! -t 0 ] && [ -z "${PXG_TERM:-}" ]; then
+  export PXG_TERM=1
+  S="$(readlink -f -- "$0")"
+  if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    if command -v mate-terminal >/dev/null 2>&1; then exec mate-terminal -e "bash '$S'"; fi
+    if command -v gnome-terminal >/dev/null 2>&1; then exec gnome-terminal -- bash "$S"; fi
+    if command -v xfce4-terminal >/dev/null 2>&1; then exec xfce4-terminal -e "bash '$S'"; fi
+    if command -v konsole >/dev/null 2>&1; then exec konsole -e bash "$S"; fi
+    if command -v x-terminal-emulator >/dev/null 2>&1; then exec x-terminal-emulator -e bash "$S"; fi
+    if command -v xterm >/dev/null 2>&1; then exec xterm -e bash "$S"; fi
+  fi
+  LOG="${TMPDIR:-/tmp}/pxg_$(basename "$S").log"
+  bash "$S" </dev/null >"$LOG" 2>&1 || true
+  xdg-open "$LOG" >/dev/null 2>&1 || true
+  exit 0
+fi
+''')
+
 README = '''Работа с исходными данными — переносная версия ({target})
 =========================================
 
@@ -263,7 +284,9 @@ def write_launchers(target, folder):
     else:
         for name, body in LINUX_LAUNCHERS.items():
             path = folder / name
-            path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
+            head, rest = LINUX_PREFIX.split('\n', 2)[0:2], LINUX_PREFIX.split('\n', 2)[2]
+            prefix = '\n'.join(head) + '\n' + (LINUX_TERMINAL if 'read -r -p' in body else '') + rest
+            path.write_text(prefix + body + '\n', encoding='utf-8')
             path.chmod(0o755)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
                              six='ishodnye_dannye.sh', five='ishodnye_dannye_console.sh', maps='karty.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', sched='gdm.sh', shortcuts='sozdat_yarlyki.sh', note=LINUX_NOTE)

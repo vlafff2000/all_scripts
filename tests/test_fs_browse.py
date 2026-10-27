@@ -286,3 +286,32 @@ def test_diagnostika_seti_report(home, monkeypatch, capsys):
     assert "записей: 6" in text and "scandir + stat по одному" in text and "pxg_core.fs_browse" in text and "Выводы" in text
     d.LINES.clear()
     assert d.main([str(home / "net")]) == 1  # недоступный путь: сообщение, а не падение
+
+
+def _launchers(tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("build_portable", os.path.join(os.path.dirname(__file__), "..", "tools", "build_portable.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.write_launchers("linux", tmp_path)
+    return mod
+
+
+def test_linux_launchers_open_terminal_when_double_clicked(tmp_path):
+    import subprocess
+    mod = _launchers(tmp_path)
+    for f in tmp_path.glob("*.sh"):
+        text = f.read_text(encoding="utf-8")
+        assert ("PXG_TERM" in text) == ("read -r -p" in text), f.name  # терминал только там, где ждём Enter
+        assert subprocess.run(["bash", "-n", str(f)]).returncode == 0, f.name
+    # без терминала и без эмуляторов: вывод уходит в файл, окно не зависает
+    demo = tmp_path / "demo.sh"
+    demo.write_text("#!/usr/bin/env bash\nset -eu\n" + mod.LINUX_TERMINAL + "echo привет-из-скрипта\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("bash", "readlink", "basename"):
+        (bin_dir / tool).symlink_to(subprocess.run(["which", tool], capture_output=True, text=True).stdout.strip())
+    env = {"PATH": str(bin_dir), "TMPDIR": str(tmp_path)}  # ни терминала, ни DISPLAY, ни xdg-open
+    r = subprocess.run([str(bin_dir / "bash"), str(demo)], stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env, timeout=30)
+    assert r.returncode == 0 and r.stdout == ""
+    assert "привет-из-скрипта" in (tmp_path / "pxg_demo.sh.log").read_text(encoding="utf-8")
