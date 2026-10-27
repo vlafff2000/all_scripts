@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from pxg_core import гдис_карта as kart
 from pxg_core import гдис_pdf as pdf
 from pxg_core import параметры
 
@@ -42,9 +43,10 @@ def num(x, nd: int = 10):
     return None if x is None else round(float(x), nd)
 
 
-def rows_of_study(study: pdf.Study, n: int, group, sposob: str) -> Tuple[List[list], List[tuple]]:
+def rows_of_study(study: kart.Study, n: int, group, sposob: str) -> Tuple[List[list], List[tuple]]:
     """Строки блока исследования и список замечаний (поле, текст) к нему."""
     notes: List[tuple] = []
+    sposob = study.sposob or sposob
     method = METHODS.get(study.method_raw.strip())
     if method is None:
         method = study.method_raw.strip().lower()
@@ -128,7 +130,7 @@ def db_keys(df: Optional[pd.DataFrame]) -> set:
             for w, d in zip(head["№скв"], head["дата"]) if not pd.isna(d)}
 
 
-def build(studies: List[pdf.Study], groups: Dict[str, object], sposob: str, start: int = 1,
+def build(studies: List[kart.Study], groups: Dict[str, object], sposob: str, start: int = 1,
           taken: Optional[set] = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Таблица базы, замечания, режимы подробно. `taken` — исследования, уже лежащие в прежней базе."""
     taken = set(taken or ())
@@ -139,7 +141,7 @@ def build(studies: List[pdf.Study], groups: Dict[str, object], sposob: str, star
     ordered = sorted(studies, key=lambda s: (int(s.well) if s.well.isdigit() else 10**9, s.started or datetime.min, s.file))
     seen: Dict[tuple, str] = {}
 
-    def add(s: pdf.Study, field: str, text: str, how: str = ""):
+    def add(s: kart.Study, field: str, text: str, how: str = ""):
         bad.append({"Файл": s.file, "Скважина": s.well or s.well_raw, "Дата": s.started.date() if s.started else None,
                     "Поле": field, "Что не так": text, "Как поправить": how or HOW.get(field, "проверить по PDF и поправить в «Лист1»")})
 
@@ -164,36 +166,66 @@ def build(studies: List[pdf.Study], groups: Dict[str, object], sposob: str, star
             add(s, f, t)
         for r in s.modes:
             detail.append({"Файл": s.file, "Скважина": s.well, "Дата начала": s.started, "Режим": r.n,
-                           "Dшб, мм": r.cells.get("dshb"), "Pдикт": r.cells.get("p_dikt"), "Tдикт": r.cells.get("t_dikt"),
-                           "Дебит в таблице режимов": r.cells.get("q_table"), "Дебит P(Q), тыс.м3/сут": r.q,
+                           "Dшб, мм": r.cells.get("dshb"), "Дебит в таблице режимов": r.cells.get("q_table"), "Дебит P(Q), тыс.м3/сут": r.q,
                            "Pтруб": r.cells.get("p_tube"), "Pзатруб": r.cells.get("p_ann"), "Ту": r.cells.get("tu"),
-                           "Pман": r.p_man, "Pман на ИП (Рзаб)": r.p_ip, "dP": r.dp, "В расчёт": "да" if r.in_calc else "нет",
+                           "Рзаб": r.p_ip, "dP": r.dp, "В расчёт": "да" if r.in_calc else "нет",
                            "Перфорация, м": "; ".join("%g–%g" % p for p in s.perforations),
-                           "Метод обработки": s.method_title, "Рпл": s.p_res, "Qабс.своб": s.q_aof, "Qсвоб": s.q_free,
-                           "Оценка качества ПО": "; ".join("%s: %s" % kv for kv in s.quality.items())})
+                           "Метод обработки (a, b)": s.method_title, "Рпл": s.p_res, "Qабс.своб": s.q_aof, "Qсвоб": s.q_free,
+                           "Шаблон": s.template})
     return (pd.DataFrame(wide, columns=COLUMNS), pd.DataFrame(bad, columns=UNRESOLVED_COLUMNS), pd.DataFrame(detail))
 
 
-def summary(files: int, studies: List[pdf.Study], new_rows: pd.DataFrame, bad: pd.DataFrame, sposob: str, kept: int) -> pd.DataFrame:
+def summary(files: int, studies: List[kart.Study], new_rows: pd.DataFrame, bad: pd.DataFrame, sposob: str, kept: int) -> pd.DataFrame:
     wells = int(new_rows["№скв"].nunique()) if not new_rows.empty else 0
     rows = [["PDF-файлов обработано", files], ["Исследований добавлено", int(new_rows["№скв"].notna().sum())],
             ["Скважин", wells], ["Строк-режимов", len(new_rows)], ["Исследований в прежней базе (сохранены)", kept],
             ["Замечаний (лист «Не распознано»)", len(bad)],
             ["Столбец «% КРУ»", "пуст: в отчёте его нет (есть диаметр шайбы Dшб, см. «Режимы (подробно)»); заполняется вручную"],
-            ["Допущение: способ исследования", "%s — в отчёте только «ДИКТ», типоразмер не указан" % sposob],
+            ["Допущение: способ исследования", "из отчёта («ДИКТ» + число), если его нет — %s" % sposob],
             ["Допущение: Тст. затр", "равна Тст. тр: в отчёте одна температура статики Ту"],
             ["Допущение: Qmax и DPmax", "дебит и dP режима с наибольшим дебитом среди вошедших в расчёт"],
-            ["Допущение: Рзаб", "Pман на ИП из таблицы P(Q) на ИП (по затрубному манометру), как в образце базы"]]
+            ["Допущение: Рзаб", "давление на ИП из таблицы P(Q) на ИП, как в образце базы; другие величины — на листе «Шаблоны»"],
+            ["Единицы", "давления в кгс/см², дебиты в тыс.м³/сут, a и b в (кгс/см²)²/(тыс.м³/сут)[²]: пересчёт по единицам отчёта"]]
     return pd.DataFrame(rows, columns=["Показатель", "Значение"])
 
 
-def write(path: str, wide: pd.DataFrame, bad: pd.DataFrame, detail: pd.DataFrame, info: pd.DataFrame) -> None:
+def read_studies(scans: List[pdf.Scan], mapping_file: str = "", method_pref: str = "4"
+                 ) -> Tuple[List[kart.Study], pd.DataFrame]:
+    """Отчёты → исследования по сопоставлению своего шаблона (сохранённое/из файла поверх подсказки) и лист «Шаблоны»."""
+    groups: Dict[str, List[pdf.Scan]] = {}
+    for sc in scans:
+        groups.setdefault(sc.fingerprint if not sc.error else "ошибка", []).append(sc)
+    studies: List[kart.Study] = []
+    info: List[dict] = []
+    for n, (fp, members) in enumerate(sorted(groups.items(), key=lambda kv: -len(kv[1])), 1):
+        if fp == "ошибка":
+            studies += [kart.build_study(sc, {}, "") for sc in members]
+            continue
+        rep = max(members, key=lambda sc: len(sc.items))
+        mapping, source = kart.effective(rep, kart.load_saved(fp, mapping_file), method_pref)
+        studies += [kart.build_study(sc, mapping, fp) for sc in members]
+        for t in kart.TARGETS:
+            info.append({"Шаблон": fp, "Файлов": len(members), "Программа": rep.program, "Поле базы": t.label,
+                         "Источник в отчёте": kart.describe(mapping.get(t.key)), "Откуда": source[t.key],
+                         "Пример": (kart.find_item(rep.items, mapping[t.key]).sample[:60] if mapping.get(t.key)
+                                    and kart.find_item(rep.items, mapping[t.key]) else "")})
+    return studies, pd.DataFrame(info, columns=["Шаблон", "Файлов", "Программа", "Поле базы", "Источник в отчёте", "Откуда", "Пример"])
+
+
+def write(path: str, wide: pd.DataFrame, bad: pd.DataFrame, detail: pd.DataFrame, info: pd.DataFrame,
+          templates: Optional[pd.DataFrame] = None) -> None:
     from openpyxl.styles import Alignment, Font, PatternFill
     with pd.ExcelWriter(path, engine="openpyxl", date_format="DD.MM.YYYY", datetime_format="DD.MM.YYYY HH:MM") as xw:
         wide.to_excel(xw, sheet_name=SHEET, index=False)
         bad.to_excel(xw, sheet_name="Не распознано", index=False)
         detail.to_excel(xw, sheet_name="Режимы (подробно)", index=False)
         info.to_excel(xw, sheet_name="Сводка", index=False)
+        if templates is not None and not templates.empty:
+            templates.to_excel(xw, sheet_name="Шаблоны", index=False)
+            for i, w in enumerate((12, 8, 24, 36, 60, 12, 50)):
+                xw.sheets["Шаблоны"].column_dimensions[chr(65 + i)].width = w
+            for c in xw.sheets["Шаблоны"][1]:
+                c.font = Font(bold=True)
         ws = xw.sheets[SHEET]
         yellow = PatternFill("solid", fgColor="FFF2CC")
         first = {c: i + 1 for i, c in enumerate(COLUMNS)}
@@ -226,7 +258,8 @@ def main(argv=None):
     args = параметры.parse(
         "База ГДИ из PDF-отчётов «Мониторинг ГДИС»", argv,
         folder="папка с PDF-отчётами или ZIP-архив", db="прежняя база ГДИ для дозаписи, необязательно",
-        groups="таблица «скважина → ГСП» (Excel), необязательно", sposob="способ исследования (по умолчанию ДИКТ-50)",
+        groups="таблица «скважина → ГСП» (Excel), необязательно", sposob="способ исследования, если его нет в отчёте (по умолчанию ДИКТ-50)",
+        mapping="файл сопоставления шапок с полями базы (JSON из мастера), необязательно", method="метод обработки для a и b (по умолчанию 4)",
         output="имя файла результата")
     src = параметры.clean_path(args.folder or параметры.ask("Папка с PDF-отчётами или ZIP"))
     if not src or not (os.path.isdir(src) or os.path.isfile(src)):
@@ -248,11 +281,14 @@ def main(argv=None):
     groups_path = параметры.ask_path("Таблица «скважина → ГСП» (Enter — пропустить)", args.groups if args.groups is not None else "")
     sposob = (args.sposob or "").strip() or "ДИКТ-50"
 
-    studies = []
+    scans = []
     for i, f in enumerate(files, 1):
-        studies.append(pdf.parse_study(f))
+        scans.append(pdf.scan_report(f))
         if i % 10 == 0 or i == len(files):
             print("… прочитано отчётов: %d из %d" % (i, len(files)))
+    studies, templates = read_studies(scans, параметры.clean_path(args.mapping or ""), (args.method or "").strip() or "4")
+    if len(templates["Шаблон"].unique()) > 1 if not templates.empty else False:
+        print("ℹ️ Найдено шаблонов отчёта: %d. Сопоставление по каждому — на листе «Шаблоны»; изменить можно в мастере «Сопоставление шапок»." % templates["Шаблон"].nunique())
     try:
         old = read_db(db_path)
     except ValueError as exc:
@@ -271,7 +307,7 @@ def main(argv=None):
     out = (args.output or "").strip() or "БД_ГДИ_из_отчётов.xlsx"
     if not out.lower().endswith(".xlsx"):
         out += ".xlsx"
-    write(out, wide, bad, detail, summary(len(files), studies, new, bad, sposob, kept))
+    write(out, wide, bad, detail, summary(len(files), studies, new, bad, sposob, kept), templates)
     print("✅ База ГДИ: %s (%d исследований добавлено, %d скважин)" % (out, int(new["№скв"].notna().sum()), new["№скв"].nunique()))
     if len(bad):
         print("⚠️ Замечаний: %d — смотрите лист «Не распознано» (пустые и спорные значения в «Лист1» выделены жёлтым)" % len(bad))
