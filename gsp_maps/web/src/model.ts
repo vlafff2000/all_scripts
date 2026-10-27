@@ -218,9 +218,9 @@ export function scopeKeys(mode: SeasonScope, picked: string[], seasons: SeasonIn
 export interface Scope { mode: SeasonScope; keys: string[]; calcs: Map<string, SeasonCalc> }
 
 /** Раскраска карты: по умолчанию круги по расходу газа, остальные режимы красят скважины одной шкалой. */
-export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis'
+export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis' | 'ref'
 export const PAINTS: [Paint, string][] = [
-  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'], ['atlas', 'Параметр Атласа'], ['model', 'Модели tNavigator'], ['gis', 'ГИС и ГВК'],
+  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'], ['atlas', 'Параметр Атласа'], ['model', 'Модели tNavigator'], ['gis', 'ГИС и ГВК'], ['ref', 'Опорная сетка'],
 ]
 export const ATLAS_AGGS: [string, string][] = [['mean', 'среднее'], ['sum', 'сумма'], ['last', 'последнее'], ['count', 'число записей']]
 export interface PaintVal { v: number; label: string; tip: string }
@@ -278,7 +278,7 @@ export function atlasPaint(values: Record<string, number>, title: string, note: 
 }
 
 export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: string, season: string, a: number, b: number, scope?: Scope): PaintData | null {
-  if (paint === 'flow' || paint === 'atlas' || paint === 'model' || paint === 'gis') return null   // параметр Атласа и модели считаются в API и передаются отдельно
+  if (paint === 'flow' || paint === 'atlas' || paint === 'model' || paint === 'gis' || paint === 'ref') return null   // параметр Атласа и модели считаются в API и передаются отдельно
   const vals = new Map<number, PaintVal>()
   const multi = !!scope && scope.mode !== 'one' && scope.keys.length > 0
   const keys = multi ? scope!.keys : [season]
@@ -588,4 +588,13 @@ export function gwcUnified(wells: GwcWell[], roofRaw: RoofRaster, spacing: numbe
   const d = lines.map(l => 'M' + l.pts.map(p => `${f1(p[0])} ${f1(p[1])}`).join('L') + (l.closed ? 'Z' : '')).join('')
   const first = lines[0].pts[Math.floor(lines[0].pts.length / 2)]
   return { d, at: first, note: '', surface, shares, closed: lines.filter(l => l.closed).length, open: lines.filter(l => !l.closed).length }
+}
+
+/** Опорная замерная сетка скважин: таблица 1.2 отчёта «Авторский надзор, Касимовское ПХГ, 2025» (скважина → ГСП). Цвет на карте берётся по группе из проекта. */
+export const REF_PRESET_AN2025 = '56, 83, 220, 182, 237, 264, 437, 520'
+/** Номера скважин из текста списка: запятая, точка с запятой, пробел или перевод строки; «№», «Скв.» и повторы отбрасываются. */
+export function parseRefWells(raw: string): number[] {
+  const out: number[] = []
+  for (const m of String(raw).matchAll(/\d+/g)) { const n = Number(m[0]); if (!out.includes(n)) out.push(n) }
+  return out
 }
