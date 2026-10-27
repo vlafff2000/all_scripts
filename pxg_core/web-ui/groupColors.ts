@@ -51,13 +51,38 @@ function hsl(h: number, s: number, l: number) {
 }
 
 let overrides: Record<string, string> = {}
+let version = 0
+const listeners = new Set<() => void>()
+/** Подписка на смену цветов (ручной выбор или сброс); возвращает отписку. */
+export const onGroupColorsChange = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } }
 /** Цвета, заданные инженером вручную (ключ — groupKey): имеют приоритет над палитрой. */
 export const setGroupColorOverrides = (o: Record<string, string>) => {
   overrides = Object.fromEntries(Object.entries(o).map(([k, v]) => [groupKey(k), v.toLowerCase()]))
+  version++
+  listeners.forEach(fn => fn())
+}
+export const hasGroupColorOverride = (group: string) => groupKey(group) in overrides
+
+/** Ручные цвета лежат в ~/.pxg/group_colors.json и общие для всех программ: читаются с сервера программы (/api/group-colors). */
+export async function loadGroupColorOverrides(): Promise<void> {
+  try { setGroupColorOverrides(((await (await fetch('/api/group-colors')).json()) as { overrides: Record<string, string> }).overrides) } catch { /* без сервера — палитра */ }
+}
+/** Запомнить цвет группы (null — вернуть цвет палитры); group='*' и null — сбросить все. */
+export async function saveGroupColor(group: string, color: string | null): Promise<void> {
+  const r = await fetch('/api/group-colors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group, color }) })
+  setGroupColorOverrides(((await r.json()) as { overrides: Record<string, string> }).overrides)
 }
 
 /** Цвета всех групп объекта {название: цвет} по номеру группы; «Без группы» пропускается. */
+let memo: { key: string; version: number; value: Record<string, string> } | null = null
 export function groupColors(all: string[]): Record<string, string> {
+  const key = all.join('\u0001')
+  if (memo && memo.key === key && memo.version === version) return memo.value
+  const value = computeGroupColors(all)
+  memo = { key, version, value }
+  return value
+}
+function computeGroupColors(all: string[]): Record<string, string> {
   const seen = new Map<string, string>()
   for (const g of all) { const s = String(g).trim(); if (s && groupKey(s) !== groupKey('Без группы')) if (!seen.has(groupKey(s))) seen.set(groupKey(s), s) }
   const names = [...seen.values()].sort(naturalCompare)

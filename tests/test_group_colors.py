@@ -52,3 +52,16 @@ def test_typescript_palettes_match_python():
     found = {int(n): tuple(re.findall(r"'(#[0-9A-Fa-f]{6})'", row))
              for n, row in re.findall(r'^\s+(\d+): \[(.*)\],$', ts, re.M)}
     assert found == {n: tuple(p) for n, p in gc.PALETTES.items()}
+
+
+def test_routes_store_and_reset_colors(tmp_path, monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+    monkeypatch.setenv('PXG_HOME', str(tmp_path))
+    client = TestClient(Starlette(routes=gc.routes()))
+    assert client.get('/api/group-colors').json() == {'overrides': {}}
+    assert client.post('/api/group-colors', json={'group': 'ГСП 1', 'color': '#AABBCC'}).json() == {'overrides': {'гсп 1': '#aabbcc'}}
+    assert client.post('/api/group-colors', json={'group': 'ГСП-2', 'color': 'red'}).status_code == 400
+    assert client.post('/api/group-colors', json={'group': 'ГСП 1', 'color': None}).json() == {'overrides': {}}
+    client.post('/api/group-colors', json={'group': 'ГСП 3', 'color': '#010203'})
+    assert client.post('/api/group-colors', json={'group': '*', 'color': None}).json() == {'overrides': {}}
