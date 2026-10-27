@@ -123,3 +123,60 @@ def test_mounted_in_apps(mod, home):
     app = importlib.import_module(mod).app
     c = TestClient(app)
     assert c.get("/api/fs/places").status_code == 200
+
+
+def test_network_detection_and_places(home, monkeypatch):
+    mounts = [{"dev": "//srv/share", "path": "/mnt/net share", "fstype": "cifs"}]
+    monkeypatch.setattr(fs_browse, "net_mounts", lambda: mounts)
+    assert fs_browse.is_network("/mnt/net share/sub/a.xlsx") and fs_browse.is_network("//srv/x")
+    assert not fs_browse.is_network("/mnt/netshare2") and not fs_browse.is_network(str(home))
+    net = [p for p in fs_browse.places() if p["kind"] == "network"]
+    assert net == [{"name": "net share (//srv/share)", "path": "/mnt/net share", "kind": "network"}]
+
+
+def test_net_mounts_parse(monkeypatch, tmp_path):
+    f = tmp_path / "mounts"
+    f.write_text("//s/a /mnt/a\\040b cifs rw 0 0\n/dev/sda1 / ext4 rw 0 0\nh:/x /mnt/x nfs4 rw 0 0\n")
+    real_open = open
+    monkeypatch.setattr("builtins.open", lambda p, *a, **k: real_open(f if p == "/proc/mounts" else p, *a, **k))
+    fs_browse._mounts_cache.update(t=0.0, v=[])
+    got = fs_browse.net_mounts()
+    assert [m["path"] for m in got] == ["/mnt/a b", "/mnt/x"]
+
+
+def test_hung_path_does_not_block(home, monkeypatch):
+    import time as _t
+    monkeypatch.setattr(fs_browse, "list_dir", lambda *a, **k: _t.sleep(2))
+    t0 = _t.monotonic()
+    r = fs_browse.browse(str(home), timeout=0.2)
+    assert "не отвечает" in r["error"] and _t.monotonic() - t0 < 1
+    # повторный запрос в период паузы отвечает сразу
+    assert "не отвечает" in fs_browse.browse(str(home), timeout=5)["error"]
+    fs_browse._dead.clear()
+
+
+def test_network_listing_light_cache_and_lazy_stat(home, monkeypatch):
+    _tree(home)
+    monkeypatch.setattr(fs_browse, "is_network", lambda p: True)
+    fs_browse._cache.clear()
+    r = fs_browse.list_dir(str(home), filt="xlsx")
+    assert r["network"] and r["lazy"] and not r["cached"]
+    assert [i["name"] for i in r["items"]] == ["a_dir", "b_dir", "t.xlsx"] and r["items"][2]["mtime"] == ""
+    (home / "new.xlsx").write_text("1")
+    r2 = fs_browse.list_dir(str(home), filt="xlsx")  # из кэша
+    assert r2["cached"] and "new.xlsx" not in [i["name"] for i in r2["items"]]
+    r3 = fs_browse.list_dir(str(home), filt="xlsx", fresh=True)
+    assert "new.xlsx" in [i["name"] for i in r3["items"]]
+    by_size = fs_browse.list_dir(str(home), sort="size", desc=True, fresh=True)
+    assert by_size["items"][2]["name"] == "t.xlsx" and by_size["items"][2]["size"] == 5
+    st = fs_browse.stat_items(str(home), ["t.xlsx", "a_dir", "nope"])
+    assert st["t.xlsx"]["size"] == 5 and st["t.xlsx"]["mtime"] and st["nope"]["locked"]
+    fs_browse._cache.clear()
+
+
+def test_stat_route(home):
+    from starlette.applications import Starlette
+    _tree(home)
+    c = TestClient(Starlette(routes=fs_browse.routes()))
+    r = c.post("/api/fs/stat", json={"path": str(home), "names": ["t.xlsx"]}).json()
+    assert r["stats"]["t.xlsx"]["size"] == 5
