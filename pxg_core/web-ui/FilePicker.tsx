@@ -63,6 +63,8 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
   const [all, setAll] = useState(false)
   const [sel, setSel] = useState(-1)
   const [busy, setBusy] = useState(false)
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
+  const sizeRef = useRef<{ w: number; h: number } | null>(null)
   const dirRef = useRef('')
   const box = useRef<HTMLDivElement>(null)
   const filter = opts.filter ?? DEFAULT_FILTER
@@ -117,6 +119,8 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
       ])
       if (!live) return
       setPlaces(pl.places); setRecent(last.recent)
+      const win = await getJson<{ w?: number; h?: number }>('/api/fs/win').catch(() => ({} as { w?: number; h?: number }))
+      if (live && win.w && win.h) { const v = { w: win.w, h: win.h }; sizeRef.current = v; setSize(v) }
       await load(opts.start || '')
     })()
     return () => { live = false }
@@ -162,12 +166,35 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
     row?.scrollIntoView({ block: 'nearest' })
   }, [sel])
 
+  // растягивание окна за углы: окно по центру, поэтому сдвиг угла меняет размер вдвое
+  const startResize = (sx: number, sy: number) => (e: React.PointerEvent) => {
+    e.preventDefault()
+    const win = (e.currentTarget as HTMLElement).parentElement as HTMLElement
+    const w0 = win.offsetWidth, h0 = win.offsetHeight, x0 = e.clientX, y0 = e.clientY
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+    const move = (ev: PointerEvent) => {
+      const v = { w: Math.round(clamp(w0 + sx * 2 * (ev.clientX - x0), 520, window.innerWidth - 16)),
+                  h: Math.round(clamp(h0 + sy * 2 * (ev.clientY - y0), 340, window.innerHeight - 16)) }
+      sizeRef.current = v; setSize(v)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
+      if (sizeRef.current) void fetch('/api/fs/win', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sizeRef.current) }).catch(() => undefined)
+    }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
+
   const cur = items[sel]
   const canPick = folderMode ? !!list && !list.error : multi ? marked.length > 0 : !!cur && !cur.dir
 
   return (
     <div className="fp-back" onMouseDown={e => { if (e.target === e.currentTarget) close(null) }} onKeyDown={onKey}>
-      <div className="fp-win" role="dialog" aria-label={opts.title || 'Выбор файла'}>
+      <div className="fp-win" role="dialog" aria-label={opts.title || 'Выбор файла'}
+        style={size ? { width: Math.min(size.w, window.innerWidth - 16), height: Math.min(size.h, window.innerHeight - 16) } : undefined}>
+        <span className="fp-rs nw" onPointerDown={startResize(-1, -1)} />
+        <span className="fp-rs ne" onPointerDown={startResize(1, -1)} />
+        <span className="fp-rs sw" onPointerDown={startResize(-1, 1)} />
+        <span className="fp-rs se" onPointerDown={startResize(1, 1)} />
         <div className="fp-head">
           <b>{opts.title || (folderMode ? 'Выбор папки' : multi ? 'Выбор файлов' : 'Выбор файла')}</b>
           <button className="fp-x" onClick={() => close(null)} aria-label="Закрыть">✕</button>
@@ -189,8 +216,9 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
         <div className="fp-main">
           <div className="fp-side">
             <div className="fp-cap">Места</div>
-            {places.map(p => <button key={p.path} className={list?.path === p.path ? 'on' : ''} onClick={() => open(p.path)} title={p.path}>
-              {p.kind === 'drive' ? '💽' : p.kind === 'network' ? '🌐' : '📁'} {p.name}</button>)}
+            {places.map(p => <button key={p.path} className={list?.path === p.path ? 'on' : ''} onClick={() => open(p.path)} title={p.name + '\n' + p.path}>
+              <span className="fp-pn">{p.kind === 'drive' ? '💽' : p.kind === 'network' ? '🌐' : '📁'} {p.name}</span>
+              {(p.kind === 'drive' || p.kind === 'network') && <span className="fp-pp">{p.path}</span>}</button>)}
             {!folderMode && recent.length > 0 && <>
               <div className="fp-cap">Недавние файлы</div>
               {recent.map(f => <button key={f} onClick={() => choose(f)} title={f}>🕘 {baseName(f)}</button>)}
