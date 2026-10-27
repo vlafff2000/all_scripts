@@ -120,19 +120,34 @@ LINUX_LAUNCHERS = {
                            'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
     'poiskovik.sh': '# Поисковик в браузере.\nexec "$PY" -s -X utf8 -m pxg_finder --browser "$@"',
     'poiskovik_papki_vkl.sh': '# Назначает Поисковик программой по умолчанию для папок (bash poiskovik_papki_vkl.sh).\n'
-                              '"$PY" -s -X utf8 -m pxg_finder.default_folder enable\n'
-                              'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+                              'pxg_report "Поисковик" "$PY" -s -X utf8 -m pxg_finder.default_folder enable',
     'poiskovik_papki_vykl.sh': '# Возвращает прежнюю программу для папок (bash poiskovik_papki_vykl.sh).\n'
-                               '"$PY" -s -X utf8 -m pxg_finder.default_folder disable\n'
-                               'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+                               'pxg_report "Поисковик" "$PY" -s -X utf8 -m pxg_finder.default_folder disable',
     'gdm.sh': '# ГДМ в браузере.\nexec "$PY" -s -X utf8 -m schedule_pxg --browser "$@"',
     'sozdat_yarlyki.sh': '# Ярлыки со значками на рабочем столе: bash sozdat_yarlyki.sh (убрать: bash sozdat_yarlyki.sh --remove).\n'
-                         '"$PY" -s -X utf8 -m pxg_core.desktop_shortcuts "$@"\n'
-                         'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+                         'pxg_report "Ярлыки ПХГ" "$PY" -s -X utf8 -m pxg_core.desktop_shortcuts "$@"',
     'ishodnye_dannye_console.sh': '# Работа с исходными данными: консольное меню модулей.\nexec "$PY" -s -X utf8 -m pxg_base "$@"',
 }
+# Разовые действия (ярлыки, папки по умолчанию): результат и ошибка видны и без терминала (двойной щелчок в файловом менеджере), лог лежит в logs_zapusk
+REPORT_SH = '''pxg_report() {
+  title=$1; shift
+  mkdir -p logs_zapusk; log="logs_zapusk/$(date +%Y%m%d-%H%M%S).log"
+  if out=$("$@" 2>&1); then rc=0; else rc=$?; fi
+  printf '%s\\n' "$out" > "$log"
+  msg=$out; [ -n "$msg" ] || msg="Готово."
+  [ "$rc" -eq 0 ] || msg="Ошибка (код $rc):"$'\\n'"$out"$'\\n\\n'"Журнал: $PWD/$log"
+  if [ -t 1 ]; then printf '%s\\n' "$msg"; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true; return "$rc"; fi
+  esc=$(printf '%s' "$msg" | sed -e 's/&/\\&amp;/g' -e 's/</\\&lt;/g' -e 's/>/\\&gt;/g')
+  if command -v zenity >/dev/null 2>&1; then zenity --info --title="$title" --width=560 --text="$esc" 2>/dev/null || true
+  elif command -v kdialog >/dev/null 2>&1; then kdialog --title "$title" --msgbox "$msg" || true
+  elif command -v yad >/dev/null 2>&1; then yad --title="$title" --text="$esc" --button=OK:0 || true
+  elif command -v xmessage >/dev/null 2>&1; then xmessage -center "$title: $msg" || true
+  else xdg-open "$log" >/dev/null 2>&1 || true; fi
+  return "$rc"
+}
+'''
 LINUX_PREFIX = ('#!/usr/bin/env bash\nset -eu\ncd -- "$(dirname -- "$(readlink -f -- "$0")")"\n'
-                'unset PYTHONHOME PYTHONPATH\nexport PYTHONNOUSERSITE=1 PYTHONUTF8=1\nPY=python/bin/python3.13\n')
+                'unset PYTHONHOME PYTHONPATH\nexport PYTHONNOUSERSITE=1 PYTHONUTF8=1\nPY=python/bin/python3.13\n' + REPORT_SH)
 
 README = '''Работа с исходными данными — переносная версия ({target})
 =========================================
@@ -253,6 +268,26 @@ def copy_icons(folder):
         shutil.copy2(str(item), str(icons / item.name))
 
 
+# Файлы .desktop рядом со скриптами: двойной щелчок запускает действие без терминала (в РЕД ОС .sh по двойному щелчку может не запускаться)
+LINUX_TWINS = {'Создать ярлыки ПХГ.desktop': ('sozdat_yarlyki.sh', 'Создать ярлыки ПХГ'),
+               'Поисковик - папки по умолчанию (включить).desktop': ('poiskovik_papki_vkl.sh', 'Поисковик для папок: включить'),
+               'Поисковик - папки по умолчанию (выключить).desktop': ('poiskovik_papki_vykl.sh', 'Поисковик для папок: выключить')}
+
+
+def twin_text(script, title):
+    # %k — путь файла .desktop (в GLib это обычный путь; на случай file:// приставка снимается): переходим в его папку и запускаем скрипт
+    return ('[Desktop Entry]\nType=Application\nVersion=1.0\nName={t}\nComment={t}\n'
+            "Exec=bash -c 'p=${{1#file://}}; cd \"$(dirname \"$p\")\" && exec bash {s}' _ %k\n"
+            'Icon=system-run\nTerminal=false\nCategories=Utility;\n').format(t=title, s=script)
+
+
+def write_twins(folder):
+    for name, (script, title) in LINUX_TWINS.items():
+        path = folder / name
+        path.write_text(twin_text(script, title), encoding='utf-8')
+        path.chmod(0o755)
+
+
 def write_launchers(target, folder):
     if target == 'windows':
         for name, body in WINDOWS_LAUNCHERS.items():
@@ -265,6 +300,7 @@ def write_launchers(target, folder):
             path = folder / name
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
+        write_twins(folder)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
                              six='ishodnye_dannye.sh', five='ishodnye_dannye_console.sh', maps='karty.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', sched='gdm.sh', shortcuts='sozdat_yarlyki.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')
