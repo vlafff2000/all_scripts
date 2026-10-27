@@ -84,7 +84,9 @@ def test_export_readable_by_atlas_format(tmp_path):
     top = t[(t["well"].astype(str) == "26-к") & (t["pack"] == "span")].iloc[0]
     assert round(top["h_eff_m"], 1) == 39.0 and round(top["kg_avg"], 3) == 0.299      # как «Суммарная мощность» в заключении
     assert os.path.exists(tmp_path / "gis_db_meta.json") and gis_export.read_meta(str(tmp_path))["version"] == gis_export.FORMAT_VERSION
-    assert "Интервалы (инкл.)" in book
+    assert "Интервалы (по стволу)" in book
+    w26 = pd.read_csv(tmp_path / "gis_intervals.csv", sep=";", decimal=",", encoding="utf-8-sig")
+    assert w26[w26["well"] == "26-к"]["from_m"].min() == 1015.7        # вторая таблица (с отклонением), не по стволу
 
 
 def test_module_check_runs():
