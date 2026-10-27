@@ -286,3 +286,31 @@ def test_diagnostika_seti_report(home, monkeypatch, capsys):
     assert "записей: 6" in text and "scandir + stat по одному" in text and "pxg_core.fs_browse" in text and "Выводы" in text
     d.LINES.clear()
     assert d.main([str(home / "net")]) == 1  # недоступный путь: сообщение, а не падение
+
+
+def test_slow_type_lookup_guesses_then_stat_fixes(home, monkeypatch):
+    """gvfs/fuse не отдаёт тип записи: после первой медленной is_dir остальные угадываются по имени, stat уточняет."""
+    import time
+    (home / "Папка без точки").mkdir()
+    (home / "v1.2").mkdir()
+    (home / "data.xlsx").write_text("x")
+    calls = {"n": 0}
+    orig_scandir = os.scandir
+
+    class Slow:
+        def __init__(self, e): self._e, self.name, self.path = e, e.name, e.path
+        def is_dir(self): calls["n"] += 1; time.sleep(0.05); return self._e.is_dir()
+
+    class It:
+        def __init__(self, path): self._it = orig_scandir(path)
+        def __enter__(self): return self
+        def __exit__(self, *a): self._it.close()
+        def __iter__(self): return self
+        def __next__(self): return Slow(next(self._it))
+
+    monkeypatch.setattr(fs_browse.os, "scandir", It)
+    raw, _ = fs_browse._scan(str(home), True, time.monotonic(), 5)
+    monkeypatch.undo()
+    assert calls["n"] == 1 and all(r.get("guess") for r in raw[1:])
+    st = fs_browse.stat_items(str(home), ["v1.2", "data.xlsx"])
+    assert st["v1.2"]["dir"] is True and st["data.xlsx"]["dir"] is False
