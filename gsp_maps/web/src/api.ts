@@ -35,7 +35,7 @@ export const saveConfig = (paths: Record<string, string>, resultsDir?: string, l
 /** Режим «весь объект»: все ГСП на одной карте. Данные собираются из обычных запросов по каждому ГСП. */
 export const ALL_GSP = 'Весь объект'
 let allGroups: string[] = []
-export const setAllGroups = (gs: string[]) => { allGroups = gs; groupColorMap = groupColors(gs) }
+export const setAllGroups = (gs: string[]) => { allGroups = gs }
 /** Набор из нескольких ГСП называется по именам через « + »; все группы сразу — «Весь объект». */
 export const GROUP_SEP = ' + '
 export const groupsOf = (name: string): string[] => (name === ALL_GSP ? allGroups : name.includes(GROUP_SEP) ? name.split(GROUP_SEP) : [name])
@@ -45,8 +45,7 @@ export const nameOf = (sel: string[]) => {
   return ordered.length === allGroups.length && ordered.length > 1 ? ALL_GSP : ordered.join(GROUP_SEP)
 }
 /** Цвета групп: сквозная палитра «Атлас-N» (pxg_core/web-ui/groupColors.ts), цвет группы не зависит от того, какие группы выбраны. */
-let groupColorMap: Record<string, string> = {}
-export const groupColor = (name: string) => colorOfGroup(name, groupColorMap)
+export const groupColor = (name: string) => colorOfGroup(name, groupColors(allGroups))
 
 function mergeGsp(list: GspData[], name: string): GspData {
   const kinds = ['Отбор', 'Закачка'] as const
