@@ -47,7 +47,7 @@ async def ping(request: Request):
 
 async def info(request: Request):
     return JSONResponse({"platform": sys.platform, "sep": os.sep, "home": os.path.expanduser("~"),
-                         "categories": search.CATEGORIES, "colors": list(store.COLORS)})
+                         "start": os.environ.get("PXG_FINDER_START", ""), "categories": search.CATEGORIES, "colors": list(store.COLORS)})
 
 
 async def start_search(request: Request):

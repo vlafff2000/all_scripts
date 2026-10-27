@@ -41,6 +41,11 @@ def serve(port: int = 8769) -> int:
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     _no_console()
+    import os
+    folder = next((a for a in argv if not a.startswith("--") and not a.isdigit() and os.path.isdir(a)), "")
+    if folder:  # папка из аргумента (пункт меню папки, «папки по умолчанию») открывается в новой вкладке
+        os.environ["PXG_FINDER_START"] = os.path.abspath(folder)
+        argv = [a for a in argv if a != folder]
     if argv and argv[0] == "--server":
         return serve(int(argv[1]) if len(argv) > 1 else 8769)
     from pxg_base.window import run

@@ -72,6 +72,12 @@ WINDOWS_LAUNCHERS = {
                         ':done\r\necho.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
     'Poiskovik.bat': 'rem Поисковик: файловый менеджер (окно приложения или браузер, если окно недоступно).\r\n'
                      '"%~dp0python\\python.exe" -s -X utf8 -m pxg_finder %*',
+    'Poiskovik_papki_vkl.bat': 'rem Добавляет в меню правой кнопки на папке пункт «Открыть в Поисковике».\r\n'
+                               '"%~dp0python\\python.exe" -s -X utf8 -m pxg_finder.default_folder enable\r\n'
+                               'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
+    'Poiskovik_papki_vykl.bat': 'rem Убирает пункт «Открыть в Поисковике» из меню папки.\r\n'
+                                '"%~dp0python\\python.exe" -s -X utf8 -m pxg_finder.default_folder disable\r\n'
+                                'echo.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
     'GDM.bat': 'rem ГДМ: окно приложения (или браузер, если окно недоступно).\r\n'
                       '"%~dp0python\\python.exe" -s -X utf8 -m schedule_pxg %*',
     'Sozdat_yarlyki.bat': 'rem Создаёт ярлыки со значками на рабочем столе (Remove: --remove).\r\n'
@@ -107,6 +113,12 @@ LINUX_LAUNCHERS = {
                        'fi\n'
                        'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
     'poiskovik.sh': '# Поисковик в браузере.\nexec "$PY" -s -X utf8 -m pxg_finder --browser "$@"',
+    'poiskovik_papki_vkl.sh': '# Назначает Поисковик программой по умолчанию для папок (bash poiskovik_papki_vkl.sh).\n'
+                              '"$PY" -s -X utf8 -m pxg_finder.default_folder enable\n'
+                              'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+    'poiskovik_papki_vykl.sh': '# Возвращает прежнюю программу для папок (bash poiskovik_papki_vykl.sh).\n'
+                               '"$PY" -s -X utf8 -m pxg_finder.default_folder disable\n'
+                               'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
     'gdm.sh': '# ГДМ в браузере.\nexec "$PY" -s -X utf8 -m schedule_pxg --browser "$@"',
     'sozdat_yarlyki.sh': '# Ярлыки со значками на рабочем столе: bash sozdat_yarlyki.sh (убрать: bash sozdat_yarlyki.sh --remove).\n'
                          '"$PY" -s -X utf8 -m pxg_core.desktop_shortcuts "$@"\n'

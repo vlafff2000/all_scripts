@@ -187,3 +187,22 @@ def test_api_flow(home):
     assert c.get("/api/finder/raw", params={"path": str(home / "a" / "notes.txt")}).status_code == 200
     c.post("/api/finder/state", json={"tabs": [{"path": "x"}]})
     assert c.get("/api/finder/state").json()["state"]["tabs"][0]["path"] == "x"
+
+
+def test_default_folder_texts_and_start_arg(tmp_path, monkeypatch):
+    from pathlib import Path
+    from pxg_finder import default_folder as df
+    root = Path("/opt/pxg")
+    assert 'Exec=bash "/opt/pxg/poiskovik.sh" %f' in df.desktop_text(root) and "MimeType=inode/directory;" in df.desktop_text(root)
+    assert df.reg_command(root, "%V").endswith('launch.py" "%V"') and "pythonw.exe" in df.reg_command(root)
+    calls = []
+    monkeypatch.setattr(df, "_xdg", lambda *a: calls.append(a) or ("old.desktop" if a[0] == "query" else ""))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "pxg"))
+    df.enable_linux(root)
+    assert ("default", df.DESKTOP_ID, "inode/directory") in calls and (tmp_path / "share" / "applications" / df.DESKTOP_ID).exists()
+    df.disable_linux()
+    assert ("default", "old.desktop", "inode/directory") in calls and not (tmp_path / "share" / "applications" / df.DESKTOP_ID).exists()
+    monkeypatch.setenv("PXG_FINDER_START", str(tmp_path))
+    c = TestClient(api.build_app())
+    assert c.get("/api/finder/info").json()["start"] == str(tmp_path)

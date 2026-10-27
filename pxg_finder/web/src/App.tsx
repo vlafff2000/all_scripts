@@ -51,7 +51,7 @@ export default function App() {
       const [state, last, info, m] = await Promise.all([
         getJson<{ state: Partial<AppState> }>('/api/finder/state').catch(() => ({ state: {} as Partial<AppState> })),
         getJson<{ dir: string }>('/api/fs/last').catch(() => ({ dir: '' })),
-        getJson<{ home: string; colors: string[] }>('/api/finder/info').catch(() => ({ home: '', colors: [] })),
+        getJson<{ home: string; start: string; colors: string[] }>('/api/finder/info').catch(() => ({ home: '', start: '', colors: [] })),
         getJson<{ meta: MetaMap }>('/api/finder/meta').catch(() => ({ meta: {} })),
       ])
       const start = last.dir || info.home || '/'
@@ -61,6 +61,11 @@ export default function App() {
         const tabs = (ps?.tabs ?? []).map((t: Tab) => ({ ...newTab(t.path), sort: t.sort || 'name', desc: !!t.desc }))
         return tabs.length ? { tabs, active: Math.min(ps?.active ?? 0, tabs.length - 1) } : { tabs: [newTab(start)], active: 0 }
       })
+      if (info.start) { // запуск с папкой: открываем её в новой вкладке левой панели
+        const t = newTab(info.start)
+        s.panes[0] = { tabs: [...s.panes[0].tabs, t], active: s.panes[0].tabs.length }
+        s.activePane = 0
+      }
       setColors(info.colors); setMeta(m.meta); setSt(s)
     })()
     void reloadFavs(); void reloadPlaces(); void reloadRoots()
