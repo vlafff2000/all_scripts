@@ -23,6 +23,15 @@ APPS = [
 ]
 
 
+# Приложения, которым на Windows не нужно окно консоли: ярлык запускает pythonw.exe с модулем (значок и закрепление на панели задач как у обычной программы)
+WINDOWED = {'poiskovik': 'pxg_finder'}
+
+
+def menu_dir() -> Path:
+    """Меню приложений РЕД ОС и других Linux (закрепляется в избранное, находится поиском)."""
+    return Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share') / 'applications'
+
+
 def desktop_dir() -> Path:
     home = Path.home()
     if os.name == 'nt':
@@ -69,7 +78,12 @@ def create(target: Path, root: Path = ROOT) -> List[Tuple[str, Path]]:
             import pythoncom  # pywin32 лежит в переносной папке
             from win32com.shell import shell  # IShellLink понимает Юникод в именах; WScript.Shell — только символы текущей кодовой страницы
             link = pythoncom.CoCreateInstance(shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink)
-            link.SetPath(str(script))
+            pyw = root / 'python' / 'pythonw.exe'
+            if icon in WINDOWED and pyw.exists():
+                link.SetPath(str(pyw))
+                link.SetArguments('-s -X utf8 -m ' + WINDOWED[icon])
+            else:
+                link.SetPath(str(script))
             link.SetWorkingDirectory(str(root))
             link.SetIconLocation(str(root / 'icons' / (icon + '.ico')), 0)
             link.SetDescription(title)
@@ -77,6 +91,11 @@ def create(target: Path, root: Path = ROOT) -> List[Tuple[str, Path]]:
         else:
             path.write_text(desktop_entry(title, script, root / 'icons' / (icon + '.png')), encoding='utf-8')
             path.chmod(0o755)
+            try:  # то же в меню приложений: оттуда ярлык закрепляется на панели
+                menu_dir().mkdir(parents=True, exist_ok=True)
+                (menu_dir() / ('pxg-' + icon + '.desktop')).write_text(path.read_text(encoding='utf-8'), encoding='utf-8')
+            except OSError:
+                pass
             try:  # GNOME без этого не доверяет ярлыку; в других оболочках gio может не быть
                 subprocess.call(['gio', 'set', str(path), 'metadata::trusted', 'true'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except OSError:
@@ -87,7 +106,10 @@ def create(target: Path, root: Path = ROOT) -> List[Tuple[str, Path]]:
 
 def remove(target: Path) -> int:
     count = 0
-    for _, title, _, _ in APPS:
+    for icon, title, _, _ in APPS:
+        entry = menu_dir() / ('pxg-' + icon + '.desktop')
+        if entry.exists():
+            entry.unlink()
         for suffix in ('.lnk', '.desktop'):
             path = target / (title + suffix)
             if path.exists():
