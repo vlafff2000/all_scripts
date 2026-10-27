@@ -71,7 +71,7 @@ def test_mapping_overrides_label():
 
 def test_export_readable_by_atlas_format(tmp_path):
     cs = [gis_word.read_conclusion(f) for f in gis_word.find_files([DATA])]
-    assert len(cs) == 3
+    assert len(cs) == 4
     files, frames = gis_word.export(cs, str(tmp_path))
     book = pd.read_excel(str(tmp_path / "БД_ГИС_Беларусь.xlsx"), sheet_name=None)
     assert {"Свод", "Интервалы", "Замеры", "Скважины", "Горизонты", "Не распознано", "Проверка"} <= set(book)
@@ -146,3 +146,30 @@ def test_plain_kg_goes_to_hidden_sheet(tmp_path):
     assert head[5:7] == ["Эквив Кг (в БД)", "Кг обычный"]
     assert wb["Кг обычный"].max_row > 5
     assert "Кг второй столбец" not in [x.value for x in wb["Интервалы"][1]]
+
+
+def test_cyrillic_horizon_and_multiline_perforation():
+    c = gis_word.read_conclusion(os.path.join(DATA, "116-0324.doc"))
+    assert [(r.horizon, r.note) for r in c.rows] == [("Спан", "отл.")] * 6      # «Спан.отл.» — горизонт кириллицей
+    assert c.perf_all == [(1014.0, 1020.0, True), (1082.0, 1088.0, False)]     # (зацем.) не берётся, второй интервал на следующей строке
+    assert c.perf == (1082.0, 1088.0) and not [i for i in c.issues if i.code == "no_horizon"]
+
+
+def test_extra_spaces_and_tabs_in_labels():
+    for label in ("V1gl1 .песч.", "V1gl1.  песч.", "V1gl1\t.песч.", "V1gl1 . песч ."):
+        assert gis_word.split_label(label)[:2] == ("V1gl1", "песч.") or gis_word.split_label(label)[:2] == ("V1gl1", "песч")
+    assert gis_word.split_label("str , п. 2 - I")[:2] == ("str", "п.2-I")
+    assert gis_word.split_label("D2nr  п.К + М")[:2] == ("D2nr", "п.К+М")
+    text = HEAD + "V1bn  п. 2\t 452.0- 454.2  -279.8: -282.0  2.2  53.5\n   п.К + М   460.0- 461.0  -290.0: -291.0  1.0  30.0\n"
+    c = gis_word.parse_text(text, "9.doc")
+    assert [r.pack for r in c.rows] == ["V1bn п.2", "V1bn п.К+М"]
+
+
+def test_rows_without_line_breaks_are_split():
+    one = HEAD + ("V1gl1.песч. 269.0- 271.6 -107.8: -110.4 2.6 31.6 V1gl1.отл. 393.4- 394.0 -232.2: -232.8 0.6 24.7 "
+                  "445.6- 446.2 -284.4: -285.0 0.6 23.0 не определ. str,п.2-I 1000.0 - 1002.0 -850.0:-852.0 2.0 20.0\n")
+    c = gis_word.parse_text(one, "9.doc")
+    assert [(r.pack, r.frm) for r in c.rows] == [("V1gl1 песч.", 269.0), ("V1gl1 отл.", 393.4), ("V1gl1 отл.", 445.6), ("str п.2-I", 1000.0)]
+    assert c.rows[2].text == "не определ." and not c.unresolved
+    frames, _ = gis_word.build([c])
+    assert len(frames["Интервалы"]) == 4

@@ -92,7 +92,8 @@ class Conclusion:
     interval: Tuple[Optional[float], Optional[float], Optional[float]] = (None, None, None)   # от, до, до а.о.
     bottom: Tuple[Optional[float], Optional[float]] = (None, None)                            # глубина, а.о.
     nkt: Optional[float] = None
-    perf: Optional[Tuple[float, float]] = None                                                # верх, низ (глубина)
+    perf: Optional[Tuple[float, float]] = None                                                # верх, низ (глубина), открытые интервалы
+    perf_all: List[Tuple[float, float, bool]] = field(default_factory=list)                   # все интервалы перфорации; True — зацементирован
     method: str = ""
     rows: List[DataRow] = field(default_factory=list)
     unresolved: List[Tuple[int, str, str]] = field(default_factory=list)                      # строка, текст, причина
@@ -146,14 +147,37 @@ def _pack_note(note: str) -> str:
     return "п." + note if re.match(r"^\d", note) else note
 
 
+ANNOT_WORDS = {"гл", "песч", "отл", "верх", "низ", "ниж", "верхн", "нижн", "покр", "пер", "кров", "подош", "глина", "песчаник"}
+_CYR_HORIZON = re.compile(r"^([А-ЯЁ][а-яё]{2,})(?=[.,;\s]|$)")
+
+
+def clean_label(label: str) -> str:
+    """Лишние пробелы и табуляции в метке: «V1gl1 .песч.», «п. 2 - I», «п.К + М» → «V1gl1.песч.», «п.2-I», «п.К+М»."""
+    text = re.sub(r"\s+", " ", label.replace("\t", " ")).strip()
+    text = re.sub(r"\s*([.,;])\s*", r"\1 ", text).strip()
+    text = re.sub(r"(?<=\w)\s*([-+])\s*(?=\w)", r"\1", text)
+    return re.sub(r"\s+([.,;])", r"\1", text).strip()
+
+
+def is_label_start(text: str) -> bool:
+    """Начинается ли текст как метка строки: латинский индекс горизонта, «п.…» или кириллический горизонт («Спан.отл.»)."""
+    t = text.strip()
+    return bool(_HORIZON.match(t) or re.match(r"^п\.", t) or
+                ((m := _CYR_HORIZON.match(t)) and m.group(1).lower() not in ANNOT_WORDS))
+
+
 def split_label(label: str, mapping: Optional[Dict[str, Tuple[str, str]]] = None) -> Tuple[str, str, bool]:
-    """Метка → (горизонт, приписка, горизонт_указан). Горизонт — латинский индекс в начале; иначе метка целиком приписка."""
-    text = label.strip()
-    if mapping and _norm(text) in mapping:
-        h, n = mapping[_norm(text)]
-        return h, n, True
-    m = _HORIZON.match(text)
-    if not m:
+    """Метка → (горизонт, приписка, горизонт_указан). Горизонт — индекс в начале (латиницей: D2nr, V1gl1; или словом с заглавной
+    буквы: «Спан»); остальное — приписка к пачке. Метка без горизонта («п.Н») — только приписка."""
+    raw = label.strip()
+    text = clean_label(raw)
+    if mapping:
+        for key in (_norm(raw), _norm(text)):
+            if key in mapping:
+                h, n = mapping[key]
+                return h, n, True
+    m = _HORIZON.match(text) or (None if re.match(r"^п\.", text) else _CYR_HORIZON.match(text))
+    if not m or (m.re is _CYR_HORIZON and m.group(1).lower() in ANNOT_WORDS):
         return "", _pack_note(text.lstrip(" .,;").rstrip(" ,;")), False
     horizon = m.group(1).rstrip("-")
     note = _pack_note(text[m.end():].lstrip(" .,;").rstrip(" ,;"))
@@ -196,6 +220,42 @@ def _first_numbers(text: str) -> List[float]:
     return [fnum(x) for x in _NUM.findall(text)]
 
 
+_REC = re.compile(r"(?<![\w.,\-])" + NUM + r"\s*[-–—]\s*" + NUM + r"(?=\s+-?" + NUM + r"\s*:\s*-?" + NUM + r"|\s*,?\s*Кг\s*~?" + NUM + r")")
+
+
+def explode(line: str) -> List[str]:
+    """Несколько записей в одной строке (нет переноса) → отдельные строки. Начало записи — «от - до» с абсолютными отметками через
+    «:» или «от - до, Кг X %»; метка следующей записи отделяется от хвоста предыдущей (если хвост похож на метку)."""
+    starts = [m.start() for m in _REC.finditer(line)]
+    if len(starts) < 2:
+        return [line]
+    cuts = [0] + starts[1:]
+    parts: List[str] = []
+    carry = ""
+    for k, a in enumerate(cuts):
+        b = cuts[k + 1] if k + 1 < len(cuts) else len(line)
+        seg = line[a:b]
+        nxt_label = ""
+        if k + 1 < len(cuts):
+            toks = seg.split()
+            tail: List[str] = []              # хвост из нечисловых слов
+            for t in reversed(toks):
+                if re.fullmatch(r"[-~:;]*" + NUM + r"[:;]?", t) or t in ("м", "м."):
+                    break
+                tail.insert(0, t)
+            for q in range(len(tail)):        # метка следующей записи — с первого слова, похожего на метку
+                if is_label_start(tail[q]):
+                    nxt_label = " ".join(tail[q:])
+                    pos = len(seg.rstrip())
+                    for t in reversed(tail[q:]):
+                        pos = seg.rfind(t, 0, pos)
+                    seg = seg[:pos].rstrip()
+                    break
+        parts.append((carry + " " + seg).strip() if carry else seg.strip())
+        carry = nxt_label
+    return parts
+
+
 def parse_text(text: str, file: str, mapping: Optional[Dict[str, Tuple[str, str]]] = None, kg_min: float = 0.0) -> Conclusion:
     """Разбор текста одного заключения."""
     c = Conclusion(file=os.path.basename(file), path=file)
@@ -205,9 +265,14 @@ def parse_text(text: str, file: str, mapping: Optional[Dict[str, Tuple[str, str]
     group = 0
     horizon = note = ""
     story: List[str] = []
+    last_field = ""
     percent = bool(re.search(r"кг\s*,?\s*%", text, re.I))
-    for no, raw in enumerate(lines, 1):
-        line = raw.replace("\t", "  ").strip()
+    expanded = []
+    for no0, raw0 in enumerate(lines, 1):
+        for piece in explode(raw0.replace("\t", "  ").strip()):
+            expanded.append((no0, piece))
+    for no, raw in expanded:
+        line = raw.strip()
         if not line:
             continue
         if not c.title and re.search(r"заключени", line, re.I):
@@ -302,11 +367,16 @@ def parse_text(text: str, file: str, mapping: Optional[Dict[str, Tuple[str, str]
             group += 1
             horizon = note = ""
             continue
+        # продолжение перфорации на следующей строке шапки: «1082-1088 м»
+        if not in_table and last_field == "perf" and re.fullmatch(r"\s*" + NUM + r"\s*[-–—]\s*" + NUM + r"\s*м?\.?\s*", line):
+            _add_perf(c, line)
+            continue
         # шапка «ключ: значение»
         if ":" in line and not in_table:
             key, _, val = line.partition(":")
             if len(key) <= 28 and not re.search(r"\d", key):
                 name = _header_field(key)
+                last_field = name
                 c.header[key.strip()] = val.strip()
                 if name:
                     _apply_field(c, name, val.strip(), no)
@@ -365,9 +435,16 @@ def _apply_field(c: Conclusion, name: str, val: str, no: int) -> None:
         c.bottom = (fnum(m.group(0)) if m else None, fnum(ab.group(1)) if ab else None)
         _ = nums
     elif name == "perf":
-        m = _SPAN.search(val)
-        if m:
-            c.perf = (fnum(m.group(1)), fnum(m.group(2)))
+        _add_perf(c, val)
+
+
+def _add_perf(c: Conclusion, text: str) -> None:
+    """Интервалы перфорации из строки шапки (их может быть несколько, в том числе на следующих строках; «зацем.» — закрытый)."""
+    cem = bool(re.search(r"зацем", text, re.I))
+    for m in _SPAN.finditer(text):
+        c.perf_all.append((fnum(m.group(1)), fnum(m.group(2)), cem))
+    opened = [(a, b) for a, b, z in c.perf_all if not z]
+    c.perf = (min(a for a, _ in opened), max(b for _, b in opened)) if opened else None
 
 
 def _finish(c: Conclusion) -> None:
@@ -520,7 +597,7 @@ def wells_frame(conclusions: List[Conclusion]) -> pd.DataFrame:
             "Альтитуда, м": alt, "Исследовано от, м": c.interval[0], "Исследовано до, м": c.interval[1],
             "Исследовано до а.о., м": c.interval[2] if c.interval[2] is not None else ao(c.interval[1]),
             "Иск. забой, м": c.bottom[0], "Иск. забой а.о., м": c.bottom[1] if c.bottom[1] is not None else ao(c.bottom[0]),
-            "НКТ, м": c.nkt, "Перфорация верх, м": c.perf[0] if c.perf else None, "Перфорация низ, м": c.perf[1] if c.perf else None,
+            "НКТ, м": c.nkt, "Перфорации (все интервалы)": "; ".join("%g-%g%s" % (a, b, " (зацем.)" if z else "") for a, b, z in c.perf_all), "Перфорация верх, м": c.perf[0] if c.perf else None, "Перфорация низ, м": c.perf[1] if c.perf else None,
             "Перфорация верх а.о., м": ao(c.perf[0]) if c.perf else None, "Перфорация низ а.о., м": ao(c.perf[1]) if c.perf else None,
             "Строк интервалов": len([r for r in c.rows if r.mode == MD]), "С учётом отклонения": "да" if c.has_incl else "",
             "Уровни жидкости": _sentence(c.story, r"уровн"), "Описание": c.story, "Примечания": " ".join(c.notes), "Прочие поля шапки": "; ".join("%s: %s" % kv for kv in c.extra.items()),
@@ -569,14 +646,13 @@ def intervals_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetR
         items = sorted([c for c in conclusions if not c.error and c.sheet == well], key=lambda x: (x.date or dt.date.min, x.file))
         for b, c in zip(res.blocks, items):
             mode = want_mode(c, depth)
-            by_line = {r.line: r for r in c.rows if r.mode == mode} or {r.line: r for r in c.rows}
-            for row in b.rows:
-                r = by_line[row.xl_row]
+            use = [r for r in c.rows if r.mode == mode] or [r for r in c.rows if r.mode == MD]
+            for row, r in zip(b.rows, use):
                 extra.append({"Горизонт": r.horizon, "Приписка": r.note,
                               "От а.о., м": r.abs_from if r.abs_from is not None else (None if c.alt is None else round(c.alt - r.frm, 2)),
                               "До а.о., м": r.abs_to if r.abs_to is not None else (None if c.alt is None else round(c.alt - r.to, 2)),
-                              "Мощность по заключению, м": r.h, "Текст после чисел": r.text, "ГВК глубина, м": r.gvk_depth, "Глубины": r.mode, "Файл": c.file,
-                              "Метка в документе": r.label or "(унаследована)"})
+                              "Мощность по заключению, м": r.h, "Текст после чисел": r.text, "ГВК глубина, м": r.gvk_depth,
+                              "Глубины": r.mode, "Файл": c.file, "Метка в документе": r.label or "(унаследована)"})
     out = base.reset_index(drop=True).copy()
     if len(out) != len(extra):
         raise ValueError("внутренняя ошибка: строки интервалов не сошлись (%d и %d)" % (len(out), len(extra)))
