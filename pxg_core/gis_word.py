@@ -64,7 +64,7 @@ class DataRow:
     gvk_abs: Optional[float] = None
     group: int = 0        # номер группы между итоговыми строками (для сверки с «Суммарная мощность»)
     carried: bool = False
-    kg2: Optional[float] = None   # второй столбец Кг в строке (если в заключении их два), доля единицы
+    kg2: Optional[float] = None   # обычный Кг, когда в строке два столбца (в kg лежит «Эквив Кг»), доля единицы
     text: str = ""        # текст после чисел: «интервал вырезки», «не определ.» и т. п.
     approx: bool = False  # Кг указан как «~20»
 
@@ -260,12 +260,12 @@ def parse_text(text: str, file: str, mapping: Optional[Dict[str, Tuple[str, str]
                 h = rest[0]
             if len(rest) >= 2:
                 kg = rest[1]
-            if len(rest) == 3:                    # h, Кг, второй Кг
-                kg2 = rest[2]
+            if len(rest) == 3:                    # h, Кг, Эквив Кг
+                kg, kg2 = rest[2], rest[1]
             elif len(rest) == 4:                  # h, Кг, ГВК, ГВК а.о. либо h, Кг, Кг2, ГВК (редко)
                 gvk_d, gvk_a = rest[2], rest[3]
-            elif len(rest) >= 5:                  # h, Кг, Кг2, ГВК, ГВК а.о.
-                kg2, gvk_d, gvk_a = rest[2], rest[3], rest[4]
+            elif len(rest) >= 5:                  # h, Кг, Эквив Кг, ГВК, ГВК а.о.
+                kg, kg2, gvk_d, gvk_a = rest[2], rest[1], rest[3], rest[4]
             if label:
                 hz, nt, has_h = split_label(label, mapping)
                 if has_h:
@@ -575,7 +575,7 @@ def intervals_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetR
                 extra.append({"Горизонт": r.horizon, "Приписка": r.note,
                               "От а.о., м": r.abs_from if r.abs_from is not None else (None if c.alt is None else round(c.alt - r.frm, 2)),
                               "До а.о., м": r.abs_to if r.abs_to is not None else (None if c.alt is None else round(c.alt - r.to, 2)),
-                              "Мощность по заключению, м": r.h, "Кг второй столбец": r.kg2, "Текст после чисел": r.text, "ГВК глубина, м": r.gvk_depth, "Глубины": r.mode, "Файл": c.file,
+                              "Мощность по заключению, м": r.h, "Текст после чисел": r.text, "ГВК глубина, м": r.gvk_depth, "Глубины": r.mode, "Файл": c.file,
                               "Метка в документе": r.label or "(унаследована)"})
     out = base.reset_index(drop=True).copy()
     if len(out) != len(extra):
@@ -588,6 +588,20 @@ def intervals_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetR
              "До а.о., м", "hi, м", "Мощность по заключению, м", "Кг", "hэф, м", "ГВК", "ГВК глубина, м", "ГВК а.о., м"]
     rest = [c for c in out.columns if c not in first and c not in ("Цвет", "Метка", "Кп", "Кг·hэф", "Кг (текст)")]
     return out[first + [c for c in rest if c not in first]].assign(Кп=None)
+
+
+def plain_kg_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetResult], depth: str) -> pd.DataFrame:
+    """Лист «Кг обычный» (скрыт): где в заключении два столбца Кг, в БД идёт «Эквив Кг», обычный Кг лежит здесь."""
+    out = []
+    for c in conclusions:
+        if c.error:
+            continue
+        mode = want_mode(c, depth)
+        for r in c.rows:
+            if r.kg2 is not None and (r.mode == mode or not c.has_incl):
+                out.append({"Скважина": c.sheet, "Дата": c.date, "Пачка": r.pack, "От, м": r.frm, "До, м": r.to,
+                            "Эквив Кг (в БД)": r.kg, "Кг обычный": r.kg2, "Файл": c.file, "Строка файла": r.line})
+    return pd.DataFrame(out, columns=["Скважина", "Дата", "Пачка", "От, м", "До, м", "Эквив Кг (в БД)", "Кг обычный", "Файл", "Строка файла"])
 
 
 def canon_horizons(conclusions: List[Conclusion]) -> None:
@@ -617,6 +631,7 @@ def build(conclusions: List[Conclusion], depth: str = "auto", kg_min: float = 0.
     out = {"Свод": frames["Пачки"], "Интервалы": intervals_frame(conclusions, results, frames["Строки"], depth),
            "Замеры": frames["Замеры"], "Скважины": wells_frame(conclusions), "Горизонты": horizons_frame(conclusions, mapping),
            "Не распознано": unresolved_frame(conclusions), "Проверка": frames["Проверка"]}
+    out["Кг обычный"] = plain_kg_frame(conclusions, results, depth)
     both = [c for c in conclusions if c.has_incl and not c.error]
     if both:          # второй вариант глубин (не вошедший в БД) — отдельным листом
         other_depth = "md" if depth != "md" else "incl"
@@ -626,8 +641,9 @@ def build(conclusions: List[Conclusion], depth: str = "auto", kg_min: float = 0.
     return out, results
 
 
-SHEET_ORDER = ("Свод", "Интервалы", "Интервалы (по стволу)", "Интервалы (инкл.)", "Замеры", "Скважины", "Горизонты", "Не распознано", "Проверка")
-PERCENT = ("Кг", "Кг ср.взв", "Кг ср.взв (весь замер)")
+SHEET_ORDER = ("Свод", "Интервалы", "Интервалы (по стволу)", "Интервалы (инкл.)", "Замеры", "Скважины", "Горизонты", "Не распознано", "Проверка", "Кг обычный")
+HIDDEN = ("Кг обычный",)
+PERCENT = ("Кг", "Кг ср.взв", "Кг ср.взв (весь замер)", "Эквив Кг (в БД)", "Кг обычный")
 
 
 def export(conclusions: List[Conclusion], out_dir: str, depth: str = "auto", kg_min: float = 0.0,
@@ -647,6 +663,8 @@ def export(conclusions: List[Conclusion], out_dir: str, depth: str = "auto", kg_
             frame.to_excel(xw, sheet_name=name[:31], index=False)
             sheet = xw.sheets[name[:31]]
             sheet.freeze_panes(1, 0)
+            if name in HIDDEN:
+                sheet.hide()
             for i, col in enumerate(frame.columns):
                 width = 12 if col not in ("Описание", "Уровни жидкости", "Сообщение", "Текст", "Почему") else 60
                 sheet.set_column(i, i, max(width, min(len(str(col)) + 2, 24)), pct if col in PERCENT else None)

@@ -119,7 +119,7 @@ def test_glued_labels_two_kg_columns_and_text_tails():
     assert not c.unresolved and len(c.notes) == 1
     r = c.rows
     assert [(x.horizon, x.note) for x in r[:3]] == [("str", "п.2-II"), ("str", "п.2-I"), ("str", "п.2-I")]
-    assert (r[0].h, r[0].kg, r[0].kg2) == (1.2, 0.267, 0.273)                  # первый столбец — Кг, второй хранится рядом
+    assert (r[0].h, r[0].kg, r[0].kg2) == (1.2, 0.273, 0.267)                  # в БД «Эквив Кг» (последний столбец), обычный Кг — на скрытом листе
     assert (r[3].gvk_depth, r[3].gvk_abs) == (1264.4, -1117.7)
     assert [x.pack for x in r[4:7]] == ["Str п.2-I"] * 3                       # метка без «п.» и «Str 2-I» — одна пачка
     assert r[5].kg is None and r[5].text == "интервал вырезки"                 # Кг не определён: строка не теряется
@@ -134,3 +134,15 @@ def test_gvk_abs_sign_fixed_by_altitude():
     c = gis_word.parse_text(HEAD + "kt  1251.2-1252.8  -1100.9:-1102.5    1.6   24.6    25.1   1252.8   1106.1\n", "101.doc")
     _, results = gis_word.build([c])
     assert results["101"].blocks[0].rows[0].gvk_abs == -1106.1
+
+
+def test_plain_kg_goes_to_hidden_sheet(tmp_path):
+    import openpyxl
+    c = gis_word.parse_text(HEAD + GLUED, "101.doc")
+    gis_word.export([c], str(tmp_path))
+    wb = openpyxl.load_workbook(str(tmp_path / "БД_ГИС_Беларусь.xlsx"))
+    assert wb["Кг обычный"].sheet_state == "hidden" and wb["Интервалы"].sheet_state == "visible"
+    head = [x.value for x in wb["Кг обычный"][1]]
+    assert head[5:7] == ["Эквив Кг (в БД)", "Кг обычный"]
+    assert wb["Кг обычный"].max_row > 5
+    assert "Кг второй столбец" not in [x.value for x in wb["Интервалы"][1]]
