@@ -347,8 +347,8 @@ def _check_totals(c: Conclusion) -> None:
         h = sum(r.to - r.frm for r in rows)
         kg = sum((r.to - r.frm) * r.kg for r in rows) / h * 100 if h else 0
         if abs(h - nums[-2]) > 0.15 or abs(kg - nums[-1]) > 0.15:
-            c.issues.append(gis.Issue("warn", "total_mismatch", c.sheet, line,
-                                      "Итог в заключении: мощность %g, Кг %g %%; по строкам выше: %.1f и %.1f %%" % (nums[-2], nums[-1], h, kg), ""))
+            c.issues.append(gis.Issue("note", "total_mismatch", c.sheet, line,
+                                      "Итог в заключении (мощность %g, Кг %g %%) не равен сумме строк (%.1f и %.1f %%): в БД берётся сумма строк" % (nums[-2], nums[-1], h, kg), ""))
 
 
 def read_conclusion(path: str, mapping: Optional[Dict[str, Tuple[str, str]]] = None) -> Conclusion:
@@ -375,9 +375,15 @@ def find_files(paths: List[str]) -> List[str]:
     return sorted(dict.fromkeys(out))
 
 
+def want_mode(c: Conclusion, depth: str) -> str:
+    """Какие глубины брать из заключения: auto — с учётом отклонения, если заключение его даёт, иначе по стволу."""
+    if depth == "md":
+        return MD
+    return INCL if (depth == "incl" or c.has_incl) else MD
+
+
 def to_results(conclusions: List[Conclusion], depth: str = "md", kg_min: float = 0.0) -> Dict[str, gis.SheetResult]:
-    """Заключения → `gis.SheetResult` по скважине (замер = заключение). depth: md — глубины по стволу, incl — с учётом отклонения."""
-    want = INCL if depth == "incl" else MD
+    """Заключения → `gis.SheetResult` по скважине (замер = заключение). depth: auto — с учётом отклонения, если заключение его даёт (по умолчанию), md — по стволу, incl — с отклонением."""
     by_well: Dict[str, List[Conclusion]] = defaultdict(list)
     for c in conclusions:
         if not c.error:
@@ -392,6 +398,7 @@ def to_results(conclusions: List[Conclusion], depth: str = "md", kg_min: float =
                               rows=rows, legend=[], issues=issues, alt_sheet=alt,
                               perf=(round(alt - perf[0], 2), round(alt - perf[1], 2)) if perf else None)
         for n, c in enumerate(items, 1):
+            want = want_mode(c, depth)
             use = [r for r in c.rows if r.mode == want] or [r for r in c.rows if r.mode == MD]
             b = gis.Block(sheet=well, well=well, block=n, xl_row=0, date_text=c.date_text, date=c.date, exact=c.exact, season=c.season,
                           quality="" if c.date and not c.date_note else ("дата из имени файла" if c.date else "нет даты"),
@@ -480,12 +487,13 @@ def unresolved_frame(conclusions: List[Conclusion]) -> pd.DataFrame:
     return pd.DataFrame(out, columns=["Файл", "Скважина", "Строка", "Текст", "Почему"])
 
 
-def intervals_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetResult], base: pd.DataFrame, mode: str) -> pd.DataFrame:
+def intervals_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetResult], base: pd.DataFrame, depth: str) -> pd.DataFrame:
     """«Строки» из `gis.to_frames` + горизонт, приписка, абсолютные отметки, мощность по заключению, файл."""
     extra = []
     for well, res in results.items():
         items = sorted([c for c in conclusions if not c.error and c.sheet == well], key=lambda x: (x.date or dt.date.min, x.file))
         for b, c in zip(res.blocks, items):
+            mode = want_mode(c, depth)
             by_line = {r.line: r for r in c.rows if r.mode == mode} or {r.line: r for r in c.rows}
             for row in b.rows:
                 r = by_line[row.xl_row]
@@ -507,33 +515,32 @@ def intervals_frame(conclusions: List[Conclusion], results: Dict[str, gis.SheetR
     return out[first + [c for c in rest if c not in first]].assign(Кп=None)
 
 
-def build(conclusions: List[Conclusion], depth: str = "md", kg_min: float = 0.0,
+def build(conclusions: List[Conclusion], depth: str = "auto", kg_min: float = 0.0,
           mapping: Optional[Dict[str, Tuple[str, str]]] = None) -> Tuple[Dict[str, pd.DataFrame], Dict[str, gis.SheetResult]]:
     """Все листы выгрузки. Ключи: Свод, Интервалы, Замеры, Скважины, Горизонты, Не распознано, Проверка (+ Интервалы (инкл.))."""
     from . import gis_qc
-    mode = INCL if depth == "incl" else MD
     results = to_results(conclusions, depth, kg_min)
     found, _dropped = gis_qc.check_results(results)
     for res in results.values():
         res.issues.extend(i for i in found if i.sheet == res.sheet)
     frames = gis.to_frames(results)
-    out = {"Свод": frames["Пачки"], "Интервалы": intervals_frame(conclusions, results, frames["Строки"], mode),
+    out = {"Свод": frames["Пачки"], "Интервалы": intervals_frame(conclusions, results, frames["Строки"], depth),
            "Замеры": frames["Замеры"], "Скважины": wells_frame(conclusions), "Горизонты": horizons_frame(conclusions, mapping),
            "Не распознано": unresolved_frame(conclusions), "Проверка": frames["Проверка"]}
-    if any(c.has_incl for c in conclusions) and mode == MD:
-        other = to_results(conclusions, "incl", kg_min)
-        both = [c for c in conclusions if c.has_incl]
-        sub = {k: v for k, v in other.items() if k in {c.sheet for c in both}}
+    both = [c for c in conclusions if c.has_incl and not c.error]
+    if both:          # второй вариант глубин (не вошедший в БД) — отдельным листом
+        other_depth = "md" if depth != "md" else "incl"
+        sub = to_results(both, other_depth, kg_min)
         base = gis.to_frames(sub)["Строки"]
-        out["Интервалы (инкл.)"] = intervals_frame(both, sub, base, INCL)
+        out["Интервалы (по стволу)" if other_depth == "md" else "Интервалы (инкл.)"] = intervals_frame(both, sub, base, other_depth)
     return out, results
 
 
-SHEET_ORDER = ("Свод", "Интервалы", "Интервалы (инкл.)", "Замеры", "Скважины", "Горизонты", "Не распознано", "Проверка")
+SHEET_ORDER = ("Свод", "Интервалы", "Интервалы (по стволу)", "Интервалы (инкл.)", "Замеры", "Скважины", "Горизонты", "Не распознано", "Проверка")
 PERCENT = ("Кг", "Кг ср.взв", "Кг ср.взв (весь замер)")
 
 
-def export(conclusions: List[Conclusion], out_dir: str, depth: str = "md", kg_min: float = 0.0,
+def export(conclusions: List[Conclusion], out_dir: str, depth: str = "auto", kg_min: float = 0.0,
            mapping: Optional[Dict[str, Tuple[str, str]]] = None, source: str = "") -> Tuple[List[str], Dict[str, pd.DataFrame]]:
     """Книга «БД_ГИС_Беларусь.xlsx» (листы «Свод», «Интервалы», «Замеры» читает Атлас) и таблицы gis_*.csv/parquet рядом."""
     from . import gis_export
