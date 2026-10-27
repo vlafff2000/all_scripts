@@ -70,6 +70,9 @@ WINDOWS_LAUNCHERS = {
                         'if "%FOUND%"=="0" (echo Файлы расчёта не найдены: положите их в папку %~dp0 и запустите снова.) else '
                         '"%~dp0python\\python.exe" -s -X utf8 -m tnav_results.describe_model --report-next-to "%~dp0*.EGRID" "%~dp0*.INIT" "%~dp0*.SMSPEC" "%~dp0*.UNSMRY"\r\n'
                         ':done\r\necho.\r\necho Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
+    'Diagnostika_seti.bat': 'rem Диагностика медленных сетевых папок: спросит путь, замерит чтение и сохранит отчёт Diagnostika_seti_<дата>.txt рядом.\r\n'
+                            '"%~dp0python\\python.exe" -s -X utf8 -m pxg_core.diagnostika_seti %*\r\n'
+                            'echo.\r\necho Отчёт лежит в этой папке. Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
     'Poiskovik.bat': 'rem Поисковик: файловый менеджер (окно приложения или браузер, если окно недоступно).\r\n'
                      '"%~dp0python\\python.exe" -s -X utf8 -m pxg_finder %*',
     'Poiskovik_papki_vkl.bat': 'rem Добавляет в меню правой кнопки на папке пункт «Открыть в Поисковике».\r\n'
@@ -112,6 +115,9 @@ LINUX_LAUNCHERS = {
                        '  "$PY" -s -X utf8 -m tnav_results.describe_model --report-next-to "${FILES[@]}" || true\n'
                        'fi\n'
                        'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+    'diagnostika_seti.sh': '# Диагностика медленных сетевых папок: bash diagnostika_seti.sh (спросит путь, отчёт Diagnostika_seti_<дата>.txt ляжет рядом).\n'
+                           '"$PY" -s -X utf8 -m pxg_core.diagnostika_seti "$@"\n'
+                           'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
     'poiskovik.sh': '# Поисковик в браузере.\nexec "$PY" -s -X utf8 -m pxg_finder --browser "$@"',
     'poiskovik_papki_vkl.sh': '# Назначает Поисковик программой по умолчанию для папок (bash poiskovik_papki_vkl.sh).\n'
                               '"$PY" -s -X utf8 -m pxg_finder.default_folder enable\n'

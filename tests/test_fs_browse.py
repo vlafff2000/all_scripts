@@ -270,3 +270,19 @@ def test_listing_timings_logged(home, monkeypatch, caplog):
     assert "ФС=cifs" in text and "лёгкий" in text and "отрисовка 40 мс" in text
     assert fs_browse.fs_info(str(home / "x")) == {"mount": str(home), "fstype": "cifs"}
     fs_browse._cache.clear()
+
+
+def test_diagnostika_seti_report(home, monkeypatch, capsys):
+    from pxg_core import diagnostika_seti as d
+    (home / "sub").mkdir()
+    for i in range(5):
+        (home / ("f%d.xlsx" % i)).write_text("x")
+    monkeypatch.chdir(home)
+    d.LINES.clear()
+    assert d.main([str(home)]) == 0
+    reports = list(home.glob("Diagnostika_seti_*.txt"))
+    assert len(reports) == 1
+    text = reports[0].read_text(encoding="utf-8")
+    assert "записей: 6" in text and "scandir + stat по одному" in text and "pxg_core.fs_browse" in text and "Выводы" in text
+    d.LINES.clear()
+    assert d.main([str(home / "net")]) == 1  # недоступный путь: сообщение, а не падение
