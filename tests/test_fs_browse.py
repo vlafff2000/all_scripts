@@ -190,3 +190,44 @@ def test_window_size_remembered(home):
     assert c.post("/api/fs/win", json={"w": 5, "h": "x"}).json() == {"w": 1200, "h": 700}
     assert c.get("/api/fs/win").json() == {"w": 1200, "h": 700}
     assert fs_browse.get_last() == {"dir": "", "recent": []}
+
+
+def test_favorites_and_frequent(home):
+    net = "//srv/share/data"
+    r = fs_browse.edit_favorites("add", net)
+    assert r["favorites"] == [{"path": os.path.normpath(net), "name": "data", "network": True}]
+    fs_browse.edit_favorites("add", str(home), "Мой каталог")
+    fs_browse.edit_favorites("add", str(home))  # дубль не добавляется
+    assert len(fs_browse.get_favorites()["favorites"]) == 2
+    r = fs_browse.edit_favorites("move", str(home), to=0)
+    assert r["favorites"][0]["name"] == "Мой каталог"
+    r = fs_browse.edit_favorites("rename", str(home), "Рабочая")
+    assert r["favorites"][0]["name"] == "Рабочая"
+    # часто посещаемые: нужно >= 2 заходов, избранное из подсказки исключается
+    a, b = str(home / "a"), str(home / "b")
+    fs_browse.add_visit(a)
+    assert fs_browse.get_favorites()["frequent"] == []
+    for _ in range(3):
+        fs_browse.add_visit(b)
+    fs_browse.add_visit(a)
+    fs_browse.add_visit(str(home))
+    fs_browse.add_visit(str(home))
+    fr = fs_browse.get_favorites()["frequent"]
+    assert [x["path"] for x in fr] == [b, a]  # home уже в избранном
+    r = fs_browse.edit_favorites("hide", b)  # инженер убирает подсказку
+    assert [x["path"] for x in r["frequent"]] == [a]
+    r = fs_browse.edit_favorites("remove", str(home))
+    assert len(r["favorites"]) == 1 and r["frequent"][0]["path"] in (a, str(home))
+    fs_browse.edit_favorites("clear_visits")
+    assert fs_browse.get_favorites()["frequent"] == []
+
+
+def test_favorites_routes(home):
+    from starlette.applications import Starlette
+    c = TestClient(Starlette(routes=fs_browse.routes()))
+    assert c.get("/api/fs/favorites").json() == {"favorites": [], "frequent": []}
+    r = c.post("/api/fs/favorites", json={"action": "add", "path": str(home), "name": "X"}).json()
+    assert r["favorites"][0]["name"] == "X"
+    c.post("/api/fs/visit", json={"path": str(home / "q")})
+    r = c.post("/api/fs/visit", json={"path": str(home / "q")}).json()
+    assert r["frequent"][0]["n"] == 2

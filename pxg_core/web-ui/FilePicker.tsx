@@ -6,6 +6,8 @@ import { createRoot } from 'react-dom/client'
 interface Item { name: string; dir: boolean; size: number; mtime: string; ext: string; locked: boolean }
 interface Listing { path: string; parent: string; items: Item[]; total: number; truncated: boolean; error: string; network?: boolean; cached?: boolean; lazy?: boolean }
 interface Place { name: string; path: string; kind: string }
+interface Fav { path: string; name: string; network?: boolean; n?: number }
+interface Favs { favorites: Fav[]; frequent: Fav[] }
 interface Last { dir: string; recent: string[] }
 
 export interface PickerOptions {
@@ -65,6 +67,9 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
   const [busy, setBusy] = useState(false)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   const sizeRef = useRef<{ w: number; h: number } | null>(null)
+  const [favs, setFavs] = useState<Favs>({ favorites: [], frequent: [] })
+  const [favText, setFavText] = useState('')
+  const [editFav, setEditFav] = useState<{ path: string; name: string } | null>(null)
   const anchor = useRef(-1)
   const dragged = useRef(false)
   const [band, setBand] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
@@ -122,6 +127,7 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
       ])
       if (!live) return
       setPlaces(pl.places); setRecent(last.recent)
+      getJson<Favs>('/api/fs/favorites').then(f => { if (live && f.favorites) setFavs(f) }).catch(() => undefined)
       const win = await getJson<{ w?: number; h?: number }>('/api/fs/win').catch(() => ({} as { w?: number; h?: number }))
       if (live && win.w && win.h) { const v = { w: win.w, h: win.h }; sizeRef.current = v; setSize(v) }
       await load(opts.start || '')
@@ -130,12 +136,17 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const postFav = (url: string, body: object) =>
+    getJson<Favs>(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(f => { if (f && f.favorites) setFavs(f) }).catch(() => undefined)
+  const favAction = (action: string, path: string, extra: object = {}) => postFav('/api/fs/favorites', { action, path, ...extra })
+
   const close = (p: string | null) => {
     if (dirRef.current) void remember({ dir: dirRef.current })
     done(p)
   }
   const choose = (full: string) => { void remember({ dir: folderMode ? full : dirRef.current, file: folderMode ? '' : full }); done(full) }
-  const open = (path: string) => { setQuery(''); void load(path, { q: '' }) }
+  const open = (path: string) => { setQuery(''); void postFav('/api/fs/visit', { path }); void load(path, { q: '' }) }
   const items = useMemo(() => list?.items ?? [], [list])
 
   const activate = (it: Item) => {
@@ -257,7 +268,7 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
         <div className="fp-bar">
           <button disabled={!list?.parent} onClick={() => list && open(list.parent)} title="Вверх (Backspace)">↑</button>
           <button onClick={() => void load(dirRef.current, undefined, true)} title="Обновить">↻</button>
-          <form onSubmit={e => { e.preventDefault(); void load(pathText.trim()) }} className="fp-path">
+          <form onSubmit={e => { e.preventDefault(); void postFav('/api/fs/visit', { path: pathText.trim() }); void load(pathText.trim()) }} className="fp-path">
             <input value={pathText} onChange={e => setPathText(e.target.value)} placeholder="Вставьте путь и нажмите Enter" aria-label="Путь" />
           </form>
           <input className="fp-search" value={query} placeholder="Поиск по имени" aria-label="Поиск"
@@ -274,6 +285,38 @@ function Picker({ opts, done }: { opts: PickerOptions; done: (p: string | null) 
             {places.map(p => <button key={p.path} className={list?.path === p.path ? 'on' : ''} onClick={() => open(p.path)} title={p.name + '\n' + p.path}>
               <span className="fp-pn">{p.kind === 'drive' ? '💽' : p.kind === 'network' ? '🌐' : '📁'} {p.name}</span>
               {(p.kind === 'drive' || p.kind === 'network') && <span className="fp-pp">{p.path}</span>}</button>)}
+            <div className="fp-cap">Избранное</div>
+            {favs.favorites.map(f => editFav?.path === f.path ? (
+              <form key={f.path} className="fp-favedit" onSubmit={e => { e.preventDefault(); void favAction('rename', f.path, { name: editFav.name }); setEditFav(null) }}>
+                <input autoFocus value={editFav.name} onChange={e => setEditFav({ path: f.path, name: e.target.value })} onBlur={() => setEditFav(null)} />
+              </form>
+            ) : (
+              <div key={f.path} className="fp-fav">
+                <button className={list?.path === f.path ? 'on' : ''} onClick={() => open(f.path)} title={f.name + '\n' + f.path}>
+                  <span className="fp-pn">{f.network ? '🌐' : '⭐'} {f.name}</span><span className="fp-pp">{f.path}</span></button>
+                <span className="fp-fa">
+                  <i onMouseDown={e => e.preventDefault()} onClick={() => setEditFav({ path: f.path, name: f.name })} title="Переименовать">✎</i>
+                  <i onClick={() => void favAction('remove', f.path)} title="Убрать из избранного">✕</i>
+                </span>
+              </div>))}
+            {favs.favorites.length === 0 && <div className="fp-note small">Пусто. Добавьте текущую папку или впишите путь (можно сетевой).</div>}
+            <form className="fp-favadd" onSubmit={e => { e.preventDefault(); if (favText.trim()) { void favAction('add', favText.trim()); setFavText('') } }}>
+              <input value={favText} onChange={e => setFavText(e.target.value)} placeholder="Путь в избранное" aria-label="Добавить путь в избранное" />
+              <button type="submit" title="Добавить путь">＋</button>
+            </form>
+            <button disabled={!list?.path || list.error !== '' || favs.favorites.some(f => f.path === list.path)}
+              onClick={() => list && void favAction('add', list.path)}>⭐ Добавить текущую папку</button>
+            {favs.frequent.length > 0 && <>
+              <div className="fp-cap">Часто посещаемые</div>
+              {favs.frequent.map(f => (
+                <div key={f.path} className="fp-fav">
+                  <button onClick={() => open(f.path)} title={f.path + '\nзаходов: ' + f.n}><span className="fp-pn">{f.network ? '🌐' : '🔁'} {f.name}</span><span className="fp-pp">{f.path}</span></button>
+                  <span className="fp-fa">
+                    <i onClick={() => void favAction('add', f.path)} title="В избранное">⭐</i>
+                    <i onClick={() => void favAction('hide', f.path)} title="Убрать из подсказок">✕</i>
+                  </span>
+                </div>))}
+            </>}
             {!folderMode && recent.length > 0 && <>
               <div className="fp-cap">Недавние файлы</div>
               {recent.map(f => <button key={f} onClick={() => choose(f)} title={f}>🕘 {baseName(f)}</button>)}

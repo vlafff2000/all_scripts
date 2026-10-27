@@ -215,6 +215,84 @@ def set_win(w: Any, h: Any) -> Dict[str, int]:
     return {"w": w, "h": h}
 
 
+# ---------- избранное и часто посещаемые папки ----------
+# Избранное — список, который инженер правит вручную (в том числе сетевые пути; существование не проверяем,
+# чтобы не опрашивать диски). «Часто посещаемые» — только подсказка по счётчику заходов, любую запись можно убрать.
+
+MAX_VISITS = 200
+MAX_FREQUENT = 8
+MIN_FREQUENT = 2  # столько заходов нужно, чтобы папка попала в подсказку
+
+
+def _norm_dir(path: str) -> str:
+    path = (path or "").strip().strip('"')
+    if not path:
+        return ""
+    if len(path) > 1:
+        path = os.path.normpath(path)
+    return path
+
+
+def _fav_name(path: str) -> str:
+    return os.path.basename(path.rstrip("\\/")) or path
+
+
+def get_favorites() -> Dict[str, Any]:
+    with _lock:
+        data = _read_settings()
+    favs = []
+    for f in data.get("favorites") or []:
+        if isinstance(f, dict) and isinstance(f.get("path"), str) and f["path"]:
+            favs.append({"path": f["path"], "name": str(f.get("name") or _fav_name(f["path"])),
+                         "network": is_network(f["path"])})
+    have = {f["path"] for f in favs}
+    visits = data.get("visits") if isinstance(data.get("visits"), dict) else {}
+    top = sorted(((p, v) for p, v in visits.items() if isinstance(v, dict) and isinstance(v.get("n"), int)
+                  and v["n"] >= MIN_FREQUENT and p not in have),
+                 key=lambda x: (-x[1]["n"], -(x[1].get("t") or 0)))[:MAX_FREQUENT]
+    return {"favorites": favs,
+            "frequent": [{"path": p, "name": _fav_name(p), "n": v["n"], "network": is_network(p)} for p, v in top]}
+
+
+def add_visit(path: str) -> None:
+    path = _norm_dir(path)
+    if not path:
+        return
+    with _lock:
+        data = _read_settings()
+        visits = data.get("visits") if isinstance(data.get("visits"), dict) else {}
+        v = visits.get(path) if isinstance(visits.get(path), dict) else {"n": 0}
+        visits[path] = {"n": int(v.get("n") or 0) + 1, "t": int(time.time())}
+        while len(visits) > MAX_VISITS:  # забываем самые редкие и старые
+            visits.pop(min(visits, key=lambda k: (visits[k].get("n", 0), visits[k].get("t", 0))))
+        data["visits"] = visits
+        _write_settings(data)
+
+
+def edit_favorites(action: str, path: str = "", name: str = "", to: int = -1) -> Dict[str, Any]:
+    """add / remove / rename / move (на позицию to) для избранного; hide — убрать папку из «часто посещаемых»."""
+    path = _norm_dir(path)
+    with _lock:
+        data = _read_settings()
+        favs = [f for f in (data.get("favorites") or []) if isinstance(f, dict) and f.get("path")]
+        idx = next((i for i, f in enumerate(favs) if f["path"] == path), -1)
+        if action == "add" and path and idx < 0:
+            favs.append({"path": path, "name": name.strip() or _fav_name(path)})
+        elif action == "remove" and idx >= 0:
+            favs.pop(idx)
+        elif action == "rename" and idx >= 0:
+            favs[idx]["name"] = name.strip() or _fav_name(path)
+        elif action == "move" and idx >= 0 and 0 <= to < len(favs):
+            favs.insert(to, favs.pop(idx))
+        elif action == "hide" and isinstance(data.get("visits"), dict):
+            data["visits"].pop(path, None)
+        elif action == "clear_visits":
+            data["visits"] = {}
+        data["favorites"] = favs
+        _write_settings(data)
+    return get_favorites()
+
+
 # ---------- быстрые места ----------
 
 def _win_drives() -> List[Dict[str, str]]:
@@ -567,6 +645,30 @@ async def _win(request: Request) -> JSONResponse:
     return JSONResponse(get_win())
 
 
+async def _favorites(request: Request) -> JSONResponse:
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        to = body.get("to")
+        return JSONResponse(edit_favorites(str(body.get("action") or ""), str(body.get("path") or ""),
+                                           str(body.get("name") or ""), to if isinstance(to, int) else -1))
+    return JSONResponse(get_favorites())
+
+
+async def _visit(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    if isinstance(body, dict):
+        add_visit(str(body.get("path") or ""))
+    return JSONResponse(get_favorites())
+
+
 def routes() -> List[Route]:
     return [
         Route("/api/fs/file", _file),
@@ -575,4 +677,6 @@ def routes() -> List[Route]:
         Route("/api/fs/stat", _stat, methods=["POST"]),
         Route("/api/fs/last", _last, methods=["GET", "POST"]),
         Route("/api/fs/win", _win, methods=["GET", "POST"]),
+        Route("/api/fs/favorites", _favorites, methods=["GET", "POST"]),
+        Route("/api/fs/visit", _visit, methods=["POST"]),
     ]
