@@ -1,11 +1,11 @@
 import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, usePref, type SeasonScope } from './prefs'
+import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, refWells, refSize, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
 
 /** Цвета вариантов критерия: одинаковы на карте, в списке вариантов панели и в подписях изолиний. */
 /** Кровля пласта: от синего (глубже) к светло-жёлтому (выше). */
@@ -125,6 +125,22 @@ const Glyph = memo(function Glyph(p: {
             stroke={pal.bg} strokeWidth={fs * 0.28} paintOrder="stroke" strokeLinejoin="round">{p.label}{share && <tspan fontWeight={400} fill={pal.muted}> · {share}</tspan>}</text>)}
       {inside && (two || (share && r > fs * 2)) && <text x={x} y={y + fs * 0.62} fontSize={fs * 0.62} textAnchor="middle" dominantBaseline="central" fill="#fff" fillOpacity={0.92}
         stroke="rgba(30,8,12,.4)" strokeWidth={fs * 0.08} paintOrder="stroke">{two || share}</text>}
+    </g>
+  )
+})
+
+/** Скважина в режиме «Опорная сетка»: опорная — крупный круг цвета своей группы с номером, остальные — мелкие нейтральные точки. */
+const RefGlyph = memo(function RefGlyph(p: { well: number; x: number; y: number; r: number; color?: string; label: string; selected: boolean; hot: boolean; pal: Pal }) {
+  const { x, y, r, pal } = p
+  const fs = r * (p.label.length > 3 ? 0.55 : p.label.length > 2 ? 0.66 : 0.8)
+  return (
+    <g className="glyph" data-well={p.well}>
+      {p.hot && !p.selected && <circle cx={x} cy={y} r={r * 1.2} fill="none" stroke={pal.accent} strokeWidth={r * 0.1} />}
+      {p.selected && <circle cx={x} cy={y} r={r * 1.3} fill={pal.accent} fillOpacity={0.16} stroke={pal.accent} strokeWidth={r * 0.08} />}
+      {p.color
+        ? <><circle cx={x} cy={y} r={r} fill={p.color} stroke={pal.surface} strokeWidth={r * 0.12} />
+          <text x={x} y={y} fontSize={fs} textAnchor="middle" dominantBaseline="central" fontWeight={700} fill="#fff" stroke="rgba(30,8,12,.45)" strokeWidth={fs * 0.14} paintOrder="stroke" strokeLinejoin="round">{p.label}</text></>
+        : <circle cx={x} cy={y} r={r} fill={pal.line} stroke={pal.muted} strokeWidth={r * 0.18} strokeOpacity={0.6} />}
     </g>
   )
 })
@@ -556,7 +572,11 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const sx = (mx: number) => view.k * (fit.s * mx + fit.ox) + view.tx, sy = (my: number) => view.k * (fit.s * my + fit.oy) + view.ty
   const bar = niceStep(140 / K)
   // в режиме группировки круги имеют постоянный размер на экране (как значки на веб-картах), поэтому при приближении близкие скважины расходятся
-  const useCluster = usePref(clusterWells)
+  const clusterPref = usePref(clusterWells)
+  const isRef = options.paint === 'ref'
+  const useCluster = clusterPref && !isRef
+  const refList = usePref(refWells), refK = usePref(refSize)
+  const refNums = useMemo(() => parseRefWells(refList), [refList])
   const paints = useMemo(() => {
     if (!paintData) return null
     const m = new Map<number, { color: string; label: string }>()
@@ -573,7 +593,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const vis: number[] = []
     placed.forEach((q, n) => {
       const t = win.stats[n].total
-      const hidden = !paintData && ((options.hideIdle && !(t > 0)) || (options.minValue > 0 && t < options.minValue * 1e6))
+      const hidden = !paintData && !isRef && ((options.hideIdle && !(t > 0)) || (options.minValue > 0 && t < options.minValue * 1e6))
       if (!hidden || selected === q.well || group.includes(q.well)) vis.push(n)
     })
     vis.sort((u, v) => win.stats[v].total - win.stats[u].total)
@@ -602,7 +622,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       out.push({ cl: { id: id++, x: cx / sw, y: cy / sw, idx: mem, total } })
     }
     return out
-  }, [placed, win, paintData, options.hideIdle, options.minValue, options.scale, selected, group, useCluster, view.k, rd])
+  }, [placed, win, paintData, isRef, options.hideIdle, options.minValue, options.scale, selected, group, useCluster, view.k, rd])
   const zoomTo = (idx: number[]) => {
     const xs = idx.map(n => placed[n].x), ys = idx.map(n => placed[n].y)
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
@@ -649,8 +669,21 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const tipIdx = tipWell ? placed.indexOf(tipWell) : -1
   const [t1, t2] = [title.split(' · ').slice(0, 2).join(' · '), paintData?.scopeNote || title.split(' · ')[2] || '']
 
+  // опорные скважины по группам (для легенды) и те из списка, которых нет на карте
+  const refInfo = useMemo(() => {
+    if (!isRef) return { groups: [] as { name: string; wells: number[] }[], missing: [] as number[] }
+    const onMap = new Set(placed.map(q => q.well)), by = new Map<string, number[]>(), missing: number[] = []
+    for (const w of refNums) { if (!onMap.has(w)) { missing.push(w); continue } const gn = g.groupOf?.[String(w)] || g.gsp; by.set(gn, [...(by.get(gn) || []), w]) }
+    const order = g.groups ?? [g.gsp]
+    return { groups: [...by.entries()].sort((u, v) => order.indexOf(u[0]) - order.indexOf(v[0])).map(([name, wells]) => ({ name, wells })), missing }
+  }, [isRef, refNums, placed, g])
+
   const layer = useMemo(() => {
     clustersRef.current = items.filter(it => it.cl).map(it => it.cl!.idx)
+    if (isRef) {
+      const set = new Set(refNums), mk = (n: number, big: boolean) => { const q = placed[n]; return <RefGlyph key={q.well} well={q.well} x={q.x} y={q.y} r={big ? rd * 0.5 * refK : rd * 0.2} color={big ? groupColor(g.groupOf?.[String(q.well)] || g.gsp) : undefined} label={String(q.well)} selected={selected === q.well || group.includes(q.well)} hot={tip?.well === q.well} pal={pal} /> }
+      return <>{placed.map((q, n) => (set.has(q.well) ? null : mk(n, false)))}{placed.map((q, n) => (set.has(q.well) ? mk(n, true) : null))}</>
+    }
     return (
       <>
         {items.map(it => {
@@ -684,7 +717,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       </>
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, rd, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
+  }, [items, rd, isRef, refNums, refK, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
   // наблюдательные (ромб) и геофизические (треугольник) скважины вне групп: в координатах карты; при «схеме» положения условные, поэтому они не рисуются
   const obsLayer = obsPts.length ? <g aria-label="Наблюдательные и геофизические скважины">
     {obsPts.map(o => {
@@ -845,7 +878,11 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         {/* заголовок и легенда рисуются в координатах экрана, поэтому попадают и в PNG */}
         <text x={18} y={32} fontSize={compact ? 15 : 18} fontWeight={700} fill={pal.ink} stroke={pal.bg} strokeWidth={5} paintOrder="stroke" strokeLinejoin="round">{t1}</text>
         <text x={18} y={compact ? 49 : 51} fontSize={compact ? 12 : 13} fill={pal.muted} stroke={pal.bg} strokeWidth={4} paintOrder="stroke" strokeLinejoin="round">{t2}</text>
-        <g transform={`translate(14 ${size.h - 14 - (paintData ? 92 : legH)})`}>
+        {isRef ? <g transform={`translate(14 ${size.h - 14 - (40 + 20 * refInfo.groups.length)})`}>
+          <rect width={250} height={40 + 20 * refInfo.groups.length} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
+          <text x={14} y={22} fontSize={12.5} fontWeight={700} fill={pal.ink}>Опорная сетка · {refNums.length - refInfo.missing.length} скв.</text>
+          {refInfo.groups.map((r, i) => <g key={r.name} transform={`translate(14 ${40 + 20 * i})`}><circle r={6} fill={groupColor(r.name)} /><text x={14} fontSize={11.5} dominantBaseline="central" fill={pal.ink}>{r.name}: {r.wells.join(', ')}</text></g>)}
+        </g> : <g transform={`translate(14 ${size.h - 14 - (paintData ? 92 : legH)})`}>
           <rect width={LW} height={paintData ? 92 : legH} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
           {paintData ? <>
             <text x={14} y={22} fontSize={12.5} fontWeight={700} fill={pal.ink}>{paintData.title}</text>
@@ -887,7 +924,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               })}
             </g>}
           </>}
-        </g>
+        </g>}
         {unit && <g transform={`translate(${size.w - 64 - bar * K} ${size.h - 24})`}>
           <rect x={-6} y={-20} width={bar * K + 12} height={26} rx={6} fill={pal.surface} fillOpacity={0.85} />
           <path d={`M0,-2V0H${bar * K}V-2`} fill="none" stroke={pal.ink} strokeWidth={1.5} />
@@ -916,18 +953,25 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             </>}
             {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} gwcNote={gwc?.note ?? ''} gwcShares={gwc?.shares ?? []} awNote={awNote} roof={{ ...gis.roof, note: [gis.roof.note, roofWarn].filter(Boolean).join(' ') }} />}
             {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
-            {!paintData && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
+            {options.paint === 'ref' && <>
+              <label className="row" style={{ display: 'block' }} title="Номера скважин через запятую, пробел или с новой строки"><span>Опорные скважины</span>
+                <textarea rows={3} value={refList} onChange={e => refWells.set(e.target.value)} spellCheck={false} style={{ width: '100%', marginTop: 4 }} aria-label="Список опорных скважин" /></label>
+              <label className="row"><span>Размер маркера</span><input type="range" min={1} max={8} step={0.5} value={refK} onChange={e => refSize.set(Number(e.target.value))} /></label>
+              <button type="button" onClick={() => refWells.set(REF_PRESET_AN2025)} title="Скв. 56, 83, 220, 182, 237, 264, 437, 520 (ГСП 1, 2, 3, 3, 4, 5, 8, 9)">Таблица 1.2 АН-2025</button>
+              <p className="muted small">Цвет маркера — группа скважины в проекте Атласа, остальные скважины — фон. Список — решение инженера.</p>
+            </>}
+            {!paintData && !isRef && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
               <button type="button" role="radio" aria-checked={options.sectors === 'plain'} onClick={() => onOptions({ sectors: 'plain' })}>Один цвет</button></div>}
           </section>
-          <section><h4>Круги</h4>
+          {!isRef && <section><h4>Круги</h4>
             <label className="row"><span>Размер</span><input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
             <label className="row"><span>Подпись</span><select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
             {multiG && <label className="check" title="Круг скважины окрашивается цветом её группы (при раскраске по значению цвет группы — обводка)"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
             <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
             <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
             {!paintData && <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Шкала по всему сезону</label>}
-          </section>
+          </section>}
           {multi && (options.paint === 'entry' || options.paint === 'wf') && <section><h4>Сезоны</h4>
             <div className="segmented" role="radiogroup" aria-label="За какие сезоны">
               {([['one', 'Один'], ['pick', 'Выбрать'], ['all', 'Все, среднее']] as [SeasonScope, string][]).map(([k, t]) => (
@@ -948,7 +992,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       {box && <div className="selbox no-export" style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}
       <div className="map-chips no-export">
         {group.length > 1 && <span className="map-chip accent">Выбрано скважин: {group.length}<button type="button" onClick={() => onGroup([])} aria-label="Сбросить выбор">×</button></span>}
-        {multiG && g.groups!.map(n => <span key={n} className="map-chip" title={byGroup ? 'Цвет круга — группа' : n}><i className="gdot" style={{ background: groupColor(n) }} />{n}</span>)}
+        {isRef && refInfo.missing.length > 0 && <span className="map-chip warn" title="Этих скважин из списка нет на карте выбранных групп">Не на карте: {refInfo.missing.join(', ')}{multiG ? '' : ' (выберите «Весь объект»)'}</span>}
+        {multiG && !isRef && g.groups!.map(n => <span key={n} className="map-chip" title={byGroup ? 'Цвет круга — группа' : n}><i className="gdot" style={{ background: groupColor(n) }} />{n}</span>)}
         {far.length > 0 && <span className="map-chip" title={'Далёкие скважины: ' + far.join(', ')}>{frameAll ? 'Показаны все скважины' : `За кадром: ${far.length} скв.`}<button type="button" onClick={() => setFrameAll(v => !v)}>{frameAll ? 'Основная группа' : 'Показать'}</button></span>}
         {spread && placed.length > 1 && <span className="map-chip" title="Скважины разнесены для читаемости: взаимное расположение сохранено, расстояния условные">Схема, расстояния условные</span>}
         {options.paint === 'gis' && gis && [gis.error, isoWarn && gis.iso.on ? isoWarn : '', gis.roof.on && !roofLines?.length ? [gis.roof.grid ? '' : gis.roof.note, roofWarn].filter(Boolean).join(' ') : ''].filter(Boolean).map((t, k) =>

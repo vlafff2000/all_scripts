@@ -25,7 +25,7 @@ export const usePref = <T,>(p: Pref<T>): T => useSyncExternalStore(p.subscribe, 
 
 export type Theme = 'light' | 'dark' | 'system'
 export const theme = pref<Theme>('gsp.theme', 'system', raw => (raw === 'dark' || raw === 'light' ? raw : 'system'))
-export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf', 'atlas', 'model', 'gis'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
+export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis' | 'ref'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf', 'atlas', 'model', 'gis', 'ref'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
 /** Выбранный параметр Атласа («таблица|колонка») и агрегация; запоминаются между сеансами. */
 export const atlasParam = pref<string>('gsp.atlasParam', '', raw => String(raw || ''))
 export const atlasAgg = pref<string>('gsp.atlasAgg', 'mean', raw => String(raw || 'mean'))
@@ -119,3 +119,6 @@ export const spreadWells = pref<boolean>('gsp.spread', false)
 export const clusterWells = pref<boolean>('gsp.cluster', true)
 /** Красить круги цветом группы, когда на карте несколько ГСП. */
 export const groupColoring = pref<boolean>('gsp.groupcolor', true)
+/** Опорная сетка на карте: список номеров скважин (по умолчанию таблица 1.2 отчёта АН-2025) и размер их маркера относительно фоновых скважин. */
+export const refWells = pref<string>('gsp.refWells', '56, 83, 220, 182, 237, 264, 437, 520', raw => String(raw ?? ''))
+export const refSize = pref<number>('gsp.refSize', 2, raw => { const v = Number(raw); return v >= 1 && v <= 8 ? v : 2 })
