@@ -25,6 +25,7 @@ import pandas as pd
 from pxg_core import гдис_карта as kart
 from pxg_core import гдис_pdf as pdf
 from pxg_core import параметры
+from pxg_core.parallel import map_jobs
 
 COLUMNS = ["№ п/п", "№скв", "ГСП", "дата", "метод исслед.", "способ исслед.", "a", "b", "DPmax кгс/см2",
            "Qmax тыс.м3/сут", "Рст. тр, кгс/см2", "Рст. затр, кгс/см2", "Тст. тр, \n˚С", "Тст. затр, ˚С", "№ режима",
@@ -281,11 +282,8 @@ def main(argv=None):
     groups_path = параметры.ask_path("Таблица «скважина → ГСП» (Enter — пропустить)", args.groups if args.groups is not None else "")
     sposob = (args.sposob or "").strip() or "ДИКТ-50"
 
-    scans = []
-    for i, f in enumerate(files, 1):
-        scans.append(pdf.scan_report(f))
-        if i % 10 == 0 or i == len(files):
-            print("… прочитано отчётов: %d из %d" % (i, len(files)))
+    print("Чтение отчётов: %d…" % len(files))
+    scans = map_jobs(pdf.scan_report, files, 150.0)       # отчёты независимы: по ядрам, результат тот же, что подряд
     studies, templates = read_studies(scans, параметры.clean_path(args.mapping or ""), (args.method or "").strip() or "4")
     if len(templates["Шаблон"].unique()) > 1 if not templates.empty else False:
         print("ℹ️ Найдено шаблонов отчёта: %d. Сопоставление по каждому — на листе «Шаблоны»; изменить можно в мастере «Сопоставление шапок»." % templates["Шаблон"].nunique())

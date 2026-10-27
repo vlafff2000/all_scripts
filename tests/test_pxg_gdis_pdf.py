@@ -141,3 +141,33 @@ def test_pdf_reader_gives_text_grid_and_marks_foreign_pdf(tmp_path):
     assert g.is_pdf(str(path)) and g.find_reports(str(tmp_path)) == [str(path)]
     assert any("Skvazhina 194" in ln for p in g.layout_pages(str(path)) for ln in p)
     assert g.scan_report(str(path)).error        # не отчёт ГДИ: причина записана, исключения нет
+
+
+def test_wizard_api_lists_templates_and_saves_choice(tmp_path, monkeypatch):
+    pytest.importorskip("starlette")
+    from starlette.testclient import TestClient
+
+    from pxg_base.api import app
+    from pxg_core import гдис_мастер as wizard
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    folder = tmp_path / "pdf"
+    folder.mkdir()
+    for name in ("194", "128"):
+        (folder / name).write_bytes(b"%PDF-1.4 stub")
+    by_name = {"194": scan("gdis_2026.txt"), "128": scan("gdis_2019.txt")}
+    monkeypatch.setattr(wizard, "scan_cached", lambda path: by_name[os.path.basename(path)])
+    c = TestClient(app)
+    data = c.post("/api/gdis/templates", json={"folder": str(folder)}).json()
+    assert data["files"] == 2 and len(data["templates"]) == 2 and not data["errors"]
+    t = next(x for x in data["templates"] if x["example"] == "gdis_2019.txt")
+    row = next(r for r in t["rows"] if r["key"] == "a")
+    assert row["source"] == "авто" and row["current"]["method"] == "4" and len(row["options"]) >= 4   # a из методов 1–4
+    pick = next(o for o in row["options"] if o["method"] == "2")
+    mapping = {r["key"]: r["current"] for r in t["rows"]}
+    mapping["a"], mapping["sposob"] = pick["loc"], None
+    assert c.post("/api/gdis/save", json={"template": t["id"], "mapping": mapping, "name": "v3.6.3"}).json()["saved"] == len(mapping)
+    again = next(x for x in c.post("/api/gdis/templates", json={"folder": str(folder)}).json()["templates"] if x["id"] == t["id"])
+    rows = {r["key"]: r for r in again["rows"]}
+    assert rows["a"]["source"] == "вручную" and rows["a"]["current"]["method"] == "2" and again["saved"]
+    assert rows["sposob"]["source"] == "отключено" and rows["sposob"]["current"] is None
+    assert c.post("/api/gdis/templates", json={"folder": str(folder / "нет")}).status_code == 404

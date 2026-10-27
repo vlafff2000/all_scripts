@@ -181,6 +181,39 @@ async def gis_legend_save(request: Request):
     return JSONResponse({"saved": count})
 
 
+async def gdis_templates(request: Request):
+    """Мастер сопоставления ГДИ: шаблоны PDF-отчётов папки с подсказкой «поле базы → величина отчёта»."""
+    from pxg_core import гдис_мастер as wizard
+    try:
+        body = await request.json()
+    except Exception:
+        return _err("Ожидался JSON.")
+    folder = str(body.get("folder") or "").strip()
+    if not os.path.isdir(folder):
+        return _err("Папка не найдена: %s" % folder, 404)
+    try:
+        data = await run_in_threadpool(wizard.templates, folder, str(body.get("mapping") or "").strip(),
+                                       str(body.get("method") or "4").strip() or "4")
+    except Exception as e:
+        return _err("Отчёты не прочитались: %s: %s" % (type(e).__name__, e), 500)
+    return JSONResponse(data)
+
+
+async def gdis_save(request: Request):
+    """Запоминает сопоставление шаблона: {template, name, mapping: {поле: адрес величины | null}}; null — не использовать."""
+    from pxg_core import гдис_карта as kart
+    try:
+        body = await request.json()
+        template = str(body["template"]).strip()
+        mapping = body["mapping"]
+        if not template or not isinstance(mapping, dict):
+            raise ValueError("нет шаблона или сопоставления")
+        count = kart.save(template, mapping, str(body.get("name") or ""))
+    except (KeyError, TypeError, ValueError) as e:
+        return _err("Не сохранилось: %s" % e)
+    return JSONResponse({"saved": count})
+
+
 async def job_list(request: Request):
     return JSONResponse({"jobs": [j.view(len(j.log)) for j in sorted(jobs.JOBS.values(), key=lambda j: -j.started)]})
 
@@ -212,6 +245,8 @@ def build_app() -> Starlette:
         Route("/api/check", run_check, methods=["POST"]),
         Route("/api/gis/legend", gis_legend, methods=["POST"]),
         Route("/api/gis/legend/save", gis_legend_save, methods=["POST"]),
+        Route("/api/gdis/templates", gdis_templates, methods=["POST"]),
+        Route("/api/gdis/save", gdis_save, methods=["POST"]),
         Route("/api/check/{id}.{fmt}", check_download),
         Route("/api/jobs/{id}", job_status),
         Route("/api/jobs/{id}/open", open_folder, methods=["POST"]),

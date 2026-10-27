@@ -84,3 +84,21 @@ export const saveGisLegend = (file: string, choices: { sheet: string; color: str
   call<{ saved: number }>('/api/gis/legend/save', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file, choices }),
   })
+
+export interface GdisLoc { table: string; label: string; method: string; text: string; unit: string }
+export interface GdisOption { loc: GdisLoc; label: string; unit: string; method: string; kind: string; heading: string; sample: string }
+export interface GdisRow {
+  key: string; label: string; scope: string; dim: string; required: boolean; hint: string
+  current: GdisLoc | null; auto: GdisLoc | null; source: string; found: boolean; sample: string; options: GdisOption[]
+}
+export interface GdisTemplate {
+  id: string; files: number; program: string; example: string; names: string[]; rows: GdisRow[]; saved: boolean
+}
+export const getGdisTemplates = (folder: string, mapping: string, method: string) =>
+  call<{ templates: GdisTemplate[]; files: number; errors: { file: string; error: string }[] }>('/api/gdis/templates', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, mapping, method }),
+  })
+export const saveGdisMapping = (template: string, name: string, mapping: Record<string, GdisLoc | null>) =>
+  call<{ saved: number }>('/api/gdis/save', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ template, name, mapping }),
+  })
