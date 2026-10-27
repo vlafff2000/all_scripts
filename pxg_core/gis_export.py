@@ -55,6 +55,33 @@ def atlas_tables(frames: Dict[str, pd.DataFrame], drop_unassigned: bool = True) 
             "gis_intervals": _atlas(intervals, INTERVALS)}
 
 
+def write_tables(tables: Dict[str, pd.DataFrame], out_dir: str, source: str = "", bottom: Optional[pd.DataFrame] = None) -> List[str]:
+    """Таблицы для Атласа (parquet и CSV) и `gis_db_meta.json`; возвращает пути. Общая часть выгрузок «Базы ГИС» и «БД ГИС Беларусь»."""
+    os.makedirs(out_dir, exist_ok=True)
+    files: List[str] = []
+    meta = {"format": FORMAT_NAME, "version": FORMAT_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"),
+            "source": source, "wells": int(tables["gis_observations"]["well"].nunique()),
+            "tables": {k: {"rows": int(len(v)), "columns": list(v.columns)} for k, v in tables.items()}}
+    for name, table in tables.items():
+        pq_path = os.path.join(out_dir, name + ".parquet")
+        table.to_parquet(pq_path, index=False)
+        csv_path = os.path.join(out_dir, name + ".csv")
+        table.to_csv(csv_path, index=False, sep=";", encoding="utf-8-sig", decimal=",", date_format="%Y-%m-%d")
+        files += [pq_path, csv_path]
+    if bottom is not None and len(bottom):
+        b = bottom.rename(columns={"Скважина": "well", "Дата": "date", "Глубина, м": "depth_m", "Вид": "kind"})
+        b["date"] = pd.to_datetime(b["date"], errors="coerce")
+        path = os.path.join(out_dir, "gis_bottom.parquet")
+        b.to_parquet(path, index=False)
+        meta["tables"]["gis_bottom"] = {"rows": int(len(b)), "columns": list(b.columns)}
+        files.append(path)
+    meta_path = os.path.join(out_dir, "gis_db_meta.json")
+    with open(meta_path, "w", encoding="utf8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    files.append(meta_path)
+    return files
+
+
 def export(results: Dict[str, gis.SheetResult], out_dir: str, bottom: Optional[pd.DataFrame] = None,
            source: str = "", drop_unassigned: bool = True) -> List[str]:
     """Пишет Excel и файлы для Атласа в out_dir; возвращает пути."""
@@ -86,26 +113,7 @@ def export(results: Dict[str, gis.SheetResult], out_dir: str, bottom: Optional[p
             sheet.set_column(0, 25, 14)
     files.append(xlsx)
 
-    meta = {"format": FORMAT_NAME, "version": FORMAT_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"),
-            "source": source, "wells": int(tables["gis_observations"]["well"].nunique()),
-            "tables": {k: {"rows": int(len(v)), "columns": list(v.columns)} for k, v in tables.items()}}
-    for name, table in tables.items():
-        pq_path = os.path.join(out_dir, name + ".parquet")
-        table.to_parquet(pq_path, index=False)
-        csv_path = os.path.join(out_dir, name + ".csv")
-        table.to_csv(csv_path, index=False, sep=";", encoding="utf-8-sig", decimal=",", date_format="%Y-%m-%d")
-        files += [pq_path, csv_path]
-    if bottom is not None and len(bottom):
-        b = bottom.rename(columns={"Скважина": "well", "Дата": "date", "Глубина, м": "depth_m", "Вид": "kind"})
-        b["date"] = pd.to_datetime(b["date"], errors="coerce")
-        path = os.path.join(out_dir, "gis_bottom.parquet")
-        b.to_parquet(path, index=False)
-        meta["tables"]["gis_bottom"] = {"rows": int(len(b)), "columns": list(b.columns)}
-        files.append(path)
-    meta_path = os.path.join(out_dir, "gis_db_meta.json")
-    with open(meta_path, "w", encoding="utf8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    files.append(meta_path)
+    files += write_tables(tables, out_dir, source, bottom)
     return files
 
 
