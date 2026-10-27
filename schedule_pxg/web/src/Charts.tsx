@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { GroupColorsButton } from '../../../pxg_core/web-ui/GroupColorsButton'
 import { colorOfGroup, groupColors, groupKey } from '../../../pxg_core/web-ui/groupColors'
 import PageHead from './PageHead'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
@@ -54,6 +55,7 @@ export default function Charts({ st }: { st: AppState }) {
   const [target, setTarget] = useState('')
   const [data, setData] = useState<ChartsView | null>(null)
   const [pick, setPick] = useState('')
+  const [colorTick, setColorTick] = useState(0)     // смена цвета группы вручную: перестроить графики
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -66,8 +68,8 @@ export default function Charts({ st }: { st: AppState }) {
   const multi = !!data && data.scenarios.length > 1
   const keys = data ? Array.from(new Set(data.scenarios.flatMap(s => s.series.map(x => x.label)))) : []
   const shown = multi ? (pick && keys.includes(pick) ? pick : keys[0]) : ''
-  const chartR = useMemo(() => (data ? build(data, by, false, shown, multi) : null), [data, by, shown, multi])
-  const chartC = useMemo(() => (data ? build(data, by, true, shown, multi) : null), [data, by, shown, multi])
+  const chartR = useMemo(() => (data ? build(data, by, false, shown, multi) : null), [data, by, shown, multi, colorTick])
+  const chartC = useMemo(() => (data ? build(data, by, true, shown, multi) : null), [data, by, shown, multi, colorTick])
   const totals = data ? data.totals.filter(t => !multi || t.label === shown) : []
 
   return (
@@ -81,6 +83,7 @@ export default function Charts({ st }: { st: AppState }) {
             {st.scenarios.map(s => <label key={s.name}><input type="checkbox" checked={names.includes(s.name)} onChange={() => toggle(s.name)} /> {s.name}</label>)}
           </div>
           <div className="row" style={{ marginTop: 8 }}>
+            {data && <GroupColorsButton groups={data.targets.groups} onChange={() => setColorTick(n => n + 1)} />}
             <select value={by} onChange={e => { setBy(e.target.value); setData(null) }}>{BY.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
             <select value={target} onChange={e => { setTarget(e.target.value); setData(null) }}>
               <option value="">весь объект</option>

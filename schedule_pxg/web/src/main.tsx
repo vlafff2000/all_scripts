@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { loadGroupColorOverrides } from '../../../pxg_core/web-ui/groupColors'
 import '@fontsource/pt-sans/cyrillic-400.css'
 import '@fontsource/pt-sans/cyrillic-700.css'
 import '@fontsource/pt-sans/latin-400.css'
@@ -17,4 +18,5 @@ import './app.css'
 
 createRoot(document.getElementById('root')!).render(<App />)
 mountLogButton()
+void loadGroupColorOverrides()
 mountBusyBar()

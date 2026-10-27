@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { GroupColorsButton } from '../../../pxg_core/web-ui/GroupColorsButton'
 import { exportExcel, getGsp, getGis, getObservers, type Observers, getGisModel, getGisModelWells, getGisModelWellsVariants, getRoof, reportIssue, type RoofGrid, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
@@ -49,6 +50,7 @@ function Issues({ notes, warnings }: { notes: string[]; warnings: string[] }) {
 
 export default function App() {
   const [app, setApp] = useState<AppState | null>(null)
+  const [, setColorTick] = useState(0)       // смена цвета группы вручную: перерисовать карту и подписи
   const [error, setError] = useState('')
   const [page, setPage] = useState<PageId>(routeOf())
   const [addr, setAddr] = useState(addressOf)
@@ -451,6 +453,7 @@ export default function App() {
                   <button type="button" className="quiet" onClick={() => lastGsp.set(selGroups[0])} disabled={selGroups.length < 2}>Только первая</button></div>}
               </div>
             </details>
+            {app!.gsps.length > 1 && <GroupColorsButton groups={app!.gsps} onChange={() => setColorTick(n => n + 1)} />}
             <div className="segmented" role="radiogroup" aria-label="Вид">
               {['Отбор', 'Закачка'].map(k => <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => lastKind.set(k)}>{k}</button>)}</div>
             {page !== 'compare' && <label className="sel"><span>Сезон</span>

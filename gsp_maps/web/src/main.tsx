@@ -4,6 +4,7 @@ import '@fontsource/pt-sans/cyrillic-700.css'
 import '@fontsource/pt-sans/latin-400.css'
 import '@fontsource/pt-sans/latin-700.css'
 import './prefs'
+import { loadGroupColorOverrides } from '../../../pxg_core/web-ui/groupColors'
 import App from './App'
 import '../../../pxg_core/web-ui/base.css'
 import '../../../pxg_core/web-ui/filepicker.css'
@@ -17,4 +18,5 @@ import './app.css'
 
 createRoot(document.getElementById('root')!).render(<App />)
 mountLogButton()
+void loadGroupColorOverrides()
 mountBusyBar()
