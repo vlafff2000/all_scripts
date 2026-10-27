@@ -231,3 +231,24 @@ def test_favorites_routes(home):
     c.post("/api/fs/visit", json={"path": str(home / "q")})
     r = c.post("/api/fs/visit", json={"path": str(home / "q")}).json()
     assert r["frequent"][0]["n"] == 2
+
+
+def test_unknown_fs_is_read_lightly(home, monkeypatch):
+    _tree(home)
+    monkeypatch.setattr(fs_browse, "_all_mounts", lambda: [(str(home), "fuse.weird"), ("/", "ext4")])
+    assert not fs_browse.is_known_local(str(home / "a_dir")) and fs_browse.is_known_local("/usr")
+    fs_browse._cache.clear()
+    r = fs_browse.list_dir(str(home), filt="xlsx")
+    assert r["lazy"] and not r["network"] and r["items"][2]["mtime"] == ""
+    fs_browse._cache.clear()
+
+
+def test_parallel_stat_many_entries(home):
+    for i in range(40):
+        (home / ("f%02d.xlsx" % i)).write_text("x" * i)
+    raw, _ = fs_browse._scan(str(home), True, __import__("time").monotonic(), 5)  # >32 записей: пул потоков
+    assert len(raw) == 40 and all(r["mt"] is None for r in raw)
+    assert not fs_browse._fill_stats(str(home), raw, __import__("time").monotonic(), 5)
+    assert {r["name"]: r["size"] for r in raw}["f07.xlsx"] == 7
+    st = fs_browse.stat_items(str(home), ["f03.xlsx", "../x"])
+    assert st["f03.xlsx"]["size"] == 3 and "../x" not in st
