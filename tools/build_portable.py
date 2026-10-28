@@ -268,26 +268,6 @@ def copy_icons(folder):
         shutil.copy2(str(item), str(icons / item.name))
 
 
-# Файлы .desktop рядом со скриптами: двойной щелчок запускает действие без терминала (в РЕД ОС .sh по двойному щелчку может не запускаться)
-LINUX_TWINS = {'Создать ярлыки ПХГ.desktop': ('sozdat_yarlyki.sh', 'Создать ярлыки ПХГ'),
-               'Поисковик - папки по умолчанию (включить).desktop': ('poiskovik_papki_vkl.sh', 'Поисковик для папок: включить'),
-               'Поисковик - папки по умолчанию (выключить).desktop': ('poiskovik_papki_vykl.sh', 'Поисковик для папок: выключить')}
-
-
-def twin_text(script, title):
-    # %k — путь файла .desktop (в GLib это обычный путь; на случай file:// приставка снимается): переходим в его папку и запускаем скрипт
-    return ('[Desktop Entry]\nType=Application\nVersion=1.0\nName={t}\nComment={t}\n'
-            "Exec=bash -c 'p=${{1#file://}}; cd \"$(dirname \"$p\")\" && exec bash {s}' _ %k\n"
-            'Icon=system-run\nTerminal=false\nCategories=Utility;\n').format(t=title, s=script)
-
-
-def write_twins(folder):
-    for name, (script, title) in LINUX_TWINS.items():
-        path = folder / name
-        path.write_text(twin_text(script, title), encoding='utf-8')
-        path.chmod(0o755)
-
-
 def write_launchers(target, folder):
     if target == 'windows':
         for name, body in WINDOWS_LAUNCHERS.items():
@@ -300,7 +280,6 @@ def write_launchers(target, folder):
             path = folder / name
             path.write_text(LINUX_PREFIX + body + '\n', encoding='utf-8')
             path.chmod(0o755)
-        write_twins(folder)
         text = README.format(target='Linux x86_64, glibc 2.17+ (РЕД ОС 7.3 и новее)', example='~/GasAtlas',
                              six='ishodnye_dannye.sh', five='ishodnye_dannye_console.sh', maps='karty.sh', unrst='perechislit_unrst.sh', descr='opisat_model.sh', sched='gdm.sh', shortcuts='sozdat_yarlyki.sh', note=LINUX_NOTE)
         (folder / 'ПРОЧТИТЕ.txt').write_text(text, encoding='utf-8')

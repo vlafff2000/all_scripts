@@ -45,6 +45,28 @@ async def ping(request: Request):
     return JSONResponse({"ok": True})
 
 
+async def integration(request: Request):
+    """Вкладка «Интеграция» в окне: Поисковик для папок и ярлыки на рабочем столе, результат показывается в окне (без терминала)."""
+    from pxg_core import desktop_shortcuts as ds
+    from . import default_folder as df
+    if request.method == "POST":
+        action = str((await _body(request)).get("action") or "")
+        try:
+            if action == "folders_on":
+                text = await run_in_threadpool(df.enable_windows if os.name == "nt" else df.enable_linux)
+            elif action == "folders_off":
+                text = await run_in_threadpool(df.disable_windows if os.name == "nt" else df.disable_linux)
+            elif action == "shortcuts":
+                made = await run_in_threadpool(ds.create, ds.desktop_dir())
+                text = "Ярлыков создано: %d (%s)." % (len(made), ds.desktop_dir()) if made else "Ярлыки создаются только в переносной папке с программами (запускалок рядом нет)."
+            else:
+                return _err("Неизвестное действие.")
+        except Exception as e:  # noqa: BLE001 - причина показывается в окне
+            return _err("%s: %s" % (type(e).__name__, e))
+        return JSONResponse({"text": text, "status": df.status()})
+    return JSONResponse({"status": await run_in_threadpool(df.status)})
+
+
 async def info(request: Request):
     return JSONResponse({"platform": sys.platform, "sep": os.sep, "home": os.path.expanduser("~"),
                          "start": os.environ.get("PXG_FINDER_START", ""), "categories": search.CATEGORIES, "colors": list(store.COLORS)})
@@ -176,6 +198,7 @@ def build_app() -> Starlette:
         *runlog.routes(),
         Route("/api/finder/info", info),
         Route("/api/finder/ping", ping),
+        Route("/api/finder/integration", integration, methods=["GET", "POST"]),
         Route("/api/finder/search", start_search, methods=["POST"]),
         Route("/api/finder/job", job_poll),
         Route("/api/finder/job/cancel", job_cancel, methods=["POST"]),

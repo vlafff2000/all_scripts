@@ -204,3 +204,31 @@ export function Help({ onClose }: { onClose: () => void }) {
     </Modal>
   )
 }
+
+export function IntegrationDialog({ onClose }: { onClose: () => void }) {
+  const [status, setStatus] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { void getJson<{ status: string }>('/api/finder/integration').then(r => setStatus(r.status)) }, [])
+  const run = async (action: string) => {
+    setBusy(true); setMsg('')
+    const r = await post<{ text?: string; status?: string; error?: string }>('/api/finder/integration', { action })
+    setBusy(false)
+    setMsg(r.error ? 'Ошибка: ' + r.error : r.text || '')
+    if (r.status) setStatus(r.status)
+  }
+  return (
+    <Modal title="Поисковик как проводник по умолчанию" onClose={onClose} wide>
+      <p>Папки в других программах и ярлыки можно настроить прямо здесь, без терминала.</p>
+      <p className="muted">Состояние: Поисковик для папок {status || '…'}</p>
+      <div className="fx-btns" style={{ justifyContent: 'flex-start' }}>
+        <button className="primary" disabled={busy} onClick={() => run('folders_on')}>Открывать папки в Поисковике</button>
+        <button disabled={busy} onClick={() => run('folders_off')}>Вернуть прежний проводник</button>
+        <button disabled={busy} onClick={() => run('shortcuts')}>Создать ярлыки на рабочем столе</button>
+      </div>
+      {msg && <p className={msg.startsWith('Ошибка') ? 'bad' : ''}>{msg}</p>}
+      <p className="muted">Windows: добавляется пункт «Открыть в Поисковике» в меню правой кнопки на папке. РЕД ОС: Поисковик назначается программой для папок, прежняя запоминается.</p>
+      <div className="fx-btns"><button onClick={onClose}>Закрыть</button></div>
+    </Modal>
+  )
+}
