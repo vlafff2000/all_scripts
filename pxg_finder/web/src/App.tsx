@@ -7,7 +7,7 @@ import Preview from './Preview'
 import SearchBar from './SearchBar'
 import Palette from './Palette'
 import type { Cmd } from './Palette'
-import { Confirm, Conflict, DupsDialog, Help, IndexDialog, MetaDialog, Prompt, TrashDialog } from './Dialogs'
+import { Confirm, Conflict, DupsDialog, Help, IndexDialog, IntegrationDialog, MetaDialog, Prompt, TrashDialog } from './Dialogs'
 import { newTab } from './types'
 import type { AppState, MetaMap, PaneApi, Row, SearchSpec, Tab } from './types'
 
@@ -16,7 +16,7 @@ type Dlg =
   | { k: 'confirm'; title: string; text: string; ok: string; danger?: boolean; list?: string[]; done: () => void }
   | { k: 'conflict'; names: string[]; done: (c: 'skip' | 'overwrite' | 'rename') => void }
   | { k: 'meta'; path: string }
-  | { k: 'trash' } | { k: 'index' } | { k: 'help' } | { k: 'dups'; folder: string }
+  | { k: 'trash' } | { k: 'index' } | { k: 'help' } | { k: 'integration' } | { k: 'dups'; folder: string }
 interface MenuItem { label: string; run?: () => void; danger?: boolean; sep?: boolean; disabled?: boolean }
 interface Toast { id: number; text: string; kind: 'info' | 'bad' | 'job'; cancel?: () => void }
 
@@ -291,6 +291,7 @@ export default function App() {
     { id: 'trashview', title: 'Корзина программы', run: () => setDlg({ k: 'trash' }) },
     { id: 'refresh', title: 'Обновить', hint: 'Ctrl+R', run: () => paneApi[ap].current?.refresh() },
     { id: 'theme', title: 'Тема: светлая / тёмная / системная', run: () => update(s => ({ ...s, theme: s.theme === 'system' ? 'light' : s.theme === 'light' ? 'dark' : 'system' })) },
+    { id: 'integration', title: 'Сделать проводником по умолчанию / создать ярлыки', run: () => setDlg({ k: 'integration' }) },
     { id: 'help', title: 'Горячие клавиши и язык поиска', hint: 'F1', run: () => setDlg({ k: 'help' }) },
     { id: 'newfile', title: 'Новый файл', run: () => makeNew(false) },
     { id: 'selall', title: 'Выделить всё', hint: 'Ctrl+A', run: () => paneApi[ap].current?.selectAll() },
@@ -377,7 +378,7 @@ export default function App() {
       </header>
       <div className="fx-body" style={{ gridTemplateColumns: `${st.sideW}px 1fr ${st.preview ? st.previewW + 'px' : ''}` }}>
         <Sidebar places={places} favs={favs} meta={meta} current={folder} go={go} onFavChanged={reloadFavs} addFav={addFavManual} editMeta={editMeta}
-          openTrash={() => setDlg({ k: 'trash' })} openIndex={() => setDlg({ k: 'index' })} openDups={() => setDlg({ k: 'dups', folder })} />
+          openIntegration={() => setDlg({ k: 'integration' })} openTrash={() => setDlg({ k: 'trash' })} openIndex={() => setDlg({ k: 'index' })} openDups={() => setDlg({ k: 'dups', folder })} />
         <main className={'fx-panes' + (st.dual ? ' dual' : '')}>
           {panes.map(pi => {
             const pn = st.panes[pi]
@@ -423,6 +424,7 @@ export default function App() {
         onDone={async m => { setDlg(null); if (m) { await post('/api/finder/meta', { path: dlg.path, color: m.color, tags: m.tags, note: m.note }); void reloadMeta() } }} />}
       {dlg?.k === 'trash' && <TrashDialog onClose={() => setDlg(null)} onChanged={refreshAll} />}
       {dlg?.k === 'index' && <IndexDialog current={folder} onClose={() => setDlg(null)} onChanged={setRoots} />}
+      {dlg?.k === 'integration' && <IntegrationDialog onClose={() => setDlg(null)} />}
       {dlg?.k === 'help' && <Help onClose={() => setDlg(null)} />}
       {dlg?.k === 'dups' && <DupsDialog folder={dlg.folder} onClose={() => setDlg(null)} onShow={showInFolder} />}
     </div>

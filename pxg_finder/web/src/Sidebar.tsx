@@ -7,7 +7,7 @@ import type { MetaMap } from './types'
 interface Props {
   places: Place[]; favs: Favs; meta: MetaMap; current: string
   go: (p: string) => void; onFavChanged: () => void; addFav: () => void; editMeta: (p: string) => void
-  openTrash: () => void; openIndex: () => void; openDups: () => void
+  openTrash: () => void; openIntegration: () => void; openIndex: () => void; openDups: () => void
 }
 const same = (a: string, b: string) => a.replace(/\//g, '\\').toLowerCase() === b.replace(/\//g, '\\').toLowerCase()
 
@@ -49,6 +49,7 @@ export default function Sidebar(p: Props) {
       <div className="fx-cap">Инструменты</div>
       <button onClick={p.openIndex}><span>⚡ Индекс (быстрый поиск)</span></button>
       <button onClick={p.openDups}><span>♊ Дубликаты в папке</span></button>
+      <button onClick={p.openIntegration}><span>🔗 Проводник по умолчанию, ярлыки</span></button>
       <button onClick={p.openTrash}><span>🗑 Корзина программы</span></button>
     </nav>
   )

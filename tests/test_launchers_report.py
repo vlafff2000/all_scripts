@@ -22,8 +22,7 @@ def _bp():
 def test_oneshot_launchers_report_without_terminal(tmp_path):
     bp = _bp()
     bp.write_launchers("linux", tmp_path)
-    assert (tmp_path / "Создать ярлыки ПХГ.desktop").read_text(encoding="utf-8").count("sozdat_yarlyki.sh") == 1
-    assert os.access(tmp_path / "Создать ярлыки ПХГ.desktop", os.X_OK)
+    assert not list(tmp_path.glob("*.desktop"))  # .desktop рядом со скриптами не кладём: файловый менеджер не доверяет им
     (tmp_path / "python" / "bin").mkdir(parents=True)
     py = tmp_path / "python" / "bin" / "python3.13"
     py.write_text('#!/bin/sh\necho "результат $*"; exit ${FAIL:-0}\n')

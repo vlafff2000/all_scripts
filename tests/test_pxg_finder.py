@@ -206,3 +206,16 @@ def test_default_folder_texts_and_start_arg(tmp_path, monkeypatch):
     monkeypatch.setenv("PXG_FINDER_START", str(tmp_path))
     c = TestClient(api.build_app())
     assert c.get("/api/finder/info").json()["start"] == str(tmp_path)
+
+
+def test_integration_api(tmp_path, monkeypatch):
+    from pxg_finder import default_folder as df
+    monkeypatch.setattr(df, "_xdg", lambda *a: "")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    c = TestClient(api.build_app())
+    assert "выключено" in c.get("/api/finder/integration").json()["status"]
+    r = c.post("/api/finder/integration", json={"action": "folders_on"}).json()
+    assert "назначен" in r["text"] and (tmp_path / "share" / "applications" / df.DESKTOP_ID).exists()
+    assert "error" in c.post("/api/finder/integration", json={"action": "x"}).json()
+    c.post("/api/finder/integration", json={"action": "folders_off"})
+    assert not (tmp_path / "share" / "applications" / df.DESKTOP_ID).exists()
