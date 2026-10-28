@@ -198,6 +198,7 @@ def test_default_folder_texts_and_start_arg(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(df, "_xdg", lambda *a: calls.append(a) or ("old.desktop" if a[0] == "query" else ""))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("PXG_HOME", str(tmp_path / "pxg"))
     df.enable_linux(root)
     assert ("default", df.DESKTOP_ID, "inode/directory") in calls and (tmp_path / "share" / "applications" / df.DESKTOP_ID).exists()
@@ -212,6 +213,7 @@ def test_integration_api(tmp_path, monkeypatch):
     from pxg_finder import default_folder as df
     monkeypatch.setattr(df, "_xdg", lambda *a: "")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     c = TestClient(api.build_app())
     assert "выключено" in c.get("/api/finder/integration").json()["status"]
     r = c.post("/api/finder/integration", json={"action": "folders_on"}).json()
@@ -219,3 +221,14 @@ def test_integration_api(tmp_path, monkeypatch):
     assert "error" in c.post("/api/finder/integration", json={"action": "x"}).json()
     c.post("/api/finder/integration", json={"action": "folders_off"})
     assert not (tmp_path / "share" / "applications" / df.DESKTOP_ID).exists()
+
+
+def test_set_mimeapps_only_default_section(tmp_path, monkeypatch):
+    from pxg_finder import default_folder as d
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    (tmp_path / "mimeapps.list").write_text("[Added Associations]\ninode/directory=x.desktop;\n[Default Applications]\ninode/directory=old.desktop;\n", encoding="utf-8")
+    d._set_mimeapps("pxg.desktop")
+    text = (tmp_path / "mimeapps.list").read_text(encoding="utf-8")
+    assert text.count("inode/directory=pxg.desktop;") == 1 and "old.desktop" not in text and "x.desktop" in text
+    d._set_mimeapps(None)
+    assert "pxg.desktop" not in (tmp_path / "mimeapps.list").read_text(encoding="utf-8")

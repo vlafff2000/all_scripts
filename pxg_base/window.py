@@ -27,7 +27,40 @@ def wait_ready(port: int, timeout: float = 20) -> bool:
     return False
 
 
-def run(browser: bool = False, port: int = 0, title: str = "Работа с исходными данными", app_factory=None) -> int:
+_CHROMIUM = ("yandex-browser", "yandex-browser-stable", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
+             "chrome", "brave-browser", "microsoft-edge", "microsoft-edge-stable")
+
+
+def chromium_path() -> str:
+    """Браузер на движке Chromium (Яндекс, Chromium, Chrome, Edge): умеет открывать страницу окном приложения без адресной строки."""
+    import os
+    import shutil
+    for name in _CHROMIUM:
+        found = shutil.which(name)
+        if found:
+            return found
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):
+        for rel in (r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe"):
+            path = os.path.join(base, rel) if base else ""
+            if path and os.path.isfile(path):
+                return path
+    return ""
+
+
+def app_window(url: str, profile: str):
+    """Отдельное окно приложения (без вкладок и адресной строки, своя группа на панели задач); None, если подходящего браузера нет."""
+    import subprocess
+    exe = chromium_path()
+    if not exe:
+        return None
+    try:
+        return subprocess.Popen([exe, "--app=" + url, "--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check",
+                                 "--class=PxgApp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+
+
+def run(browser: bool = False, port: int = 0, title: str = "Работа с исходными данными", app_factory=None, app_profile: str = "") -> int:
     import uvicorn
 
     if app_factory is None:
@@ -60,6 +93,23 @@ def run(browser: bool = False, port: int = 0, title: str = "Работа с ис
             return 0
         except Exception as error:  # например, нет WebView2
             print("Окно приложения не открылось (%s), открываю в браузере" % error)
+    if app_profile:  # окно приложения через Chromium; закрыли окно — сервер останавливается
+        proc = app_window(url, app_profile)
+        if proc is not None:
+            started = time.monotonic()
+            try:
+                proc.wait()
+            except KeyboardInterrupt:
+                pass
+            if time.monotonic() - started > 5:  # браузер не подхватил чужой экземпляр: окно закрыто пользователем
+                server.should_exit = True
+                return 0
+            print("%s: окно открыто в уже запущенном браузере (остановка: Ctrl+C)" % title)
+            try:
+                thread.join()
+            except KeyboardInterrupt:
+                server.should_exit = True
+            return 0
     webbrowser.open(url)
     print("%s: %s  (остановка: Ctrl+C)" % (title, url))
     try:
