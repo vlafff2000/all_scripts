@@ -52,7 +52,9 @@ def main(argv=None) -> int:
     from .api import build_app
     if argv and argv[0] == "--browser":
         _exit_when_tab_closed()
-    return run(browser=bool(argv and argv[0] == "--browser"), title="Поисковик", app_factory=build_app)
+    from pxg_finder import store
+    profile = os.path.join(store.home(), "finder_window")  # свой профиль: отдельное окно приложения со своей группой на панели задач
+    return run(browser=bool(argv and argv[0] == "--browser"), title="Поисковик", app_factory=build_app, app_profile=profile)
 
 
 if __name__ == "__main__":

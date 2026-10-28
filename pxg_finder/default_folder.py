@@ -43,6 +43,44 @@ def _xdg(*args: str) -> str:
         return ""
 
 
+def mimeapps_path() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "mimeapps.list"
+
+
+def _set_mimeapps(app: Optional[str]) -> None:
+    """Прямая запись в ~/.config/mimeapps.list (если xdg-mime/gio не сработали или их нет): app=None убирает назначение."""
+    path = mimeapps_path()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    except OSError:
+        return
+    key = "inode/directory="
+    out, section = [], ""
+    for line in lines:
+        if line.startswith("["):
+            section = line.strip()
+        elif section == "[Default Applications]" and line.startswith(key):
+            continue
+        out.append(line)
+    if app:
+        if "[Default Applications]" not in out:
+            out.append("[Default Applications]")
+        out.insert(out.index("[Default Applications]") + 1, key + app + ";")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _refresh_linux() -> None:
+    for cmd in (["update-desktop-database", str(applications_dir())], ["gio", "mime", "inode/directory", DESKTOP_ID]):
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
 def enable_linux(root: Path = ROOT) -> str:
     memo = memo_path()
     prev = _xdg("query", "default", "inode/directory")
@@ -53,7 +91,21 @@ def enable_linux(root: Path = ROOT) -> str:
     apps.mkdir(parents=True, exist_ok=True)
     (apps / DESKTOP_ID).write_text(desktop_text(root), encoding="utf-8")
     _xdg("default", DESKTOP_ID, "inode/directory")
-    return "Поисковик назначен программой для папок (было: %s)." % (prev or "не задано")
+    _refresh_linux()
+    if _xdg("query", "default", "inode/directory") != DESKTOP_ID:
+        _set_mimeapps(DESKTOP_ID)  # запасной путь: пишем настройку сами
+    ok = _xdg("query", "default", "inode/directory") == DESKTOP_ID or "inode/directory=%s" % DESKTOP_ID in _read_mimeapps()
+    if not ok:
+        return "Не удалось назначить Поисковик программой для папок: система не приняла настройку (проверьте ~/.config/mimeapps.list)."
+    return ("Поисковик назначен программой для папок (было: %s). Папки, которые открывают другие программы («Показать в папке» и т. п.), "
+            "теперь откроются в нём. Сам файловый менеджер РЕД ОС (Caja) двойной щелчок по папке обрабатывает по-своему." % (prev or "не задано"))
+
+
+def _read_mimeapps() -> str:
+    try:
+        return mimeapps_path().read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def disable_linux() -> str:
@@ -64,6 +116,8 @@ def disable_linux() -> str:
         pass
     if prev:
         _xdg("default", prev, "inode/directory")
+    if "inode/directory=%s" % DESKTOP_ID in _read_mimeapps():
+        _set_mimeapps(prev or None)
     entry = applications_dir() / DESKTOP_ID
     if entry.exists():
         entry.unlink()
@@ -80,11 +134,19 @@ def enable_windows(root: Path = ROOT) -> str:
             winreg.SetValueEx(k, "Icon", 0, winreg.REG_SZ, str(root / "icons" / "poiskovik.ico"))
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key + r"\command") as k:
             winreg.SetValue(k, "", winreg.REG_SZ, reg_command(root, arg))
-    return "Добавлен пункт «%s» в меню правой кнопки на папке." % TITLE
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Directory\shell") as k:  # команда по умолчанию для папок: их открывают другие программы
+        winreg.SetValue(k, "", winreg.REG_SZ, "PxgFinder")
+    return ("Добавлен пункт «%s» в меню правой кнопки на папке, и Поисковик назначен для папок, которые открывают другие программы. "
+            "Двойной щелчок внутри проводника Windows (рабочий стол, окна папок) Windows оставляет за собой." % TITLE)
 
 
 def disable_windows() -> str:
     import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Directory\shell", 0, winreg.KEY_SET_VALUE) as k:
+            winreg.DeleteValue(k, "")
+    except OSError:
+        pass
     for key in REG_KEYS:
         for sub in (key + r"\command", key):
             try:
@@ -102,6 +164,8 @@ def status() -> str:
             return "включено (пункт в меню папки)"
         except OSError:
             return "выключено"
+    if "inode/directory=%s" % DESKTOP_ID in _read_mimeapps():
+        return "включено"
     return "включено" if _xdg("query", "default", "inode/directory") == DESKTOP_ID else "выключено (сейчас: %s)" % (_xdg("query", "default", "inode/directory") or "не задано")
 
 
