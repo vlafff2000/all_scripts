@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { GroupColorsButton } from '../../../pxg_core/web-ui/GroupColorsButton'
 import { colorOfGroup, groupColors, groupKey } from '../../../pxg_core/web-ui/groupColors'
 import PageHead from './PageHead'
+import { useTabFilter } from './TabFilter'
+import { viewCharts } from './wellView'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { dayNum, isoOfDay, mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 import type { Chart } from '../../../pxg_core/web-ui/chart/chartTypes'
@@ -53,7 +55,9 @@ export default function Charts({ st }: { st: AppState }) {
   const [names, setNames] = useState<string[]>(st.scenarios.length ? [st.scenarios[0].name] : [])
   const [by, setBy] = useState('total')
   const [target, setTarget] = useState('')
-  const [data, setData] = useState<ChartsView | null>(null)
+  const [dataAll, setData] = useState<ChartsView | null>(null)
+  const f = useTabFilter('charts')
+  const data = useMemo(() => viewCharts(dataAll, f.keep), [dataAll, f.keep])
   const [pick, setPick] = useState('')
   const [colorTick, setColorTick] = useState(0)     // смена цвета группы вручную: перестроить графики
   const [msg, setMsg] = useState('')
@@ -75,6 +79,7 @@ export default function Charts({ st }: { st: AppState }) {
   return (
     <main className="workspace">
       <PageHead title="Графики" lede="Расходы и накопленные объёмы по сценариям: проверьте, что сезоны стыкуются и объёмы похожи на ожидаемые." />
+      {f.node}
       <section className="card">
         <h2>Графики расходов и накопленных объёмов</h2>
         {st.scenarios.length === 0 ? <p className="muted">Сначала создайте сценарий с календарём сезонов (вкладка «Сценарии»).</p> : <>

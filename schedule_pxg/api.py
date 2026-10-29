@@ -7,7 +7,7 @@ import datetime as dt
 import io
 import os
 
-from pxg_core import fs_browse, group_colors, runlog, workspace
+from pxg_core import fs_browse, group_colors, runlog, well_presets, workspace
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -38,6 +38,26 @@ def _err(text: str, code: int = 400) -> JSONResponse:
 
 def _project() -> Project:
     return Project.load(FOLDER) if os.path.isdir(FOLDER) else Project()
+
+
+def _presets_folder():
+    """Папка проекта Атласа, с которым работает ГДМ (выбранный в «Истории/модели» или самый свежий): там лежат пресеты скважин,
+    общие с Атласом и «Картами». Нет проекта Атласа — None (общий каталог пользователя)."""
+    from pathlib import Path as _P
+    from gsp_maps import atlas_source
+    saved = _project().histmodel or {}
+    root = atlas_source.storage_root(str(saved.get("atlas_storage") or ""))
+    if root is None:
+        return None
+    pid = str(saved.get("atlas_project") or "") or atlas_source.default_project(atlas_source.list_projects(root))
+    folder = _P(root) / "projects" / pid if pid else None
+    return folder if folder is not None and folder.is_dir() else None
+
+
+async def wells_get(request: Request):
+    """Скважины проекта ГДМ и их группы: из них собирается фильтр скважин на вкладках."""
+    p = _project()
+    return JSONResponse({"wells": sorted(p.wells, key=lambda w: (len(w), w)), "groupOf": dict(p.well_group)})
 
 
 def _clean(path) -> str:
@@ -1577,6 +1597,8 @@ def build_app() -> Starlette:
         Route("/api/results/report", results_report),
         *fs_browse.routes(),
         *group_colors.routes(),
+        *well_presets.routes(_presets_folder),
+        Route("/api/wells", wells_get),
         Route("/api/sources/sample", sources_sample),
         Route("/api/quality", quality_get),
         Route("/api/quality/exclude", quality_exclude, methods=["POST"]),
