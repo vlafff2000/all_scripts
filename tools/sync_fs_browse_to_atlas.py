@@ -1,6 +1,6 @@
 """Копирует общий проводник из all_scripts в Газовый Атлас (копия, правится только здесь).
 
-Источник правды — pxg_core/fs_browse.py (сервер /api/fs/*), pxg_core/group_colors.py (сквозные цвета групп) и pxg_core/web-ui/FilePicker.tsx + filepicker.css (окно выбора).
+Источник правды — pxg_core/fs_browse.py (сервер /api/fs/*), pxg_core/group_colors.py (сквозные цвета групп) и pxg_core/web-ui/FilePicker.tsx + filepicker.css (окно выбора) и desktopDownload.ts (скачивание через проводник).
 Копии байт в байт совпадают с источником: Атлас не правит их руками.
 
     python tools/sync_fs_browse_to_atlas.py [путь_к_gas_atlas]            # обновить копии
@@ -19,6 +19,7 @@ FILES = [
     (HERE / "pxg_core" / "group_colors.py", Path("atlas") / "group_colors.py"),
     (HERE / "pxg_core" / "web-ui" / "FilePicker.tsx", Path("web") / "src" / "FilePicker.tsx"),
     (HERE / "pxg_core" / "web-ui" / "filepicker.css", Path("web") / "src" / "filepicker.css"),
+    (HERE / "pxg_core" / "web-ui" / "desktopDownload.ts", Path("web") / "src" / "desktopDownload.ts"),
     (HERE / "pxg_core" / "web-ui" / "groupColors.ts", Path("web") / "src" / "groupColors.ts"),
     (HERE / "pxg_core" / "web-ui" / "GroupColorsButton.tsx", Path("web") / "src" / "GroupColorsButton.tsx"),
     (HERE / "pxg_core" / "web-ui" / "groupcolors.css", Path("web") / "src" / "groupcolors.css"),
