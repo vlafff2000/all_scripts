@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Chart from './Chart'
 import { isMulti, getSeason, type GspData } from './api'
 import { SeasonCalc, fmt1, fmtInt, fmtMln, fmtPct, fmtTh } from './model'
+import { sortLabels } from './legendOrder'
 
 interface Props {
   g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number
@@ -47,7 +48,7 @@ function Lines({ lines, n, unit, fmt, win }: { lines: Line[]; n: number; unit: s
     <>
       <Chart mode="lines" labels={Array.from({ length: n }, (_, j) => 'день ' + (j + 1))} win={win} fmt={fmt} unit={unit} height={220} label="Накопленные кривые"
         series={lines.filter(l => l.ys.length > 0).map(l => ({ key: l.name, label: l.name, color: l.color, y: l.ys, dash: l.dash, bold: l.bold }))} />
-      <div className="cum-legend">{lines.map(l => <span key={l.name}><i style={{ background: l.color }} />{l.name}</span>)}</div>
+      <div className="cum-legend">{sortLabels(lines, l => l.name).map(l => <span key={l.name}><i style={{ background: l.color }} />{l.name}</span>)}</div>
     </>
   )
 }

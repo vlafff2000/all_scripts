@@ -21,6 +21,7 @@ from urllib.parse import quote
 
 import numpy as np
 
+from pxg_core import legend_order
 from pxg_core import word_export as wx
 
 PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#8a5a14']
@@ -44,6 +45,7 @@ FONTS = {
     'calibri': ('Calibri (как в Excel)', 'Calibri', 'Carlito'),
 }
 LEGEND_POS = {'auto': 'Автоматически', 'inside': 'Внутри, слева вверху', 'below': 'Под графиком', 'right': 'Справа', 'above': 'Над графиком'}
+LEGEND_ORDER = {'asc': 'По возрастанию: сезоны, годы, даты, скважины', 'module': 'Как задал график'}
 MARKERS = {'circle': ('Кружок', 'o'), 'square': ('Квадрат', 's'), 'diamond': ('Ромб', 'D'), 'triangle': ('Треугольник', '^'),
            'cross': ('Крест', 'x'), 'plus': ('Плюс', '+')}
 LIMITS = {'font_size': (5.0, 20.0), 'line_width': (0.5, 6.0), 'marker_size': (1.0, 15.0)}     # пт
@@ -71,6 +73,7 @@ class Style:
     title: Optional[str] = None                        # шаблон: {скважина}, {дата}
     legend: bool = True
     legend_pos: str = 'auto'
+    legend_order: str = 'asc'                          # подписи легенды: по возрастанию или как задал график (pxg_core/legend_order.py)
     line_width: Optional[float] = None                 # пт, обе кривые модели
     marker: str = 'circle'
     marker_size: Optional[float] = None                # пт, точки ГДИ
@@ -140,6 +143,7 @@ def style_from(form: Mapping[str, Any]) -> Style:
                  x_label=_opt_text(form, 'x_label', 'Подпись оси X'), y_label=_opt_text(form, 'y_label', 'Подпись оси Y'),
                  title_on=_flag(form, 'title_on', True), title=_opt_text(form, 'title', 'Заголовок графика'),
                  legend=_flag(form, 'legend', True), legend_pos=pick('legend_pos', LEGEND_POS, 'auto'),
+                 legend_order=pick('legend_order', LEGEND_ORDER, 'asc'),
                  line_width=_opt_float(form, 'line_width', 'Толщина линии, пт', *lim['line_width']),
                  marker=pick('marker', MARKERS, 'circle'),
                  marker_size=_opt_float(form, 'marker_size', 'Размер точек, пт', *lim['marker_size']),
@@ -312,13 +316,13 @@ def _draw(row: Mapping[str, Any], style: Style, width: float, height: float, sav
             if pos == 'auto':
                 pos = 'below' if excel else 'inside'
             if pos == 'below':
-                ax.legend(loc='upper center', bbox_to_anchor=(.5, -.16), ncol=2, frameon=False, fontsize=legend_size)
+                legend_order.legend(ax, style.legend_order, loc='upper center', bbox_to_anchor=(.5, -.16), ncol=2, frameon=False, fontsize=legend_size)
             elif pos == 'above':
-                ax.legend(loc='lower center', bbox_to_anchor=(.5, 1.0), ncol=2, frameon=False, fontsize=legend_size)
+                legend_order.legend(ax, style.legend_order, loc='lower center', bbox_to_anchor=(.5, 1.0), ncol=2, frameon=False, fontsize=legend_size)
             elif pos == 'right':
-                ax.legend(loc='center left', bbox_to_anchor=(1.01, .5), frameon=False, fontsize=legend_size)
+                legend_order.legend(ax, style.legend_order, loc='center left', bbox_to_anchor=(1.01, .5), frameon=False, fontsize=legend_size)
             else:
-                ax.legend(loc='upper left', fontsize=legend_size, frameon=True)
+                legend_order.legend(ax, style.legend_order, loc='upper left', fontsize=legend_size, frameon=True)
         return save(fig)
 
 
@@ -657,7 +661,7 @@ def options() -> dict:
         'layout': wx.catalog(),
         'chart': {'y': list(Y_MODES), 'variant': list(VARIANTS), 'look': list(LOOKS), 'dpi_png': list(PNG_DPI),
                   'width': [80, 300], 'height': [40, 400], 'defaults': dataclasses.asdict(Style()),
-                  'format': {'fonts': [[k, v[0]] for k, v in FONTS.items()], 'legend_pos': [[k, v] for k, v in LEGEND_POS.items()],
+                  'format': {'fonts': [[k, v[0]] for k, v in FONTS.items()], 'legend_pos': [[k, v] for k, v in LEGEND_POS.items()], 'legend_order': [[k, v] for k, v in LEGEND_ORDER.items()],
                              'markers': [[k, v[0]] for k, v in MARKERS.items()], 'limits': {k: list(v) for k, v in LIMITS.items()},
                              'labels': {'x': LABEL_X, 'y': LABEL_Y, 'title': TITLE}, 'title_fields': list(TITLE_FIELDS)}},
         'caption': {'default': CAPTION_DEFAULT, 'fields': list(CAPTION_FIELDS)},

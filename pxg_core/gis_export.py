@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from . import gis
+from . import gis, legend_order
 
 FORMAT_VERSION = 2   # 2: в интервалах добавлен номер замера (investigation)
 FORMAT_NAME = "gis_db"
@@ -104,6 +104,8 @@ def export(results: Dict[str, gis.SheetResult], out_dir: str, bottom: Optional[p
         # подробная сборка: каждый интервал каждого замера (в одном замере бывает до 15 интервалов)
         frames["Строки"].sort_values(["Скважина", "Дата", "Замер", "От, м"], na_position="last").to_excel(
             xw, sheet_name="Интервалы", index=False)
+        # легенда пачек: по листу и цвету по возрастанию (номера скважин — по числу, а не по символу)
+        frames["Легенда"] = frames["Легенда"].sort_values(["Лист", "Цвет"], key=lambda col: col.map(legend_order.label_key))
         for key in ("Замеры", "Листы", "Легенда", "Проверка"):
             frames[key].to_excel(xw, sheet_name=key, index=False)
         if bottom is not None and len(bottom):

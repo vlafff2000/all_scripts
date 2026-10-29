@@ -301,7 +301,7 @@ export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv') => '/api
 /** Оформление графика: значения по умолчанию, пределы и подписи приходят с сервера (/api/adapt/export/options); null - авто. */
 export interface AdaptChartFormat {
   font: string; font_size: number | null; x_label: string | null; y_label: string | null; title_on: boolean; title: string | null
-  legend: boolean; legend_pos: string; line_width: number | null; marker: string; marker_size: number | null; grid: boolean
+  legend: boolean; legend_pos: string; legend_order: string; line_width: number | null; marker: string; marker_size: number | null; grid: boolean
   x_min: number | null; x_max: number | null; y_min: number | null; y_max: number | null
 }
 /** Настройки индикаторной диаграммы для выгрузки: ось Y, какие кривые, оформление, ширина графика (мм), оформление. */
@@ -340,7 +340,7 @@ export interface AdaptExportOptions {
   chart: { y: string[]; variant: string[]; look: string[]; dpi_png: number[]; width: [number, number]; height: [number, number]
     defaults: AdaptChartDefaults
     format: {
-      fonts: [string, string][]; legend_pos: [string, string][]; markers: [string, string][]; limits: Record<string, [number, number]>
+      fonts: [string, string][]; legend_pos: [string, string][]; legend_order: [string, string][]; markers: [string, string][]; limits: Record<string, [number, number]>
       labels: { x: string; y: Record<string, string>; title: string }; title_fields: string[]
     } }
   caption: { default: string; fields: string[] }

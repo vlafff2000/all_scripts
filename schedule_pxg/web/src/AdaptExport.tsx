@@ -274,6 +274,7 @@ export default function AdaptExport() {
               {cfg.style.title_on && <Txt label="Текст заголовка" value={cfg.style.title ?? F.labels.title} wide max={200} onCommit={v => setS({ title: v })} />}
               <Chk label="Легенда" checked={cfg.style.legend} onChange={v => setS({ legend: v })} />
               {cfg.style.legend && <Sel label="Положение легенды" value={cfg.style.legend_pos} options={F.legend_pos} onCommit={v => setS({ legend_pos: String(v) })} />}
+              {cfg.style.legend && <Sel label="Порядок подписей в легенде" value={cfg.style.legend_order} options={F.legend_order} onCommit={v => setS({ legend_order: String(v) })} />}
               <Num label="Толщина линии, пт" value={cfg.style.line_width} {...fbounds('line_width')} empty onCommit={v => setS({ line_width: v })} />
               <Sel label="Точки ГДИ: форма" value={cfg.style.marker} options={F.markers} onCommit={v => setS({ marker: String(v) })} />
               <Num label="Размер точек, пт" value={cfg.style.marker_size} {...fbounds('marker_size')} empty onCommit={v => setS({ marker_size: v })} />
@@ -400,7 +401,7 @@ function styleFrom(d: AdaptChartDefaults): Style {
 /** Только поля оформления (без вида графика и размера) - для кнопки «по умолчанию». */
 function formatFrom(d: AdaptChartDefaults): Partial<Style> {
   return { font: d.font, font_size: d.font_size, x_label: d.x_label, y_label: d.y_label, title_on: d.title_on, title: d.title,
-    legend: d.legend, legend_pos: d.legend_pos, line_width: d.line_width, marker: d.marker, marker_size: d.marker_size, grid: d.grid,
+    legend: d.legend, legend_pos: d.legend_pos, legend_order: d.legend_order, line_width: d.line_width, marker: d.marker, marker_size: d.marker_size, grid: d.grid,
     x_min: d.x_min, x_max: d.x_max, y_min: d.y_min, y_max: d.y_max }
 }
 
