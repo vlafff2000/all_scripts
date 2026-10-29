@@ -11,7 +11,9 @@ import LayersGrip from './LayersGrip'
 import { bgAlign, bgOpacity, bgShow, useBgUrl } from './background'
 import { alignTransform, applyAffine, FLIP_Y, polyAlign, polyStyles, styleOf, usePolygons } from './polygons'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
+import PaletteEditor from './PaletteEditor'
+import { defOf, gradientStops, setOverride, usePaletteOverride } from './palette'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, paintColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
 
 /** Цвета вариантов критерия: одинаковы на карте, в списке вариантов панели и в подписях изолиний. */
 /** Кровля пласта: от синего (глубже) к светло-жёлтому (выше). */
@@ -348,7 +350,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return { mode: keys.length === 1 && keys[0] === season ? 'one' : scopeMode, keys, calcs: multi.calcs }
   }, [multi, scopeMode, picked, season])
   const calcPaint: PaintData | null = useMemo(() => paintFor(options.paint, g, calc, kind, season, a, b, options.paint === 'entry' || options.paint === 'wf' ? scope : undefined), [options.paint, g, calc, kind, season, a, b, scope])
-  const paintData: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : options.paint === 'gis' ? gis?.paint ?? null : calcPaint
+  const rawPaint: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : options.paint === 'gis' ? gis?.paint ?? null : calcPaint
+  // палитра: изменённая инженером или режима по умолчанию; ручной диапазон, если он задан и корректен
+  const palOv = usePaletteOverride(rawPaint?.palKey ?? options.paint)
+  const paintData: PaintData | null = useMemo(() => {
+    if (!rawPaint || !palOv) return rawPaint
+    const lo = palOv.lo ?? rawPaint.lo, hi = palOv.hi ?? rawPaint.hi
+    return { ...rawPaint, pal: palOv, ...(hi > lo ? { lo, hi } : {}) }
+  }, [rawPaint, palOv])
   const wm = useMemo(() => waterMonths(water), [water])
   // кольца воды скважины: один месяц — одно кольцо (замеры месяца сводятся к максимуму)
   const rings = useMemo(() => {
@@ -587,7 +596,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const paints = useMemo(() => {
     if (!paintData) return null
     const m = new Map<number, { color: string; label: string }>()
-    paintData.vals.forEach((v, well) => m.set(well, { color: rampColor(paintData.stops, (v.v - paintData.lo) / (paintData.hi - paintData.lo)), label: v.label }))
+    paintData.vals.forEach((v, well) => m.set(well, { color: paintColor(paintData, v.v), label: v.label }))
     return m
   }, [paintData])
   const groupsOn = usePref(groupColoring)
@@ -716,7 +725,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 if (byGroup) { for (const n of c.idx) { const gn = g.groupOf![String(placed[n].well)]; cnt.set(gn, (cnt.get(gn) || 0) + 1) } const top = [...cnt.entries()].sort((u, v) => v[1] - u[1])[0]; ringC = groupColor(top[0]); fill = ringC }
                 if (paintData) {
                   const vs = c.idx.map(n => paintData.vals.get(placed[n].well)?.v).filter((v): v is number => v !== undefined)
-                  fill = vs.length ? rampColor(paintData.stops, (vs.reduce((p2, q2) => p2 + q2, 0) / vs.length - paintData.lo) / (paintData.hi - paintData.lo)) : pal.muted
+                  fill = vs.length ? paintColor(paintData, vs.reduce((p2, q2) => p2 + q2, 0) / vs.length) : pal.muted
                 }
                 const wet = c.idx.filter(n => (water.get(placed[n].well) || []).some(w => (w.flow ?? 0) > 0)).length
                 const title = `${c.idx.length} скв. рядом: ${fmtMln(c.total)} млн м³` + (win.sumAll > 0 ? ` (${fmtPct(c.total / win.sumAll)})` : '') + (wet ? `, с водой: ${wet}` : '') + (byGroup ? ' · ' + [...cnt.entries()].sort((u, v) => v[1] - u[1]).map(e => e[0] + ': ' + e[1]).join(', ') : '') + ' · нажмите или приблизьте карту'
@@ -742,7 +751,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const obsLayer = obsPts.length ? <g aria-label="Наблюдательные и геофизические скважины">
     {obsPts.map(o => {
       const pv = paintData?.vals.get(o.well), r = rd * 0.5, x = o.x!, y = -o.y!, geo = o.fund === 'geophysical'
-      const fill = pv && paintData ? rampColor(paintData.stops, (pv.v - paintData.lo) / (paintData.hi - paintData.lo)) : pal.surface
+      const fill = pv && paintData ? paintColor(paintData, pv.v) : pal.surface
       return <g key={o.well}>
         <path d={geo ? `M${x},${y - r}L${x + r},${y + r * 0.8}L${x - r},${y + r * 0.8}Z` : `M${x},${y - r}L${x + r},${y}L${x},${y + r}L${x - r},${y}Z`} fill={fill} stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
         <text x={x} y={y - r - 3 / K} fontSize={10 / K} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{o.well}{pv ? ' · ' + pv.label : ''}</text>
@@ -768,7 +777,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up) }
                 el.addEventListener('pointermove', move); el.addEventListener('pointerup', up)
               }}><b>№ {tipWell.well}</b>{tipWell.dir && <span className="tip-dir">{tipWell.dir}</span>}{multiG && g.groupOf?.[String(tipWell.well)] && <span className="tip-dir">{g.groupOf[String(tipWell.well)]}</span>}</div>
-            {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? rampColor(paintData.stops, (paintData.vals.get(tipWell.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
+            {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? paintColor(paintData, paintData.vals.get(tipWell.well)!.v) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
             <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
             <div className="tip-share"><span><i style={{ width: Math.min(100, share * 100 * 4) + '%' }} /></span>{share > 0 ? fmtPct(share) + ' ГСП' : 'не работала'}</div>
             <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
@@ -916,7 +925,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           <rect width={LW} height={paintData ? 92 : legH} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
           {paintData ? <>
             <text x={14} y={22} fontSize={12.5} fontWeight={700} fill={pal.ink}>{paintData.title}</text>
-            <defs><linearGradient id="paintramp" x1="0" x2="1">{[0, 0.25, 0.5, 0.75, 1].map(t => <stop key={t} offset={t} stopColor={rampColor(paintData.stops, t)} />)}</linearGradient></defs>
+            <defs><linearGradient id="paintramp" x1="0" x2="1">{gradientStops(paintData.pal ?? defOf(paintData.stops)).map((g2, k) => <stop key={k} offset={g2.offset} stopColor={g2.color} />)}</linearGradient></defs>
             <rect x={14} y={32} width={LW - 28} height={10} rx={5} fill="url(#paintramp)" />
             <text x={14} y={57} fontSize={11} fill={pal.muted}>{paintData.fmt(paintData.lo)}</text>
             {paintData.mid && <text x={LW / 2} y={57} fontSize={11} fill={pal.muted} textAnchor="middle">{paintData.fmt((paintData.lo + paintData.hi) / 2)}</text>}
@@ -991,6 +1000,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               <button type="button" onClick={() => refWells.set(REF_PRESET_AN2025)} title="Скв. 56, 83, 220, 182, 237, 264, 437, 520 (ГСП 1, 2, 3, 3, 4, 5, 8, 9)">Таблица 1.2 АН-2025</button>
               <p className="muted small">Цвет маркера — группа скважины в проекте Атласа, остальные скважины — фон. Список — решение инженера.</p>
             </>}
+            {paintData && rawPaint && <details className="pal-det"><summary>Палитра{palOv ? ' · изменена' : ''}</summary>
+              <PaletteEditor def={paintData.pal ?? defOf(rawPaint.stops)} base={defOf(rawPaint.stops)} auto={[rawPaint.lo, rawPaint.hi]}
+                onChange={d => setOverride(rawPaint.palKey ?? options.paint, d)} onReset={() => setOverride(rawPaint.palKey ?? options.paint, null)} />
+            </details>}
             {!paintData && !isRef && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
               <button type="button" role="radio" aria-checked={options.sectors === 'plain'} onClick={() => onOptions({ sectors: 'plain' })}>Один цвет</button></div>}
