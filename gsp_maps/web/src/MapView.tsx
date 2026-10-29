@@ -82,12 +82,12 @@ const Glyph = memo(function Glyph(p: {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={pal.surface} stroke={pal.muted} strokeWidth={rmax * 0.04} strokeDasharray={`${rmax * 0.09} ${rmax * 0.07}`} />)
   } else if (p.paint) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.paint.color} stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
-  } else if (!p.sectors || p.gcolor) {
+  } else if (!p.sectors) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.gcolor || pal.gas} stroke={pal.surface} strokeWidth={ring} />)
   } else {
     const sum = p.months.reduce((s, v) => s + v, 0) || 1
     const parts = p.order.filter(m => p.months[m] > 0)
-    if (parts.length <= 1) els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.monthColors[parts[0] ?? 0] || pal.gas} stroke={pal.surface} strokeWidth={ring} />)
+    if (parts.length <= 1) els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.monthColors[parts[0] ?? 0] || pal.gas} stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
     else {
       let a0 = 0
       for (const m of parts) {
@@ -95,7 +95,7 @@ const Glyph = memo(function Glyph(p: {
         els.push(<path key={m} d={sectorPath(x, y, r, a0, a1)} fill={p.monthColors[m]} stroke={pal.surface} strokeWidth={rmax * 0.03} strokeLinejoin="round" />)
         a0 = a1
       }
-      els.push(<circle key="o" cx={x} cy={y} r={r} fill="none" stroke={pal.surface} strokeWidth={ring} />)
+      els.push(<circle key="o" cx={x} cy={y} r={r} fill="none" stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
     }
   }
   // вода: по кольцу на каждый месяц с водой, снаружи друг от друга (раньше — ближе к кругу), цвет — месяц, толщина ∝ л/ч; водный фактор — кружок на внешнем кольце
@@ -1018,7 +1018,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           {!isRef && <section><h4>Круги</h4>
             <label className="row"><span>Размер</span><input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
             <label className="row"><span>Подпись</span><select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
-            {multiG && <label className="check" title="Круг скважины окрашивается цветом её группы (при раскраске по значению цвет группы — обводка)"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
+            {multiG && <label className="check" title="Цвет группы: заливка круга, а при секторах по месяцам или раскраске по значению — обводка"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
             <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
             <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
             {!paintData && <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Шкала по всему сезону</label>}
