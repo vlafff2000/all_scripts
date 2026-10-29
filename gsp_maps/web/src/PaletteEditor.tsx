@@ -14,11 +14,13 @@ interface Props {
   auto: [number, number]
   onChange: (d: PaletteDef) => void
   onReset: () => void
+  /** Без полей «мин/макс»: палитра раскладывается по порядку (месяцы), а не по значению. */
+  noRange?: boolean
 }
 
 /** Редактор палитры как в дизайнере геологии tNavigator: полоса градиента со стопами (тянуть, щёлкнуть по полосе — добавить стоп),
  *  цвет и положение выбранного стопа, число ступеней, обратить, диапазон, пресеты. */
-export default function PaletteEditor({ def, base, auto, onChange, onReset }: Props) {
+export default function PaletteEditor({ def, base, auto, onChange, onReset, noRange }: Props) {
   const bar = useRef<HTMLDivElement>(null)
   const useRefStops = useRef<PStop[]>(def.stops), defRef = useRef(def), onChangeRef = useRef(onChange)
   const [sel, setSel] = useState(0)
@@ -119,7 +121,7 @@ export default function PaletteEditor({ def, base, auto, onChange, onReset }: Pr
         {def.steps >= 2 && <label className="pal-pos">интервалов
           <input type="number" min={2} max={32} step={1} value={def.steps} onChange={e => set({ steps: Math.max(2, Math.min(32, Math.round(Number(e.target.value) || 2))) })} aria-label="Число интервалов" /></label>}
       </div>
-      <div className="pal-row">
+      {!noRange && <div className="pal-row">
         <label className="pal-pos">мин
           <input type="text" inputMode="decimal" className="pal-rng" value={def.lo === null ? '' : String(def.lo)} placeholder={String(+auto[0].toPrecision(4))}
             onChange={e => set({ lo: num(e.target.value) })} aria-label="Нижняя граница шкалы" /></label>
@@ -127,7 +129,7 @@ export default function PaletteEditor({ def, base, auto, onChange, onReset }: Pr
           <input type="text" inputMode="decimal" className="pal-rng" value={def.hi === null ? '' : String(def.hi)} placeholder={String(+auto[1].toPrecision(4))}
             onChange={e => set({ hi: num(e.target.value) })} aria-label="Верхняя граница шкалы" /></label>
         <button type="button" disabled={def.lo === null && def.hi === null} onClick={() => set({ lo: null, hi: null })} title="Границы шкалы снова по данным">По данным</button>
-      </div>
+      </div>}
       <label className="check"><input type="checkbox" checked={def.reverse} onChange={e => set({ reverse: e.target.checked })} />Обратить</label>
       <div className="pal-row">
         <select value="" onChange={e => pick(e.target.value)} aria-label="Готовые палитры">
