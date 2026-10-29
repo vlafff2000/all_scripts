@@ -17,5 +17,5 @@
 
 ## Устройство
 - `api.py` — маршруты `/api/finder/*` и общие `/api/fs/*`; `search.py` — разбор запроса, обход папок, индекс; `ops.py` — операции и корзина; `preview.py` — предпросмотр; `store.py` — метки, вид, папки индекса; `jobs.py` — фоновые задания.
-- Интерфейс: `web/` (React + TS), сборка `npm run build` кладёт её в `web/dist`, она лежит в git.
+- Интерфейс: `web/` (React + TS), сборка `npm run build` кладёт её в `web/dist`, она в git не хранится (CI архивов собирает её сам).
 - Тесты: `python -m pytest -q tests/test_pxg_finder.py`.
