@@ -29,6 +29,11 @@ export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'mod
 /** Выбранный параметр Атласа («таблица|колонка») и агрегация; запоминаются между сеансами. */
 export const atlasParam = pref<string>('gsp.atlasParam', '', raw => String(raw || ''))
 export const atlasAgg = pref<string>('gsp.atlasAgg', 'mean', raw => String(raw || 'mean'))
+/** Размер окна «Вид карты» (px), если его растянули; null — размер по умолчанию. */
+export const layersBox = pref<{ w: number; h: number } | null>('gsp.layersBox', null, raw => {
+  const o = raw as { w?: unknown; h?: unknown } | null
+  return o && Number.isFinite(Number(o.w)) && Number.isFinite(Number(o.h)) ? { w: Math.max(Number(o.w), 300), h: Math.max(Number(o.h), 240) } : null
+})
 /** ГИС и ГВК на карте: пачка, показатель, сезон, сезон для сравнения («Δ») и закреплённые инженером замеры («скважина:дата,…»). */
 export const gisPack = pref<string>('gsp.gisPack', '', raw => String(raw || ''))
 export const gisMetric = pref<string>('gsp.gisMetric', 'gvk_abs_m', raw => String(raw || 'gvk_abs_m'))
