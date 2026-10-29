@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import '../../../pxg_core/web-ui/desktopDownload'
 import '@fontsource/pt-sans/cyrillic-400.css'
 import '@fontsource/pt-sans/cyrillic-700.css'
 import '@fontsource/pt-sans/latin-400.css'
