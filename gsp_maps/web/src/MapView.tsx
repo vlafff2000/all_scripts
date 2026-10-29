@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import PolyPanel from './PolyPanel'
-import { polyStyles, styleOf, usePolygons } from './polygons'
+import { alignTransform, applyAffine, FLIP_Y, polyAlign, polyStyles, styleOf, usePolygons } from './polygons'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
 
@@ -639,7 +639,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   // многоугольники из файла: контур в координатах карты (Y отражён, как у скважин), маркеры по вершинам
   const polyData = usePolygons()
   const polyOver = usePref(polyStyles)
-  const polyShown = useMemo(() => polyData.polys.map((p, i) => ({ p, st: styleOf(p.name, i, polyOver) })).filter(x => x.st.show), [polyData.polys, polyOver])
+  const alignPts = usePref(polyAlign)
+  const align = useMemo(() => alignTransform(alignPts, placed), [alignPts, placed])
+  const polyShown = useMemo(() => {
+    const T = align.t
+    return polyData.polys.map((p, i) => ({ p, st: styleOf(p.name, i, polyOver) })).filter(x => x.st.show)
+      .map(x => ({ ...x, xy: x.p.pts.map(([X, Y]) => (T ? applyAffine(T, X, Y) : applyAffine(FLIP_Y, X, Y))) }))
+  }, [polyData.polys, polyOver, align])
   const grid = useMemo(() => {
     if (!gridOn || !unit || !placed.length) return null
     const mx0 = ((0 - view.tx) / view.k - fit.ox) / fit.s, mx1 = ((size.w - view.tx) / view.k - fit.ox) / fit.s
@@ -838,9 +844,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
             <g opacity={0.07} fill={pal.accent}>{placed.map(q => <circle key={q.well} cx={q.x} cy={q.y} r={halo} />)}</g>
             {polyShown.length > 0 && <g aria-label="Многоугольники" pointerEvents="none">
-              {polyShown.map(({ p, st }) => { const K0 = Math.max(K, 1e-9); return <g key={p.name}>
-                <path d={'M' + p.pts.map(([x, y]) => `${x},${-y}`).join('L') + 'Z'} fill={st.fill} fillOpacity={st.fillOpacity} stroke={st.stroke} strokeWidth={st.width} strokeDasharray={st.dash ? '6 4' : undefined} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-                {st.marker !== 'none' && p.pts.map(([x, y], j) => { const X = x, Y = -y, r = st.markerSize / K0
+              {polyShown.map(({ p, st, xy }) => { const K0 = Math.max(K, 1e-9); return <g key={p.name}>
+                <path d={'M' + xy.map(([x, y]) => `${x},${y}`).join('L') + 'Z'} fill={st.fill} fillOpacity={st.fillOpacity} stroke={st.stroke} strokeWidth={st.width} strokeDasharray={st.dash ? '6 4' : undefined} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                {st.marker !== 'none' && xy.map(([X, Y], j) => { const r = st.markerSize / K0
                   return st.marker === 'circle' ? <circle key={j} cx={X} cy={Y} r={r} fill={st.markerColor} />
                     : st.marker === 'square' ? <rect key={j} x={X - r} y={Y - r} width={2 * r} height={2 * r} fill={st.markerColor} />
                     : <path key={j} d={`M${X - r},${Y}H${X + r}M${X},${Y - r}V${Y + r}`} stroke={st.markerColor} strokeWidth={2} vectorEffect="non-scaling-stroke" /> })}
@@ -984,7 +990,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             <label className="check" title="Квадратная сетка с подписями координат; выключена — на карте остаётся только фон"><input type="checkbox" checked={gridOn} onChange={e => mapGrid.set(e.target.checked)} />Координатная сетка</label>
           </section>}
           {polyData.polys.length > 0 && <section><h4>Многоугольники</h4>
-            <PolyPanel polys={polyData.polys} overrides={polyOver} warnings={polyData.warnings} />
+            <PolyPanel polys={polyData.polys} overrides={polyOver} warnings={polyData.warnings} placed={placed} align={alignPts} />
           </section>}
           {!isRef && <section><h4>Круги</h4>
             <label className="row"><span>Размер</span><input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
