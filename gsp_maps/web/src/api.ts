@@ -8,8 +8,8 @@ export interface AtlasInfo { storage: string; fromEnv: boolean; project: string;
 export interface AppState { state: 'idle' | 'loading' | 'ready' | 'error'; log: string[]; paths: Record<string, string>; checks: FileCheck[]; resultsDir: string; gsps: string[]; gspMeta: Record<string, { grid: boolean; xy: boolean }>; atlas: AtlasInfo }
 export interface Pos { x: number; y: number; src: 'grid' | 'xy' | 'fit'; dir: string }
 export interface Layout { mode: 'grid' | 'xy'; wells: Record<string, Pos>; missing: number[]; notes: string[]; has_grid: boolean; has_xy: boolean }
-export interface SeasonInfo { key: string; start: number; end: number }
-export interface WaterRec { well: number; month: number; year: number; factor: number | null; flow: number | null; note: string }
+export interface SeasonInfo { key: string; start: number; end: number; manual?: boolean }
+export interface WaterRec { well: number; month: number; year: number; kind: string; season: string; factor: number | null; flow: number | null; note: string }
 export interface TrendRow { Скважина: number; Направление: string; Тренд_расхода: number; Тренд_воды: number; Средний_расход: number }
 export interface Series { days: number[]; bar: number[] }
 export interface GspData {
@@ -35,6 +35,9 @@ const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Cont
 export const getState = () => call<AppState>('/api/state')
 export const saveConfig = (paths: Record<string, string>, resultsDir?: string, load = true) =>
   call<AppState>('/api/config', post({ paths, resultsDir, load }))
+/** Ручная правка типа сезона (решение за инженером); to = «auto» возвращает тип из Атласа. */
+export const setSeasonKind = (kind: string, season: string, to: string) =>
+  call<{ ok: boolean }>('/api/season-kind', post({ kind, season, to }))
 /** Режим «весь объект»: все ГСП на одной карте. Данные собираются из обычных запросов по каждому ГСП. */
 export const ALL_GSP = 'Весь объект'
 let allGroups: string[] = []

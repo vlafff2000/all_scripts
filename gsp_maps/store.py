@@ -71,9 +71,12 @@ def _frame_to_arrays(df: pd.DataFrame, kind: int) -> Dict[str, np.ndarray]:
     runtime = (pd.to_numeric(df["Время работы"], errors="coerce").to_numpy(dtype="float64")
                if "Время работы" in df.columns else np.full(len(df), np.nan))
     gsp = df["Источник"].astype(str).str.strip().to_numpy(dtype=object)
-    if kind == OTBOR and "Сезон" in df.columns:
+    if "Период" in df.columns:      # сезон уже назван правилом проекта Атласа — своих догадок по датам нет
+        season = df["Период"].astype(str).str.strip().to_numpy(dtype=object)
+        blank = np.zeros(len(df), dtype=bool)
+    elif kind == OTBOR and "Сезон" in df.columns:
         season = df["Сезон"].astype(str).str.strip().to_numpy(dtype=object)
-        blank = (df["Сезон"].isna() | (season == "nan")).to_numpy()
+        blank = df["Сезон"].isna().to_numpy() | np.isin(season, ["nan", "None", ""])
     elif kind == ZAKACHKA and "Год" in df.columns:
         year = pd.to_numeric(df["Год"], errors="coerce")
         season = year.fillna(-1).astype("int64").astype(str).to_numpy(dtype=object)
@@ -129,6 +132,8 @@ class Store:
         self._agg: Dict[Tuple[str, int, str], pd.DataFrame] = {}
         self._matrix: Dict[Tuple[str, int, str], dict] = {}
         self._wells: Dict[str, List[int]] = {}
+        self._spans: Optional[Dict[Tuple[int, str], Tuple[int, int]]] = None
+        self._month_season: Dict[Tuple[int, int], Optional[Tuple[int, str]]] = {}
 
     @staticmethod
     def _sorted(raw: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
@@ -198,6 +203,33 @@ class Store:
             except ValueError:
                 return 0
         return sorted((s for g, k, s in self.segments if g == gsp and k == kind), key=start)
+
+    def season_spans(self) -> Dict[Tuple[int, str], Tuple[int, int]]:
+        """Границы каждого сезона по всем группам: первый и последний день с записью (сутки с начала эпохи)."""
+        if self._spans is None:
+            spans: Dict[Tuple[int, str], Tuple[int, int]] = {}
+            for (_g, k, s), (lo, hi) in self.segments.items():
+                a, b = int(self.day[lo:hi].min()), int(self.day[lo:hi].max())
+                old = spans.get((k, s))
+                spans[(k, s)] = (a, b) if old is None else (min(a, old[0]), max(b, old[1]))
+            self._spans = spans
+        return self._spans
+
+    def season_of_month(self, year: int, month: int) -> Optional[Tuple[int, str]]:
+        """(вид, сезон), на который приходится месяц замера: сезон из данных с наибольшим числом дней в этом месяце.
+        Сезоны не выдумываются по календарю — берутся те, что есть в расходах (названы правилом проекта Атласа)."""
+        key = (int(year), int(month))
+        if key not in self._month_season:
+            first = int(np.datetime64("%04d-%02d-01" % key, "D").astype("int64"))
+            nxt = (key[0] + (key[1] == 12), key[1] % 12 + 1)
+            last = int(np.datetime64("%04d-%02d-01" % nxt, "D").astype("int64")) - 1
+            best, best_days, best_start = None, 0, 0
+            for ks, (a, b) in self.season_spans().items():
+                overlap = min(b, last) - max(a, first) + 1
+                if overlap > best_days or (overlap == best_days and overlap > 0 and a > best_start):
+                    best, best_days, best_start = ks, overlap, a
+            self._month_season[key] = best
+        return self._month_season[key]
 
     def wells(self, gsp: str) -> List[int]:
         if gsp not in self._wells:

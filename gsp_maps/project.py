@@ -14,7 +14,7 @@ import pandas as pd
 from pxg_core import runlog, workspace
 
 from . import atlas_source, gis_source, inputs, observers, wellmap
-from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
+from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store
 
 PATH_KEYS = ["map", "atlas_storage", "atlas_project", "polygons", "background"]    # карта-сетка Excel — необязательный запасной источник положений
 LABELS = {"map": "Карта-сетка (Excel)", "atlas_storage": "Хранилище Атласа", "atlas_project": "Проект Атласа", "polygons": "Многоугольники (X Y)", "background": "Фото или растр на фон"}
@@ -35,6 +35,7 @@ class Project:
     def __init__(self) -> None:
         self.paths: Dict[str, str] = {k: "" for k in PATH_KEYS}
         self.results_dir = ""
+        self.season_kinds: Dict[str, Dict[str, str]] = {}  # ручная правка типа сезона по проектам Атласа: «Отбор|2025-2026» → «Закачка»
         self.models: List[str] = []  # модели tNavigator, отмеченные для карты (пути из общего каталога)
         self.store: Optional[Store] = None
         self.atlas: Optional[atlas_source.AtlasData] = None
@@ -52,13 +53,15 @@ class Project:
             self.paths.update({k: str(v) for k, v in data.get("paths", {}).items() if k in self.paths})
             self.results_dir = str(data.get("results_dir", ""))
             self.models = [str(x) for x in data.get("models", [])]
+            self.season_kinds = {str(p): {str(k): str(v) for k, v in m.items()} for p, m in (data.get("season_kinds") or {}).items() if isinstance(m, dict)}
         except (OSError, ValueError):
             pass
 
     def _save(self) -> None:
         try:
             config_file().parent.mkdir(parents=True, exist_ok=True)
-            config_file().write_text(json.dumps({"paths": self.paths, "results_dir": self.results_dir, "models": self.models}, ensure_ascii=False, indent=1),
+            config_file().write_text(json.dumps({"paths": self.paths, "results_dir": self.results_dir, "models": self.models,
+                                                 "season_kinds": self.season_kinds}, ensure_ascii=False, indent=1),
                                      encoding="utf-8")
         except OSError:
             pass
@@ -66,6 +69,32 @@ class Project:
     def observers_payload(self) -> dict:
         assert self.atlas is not None and self.store is not None
         return observers.observers(self.atlas, np.unique(self.store.well).tolist(), self.xy()[0])
+
+    def set_season_kind(self, kind: str, season: str, to: str) -> None:
+        """Ручная правка типа сезона: сезон kind/season показывается как `to` («Отбор», «Закачка»); «auto» возвращает тип из Атласа.
+        Решение за инженером: тип сезона по правилу Атласа — подсказка, правка хранится в настройках Карт и действует при перезагрузке."""
+        if kind not in KIND_BY_NAME or not season or to not in (*KIND_BY_NAME, "auto"):
+            raise ValueError("Нужны вид сезона (Отбор или Закачка), сезон и новый вид.")
+        if self.atlas is None:
+            raise ValueError("Данные ещё не загружены из проекта Атласа.")
+        pid = self.atlas.pid
+        marks = dict(self.season_kinds.get(pid) or {})
+        was = next((k.split("|", 1)[0] for k, v in marks.items() if k.split("|", 1)[1] == season and v == kind), kind)   # вид сезона в Атласе
+        marks.pop("%s|%s" % (was, season), None)
+        if to not in ("auto", was):
+            marks["%s|%s" % (was, season)] = to
+        self.season_kinds[pid] = marks
+        self._save()
+        store = Store.from_raw(self.atlas.flow_arrays(marks))
+        store.path = self.atlas.key
+        with self._lock:
+            self.store = store
+            self._cache.clear()
+
+    def manual_seasons(self) -> set:
+        """Сезоны с вручную заданным типом: {(вид сейчас, сезон)}."""
+        marks = self.season_kinds.get(self.atlas.pid if self.atlas is not None else "") or {}
+        return {(v, k.split("|", 1)[1]) for k, v in marks.items()}
 
     def set_models(self, ids: List[str]) -> None:
         self.models = list(ids)
@@ -139,8 +168,9 @@ class Project:
             t0 = time.time()
             atlas = atlas_source.AtlasData(root, pid)
             self.log.append("Читаю проект Атласа «%s»…" % atlas.name)
-            store = Store.from_raw(atlas.flow_arrays())
+            store = Store.from_raw(atlas.flow_arrays(self.season_kinds.get(pid)))
             store.path = atlas.key
+            self.log.extend(atlas.warnings)
             tables = {}
             for key, read in (("periods", atlas.periods), ("water", atlas.water), ("press_gsp", lambda: atlas.pressure(True)),
                               ("press_obj", lambda: atlas.pressure(False)), ("geo", atlas.geo)):
@@ -273,9 +303,12 @@ class Project:
         if not len(df):
             return {}
         ts = pd.DatetimeIndex(df["Дата"])
-        keys = [season_of(int(m), int(y)) for m, y in zip(ts.month, ts.year)]
-        ser = pd.Series(df["Давление_бар"].to_numpy(), index=pd.MultiIndex.from_tuples(
-            [(KIND_BY_NAME[k], s) for s, k in keys]))
+        assert self.store is not None
+        keys = [self.store.season_of_month(int(y), int(m)) for m, y in zip(ts.month, ts.year)]
+        have = [i for i, k in enumerate(keys) if k is not None]      # месяц вне сезонов Атласа в сезонное давление не входит
+        if not have:
+            return {}
+        ser = pd.Series(df["Давление_бар"].to_numpy()[have], index=pd.MultiIndex.from_tuples([keys[i] for i in have]))
         return {k: float(v) for k, v in ser.groupby(level=[0, 1]).mean().items()}
 
     def season_frame(self, gsp: str, kind: int, season: str, layout_dirs: Dict[int, str]) -> pd.DataFrame:
@@ -292,8 +325,8 @@ class Project:
                 df[col] = v
         w = self.water()[0]
         if len(w):
-            wk = self._memo(("water_seasons",), 0.0, lambda: [season_of(int(m), int(y)) for m, y in zip(w["Месяц"], w["Год"])])
-            sel = w[[k == (season, KIND_NAMES[kind]) for k in wk]]
+            wk = self._memo(("water_seasons",), 0.0, lambda: [self.store.season_of_month(int(y), int(m)) for m, y in zip(w["Месяц"], w["Год"])])
+            sel = w[[k == (kind, season) for k in wk]]
             for mark in sorted(sel["Метка_замера"].unique()):
                 part = sel[sel["Метка_замера"] == mark].drop_duplicates("Скважина").set_index("Скважина")
                 df["Водный_фактор_" + mark] = df["Скважина"].map(part["Водный_фактор"])
@@ -333,12 +366,13 @@ class Project:
         depths, alt = self.depths()
         wells = st.wells(gsp)
         seasons = {}
+        manual = self.manual_seasons()
         for kind in (OTBOR, ZAKACHKA):
             lst = []
             for s in st.seasons(gsp, kind):
                 lo, hi = st.segments[(gsp, kind, s)]
                 d = st.day[lo:hi]
-                lst.append({"key": s, "start": int(d.min()), "end": int(d.max())})
+                lst.append({"key": s, "start": int(d.min()), "end": int(d.max()), "manual": (KIND_NAMES[kind], s) in manual})
             seasons[KIND_NAMES[kind]] = lst
         periods = [{"day": d, "type": t} for d, t in self.periods()[0]]
         wdf = self.water()[0]
@@ -347,7 +381,9 @@ class Project:
             ws = set(wells)
             for r in wdf.itertuples(index=False):
                 if r.Скважина in ws:
+                    ks = st.season_of_month(int(r.Год), int(r.Месяц))      # сезон замера — из сезонов Атласа, не по календарю
                     water.append({"well": int(r.Скважина), "month": int(r.Месяц), "year": int(r.Год),
+                                  "kind": KIND_NAMES[ks[0]] if ks else "", "season": ks[1] if ks else "",
                                   "factor": None if pd.isna(r.Водный_фактор) else float(r.Водный_фактор),
                                   "flow": None if pd.isna(r.Расход_воды_лч) else float(r.Расход_воды_лч),
                                   "note": r.Примечание})
