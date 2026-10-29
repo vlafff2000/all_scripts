@@ -57,7 +57,7 @@ def test_time_budget(home):
 
 def test_last_dir_shared(home):
     (home / "x").mkdir()
-    assert fs_browse.get_last() == {"dir": "", "recent": []}
+    assert fs_browse.get_last() == {"dir": "", "recent": [], "save_dir": ""}
     fs_browse.set_last(str(home / "x"))
     f = home / "x" / "a.xlsx"
     f.write_text("1")
@@ -189,7 +189,7 @@ def test_window_size_remembered(home):
     assert c.post("/api/fs/win", json={"w": 1200, "h": 700}).json() == {"w": 1200, "h": 700}
     assert c.post("/api/fs/win", json={"w": 5, "h": "x"}).json() == {"w": 1200, "h": 700}
     assert c.get("/api/fs/win").json() == {"w": 1200, "h": 700}
-    assert fs_browse.get_last() == {"dir": "", "recent": []}
+    assert fs_browse.get_last() == {"dir": "", "recent": [], "save_dir": ""}
 
 
 def test_favorites_and_frequent(home):
@@ -314,3 +314,42 @@ def test_slow_type_lookup_guesses_then_stat_fixes(home, monkeypatch):
     assert calls["n"] == 1 and all(r.get("guess") for r in raw[1:])
     st = fs_browse.stat_items(str(home), ["v1.2", "data.xlsx"])
     assert st["v1.2"]["dir"] is True and st["data.xlsx"]["dir"] is False
+
+
+def _save_client():
+    from starlette.applications import Starlette
+
+    return TestClient(Starlette(routes=fs_browse.routes()))
+
+
+def test_save_writes_file_and_remembers_folder(home):
+    c = _save_client()
+    target = home / "out" / "график.png"
+    (home / "out").mkdir()
+    r = c.post("/api/fs/save", params={"path": str(target)}, content=b"\x89PNG data", headers={"X-PXG": "1"})
+    assert r.status_code == 200 and r.json()["path"] == str(target)
+    assert target.read_bytes() == b"\x89PNG data"
+    assert not (home / "out" / "график.png.part").exists()
+    assert fs_browse.get_last()["save_dir"] == str(home / "out")
+    assert fs_browse.get_last()["dir"] == ""  # папка открытия файлов не трогается
+
+
+def test_save_refuses_foreign_page_and_existing_file(home):
+    c = _save_client()
+    target = home / "a.csv"
+    assert c.post("/api/fs/save", params={"path": str(target)}, content=b"x").status_code == 403  # без заголовка X-PXG
+    assert not target.exists()
+    h = {"X-PXG": "1"}
+    assert c.post("/api/fs/save", params={"path": str(target)}, content=b"1", headers=h).status_code == 200
+    r = c.post("/api/fs/save", params={"path": str(target)}, content=b"2", headers=h)
+    assert r.status_code == 409 and r.json()["exists"] and target.read_bytes() == b"1"
+    assert c.post("/api/fs/save", params={"path": str(target), "overwrite": "1"}, content=b"2", headers=h).status_code == 200
+    assert target.read_bytes() == b"2"
+
+
+def test_save_bad_paths(home):
+    assert not fs_browse.save_bytes("relative.txt", b"x")["ok"]
+    assert not fs_browse.save_bytes(str(home), b"x")["ok"]  # папка вместо файла
+    r = fs_browse.save_bytes(str(home / "no_such" / "a.txt"), b"x")
+    assert not r["ok"] and r["error"]
+    assert fs_browse.clean_file_name('a:b?"c".xlsx') == "a_b__c_.xlsx"

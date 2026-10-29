@@ -87,10 +87,7 @@ def run(browser: bool = False, port: int = 0, title: str = "Работа с ис
         except (AttributeError, TypeError):
             pass
         try:
-            from pxg_core.desktop_save import SaveApi
-
-            saver = SaveApi()
-            saver.bind(webview.create_window(title, url, width=1280, height=860, min_size=(900, 600), js_api=saver))
+            webview.create_window(title, url, width=1280, height=860, min_size=(900, 600))
             webview.start()
             server.should_exit = True
             return 0
