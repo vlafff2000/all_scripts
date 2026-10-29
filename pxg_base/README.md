@@ -16,7 +16,7 @@
 ```
 python -m pxg_base --server          # http://127.0.0.1:8766
 cd pxg_base/web && npm install && npm run dev    # разработка, /api проксируется на 8766
-npm run build                        # пересобрать pxg_base/web/dist перед коммитом
+npm run build                        # собрать pxg_base/web/dist (в git не коммитится)
 ```
 
 Нужны библиотеки из `requirements.txt` (берутся последние версии).
