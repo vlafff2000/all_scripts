@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import os
 
-from pxg_core import fs_browse, group_colors, runlog
+from pxg_core import fs_browse, group_colors, runlog, well_presets
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -37,6 +37,13 @@ def _atlas_url() -> str:
         return str(json.loads(os.environ.get("PXG_APP_URLS", "{}")).get("atlas", ""))
     except ValueError:
         return ""
+
+
+def _project_folder():
+    """Папка выбранного проекта Атласа: в ней лежат пресеты скважин, общие с Атласом и другими программами (нет проекта — None)."""
+    root, pid = PROJECT.storage(), PROJECT.project_id()
+    folder = root / "projects" / pid if root and pid else None
+    return folder if folder is not None and folder.is_dir() else None
 
 
 def _state() -> dict:
@@ -428,6 +435,7 @@ def build_app() -> Starlette:
         Route("/api/export", export, methods=["POST"]),
         Route("/api/image", save_image, methods=["POST"]),
         *fs_browse.routes(),
+        *well_presets.routes(lambda: _project_folder()),
         *group_colors.routes(),
         Route("/api/open-folder", open_folder, methods=["POST"]),
         Route("/api/files/{name:path}", files),
