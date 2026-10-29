@@ -1,12 +1,14 @@
-import { MARKERS, POLY_COLORS, resetStyle, setStyle, styleOf, type PolyStyle } from './polygons'
+import { MARKERS, POLY_COLORS, polyAlign, alignTransform, resetStyle, setStyle, styleOf, type AlignPoint, type PolyStyle } from './polygons'
+import type { Placed } from './model'
 import { useState } from 'react'
 import type { Poly } from './api'
 
 /** Настройка многоугольников в «Вид карты»: выбор контура и его цвета, толщины, заливки и маркеров по вершинам. */
-export default function PolyPanel({ polys, overrides, warnings }: { polys: Poly[]; overrides: Record<string, Partial<PolyStyle>>; warnings: string[] }) {
+export default function PolyPanel({ polys, overrides, warnings, placed, align }: { polys: Poly[]; overrides: Record<string, Partial<PolyStyle>>; warnings: string[]; placed: Placed[]; align: AlignPoint[] }) {
   const [name, setName] = useState(polys[0]?.name ?? '')
   const idx = Math.max(0, polys.findIndex(p => p.name === name))
   const st = styleOf(name, idx, overrides)
+  const setPoint = (i: number, patch: Partial<AlignPoint>) => polyAlign.set(align.map((p, k) => (k === i ? { ...p, ...patch } : p)))
   return (
     <>
       <label className="row"><span>Контур</span>
@@ -23,6 +25,17 @@ export default function PolyPanel({ polys, overrides, warnings }: { polys: Poly[
       <label className="row"><span>Размер маркера</span><input type="range" min={1} max={12} step={1} value={st.markerSize} onChange={e => setStyle(name, { markerSize: Number(e.target.value) })} aria-label="Размер маркера" /></label>
       <label className="row"><span>Цвет маркера</span><input type="color" value={st.markerColor} onChange={e => setStyle(name, { markerColor: e.target.value })} aria-label="Цвет маркера" /></label>
       <button type="button" className="quiet" onClick={() => resetStyle(name)}>Вернуть стиль по умолчанию</button>
+      <div className="poly-align">
+        <b>Привязка по трём точкам</b>
+        <span className="muted small">Три точки контура (X и Y из файла) и номер скважины, которая стоит в той же точке на карте.</span>
+        {align.map((pt, i) => <label key={i} className="row"><span>Точка {i + 1}</span>
+          <input type="number" step="any" placeholder="X" value={pt.x ?? ''} aria-label={`Точка ${i + 1}, X`} onChange={e => setPoint(i, { x: e.target.value === '' ? null : Number(e.target.value) })} />
+          <input type="number" step="any" placeholder="Y" value={pt.y ?? ''} aria-label={`Точка ${i + 1}, Y`} onChange={e => setPoint(i, { y: e.target.value === '' ? null : Number(e.target.value) })} />
+          <select value={pt.well ?? ''} aria-label={`Точка ${i + 1}, скважина`} onChange={e => setPoint(i, { well: e.target.value === '' ? null : Number(e.target.value) })}>
+            <option value="">скважина…</option>{placed.map(q => <option key={q.well} value={q.well}>{q.well}</option>)}</select></label>)}
+        <span className="muted small">{alignTransform(align, placed).status}</span>
+        <button type="button" className="quiet" onClick={() => polyAlign.set(polyAlign.get().map(() => ({ x: null, y: null, well: null })))}>Сбросить привязку</button>
+      </div>
       <span className="muted small">Цвета по умолчанию идут по порядку: {POLY_COLORS.slice(0, 4).join(', ')}…</span>
       {warnings.map((w, i) => <span key={i} className="muted small">{w}</span>)}
     </>
