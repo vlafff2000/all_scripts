@@ -40,3 +40,22 @@ def test_without_a_project_the_user_folder_is_used(tmp_path, monkeypatch):
     client.post("/api/well-presets", json={"name": "Общий", "wells": ["9"]})
     assert (tmp_path / "home" / "well_presets.json").is_file()
     assert [p["label"] for p in client.get("/api/well-presets").json()["presets"]] == ["Общий"]
+
+
+def test_atlas_project_folder(tmp_path, monkeypatch):
+    monkeypatch.delenv("GAS_ATLAS_STORAGE", raising=False)
+    assert well_presets.atlas_project_folder() is None                       # хранилища нет — каталог пользователя
+    (tmp_path / "projects" / ("c" * 32)).mkdir(parents=True)
+    assert well_presets.atlas_project_folder(str(tmp_path), "c" * 32) == tmp_path / "projects" / ("c" * 32)
+    assert well_presets.atlas_project_folder(str(tmp_path), "d" * 32) is None   # такого проекта нет
+    monkeypatch.setenv("GAS_ATLAS_STORAGE", str(tmp_path))
+    assert well_presets.atlas_project_folder("", "c" * 32) == tmp_path / "projects" / ("c" * 32)
+
+
+def test_work_with_source_data_has_the_presets_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("GAS_ATLAS_STORAGE", raising=False)
+    from pxg_base.api import app
+    c = TestClient(app)
+    assert c.post("/api/well-presets", json={"name": "Скважины замечаний", "wells": ["102", "103"]}).status_code == 200
+    assert [p["label"] for p in c.get("/api/well-presets").json()["presets"]] == ["Скважины замечаний"]

@@ -41,9 +41,8 @@ def _atlas_url() -> str:
 
 def _project_folder():
     """Папка выбранного проекта Атласа: в ней лежат пресеты скважин, общие с Атласом и другими программами (нет проекта — None)."""
-    root, pid = PROJECT.storage(), PROJECT.project_id()
-    folder = root / "projects" / pid if root and pid else None
-    return folder if folder is not None and folder.is_dir() else None
+    root = PROJECT.storage()
+    return well_presets.atlas_project_folder(str(root or ""), PROJECT.project_id())
 
 
 def _state() -> dict:
