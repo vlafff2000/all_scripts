@@ -16,8 +16,8 @@ from pxg_core import runlog, workspace
 from . import atlas_source, gis_source, inputs, observers, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store, season_of
 
-PATH_KEYS = ["map", "atlas_storage", "atlas_project", "polygons"]    # карта-сетка Excel — необязательный запасной источник положений
-LABELS = {"map": "Карта-сетка (Excel)", "atlas_storage": "Хранилище Атласа", "atlas_project": "Проект Атласа", "polygons": "Многоугольники (X Y)"}
+PATH_KEYS = ["map", "atlas_storage", "atlas_project", "polygons", "background"]    # карта-сетка Excel — необязательный запасной источник положений
+LABELS = {"map": "Карта-сетка (Excel)", "atlas_storage": "Хранилище Атласа", "atlas_project": "Проект Атласа", "polygons": "Многоугольники (X Y)", "background": "Фото или растр на фон"}
 
 
 def config_file() -> Path:

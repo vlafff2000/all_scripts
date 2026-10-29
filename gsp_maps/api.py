@@ -372,6 +372,17 @@ async def polygons_get(request: Request):
     return JSONResponse({"polygons": polys, "warnings": warn})
 
 
+BACKGROUND_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+
+
+async def background_get(request: Request):
+    """Фото или растр под скважинами: отдаётся файл, выбранный в «Данные»; привязка по трём точкам делается в интерфейсе."""
+    p = PROJECT.paths["background"]
+    if not p or not os.path.isfile(p) or os.path.splitext(p)[1].lower() not in BACKGROUND_EXT:
+        return _err("Фон не задан или не картинка.", 404)
+    return FileResponse(p)
+
+
 async def open_folder(request: Request):
     folder = str(PROJECT.out_dir())
     try:
@@ -405,6 +416,7 @@ def build_app() -> Starlette:
         Route("/api/observers", observers_get),
         Route("/api/roof", roof),
         Route("/api/polygons", polygons_get),
+        Route("/api/background", background_get),
         Route("/api/client-log", client_log, methods=["POST"]),
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
