@@ -12,6 +12,7 @@ import os
 from typing import Dict, List
 
 from . import gis
+from .legend_order import label_key
 
 FILE_NAME = "gis_legend.json"
 
@@ -87,4 +88,4 @@ def table(results: Dict[str, gis.SheetResult], saved: Dict[str, Dict[str, str]])
             out.append({"sheet": e.sheet, "well": res.well, "color": e.color, "pack": e.pack, "source": e.source,
                         "status": e.status, "reason": e.reason, "rows": e.rows, "labels": e.labels,
                         "confirmed": e.color in saved.get(e.sheet, {}), "hints": res.hints})
-    return out
+    return sorted(out, key=lambda r: (label_key(r["sheet"]), label_key(r["color"])))     # по листу (скважине) по возрастанию
