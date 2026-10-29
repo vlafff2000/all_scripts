@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GroupColorsButton } from '../../../pxg_core/web-ui/GroupColorsButton'
+import { refreshPolygons } from './polygons'
 import { exportExcel, getGsp, getGis, getObservers, type Observers, getGisModel, getGisModelWells, getGisModelWellsVariants, getRoof, reportIssue, type RoofGrid, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, ALL_GSP, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
@@ -250,6 +251,8 @@ export default function App() {
   }, [ready, paint])
   const pair = (modelView?.selected ?? []).slice(0, 2)
   const pairKey = pair.join('|')
+  // многоугольники из файла: перечитываются при готовности данных и смене файла
+  useEffect(() => { if (ready) refreshPolygons() }, [ready, app?.paths.polygons])
   const roofOn = usePref(gisRoof), roofModel = usePref(gisRoofModel), roofLayer = usePref(gisRoofLayer), roofStep = usePref(gisRoofStep)
   const [roofGrid, setRoofGrid] = useState<RoofGrid | null>(null)
   const [roofErr, setRoofErr] = useState('')

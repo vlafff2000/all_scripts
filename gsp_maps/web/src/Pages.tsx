@@ -197,6 +197,10 @@ export function DataPage({ app, setApp, mode, setMode, gsp, onReload }: { app: A
             <div className="path-row"><input value={paths.map || ''} onChange={e => setPaths(p => ({ ...p, map: e.target.value }))} placeholder="не задан" />
               <button type="button" className="quiet" disabled={busy} onClick={() => pick('map', 'file')}>Файл…</button></div>
             <span className="hint">Нужна только скважинам без координат в Атласе: лист с названием ГСП, номера скважин в ячейках.</span></div>
+          <div className="field wide"><span className="field-label">Многоугольники (файл X Y), необязательно</span>
+            <div className="path-row"><input value={paths.polygons || ''} onChange={e => setPaths(p => ({ ...p, polygons: e.target.value }))} placeholder="не заданы" />
+              <button type="button" className="quiet" disabled={busy} onClick={() => pick('polygons', 'file')}>Файл…</button></div>
+            <span className="hint">Строки «имя X Y» или «X Y»; пустая строка отделяет контуры. Оформление задаётся в «Вид карты».</span></div>
           <div className="field wide"><span className="field-label">Папка для результатов (Excel, картинки)</span>
             <div className="path-row"><input value={results} onChange={e => setResults(e.target.value)} />
               <button type="button" className="quiet" disabled={busy} onClick={() => run(async () => { const r = await pickPath('folder', results); if (r.path) setResults(r.path) })}>Выбрать…</button></div></div>

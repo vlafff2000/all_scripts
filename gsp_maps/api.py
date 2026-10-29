@@ -20,7 +20,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import gis_source, models as tnav_models, roof as roof_mod
+from . import gis_source, models as tnav_models, polygons, roof as roof_mod
 from .project import PATH_KEYS, Project
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -367,6 +367,11 @@ async def files(request: Request):
     return FileResponse(str(path), filename=path.name)
 
 
+async def polygons_get(request: Request):
+    polys, warn = await run_in_threadpool(polygons.read_polygons, PROJECT.paths["polygons"])
+    return JSONResponse({"polygons": polys, "warnings": warn})
+
+
 async def open_folder(request: Request):
     folder = str(PROJECT.out_dir())
     try:
@@ -399,6 +404,7 @@ def build_app() -> Starlette:
         Route("/api/gis/model-wells-variants", gis_model_wells_variants),
         Route("/api/observers", observers_get),
         Route("/api/roof", roof),
+        Route("/api/polygons", polygons_get),
         Route("/api/client-log", client_log, methods=["POST"]),
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
