@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GroupColorsButton } from '../../../pxg_core/web-ui/GroupColorsButton'
 import { refreshBackground } from './background'
 import { refreshPolygons } from './polygons'
-import { exportExcel, getGsp, getGis, getObservers, type Observers, getGisModel, getGisModelWells, getGisModelWellsVariants, getRoof, reportIssue, type RoofGrid, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, ALL_GSP, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getGis, getObservers, type Observers, getGisModel, getGisModelWells, getGisModelWellsVariants, getRoof, reportIssue, type RoofGrid, getGisValues, type GisModel, getParam, getParams, type GisCatalog, type GisValues, getSeason, getState, setSeasonKind, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, ALL_GSP, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
@@ -66,6 +66,7 @@ export default function App() {
   const [wfilter, setWfilter] = useWellFilter(page)
   setWellView(wfilter)
   const fkey = JSON.stringify(wfilter)
+  const [kindTick, setKindTick] = useState(0)    // данные группы перечитываются после ручной правки типа сезона
   const [g, setG] = useState<GspData | null>(null)
   const [gErr, setGErr] = useState('')
   const [seasonKey, setSeasonKey] = useState('')
@@ -119,7 +120,7 @@ export default function App() {
     setGErr('')
     getGsp(gsp, mode).then(d => { if (live) { setG(d); setSelected(null) } }).catch(e => live && setGErr(String(e.message || e)))
     return () => { live = false }
-  }, [ready, gsp, mode, fkey])
+  }, [ready, gsp, mode, fkey, kindTick])
 
   // параметры Атласа: каталог — при загрузке проекта; значения — при выборе параметра на карте
   const [atlasItems, setAtlasItems] = useState<ParamItem[]>([])
@@ -473,6 +474,17 @@ export default function App() {
               {['Отбор', 'Закачка'].map(k => <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => lastKind.set(k)}>{k}</button>)}</div>
             {page !== 'compare' && <label className="sel"><span>Сезон</span>
               <select value={season} onChange={e => setSeasonKey(e.target.value)}>{seasons.map(s => <option key={s.key}>{s.key}</option>)}</select></label>}
+            {page !== 'compare' && season && <label className="sel" title="Тип сезона берётся из Атласа; если определён неверно, его можно задать вручную">
+              <span>Тип сезона</span>
+              <select value={seasons.find(s => s.key === season)?.manual ? 'manual:' + kind : kind} onChange={e => {
+                const to = e.target.value.startsWith('manual:') ? kind : e.target.value
+                setSeasonKind(kind, season, to).then(() => { lastKind.set(to === 'auto' ? (kind === 'Отбор' ? 'Закачка' : 'Отбор') : to); setSeasonKey(season); setKindTick(n => n + 1) })
+                  .catch(err => flash(String(err.message || err)))
+              }}>
+                <option value="Отбор">Отбор</option><option value="Закачка">Закачка</option>
+                {seasons.find(s => s.key === season)?.manual && <option value={'manual:' + kind}>{kind} (вручную)</option>}
+                {seasons.find(s => s.key === season)?.manual && <option value="auto">Вернуть по Атласу</option>}
+              </select></label>}
             {page === 'compare' && <><span className="spacer" /><button type="button" className="quiet" onClick={() => tipMode.set(tmode === 'dock' ? 'float' : 'dock')} title="Подсказка при наведении: в панели сведений или плавающая у курсора">{tmode === 'dock' ? 'Подсказка: в панели' : 'Подсказка: плавающая'}</button><button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сравнения">Сведения</button></>}
             {page === 'map' && <>
               <input className="find" inputMode="numeric" placeholder="Скважина №" aria-label="Найти скважину" value={find} onChange={e => goFind(e.target.value)} />

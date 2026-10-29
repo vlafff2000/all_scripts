@@ -70,8 +70,7 @@ export function waterByWell(water: WaterRec[], kind: string, season: string, d0:
   const from = dayDate(d0), to = dayDate(d1)
   const lo = from.getUTCFullYear() * 12 + from.getUTCMonth(), hi = to.getUTCFullYear() * 12 + to.getUTCMonth()
   for (const r of water) {
-    const [s, k] = seasonOf(r.month - 1, r.year)
-    if (s !== season || k !== kind) continue
+    if (r.season !== season || r.kind !== kind) continue      // сезон замера определил сервер по сезонам Атласа
     const ym = r.year * 12 + (r.month - 1)
     if (ym < lo || ym > hi) continue
     const arr = out.get(r.well) || []
@@ -81,14 +80,6 @@ export function waterByWell(water: WaterRec[], kind: string, season: string, d0:
   for (const arr of out.values()) arr.sort((p, q) => p.year * 12 + p.month - (q.year * 12 + q.month))
   return out
 }
-/** Сезон и вид по месяцу (0–11) и году — как get_season_from_month в старом скрипте. */
-export function seasonOf(month0: number, year: number): [string, string] {
-  const m = month0 + 1
-  if (m >= 10) return [year + '-' + (year + 1), 'Отбор']
-  if (m <= 4) return [year - 1 + '-' + year, 'Отбор']
-  return [String(year), 'Закачка']
-}
-
 const medianNN = (pts: { x: number; y: number }[]) => {
   if (pts.length < 2) return 1
   const nn = pts.map(a => {

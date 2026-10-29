@@ -76,6 +76,17 @@ async def load(request: Request):
     return JSONResponse(await run_in_threadpool(_state))
 
 
+async def season_kind(request: Request):
+    """Ручная правка типа сезона: {kind, season, to: Отбор|Закачка|auto}. Решение за инженером, тип из Атласа — подсказка."""
+    try:
+        body = await request.json()
+        await run_in_threadpool(PROJECT.set_season_kind, str(body.get("kind") or ""), str(body.get("season") or ""), str(body.get("to") or ""))
+    except ValueError as e:
+        return _err(str(e))
+    runlog.action("Карты: тип сезона изменён вручную", kind=body.get("kind"), season=body.get("season"), to=body.get("to"))
+    return JSONResponse({"ok": True})
+
+
 async def locate(request: Request):
     """Адрес карты: по записи группы и скважины — настоящее имя группы и все группы, где есть скважина."""
     if PROJECT.store is None:
@@ -410,6 +421,7 @@ def build_app() -> Starlette:
         Route("/api/load", load, methods=["POST"]),
         Route("/api/gsp", gsp),
         Route("/api/locate", locate),
+        Route("/api/season-kind", season_kind, methods=["POST"]),
         Route("/api/season", season),
         Route("/api/work", work),
         Route("/api/params", params),

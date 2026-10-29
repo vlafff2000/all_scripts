@@ -25,7 +25,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .store import _frame_to_arrays
+from . import atlas_seasons
+from .store import KIND_BY_NAME, _frame_to_arrays
 
 KGF_TO_BAR = 0.980665          # Атлас хранит давления в кгс/см², Карты считают в барах
 MIN_RUN_DAYS = 5               # режим короче этого срока при выводе периодов сливается с предыдущим
@@ -127,8 +128,21 @@ class AtlasData:
         return {str(w): str(v.get("group")) for w, v in (self.manifest.get("groups") or {}).items()
                 if isinstance(v, dict) and str(v.get("group") or "").strip()}
 
-    def flow_arrays(self) -> Dict[str, np.ndarray]:
-        """Массивы для `Store.from_raw`: отбор и закачка по скважинам и суткам."""
+    @property
+    def settings(self) -> dict:
+        return self.manifest.get("settings") or {}
+
+    def period_labels(self, prod: pd.DataFrame) -> pd.Series:
+        """Сезон каждой строки расходов, как его считает Атлас (настройки месяцев, автоопределение, расписание периодов)."""
+        base = pd.DataFrame({"date": pd.to_datetime(prod["date"]).dt.normalize(), "kind": prod["kind"], "q": prod["q"]}, index=prod.index)
+        for col in ("season", "year"):
+            if col in prod:
+                base[col] = prod[col]
+        return atlas_seasons.period_labels(base, self.settings)
+
+    def flow_arrays(self, kind_overrides: Optional[Dict[str, str]] = None) -> Dict[str, np.ndarray]:
+        """Массивы для `Store.from_raw`: отбор и закачка по скважинам и суткам.
+        `kind_overrides` — ручная правка типа сезона инженером: «Отбор|2025-2026» → «Закачка» (решение за инженером, Атлас — подсказка)."""
         prod = self.frame("production")
         if prod is None or prod.empty:
             raise ValueError("В проекте Атласа «%s» нет расходов: загрузите базу расходов в Атласе." % self.name)
@@ -146,24 +160,33 @@ class AtlasData:
             part = ops[["well", "date", "work_hours"]].dropna(subset=["work_hours"]).copy()
             part["date"] = pd.to_datetime(part["date"]).dt.normalize()
             hours = part.drop_duplicates(["well", "date"], keep="last").set_index(["well", "date"])["work_hours"]
+        period = self.period_labels(prod)
         parts = []
         for atlas_kind, kind, name in (("withdrawal", 0, "Отбор"), ("injection", 1, "Закачка")):
             sel = prod[prod["kind"].eq(atlas_kind)]
+            if not self.settings.get("show_neutral_periods"):      # как в Атласе: нейтральные периоды и «вне сезона» — не сезоны
+                neutral = period.loc[sel.index].map(atlas_seasons.is_neutral).astype(bool)
+                if neutral.any():
+                    self.warnings.append("%s: строк вне сезонов Атласа (нейтральные периоды) — %d, в сезоны Карт они не входят."
+                                         % (name, int(neutral.sum())))
+                sel = sel[~neutral.to_numpy()]
             if sel.empty:
                 continue
             frame = pd.DataFrame({"Скважина": sel["well"].to_numpy(), "Дата": pd.to_datetime(sel["date"]).dt.normalize().to_numpy(),
                                   "Суточный расход газа": sel["q"].to_numpy(), "Источник": group.loc[sel.index].to_numpy()})
-            if kind == 0 and "season" in sel:
-                frame["Сезон"] = sel["season"].to_numpy()
-            if kind == 1 and "year" in sel:
-                frame["Год"] = sel["year"].to_numpy()
+            frame["Период"] = period.loc[sel.index].to_numpy()      # сезон строки — по правилу проекта Атласа
             if hours is not None:
                 keys = pd.MultiIndex.from_arrays([sel["well"].to_numpy(), frame["Дата"].to_numpy()])
                 frame["Время работы"] = hours.reindex(keys).to_numpy()
             parts.append(_frame_to_arrays(frame[frame["Источник"].astype(str).str.strip().ne("")], kind))
         if not parts:
             raise ValueError("В расходах проекта «%s» нет ни отбора, ни закачки." % self.name)
-        return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+        raw = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+        for key, target in (kind_overrides or {}).items():
+            was, _, label = key.partition("|")
+            if was in KIND_BY_NAME and target in KIND_BY_NAME and was != target:
+                raw["kind"][(raw["kind"] == KIND_BY_NAME[was]) & (raw["season"] == label)] = KIND_BY_NAME[target]
+        return raw
 
     # ---------- периоды ----------
     def periods(self) -> Tuple[List[Tuple[int, str]], List[str]]:

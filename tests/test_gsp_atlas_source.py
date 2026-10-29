@@ -166,3 +166,107 @@ def test_any_atlas_numeric_column_is_a_map_parameter(tmp_path):
     assert hours == {11: 1, 12: 1}
     none, warn = data.parameter_values("response", "nope")
     assert none == {} and warn
+
+
+# ---------- сезоны: строго как в Атласе ----------
+
+def long_prod(season="", year=""):
+    """Отбор с ноября по апрель и закачка с мая по сентябрь; колонки «Сезон»/«Год» — как их пишет Атлас, когда в файле их нет (пустая строка)."""
+    rows = []
+    for d in pd.date_range("2024-11-01", "2025-04-30"):
+        rows.append({"well": "11", "date": d, "q": 100.0, "kind": "withdrawal", "season": season, "year": "", "group": "ГСП 1"})
+    for d in pd.date_range("2025-05-10", "2025-09-20"):
+        rows.append({"well": "11", "date": d, "q": 50.0, "kind": "injection", "season": "", "year": year, "group": "ГСП 1"})
+    return pd.DataFrame(rows)
+
+
+def test_empty_season_string_is_no_season_not_one_nameless_season(tmp_path):
+    data = open_data(tmp_path, {"production": long_prod()})
+    store = Store.from_raw(data.flow_arrays())
+    assert store.seasons("ГСП 1", OTBOR) == ["2024-2025"]      # раньше: [""] — сезон не выбрать, карта висит на «Считаю…»
+    assert store.seasons("ГСП 1", ZAKACHKA) == ["2025"]
+    assert store.aggregate("ГСП 1", OTBOR, "2024-2025").iloc[0]["Количество_дней"] == 181
+
+
+def test_season_names_in_table_are_normalised_like_atlas(tmp_path):
+    data = open_data(tmp_path, {"production": long_prod(season="2024 – 2025", year="2025.0")})
+    store = Store.from_raw(data.flow_arrays())
+    assert store.seasons("ГСП 1", OTBOR) == ["2024-2025"] and store.seasons("ГСП 1", ZAKACHKA) == ["2025"]
+
+
+def test_months_come_from_atlas_settings_not_from_own_calendar(tmp_path):
+    # сезон отбора Атласа — октябрь–апрель: октябрь входит в отбор; в по умолчанию (ноябрь–апрель) он «вне сезона»
+    frame = long_prod()
+    extra = pd.DataFrame({"well": "11", "date": pd.date_range("2024-10-10", "2024-10-20"), "q": 70.0, "kind": "withdrawal",
+                          "season": "", "year": "", "group": "ГСП 1"})
+    frame = pd.concat([extra, frame], ignore_index=True)
+    default = Store.from_raw(open_data(tmp_path / "a", {"production": frame}).flow_arrays())
+    assert default.aggregate("ГСП 1", OTBOR, "2024-2025").iloc[0]["Количество_дней"] == 181
+    wide = Store.from_raw(open_data(tmp_path / "b", {"production": frame}, settings={"season_start": 10}).flow_arrays())
+    assert wide.aggregate("ГСП 1", OTBOR, "2024-2025").iloc[0]["Количество_дней"] == 181 + 11
+
+
+def test_season_dates_follow_the_uploaded_schedule(tmp_path):
+    schedule = [["2024-11-05", "withdrawal"], ["2025-03-01", "none"], ["2025-05-20", "injection"], ["2025-09-01", "none"]]
+    data = open_data(tmp_path, {"production": long_prod()}, settings={"season_schedule": schedule})
+    store = Store.from_raw(data.flow_arrays())
+    assert store.seasons("ГСП 1", OTBOR) == ["2024-2025"] and store.seasons("ГСП 1", ZAKACHKA) == ["2025"]
+    lo, hi = store.segments[("ГСП 1", OTBOR, "2024-2025")]
+    epoch = np.datetime64("1970-01-01", "D")
+    first, last = (epoch + np.timedelta64(int(store.day[lo:hi].min()), "D")), (epoch + np.timedelta64(int(store.day[lo:hi].max()), "D"))
+    assert (str(first), str(last)) == ("2024-11-01", "2025-02-28")      # до первой строки расписания — обычное правило, после «none» — нейтральный период
+    zlo, zhi = store.segments[("ГСП 1", ZAKACHKA, "2025")]
+    assert (str(epoch + np.timedelta64(int(store.day[zlo:zhi].min()), "D")), str(epoch + np.timedelta64(int(store.day[zlo:zhi].max()), "D"))) == ("2025-05-20", "2025-08-31")
+    assert any("вне сезонов" in w for w in data.warnings)
+
+
+def test_neutral_periods_are_shown_when_atlas_shows_them(tmp_path):
+    schedule = [["2024-11-05", "withdrawal"], ["2025-03-01", "none"]]
+    data = open_data(tmp_path, {"production": long_prod()}, settings={"season_schedule": schedule, "show_neutral_periods": True})
+    store = Store.from_raw(data.flow_arrays())
+    assert any(s.startswith("Нейтральный период") for s in store.seasons("ГСП 1", OTBOR))
+
+
+def test_pressure_and_water_months_belong_to_atlas_seasons(tmp_path):
+    store = Store.from_raw(open_data(tmp_path, {"production": long_prod()}).flow_arrays())
+    assert store.season_of_month(2025, 1) == (OTBOR, "2024-2025") and store.season_of_month(2025, 7) == (ZAKACHKA, "2025")
+    assert store.season_of_month(2023, 7) is None and store.season_of_month(2025, 5) == (ZAKACHKA, "2025")   # вне данных сезона не придумывается
+
+
+@pytest.mark.parametrize("settings", [{}, {"season_start": 10, "season_end": 4}, {"auto_seasons": True},
+                                      {"season_schedule": [["2024-11-05", "withdrawal"], ["2025-03-01", "none"], ["2025-05-20", "injection"]]}])
+def test_period_labels_equal_atlas_if_atlas_is_importable(settings):
+    sys.path.insert(0, "/home/claude/gas_atlas")
+    production = pytest.importorskip("atlas.engine.modules.production")
+    frame = long_prod().assign(date=lambda d: pd.to_datetime(d.date))
+    expected = production.periods_for(frame, {"season_start": 11, "season_end": 4, **settings})["period"].tolist()
+    from gsp_maps import atlas_seasons
+    assert atlas_seasons.period_labels(frame, settings).tolist() == expected
+
+
+def test_season_type_can_be_overridden_by_hand_and_survives_reload(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSP_MAPS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GAS_ATLAS_STORAGE", str(tmp_path / "st"))
+    write_project(tmp_path / "st", {"production": long_prod()})
+    from gsp_maps.project import Project
+
+    def opened():
+        pr = Project()
+        pr.start_loading()
+        for _ in range(200):
+            if pr.state != "loading":
+                break
+            time.sleep(0.05)
+        assert pr.state == "ready"
+        return pr
+
+    pr = opened()
+    assert pr.store.seasons("ГСП 1", ZAKACHKA) == ["2025"]
+    pr.set_season_kind("Закачка", "2025", "Отбор")              # инженер: Атлас определил тип неверно
+    assert pr.store.seasons("ГСП 1", ZAKACHKA) == [] and pr.store.seasons("ГСП 1", OTBOR) == ["2024-2025", "2025"]
+    assert pr.manual_seasons() == {("Отбор", "2025")}
+    assert opened().store.seasons("ГСП 1", OTBOR) == ["2024-2025", "2025"]      # правка хранится в настройках Карт
+    pr.set_season_kind("Отбор", "2025", "auto")                  # вернуть тип из Атласа
+    assert pr.store.seasons("ГСП 1", ZAKACHKA) == ["2025"] and not pr.manual_seasons()
+    with pytest.raises(ValueError):
+        pr.set_season_kind("Отбор", "2025", "что-то")
