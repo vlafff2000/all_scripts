@@ -287,3 +287,18 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .group-menu-row { display: flex; gap: 6px; margin-top: 4px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
 .gdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .map-chip .gdot { margin-right: 5px; }
+
+/* Редактор палитры (как в дизайнере геологии tNavigator) */
+.pal-det > summary { cursor: pointer; font-size: 13px; color: var(--ink); }
+.pal-ed { display: grid; gap: 8px; margin-top: 8px; }
+.pal-bar-wrap { position: relative; padding-bottom: 20px; }
+.pal-bar { height: 22px; border-radius: 6px; border: 1px solid var(--line); cursor: copy; }
+.pal-marks { position: absolute; left: 0; right: 0; top: 24px; height: 0; }
+.pal-mark { position: absolute; top: 0; width: 14px; height: 16px; margin-left: -7px; padding: 0; border: 2px solid var(--muted); border-radius: 3px 3px 7px 7px; cursor: ew-resize; touch-action: none; }
+.pal-mark.on { border-color: var(--accent-strong); box-shadow: 0 0 0 2px var(--accent-soft); }
+.pal-stop, .pal-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pal-stop input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; }
+.pal-hex { width: 76px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 3px 6px; font-family: monospace; }
+.pal-pos { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.pal-pos input { width: 52px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 3px 5px; text-align: right; }
+.pal-pos input.pal-rng { width: 70px; }
