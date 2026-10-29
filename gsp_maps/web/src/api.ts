@@ -133,6 +133,9 @@ export const getGisModelWellsVariants = (model: string, date: string, spec: [str
 export const getGisModelWells = (model: string, date: string, preset: string) => call<GisModelWells>('/api/gis/model-wells?' + new URLSearchParams({ model, date, preset }))
 /** Кровля пласта из модели: растр отметок (а.о.) верха ячеек слоя; строки идут по возрастанию Y, пропуск — null. */
 export interface RoofGrid { x0: number; y0: number; dx: number; dy: number; nx: number; ny: number; z: (number | null)[][]; layers: number; note: string; mapaxes?: boolean }
+/** Многоугольники из файла «имя X Y» (координаты как в XY tNavigator). */
+export interface Poly { name: string; pts: [number, number][] }
+export const getPolygons = () => call<{ polygons: Poly[]; warnings: string[] }>('/api/polygons')
 export const getRoof = (model: string, layer: number) => call<RoofGrid>('/api/roof?' + new URLSearchParams({ model, layer: String(layer) }))
 /** Сбой или пустой результат в окне — в лог программы (Проект/logs/gsp_maps.log), чтобы причину можно было найти. Сам не падает. */
 export const reportIssue = (where: string, text: string) => { fetch('/api/client-log', post({ where, text })).catch(() => undefined) }
