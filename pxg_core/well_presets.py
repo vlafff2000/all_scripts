@@ -74,6 +74,19 @@ def remove(folder: Path, preset_id: str) -> List[dict]:
     return user_presets(folder)
 
 
+def atlas_project_folder(storage: str = "", project: str = "") -> Optional[Path]:
+    """Папка проекта Атласа с пресетами: выбранный проект (`project`) или самый свежий не демонстрационный с расходами.
+
+    Хранилище — `storage` или GAS_ATLAS_STORAGE (в едином запуске его задаёт меню). Нет хранилища или проекта — None."""
+    from gsp_maps import atlas_source
+    root = atlas_source.storage_root(storage)
+    if root is None:
+        return None
+    pid = project or atlas_source.default_project(atlas_source.list_projects(root))
+    folder = Path(root) / "projects" / pid if pid else None
+    return folder if folder is not None and folder.is_dir() else None
+
+
 def routes(folder: Callable[[], Optional[Path]], builtin: Optional[Callable[[], List[dict]]] = None) -> List[Route]:
     """``folder`` — папка с файлом пресетов (``None`` — общий каталог пользователя); ``builtin`` — готовые пресеты программы (группы)."""
     def where() -> Path:

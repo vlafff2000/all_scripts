@@ -43,15 +43,8 @@ def _project() -> Project:
 def _presets_folder():
     """Папка проекта Атласа, с которым работает ГДМ (выбранный в «Истории/модели» или самый свежий): там лежат пресеты скважин,
     общие с Атласом и «Картами». Нет проекта Атласа — None (общий каталог пользователя)."""
-    from pathlib import Path as _P
-    from gsp_maps import atlas_source
     saved = _project().histmodel or {}
-    root = atlas_source.storage_root(str(saved.get("atlas_storage") or ""))
-    if root is None:
-        return None
-    pid = str(saved.get("atlas_project") or "") or atlas_source.default_project(atlas_source.list_projects(root))
-    folder = _P(root) / "projects" / pid if pid else None
-    return folder if folder is not None and folder.is_dir() else None
+    return well_presets.atlas_project_folder(str(saved.get("atlas_storage") or ""), str(saved.get("atlas_project") or ""))
 
 
 async def wells_get(request: Request):

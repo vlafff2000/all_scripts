@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { usePanelFilter } from './PanelFilter'
 import { getGisLegend, saveGisLegend, type LegendRow } from './api'
 
 const CHIP: Record<string, string> = { 'ок': 'done', 'проверить': 'warn', 'не распознан': 'failed' }
@@ -27,7 +28,8 @@ export default function LegendPanel({ file, onClose }: { file: string; onClose: 
   useEffect(() => { load() }, [file])
 
   const needs = (r: LegendRow) => r.status !== 'ок' && !r.confirmed
-  const shown = rows.filter(r => !onlyOpen || needs(r) || pick[key(r)] !== r.pack)
+  const wf = usePanelFilter('legend', useMemo(() => rows.map(r => r.well), [rows]))
+  const shown = rows.filter(r => (!onlyOpen || needs(r) || pick[key(r)] !== r.pack) && wf.keep(r.well))
   const open = rows.filter(needs).length
 
   const confirm = async (which: LegendRow[]) => {
@@ -49,6 +51,7 @@ export default function LegendPanel({ file, onClose }: { file: string; onClose: 
         <button type="button" className="quiet" onClick={onClose}>Закрыть</button>
       </div>
       <p className="muted out-dir">Пачка определяется по заливке столбца «от». Это подсказка: выберите пачку сами и подтвердите. Цвет без пачки в таблицы для Атласа не попадёт.</p>
+      {wf.node}
       {error && <p className="note warning">{error}</p>}
       {saved && <p className="note info">{saved}</p>}
       {!busy && shown.length === 0 && <p className="note info">Нечего проверять: все цвета распознаны. Снимите фильтр, чтобы увидеть всю легенду.</p>}

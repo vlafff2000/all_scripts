@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import DateIssues from './DateIssues'
 import LegendPanel from './LegendPanel'
 import GdisPanel from './GdisPanel'
+import { usePanelFilter } from './PanelFilter'
 import { checkUrl, fileUrl, getJob, getJobs, openFolder, pickPath, runCheck, startJob, type Job, type ModuleInfo, type Param, type QcReport } from './api'
 import { loadForm, saveForm } from './prefs'
 
@@ -52,9 +53,11 @@ function PathField({ param, value, onChange, invalid }: { param: Param; value: s
 
 const LEVEL_CLASS: Record<string, string> = { 'ошибка': 'failed', 'предупреждение': 'warn', 'заметка': 'idle' }
 
-function QcPanel({ report }: { report: QcReport }) {
+function QcPanel({ report, moduleId }: { report: QcReport; moduleId: string }) {
   const [level, setLevel] = useState('')
-  const rows = report.issues.filter(i => !level || i.level === level)
+  // фильтр скважин: замечания без скважины (по файлу, листу) остаются всегда
+  const wf = usePanelFilter('check:' + moduleId, useMemo(() => report.issues.map(i => i.well), [report]))
+  const rows = report.issues.filter(i => (!level || i.level === level) && (!i.well || wf.keep(i.well)))
   const where = (i: QcReport['issues'][number]) =>
     [i.file, i.sheet && 'лист ' + i.sheet, i.row && 'строка ' + i.row, i.well && 'скв. ' + i.well, i.date].filter(Boolean).join(' · ')
   return (
@@ -71,6 +74,8 @@ function QcPanel({ report }: { report: QcReport }) {
         <a className="quiet" href={checkUrl(report.id, 'xlsx')}>Excel</a>
       </div>
       {report.checked.length > 0 && <p className="muted out-dir">Просмотрено: {report.checked.join('; ')}</p>}
+      {wf.node}
+      {wf.active && <p className="muted out-dir">Фильтр скважин прячет замечания других скважин; числа по уровням выше — по всем замечаниям.</p>}
       {rows.length === 0 ? <p className="note info">{report.issues.length ? 'В этом уровне замечаний нет.' : 'Замечаний нет.'}</p> : (
         <table className="files qc">
           <thead><tr><th>Уровень</th><th>Что не так</th><th>Где</th><th>Значение</th></tr></thead>
@@ -224,7 +229,7 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
 
       {gdis && (values.folder || '').trim() && <GdisPanel key={values.folder} folder={values.folder.trim()} mapping={(values.mapping || '').trim()} method={(values.method || '4').trim()} onClose={() => setGdis(false)} />}
 
-      {qc && <QcPanel report={qc} />}
+      {qc && <QcPanel report={qc} moduleId={module.id} />}
 
       {job && (
         <section className="card result" aria-live="polite">
