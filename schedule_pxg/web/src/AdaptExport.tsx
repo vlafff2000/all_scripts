@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import PageHead from './PageHead'
+import { useTabFilter } from './TabFilter'
 import {
   adaptExportAll, adaptExportChart, adaptExportDocx, adaptExportOptions, adaptExportPreview, adaptExportZip, adaptRun, adaptRuns, getAdapt,
   type AdaptChartDefaults, type AdaptChartStyle, type AdaptExportBody, type AdaptExportError, type AdaptExportOptions, type AdaptLayout,
@@ -43,6 +44,7 @@ export default function AdaptExport() {
   const [kit, setKit] = useState('')
   const [runs, setRuns] = useState<AdaptRun[]>([])
   const [view, setView] = useState<AdaptView | null>(null)
+  const tabFilter = useTabFilter('adapt-export')
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [cur, setCur] = useState('')
   const [q, setQ] = useState('')
@@ -100,7 +102,8 @@ export default function AdaptExport() {
   }, [])
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current) }, [])
 
-  const rows = useMemo(() => sortRows(view?.rows ?? []), [view])
+  // фильтр скважин вкладки: в списке и в выгрузке остаются только оставленные им скважины
+  const rows = useMemo(() => sortRows((view?.rows ?? []).filter(r => tabFilter.keep(r.well))), [view, tabFilter.keep])
   const shownRows = useMemo(() => {
     const t = q.trim().toLowerCase()
     return rows.filter(r => (filter === 'all' || (filter === 'problems' ? !r.ok : r.at_bound)) && matches(r, t))
@@ -193,6 +196,8 @@ export default function AdaptExport() {
   return (
     <main className="workspace">
       <PageHead title="Экспорт графиков" lede="Индикаторные диаграммы адаптации по ГДИ: таблица в Word с макетом листа, как в Газовом атласе, картинки ZIP и отдельные файлы." />
+      {tabFilter.node}
+      {tabFilter.active && <p className="note">Фильтр скважин: в списке и в выгрузке только оставленные им скважины.</p>}
 
       <section className="card">
         <div className="row">

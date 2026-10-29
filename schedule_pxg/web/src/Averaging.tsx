@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import PageHead from './PageHead'
+import { useTabFilter } from './TabFilter'
+import { viewAveraging, viewDaily } from './wellView'
 import ColumnWizard from './ColumnWizard'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
@@ -80,11 +82,14 @@ function DailyChart({ d, group }: { d: AvgDaily; group: string }) {
 
 export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppState) => void }) {
   const [kind, setKind] = useState('закачка')
-  const [v, setV] = useState<AvgView | null>(null)
+  const [vAll, setV] = useState<AvgView | null>(null)
+  const f = useTabFilter('averaging')
+  const v = useMemo(() => viewAveraging(vAll, f.keep), [vAll, f.keep])
   const [sel, setSel] = useState('')
   const [wv, setWv] = useState<AvgWellView | null>(null)
   const [status, setStatus] = useState<AvgStatus | null>(null)
-  const [daily, setDaily] = useState<AvgDaily | null>(null)
+  const [dailyAll, setDaily] = useState<AvgDaily | null>(null)
+  const daily = useMemo(() => viewDaily(dailyAll, f.keep), [dailyAll, f.keep])
   const [wizard, setWizard] = useState('')
   const [edit, setEdit] = useState<{ month: string; text: string } | null>(null)
   const [msg, setMsg] = useState('')
@@ -129,6 +134,8 @@ export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppS
   return (
     <main className="workspace">
       <PageHead title="Осреднение" lede="Доли скважин в расходе группы считаются из базы расходов проекта по выбранным сезонам: для каждых суток сезона, от его старта." />
+      {f.node}
+      {f.active && <div className="note">Фильтр скважин прячет скважины в таблицах и на графиках; суммы долей по группе считаются по всем скважинам группы.</div>}
       {msg && <div className="note warn">{msg}</div>}
       <div className="card">
         <h2>Источник и настройки</h2>

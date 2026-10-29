@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTabFilter } from './TabFilter'
+import { viewAdapt } from './wellView'
 import { AdaptConfig, AdaptResultRow, AdaptRun, AdaptView, adaptFileUrl, adaptRecompute, adaptRun, adaptRuns, pickFile } from './api'
 import { lastAdaptRun } from './prefs'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
@@ -80,7 +82,9 @@ function PeriodSel({ value, onChange, anchor }: { value: Period; onChange: (p: P
 export default function AdaptResults({ kit, config }: { kit: string; config: Partial<AdaptConfig> }) {
   const [snap, setSnap] = useState('')
   const [runs, setRuns] = useState<AdaptRun[]>([])
-  const [view, setView] = useState<AdaptView | null>(null)
+  const [viewAll, setView] = useState<AdaptView | null>(null)
+  const tabFilter = useTabFilter('adapt')
+  const view = useMemo(() => viewAdapt(viewAll, tabFilter.keep), [viewAll, tabFilter.keep])
   const [well, setWell] = useState('')
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
@@ -181,6 +185,8 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
           <option value="">— открыть —</option>{runs.filter(r => r.has_results).map(r => <option key={r.dir} value={r.dir}>{r.name}</option>)}</select></label>}
       </div>
       {msg && <p className="note warn">{msg}</p>}
+      {tabFilter.node}
+      {tabFilter.active && <p className="note">Фильтр скважин прячет скважины в таблице и на графиках; итоги расчёта и таблица по группам — по всему расчёту.</p>}
       <p className="muted small">WPIMULT в тНавигаторе накопительный: множитель подобран относительно модели такой, какая она на дату ГДИ, поэтому вставляйте include на эту дату и учитывайте, что все более поздние WPIMULT скважины перемножатся с ним.</p>
 
       {view && s && <>

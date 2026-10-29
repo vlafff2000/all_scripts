@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { MultiSelect } from '../../../pxg_core/web-ui/MultiSelect'
 import '../../../pxg_core/web-ui/multiselect.css'
 import PageHead from './PageHead'
+import { useTabFilter } from './TabFilter'
+import { viewCatalog } from './wellView'
 import GwcCompare from './GwcCompare'
 import CriterionPicker from './CriterionPicker'
 import { CriterionCfg, CriterionPreset, FactWell, GisObs, ModelEntry, WellProfile, getCriterionPresets, getModelPerfs, ModelPerfRow, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
@@ -196,7 +198,9 @@ export default function Planshet() {
   const [perfModel, setPerfModel] = useState('')                     // перфорации из входного файла этой модели (главнее файла); пусто — из файла
   const [perfDataDir, setPerfDataDir] = useState('')                 // папка с .data вручную; пусто — из базовой модели проекта или рядом с результатами
   const [allModels, setAllModels] = useState<ModelEntry[]>([])
-  const [catalog, setCatalog] = useState<{ wells: string[]; observations: GisObs[] }>({ wells: [], observations: [] })
+  const [catalogAll, setCatalog] = useState<{ wells: string[]; observations: GisObs[] }>({ wells: [], observations: [] })
+  const f = useTabFilter('planshet', catalogAll.wells)       // скважины базы ГИС, которых нет в проекте ГДМ, тоже в списке фильтра
+  const catalog = useMemo(() => viewCatalog(catalogAll, f.keep), [catalogAll, f.keep])
   const [wells, setWells] = useState<string[]>([])
   const [seasons, setSeasons] = useState<string[]>([])
   const [allInSeason, setAllInSeason] = useState(false)             // подсказка: все замеры сезона, а не последний
@@ -257,8 +261,8 @@ export default function Planshet() {
   }
   const pasteWells = () => {
     const add = pasted.split(/[;,|\s]+/).map(x => x.trim()).filter(Boolean)
-    const known = add.filter(w => catalog.wells.includes(w)), miss = add.filter(w => !catalog.wells.includes(w))
-    setWells(catalog.wells.filter(w => wells.includes(w) || known.includes(w)))
+    const known = add.filter(w => catalogAll.wells.includes(w)), miss = add.filter(w => !catalogAll.wells.includes(w))     // вставка главнее фильтра
+    setWells(catalogAll.wells.filter(w => wells.includes(w) || known.includes(w)))
     setPasted('')
     setMsg(miss.length ? 'В базе ГИС нет скважин: ' + miss.join(', ') : '')
   }
@@ -327,6 +331,7 @@ export default function Planshet() {
   return (
     <main className="workspace">
       <PageHead title="Планшет ГВК" lede="Газонасыщенность вдоль скважины в абсолютных отметках: фактический замер ГИС и выбранные модели рядом, ГВК и перфорация." />
+      {f.node}
       <section className="card">
         <h2>Источники</h2>
         <p className="muted small">Факт — папка выгрузки «Работы с исходными данными» → ГИС (файлы gis_*.csv или .parquet и gis_db_meta.json). Перфорации и альтитуды — «Глубины_перфораций.xlsx».

@@ -1,12 +1,16 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import PageHead from './PageHead'
+import { useTabFilter } from './TabFilter'
+import { viewQuality } from './wellView'
 import { QualityView, excludeRows, getQuality } from './api'
 
 const SHOW = 300
 
 export default function Quality() {
   const [jump, setJump] = useState(3)
-  const [v, setV] = useState<QualityView | null>(null)
+  const [vAll, setV] = useState<QualityView | null>(null)
+  const f = useTabFilter('quality')
+  const v = useMemo(() => viewQuality(vAll, f.keep), [vAll, f.keep])
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [marked, setMarked] = useState<Set<string>>(new Set())
@@ -34,6 +38,8 @@ export default function Quality() {
   return (
     <main className="workspace">
       <PageHead title="Проверка данных" lede="Ищем «ненормальные» строки в базе расходов и эталонном суточном объёме и даём исключить их из расчётов." />
+      {f.node}
+      {f.active && <div className="note">Фильтр скважин прячет строки других скважин; строки «по объекту» и сводка по проверкам остаются полными.</div>}
       <section className="card">
         <div className="row">
           <label>Скачок расхода, раз
