@@ -12,8 +12,8 @@ import { bgAlign, bgOpacity, bgShow, useBgUrl } from './background'
 import { alignTransform, applyAffine, FLIP_Y, polyAlign, polyStyles, styleOf, usePolygons } from './polygons'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
 import PaletteEditor from './PaletteEditor'
-import { defOf, gradientStops, setOverride, usePaletteOverride } from './palette'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, paintColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
+import { defOf, gradientStops, paletteAt, setOverride, usePaletteOverride } from './palette'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, WATER_STOPS, type PaintData, paintFor, rampColor, paintColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
 
 /** Цвета вариантов критерия: одинаковы на карте, в списке вариантов панели и в подписях изолиний. */
 /** Кровля пласта: от синего (глубже) к светло-жёлтому (выше). */
@@ -358,7 +358,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const lo = palOv.lo ?? rawPaint.lo, hi = palOv.hi ?? rawPaint.hi
     return { ...rawPaint, pal: palOv, ...(hi > lo ? { lo, hi } : {}) }
   }, [rawPaint, palOv])
-  const wm = useMemo(() => waterMonths(water), [water])
+  const waterOv = usePaletteOverride('water'), monthsOv = usePaletteOverride('months')
+  const wm = useMemo(() => waterMonths(water, waterOv), [water, waterOv])
   // кольца воды скважины: один месяц — одно кольцо (замеры месяца сводятся к максимуму)
   const rings = useMemo(() => {
     const out = new Map<number, { factor: number | null; flow: number | null; color: string }[]>()
@@ -430,9 +431,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const monthColors = useMemo(() => {
     const c: string[] = Array(12).fill(pal.gas)
     const stops = themeKey === 'dark' ? SEASON_STOPS_DARK : SEASON_STOPS
-    usedMonths.forEach((m, i) => { c[m] = rampColor(stops, usedMonths.length > 1 ? i / (usedMonths.length - 1) : 0.5) })
+    usedMonths.forEach((m, i) => { const t = usedMonths.length > 1 ? i / (usedMonths.length - 1) : 0.5; c[m] = monthsOv ? paletteAt(monthsOv, t) : rampColor(stops, t) })
     return c
-  }, [usedMonths, pal.gas, themeKey])
+  }, [usedMonths, pal.gas, themeKey, monthsOv])
 
   const unit = g.layout.mode === 'xy' && !spread ? 'м' : ''
   const K = fit.s * view.k
@@ -1021,6 +1022,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             {multiG && <label className="check" title="Круг скважины окрашивается цветом её группы (при раскраске по значению цвет группы — обводка)"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
             <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
             <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
+            {!paintData && <details className="pal-det"><summary>Палитра месяцев{monthsOv ? ' · изменена' : ''}</summary>
+              <PaletteEditor noRange def={monthsOv ?? defOf(themeKey === 'dark' ? SEASON_STOPS_DARK : SEASON_STOPS)} base={defOf(themeKey === 'dark' ? SEASON_STOPS_DARK : SEASON_STOPS)} auto={[0, 1]}
+                onChange={d => setOverride('months', d)} onReset={() => setOverride('months', null)} /></details>}
             {!paintData && <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Шкала по всему сезону</label>}
           </section>}
           {multi && (options.paint === 'entry' || options.paint === 'wf') && <section><h4>Сезоны</h4>
@@ -1036,6 +1040,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             <label className="check"><input type="checkbox" checked={options.hideIdle} onChange={e => onOptions({ hideIdle: e.target.checked })} />Только работающие</label>
             <label className="row" title="Скрыть скважины с расходом ниже порога"><span>Порог, млн м³</span><input type="number" min={0} step={0.5} className="thr" value={options.minValue} onChange={e => onOptions({ minValue: Math.max(0, Number(e.target.value) || 0) })} /></label>
             <label className="check"><input type="checkbox" checked={options.water} onChange={e => onOptions({ water: e.target.checked })} />Вынос воды</label>
+            {options.water && <details className="pal-det"><summary>Палитра воды{waterOv ? ' · изменена' : ''}</summary>
+              <PaletteEditor noRange def={waterOv ?? defOf(WATER_STOPS)} base={defOf(WATER_STOPS)} auto={[0, 1]}
+                onChange={d => setOverride('water', d)} onReset={() => setOverride('water', null)} /></details>}
             <label className="check"><input type="checkbox" checked={options.share} onChange={e => onOptions({ share: e.target.checked })} />Доля ГСП у подписи</label>
           </section>}
           </div>

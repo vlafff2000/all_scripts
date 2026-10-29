@@ -202,11 +202,11 @@ export function niceStep(span: number, target = 5) {
 /** Цвета колец воды по месяцам: от голубого к фиолетовому, раньше — светлее. */
 export const WATER_STOPS = ['#6dd3ee', '#2f9be0', '#2f6fd0', '#4a4fc4', '#7a3fb0']
 /** Месяцы с водой в окне (год·12+месяц) по порядку и их цвета. */
-export function waterMonths(water: Map<number, WaterPoint[]>): { list: number[]; color: Map<number, string> } {
+export function waterMonths(water: Map<number, WaterPoint[]>, pal?: PaletteDef | null): { list: number[]; color: Map<number, string> } {
   const set = new Set<number>()
   for (const pts of water.values()) for (const p of pts) if ((p.flow ?? 0) > 0) set.add(p.year * 12 + p.month)
   const list = [...set].sort((p, q) => p - q), color = new Map<number, string>()
-  list.forEach((ym, i) => color.set(ym, rampColor(WATER_STOPS, list.length > 1 ? i / (list.length - 1) : 0.4)))
+  list.forEach((ym, i) => { const t = list.length > 1 ? i / (list.length - 1) : 0.4; color.set(ym, pal ? paletteAt(pal, t) : rampColor(WATER_STOPS, t)) })
   return { list, color }
 }
 
