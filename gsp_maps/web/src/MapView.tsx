@@ -515,6 +515,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     }
   }, [options.paint, gis?.iso.on, gis?.iso.step, gis?.iso.reach, gis?.paint, gis?.allWells.on, awOk, gisPts, spacing, spread])
   // изолинии кровли из модели: тонкие линии под скважинами, шаг подбирается или задаётся; любой исход объясняется на экране
+  const roofOv = usePaletteOverride('roof')
   const roofRes = useMemo((): { lines: ReturnType<typeof contourLines> | null; fill: { d: string; c: string }[]; step: number; warn: string } => {
     const r0 = gis?.roof.grid
     if (options.paint !== 'gis' || !gis?.roof.on || !r0) return { lines: null, fill: [], step: 0, warn: '' }
@@ -540,12 +541,12 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         const b = Math.min(23, Math.floor(((z - lo) / ((hi - lo) || 1)) * 24))
         bands[b] += `M${(r.x0 + (i - 0.5) * r.dx).toFixed(1)} ${(r.y0 + (j - 0.5) * r.dy).toFixed(1)}h${r.dx.toFixed(1)}v${r.dy.toFixed(1)}h${(-r.dx).toFixed(1)}z`
       }
-      const fill = bands.map((d, b) => ({ d, c: rampColor(ROOF_STOPS, (b + 0.5) / 24) })).filter(x => x.d)
+      const fill = bands.map((d, b) => ({ d, c: roofOv ? paletteAt(roofOv, (b + 0.5) / 24) : rampColor(ROOF_STOPS, (b + 0.5) / 24) })).filter(x => x.d)
       return { lines, fill, step, warn }
     } catch (e) {
       return { lines: null, fill: [], step: 0, warn: 'Кровля не нарисована из-за ошибки: ' + String((e as Error)?.message || e) }
     }
-  }, [options.paint, gis?.roof.on, gis?.roof.step, gis?.roof.grid, placed, g.layout.mode])
+  }, [options.paint, gis?.roof.on, gis?.roof.step, gis?.roof.grid, placed, g.layout.mode, roofOv])
   const roofLines = roofRes.lines
   // контур ГВК по кровле: только для значений ГВК (факт ГИС без сравнения сезонов или ГВК модели)
   const gwc = useMemo(() => {
@@ -993,6 +994,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               </select>
             </>}
             {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} gwcNote={gwc?.note ?? ''} gwcShares={gwc?.shares ?? []} awNote={awNote} roof={{ ...gis.roof, note: [gis.roof.note, roofWarn].filter(Boolean).join(' ') }} />}
+            {options.paint === 'gis' && gis?.roof.on && <details className="pal-det"><summary>Палитра подложки кровли{roofOv ? ' · изменена' : ''}</summary>
+              <PaletteEditor noRange def={roofOv ?? defOf(ROOF_STOPS)} base={defOf(ROOF_STOPS)} auto={[0, 1]}
+                onChange={d => setOverride('roof', d)} onReset={() => setOverride('roof', null)} /></details>}
             {options.paint === 'model' && models && <ModelPicker {...models.picker} />}
             {options.paint === 'ref' && <>
               <label className="row" style={{ display: 'block' }} title="Номера скважин через запятую, пробел или с новой строки"><span>Опорные скважины</span>
