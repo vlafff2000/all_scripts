@@ -71,9 +71,10 @@ export function affineFrom3(src: [number, number][], dst: [number, number][]): A
 /** Привязка по трём точкам: точка контура (X, Y из файла) и номер скважины, стоящей в той же точке на карте. */
 export interface AlignPoint { x: number | null; y: number | null; well: number | null }
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
-const emptyAlign = (): AlignPoint[] => [0, 1, 2].map(() => ({ x: null, y: null, well: null }))
-export const polyAlign = pref<AlignPoint[]>('gsp.polyalign', emptyAlign(), raw => (Array.isArray(raw) && raw.length === 3
-  ? (raw as Partial<AlignPoint>[]).map(p => ({ x: num(p?.x), y: num(p?.y), well: num(p?.well) })) : emptyAlign()))
+export const emptyAlign = (): AlignPoint[] => [0, 1, 2].map(() => ({ x: null, y: null, well: null }))
+export const parseAlign = (raw: unknown): AlignPoint[] => (Array.isArray(raw) && raw.length === 3
+  ? (raw as Partial<AlignPoint>[]).map(p => ({ x: num(p?.x), y: num(p?.y), well: num(p?.well) })) : emptyAlign())
+export const polyAlign = pref<AlignPoint[]>('gsp.polyalign', emptyAlign(), parseAlign)
 
 /** Преобразование контура в координаты карты и пояснение, что с привязкой. */
 export function alignTransform(pts: AlignPoint[], placed: Placed[]): { t: Affine | null; status: string } {

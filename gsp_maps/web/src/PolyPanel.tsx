@@ -1,5 +1,6 @@
-import { MARKERS, POLY_COLORS, polyAlign, alignTransform, resetStyle, setStyle, styleOf, type AlignPoint, type PolyStyle } from './polygons'
+import AlignEditor from './AlignEditor'
 import type { Placed } from './model'
+import { MARKERS, POLY_COLORS, alignTransform, emptyAlign, polyAlign, resetStyle, setStyle, styleOf, type AlignPoint, type PolyStyle } from './polygons'
 import { useState } from 'react'
 import type { Poly } from './api'
 
@@ -25,17 +26,8 @@ export default function PolyPanel({ polys, overrides, warnings, placed, align }:
       <label className="row"><span>Размер маркера</span><input type="range" min={1} max={12} step={1} value={st.markerSize} onChange={e => setStyle(name, { markerSize: Number(e.target.value) })} aria-label="Размер маркера" /></label>
       <label className="row"><span>Цвет маркера</span><input type="color" value={st.markerColor} onChange={e => setStyle(name, { markerColor: e.target.value })} aria-label="Цвет маркера" /></label>
       <button type="button" className="quiet" onClick={() => resetStyle(name)}>Вернуть стиль по умолчанию</button>
-      <div className="poly-align">
-        <b>Привязка по трём точкам</b>
-        <span className="muted small">Три точки контура (X и Y из файла) и номер скважины, которая стоит в той же точке на карте.</span>
-        {align.map((pt, i) => <label key={i} className="row"><span>Точка {i + 1}</span>
-          <input type="number" step="any" placeholder="X" value={pt.x ?? ''} aria-label={`Точка ${i + 1}, X`} onChange={e => setPoint(i, { x: e.target.value === '' ? null : Number(e.target.value) })} />
-          <input type="number" step="any" placeholder="Y" value={pt.y ?? ''} aria-label={`Точка ${i + 1}, Y`} onChange={e => setPoint(i, { y: e.target.value === '' ? null : Number(e.target.value) })} />
-          <select value={pt.well ?? ''} aria-label={`Точка ${i + 1}, скважина`} onChange={e => setPoint(i, { well: e.target.value === '' ? null : Number(e.target.value) })}>
-            <option value="">скважина…</option>{placed.map(q => <option key={q.well} value={q.well}>{q.well}</option>)}</select></label>)}
-        <span className="muted small">{alignTransform(align, placed).status}</span>
-        <button type="button" className="quiet" onClick={() => polyAlign.set(polyAlign.get().map(() => ({ x: null, y: null, well: null })))}>Сбросить привязку</button>
-      </div>
+      <AlignEditor title="Привязка по трём точкам" hint="Три точки контура (X и Y из файла) и номер скважины, которая стоит в той же точке на карте."
+        axes={['X', 'Y']} align={align} placed={placed} onPatch={setPoint} status={alignTransform(align, placed).status} onReset={() => polyAlign.set(emptyAlign())} />
       <span className="muted small">Цвета по умолчанию идут по порядку: {POLY_COLORS.slice(0, 4).join(', ')}…</span>
       {warnings.map((w, i) => <span key={i} className="muted small">{w}</span>)}
     </>

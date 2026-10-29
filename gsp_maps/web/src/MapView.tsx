@@ -5,6 +5,8 @@ import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import PolyPanel from './PolyPanel'
+import BgPanel from './BgPanel'
+import { bgAlign, bgOpacity, bgShow, useBgUrl } from './background'
 import { alignTransform, applyAffine, FLIP_Y, polyAlign, polyStyles, styleOf, usePolygons } from './polygons'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
@@ -641,6 +643,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const polyOver = usePref(polyStyles)
   const alignPts = usePref(polyAlign)
   const align = useMemo(() => alignTransform(alignPts, placed), [alignPts, placed])
+  // фото или растр на фон: показываем, только когда привязка по трём точкам задана
+  const bgPts = usePref(bgAlign), bgOn = usePref(bgShow), bgOp = usePref(bgOpacity), bgUrl = useBgUrl()
+  const bgT = useMemo(() => alignTransform(bgPts, placed).t, [bgPts, placed])
   const polyShown = useMemo(() => {
     const T = align.t
     return polyData.polys.map((p, i) => ({ p, st: styleOf(p.name, i, polyOver) })).filter(x => x.st.show)
@@ -842,6 +847,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
         </g>}
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
           <g transform={`translate(${fit.ox} ${fit.oy}) scale(${fit.s})`}>
+            {bgT && bgOn && <image href={bgUrl} transform={`matrix(${bgT.a} ${bgT.d} ${bgT.b} ${bgT.e} ${bgT.c} ${bgT.f})`} opacity={bgOp} pointerEvents="none" />}
             <g opacity={0.07} fill={pal.accent}>{placed.map(q => <circle key={q.well} cx={q.x} cy={q.y} r={halo} />)}</g>
             {polyShown.length > 0 && <g aria-label="Многоугольники" pointerEvents="none">
               {polyShown.map(({ p, st, xy }) => { const K0 = Math.max(K, 1e-9); return <g key={p.name}>
@@ -986,9 +992,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
               <button type="button" role="radio" aria-checked={options.sectors === 'plain'} onClick={() => onOptions({ sectors: 'plain' })}>Один цвет</button></div>}
           </section>
-          {unit && <section><h4>Фон</h4>
-            <label className="check" title="Квадратная сетка с подписями координат; выключена — на карте остаётся только фон"><input type="checkbox" checked={gridOn} onChange={e => mapGrid.set(e.target.checked)} />Координатная сетка</label>
-          </section>}
+          <section><h4>Фон</h4>
+            {unit && <label className="check" title="Квадратная сетка с подписями координат; выключена — на карте остаётся только фон"><input type="checkbox" checked={gridOn} onChange={e => mapGrid.set(e.target.checked)} />Координатная сетка</label>}
+            <BgPanel placed={placed} align={bgPts} />
+          </section>
           {polyData.polys.length > 0 && <section><h4>Многоугольники</h4>
             <PolyPanel polys={polyData.polys} overrides={polyOver} warnings={polyData.warnings} placed={placed} align={alignPts} />
           </section>}
