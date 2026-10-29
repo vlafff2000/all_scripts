@@ -1,12 +1,13 @@
 import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, type SeasonScope } from './prefs'
+import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import PolyPanel from './PolyPanel'
 import { sortLabels } from './legendOrder'
 import BgPanel from './BgPanel'
+import LayersGrip from './LayersGrip'
 import { bgAlign, bgOpacity, bgShow, useBgUrl } from './background'
 import { alignTransform, applyAffine, FLIP_Y, polyAlign, polyStyles, styleOf, usePolygons } from './polygons'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
@@ -301,6 +302,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const geo = useMemo(() => place(g, calc, spread), [g, calc, spread])
   const [frameAll, setFrameAll] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
+  const layersSize = usePref(layersBox)
   const { placed, spacing, far } = geo
   const obsBox = frameAll && gis && (gis.obs.on || gis.obs.geoOn) && !spread ? shownFunds(gis.obs).filter(o => o.x !== undefined) : []
   const bounds = useMemo(() => {
@@ -967,7 +969,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       <div className="map-view-ctl no-export">
         <button type="button" className={'view-btn' + (layersOpen ? ' on' : '')} onClick={() => setLayersOpen(v => !v)} aria-expanded={layersOpen} title="Как показывать скважины">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 1.5 5.5 8 9l6.5-3.5L8 2ZM1.5 8.5 8 12l6.5-3.5M1.5 11.5 8 15l6.5-3.5" /></svg><span className="view-label">Вид карты</span></button>
-        {layersOpen && <div className="layers" role="dialog" aria-label="Вид карты">
+        {layersOpen && <div className="layers" role="dialog" aria-label="Вид карты" style={layersSize ? { width: layersSize.w, height: layersSize.h } : undefined}>
+          <div className="layers-body">
           <section><h4>Цвет</h4>
             <select value={options.paint} onChange={e => onOptions({ paint: e.target.value as Paint })} aria-label="Раскраска">{PAINTS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
             {options.paint === 'atlas' && atlas && <>
@@ -1022,6 +1025,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             <label className="check"><input type="checkbox" checked={options.water} onChange={e => onOptions({ water: e.target.checked })} />Вынос воды</label>
             <label className="check"><input type="checkbox" checked={options.share} onChange={e => onOptions({ share: e.target.checked })} />Доля ГСП у подписи</label>
           </section>}
+          </div>
+          <LayersGrip />
         </div>}
       </div>
       {box && <div className="selbox no-export" style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}
