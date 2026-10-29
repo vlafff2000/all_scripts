@@ -1,3 +1,4 @@
+import { viewGsp, viewSeason, viewSummary, viewWork, mergeAll } from './wellView'
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 import { colorOfGroup, groupColors } from '../../../pxg_core/web-ui/groupColors'
 import type { GisModelWells, GisVariants } from './allWells'
@@ -17,6 +18,8 @@ export interface GspData {
   gspFlow: Series; pressure: { gsp?: Series; obj?: Series }; seasonPressure: { gsp: Record<string, number>; obj: Record<string, number> }
   /** Для набора из нескольких ГСП: какие группы вошли и какой группе принадлежит скважина. */
   groups?: string[]; groupOf?: Record<string, string>
+  /** Все скважины набора до фильтра скважин вкладки (wellView.ts); без фильтра пусто. */
+  all?: { wells: number[]; groupOf: Record<string, string> }
   warnings: string[]; trends: TrendRow[]; depths: Record<string, [number, number]>; altitude: Record<string, number>
 }
 export interface SeasonData { wells: number[]; days: number[]; flow: number[][] }
@@ -102,12 +105,13 @@ export interface Locate { well: number; gsp: string; groups: string[] }
 export const locateWell = (gsp: string, well: number) => call<Locate>('/api/locate?' + new URLSearchParams({ gsp, well: String(well) }))
 
 export const getGsp = async (name: string, mode: string): Promise<GspData> => {
-  if (!isMulti(name)) return call<GspData>('/api/gsp?name=' + encodeURIComponent(name) + '&mode=' + mode)
-  return mergeGsp(await Promise.all(groupsOf(name).map(n => getGsp(n, mode))), name)
+  if (!isMulti(name)) return viewGsp(await call<GspData>('/api/gsp?name=' + encodeURIComponent(name) + '&mode=' + mode))
+  const list = await Promise.all(groupsOf(name).map(n => getGsp(n, mode)))
+  return { ...mergeGsp(list, name), all: mergeAll(list) }
 }
 export const getSeason = async (gsp: string, kind: string, season: string): Promise<SeasonData> => {
   if (isMulti(gsp)) return mergeSeason((await Promise.all(groupsOf(gsp).map(n => getSeason(n, kind, season)))).filter(d => d.wells.length))
-  return call<SeasonData>('/api/season?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season))
+  return viewSeason(await call<SeasonData>('/api/season?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season)), gsp)
 }
 export const exportExcel = (gsp: string, mode: string) => call<{ name: string; path: string }>('/api/export', post({ gsp, mode }))
 // Свой проводник вместо окна Tk; пустой путь — отмена, несколько файлов — по пути на строку.
@@ -149,7 +153,7 @@ export const getGisValues = (pack: string, metric: string, season: string, again
 export const getParams = () => call<{ items: ParamItem[] }>('/api/params')
 export const getParam = (table: string, column: string, agg: string) =>
   call<ParamValues>('/api/param?' + new URLSearchParams({ table, column, agg }))
-export const getWork = (gsp: string) => call<WorkData>('/api/work?name=' + encodeURIComponent(gsp))
+export const getWork = async (gsp: string) => viewWork(await call<WorkData>('/api/work?name=' + encodeURIComponent(gsp)), gsp)
 
 /** Модели tNavigator: папки из общего списка (~/.pxg), найденные модели и отмеченные для карты. */
 export interface TnavModel { id: string; name: string; folder: string; files: string[]; summary: boolean; indicators: boolean; missing: string[]; selected: boolean }
@@ -164,5 +168,5 @@ export const getModelValues = (keyword: string, start: string, end: string, agg:
   call<ModelValues>('/api/model-values?' + new URLSearchParams({ keyword, start, end, agg, models: models.join('|') }))
 
 export interface SummaryData { columns: string[]; rows: (string | number | null)[][] }
-export const getSummary = (gsp: string, kind: string, season: string, mode: string) =>
-  call<SummaryData>('/api/summary?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season) + '&mode=' + mode)
+export const getSummary = async (gsp: string, kind: string, season: string, mode: string) =>
+  viewSummary(await call<SummaryData>('/api/summary?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season) + '&mode=' + mode), gsp)

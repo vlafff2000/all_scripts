@@ -343,6 +343,10 @@ def test_api_flow(db, tmp_path, monkeypatch):
     loc = c.get("/api/locate", params={"gsp": "ГСП-1", "well": 12}).json()
     assert loc == {"well": 12, "gsp": "ГСП 1", "groups": ["ГСП 1", "ГСП 2"]}
     assert c.get("/api/locate", params={"gsp": "гсп_2", "well": 12}).json()["gsp"] == "ГСП 2"
+    # пресеты скважин (фильтр вкладки): файл лежит в папке проекта Атласа, поэтому их видят и Атлас, и другие программы
+    r = c.post("/api/well-presets", json={"name": "Контрольные", "wells": ["11", "12"]})
+    assert r.status_code == 200 and (storage / "projects" / ("a" * 32) / "well_presets.json").is_file()
+    assert [p["label"] for p in c.get("/api/well-presets").json()["presets"]] == ["Контрольные"]
     assert c.get("/api/locate", params={"gsp": "нет", "well": 12}).json()["gsp"] == ""
     assert c.get("/api/locate", params={"gsp": "ГСП 2", "well": 99}).json()["groups"] == []
     assert c.get("/api/locate", params={"well": "x"}).status_code == 400

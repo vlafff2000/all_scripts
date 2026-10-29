@@ -15,6 +15,8 @@ import WorkPage from './WorkPage'
 import { DataPage, PressurePage, TablePage, TrendsPage } from './Pages'
 import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atlasAgg, gisPack, gisMetric, gisSeason, gisAgainst, gisPins, gisSource, gisGwc, gisGwcMode, gisGwcPar, gisGwcExcl, gisRoof, gisRoofModel, gisAllOn, gisAllModel, gisAllMulti, gisAllSpec, gisAllDate, gisAllMode, gisAllDepth, gisAllPreset, gisAllOutlier, gisAllExcl, gisRoofLayer, gisRoofStep, gisIso, gisObservers, gisGeophys, gisIsoStep, gisIsoReach, modelKeyword, modelAgg, fixedScale, inspectorOpen, tipMode, lastGsp, pickedSeasons, seasonScope, lastKind, posMode, sectors, showShare, showWater, sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Timeline from './Timeline'
+import { WellFilter, useWellFilter } from '../../../pxg_core/web-ui/WellFilter'
+import { setWellView } from './wellView'
 
 const PAGES = [
   { id: 'map', title: 'Карта', icon: 'M8 1.5a4.5 4.5 0 0 1 4.5 4.5c0 3-4.5 8.5-4.5 8.5S3.5 9 3.5 6A4.5 4.5 0 0 1 8 1.5Zm0 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z' },
@@ -60,6 +62,10 @@ export default function App() {
   const collapsed = usePref(sidebarCollapsed), currentTheme = usePref(theme)
   const mode = usePref(posMode), kind = usePref(lastKind), gspPref = usePref(lastGsp)
   const sec = usePref(sectors), water = usePref(showWater), share = usePref(showShare), fixed = usePref(fixedScale), paint = usePref(paintMode), bscale = usePref(bubbleScale), labels = usePref(labelMode), idleOff = usePref(hideIdle), minV = usePref(minValue), insp = usePref(inspectorOpen), tmode = usePref(tipMode)
+  // фильтр скважин у каждой вкладки свой; страницы получают данные уже без скрытых скважин (wellView.ts)
+  const [wfilter, setWfilter] = useWellFilter(page)
+  setWellView(wfilter)
+  const fkey = JSON.stringify(wfilter)
   const [g, setG] = useState<GspData | null>(null)
   const [gErr, setGErr] = useState('')
   const [seasonKey, setSeasonKey] = useState('')
@@ -113,7 +119,7 @@ export default function App() {
     setGErr('')
     getGsp(gsp, mode).then(d => { if (live) { setG(d); setSelected(null) } }).catch(e => live && setGErr(String(e.message || e)))
     return () => { live = false }
-  }, [ready, gsp, mode])
+  }, [ready, gsp, mode, fkey])
 
   // параметры Атласа: каталог — при загрузке проекта; значения — при выборе параметра на карте
   const [atlasItems, setAtlasItems] = useState<ParamItem[]>([])
@@ -402,16 +408,16 @@ export default function App() {
         <p className="muted">Откройте раздел «Данные»: выберите проект Газового Атласа (расходы, давления, вода и координаты загружаются в Атласе).</p>
         <p><a className="primary linkbtn" href="#/data">Перейти к данным</a></p></section>)
     if (g && page === 'compare') return (
-      <Compare g={g} kind={kind} inspector={insp} options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
+      <Compare key={fkey} g={g} kind={kind} inspector={insp} options={{ sectors: sec, water, share, fixed, paint, scale: bscale, labels, hideIdle: idleOff, minValue: minV }}
         onOptions={o => { if (o.sectors) sectors.set(o.sectors); if (o.water !== undefined) showWater.set(o.water); if (o.share !== undefined) showShare.set(o.share); if (o.fixed !== undefined) fixedScale.set(o.fixed); if (o.paint) paintMode.set(o.paint); if (o.scale !== undefined) bubbleScale.set(o.scale); if (o.labels) labelMode.set(o.labels); if (o.hideIdle !== undefined) hideIdle.set(o.hideIdle); if (o.minValue !== undefined) minValue.set(o.minValue) }} />)
     if (!g || !calc) return gErr ? <div className="note warning">{gErr}</div> : <p className="muted">Считаю…</p>
     if (wholeField && ['table', 'work', 'shares'].includes(page)) return <section className="card"><h2>Нужна одна группа</h2><p className="muted">Эта страница считается по одному ГСП. Выберите ГСП вверху: «Весь объект» работает на картах, в сравнении и в разделе «Скважины».</p></section>
-    if (page === 'table') return <TablePage g={g} calc={calc} kind={kind} season={season} a={a} b={b} mode={mode} />
-    if (page === 'pressure') return <PressurePage g={g} kind={kind} season={season} range={[calc.days[a], calc.days[b]]} />
-    if (page === 'wells') return <WellsPage g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={setSelected} group={group} />
-    if (page === 'work') return <WorkPage g={g} calc={calc} kind={kind} season={season} selected={selected} onSelect={setSelected} />
-    if (page === 'shares') return <SharesPage g={g} kind={kind} selected={selected} onSelect={setSelected} />
-    if (page === 'trends') return <TrendsPage g={g} />
+    if (page === 'table') return <TablePage key={fkey} g={g} calc={calc} kind={kind} season={season} a={a} b={b} mode={mode} />
+    if (page === 'pressure') return <PressurePage key={fkey} g={g} kind={kind} season={season} range={[calc.days[a], calc.days[b]]} />
+    if (page === 'wells') return <WellsPage key={fkey} g={g} calc={calc} kind={kind} season={season} a={a} b={b} selected={selected} onSelect={setSelected} group={group} />
+    if (page === 'work') return <WorkPage key={fkey} g={g} calc={calc} kind={kind} season={season} selected={selected} onSelect={setSelected} />
+    if (page === 'shares') return <SharesPage key={fkey} g={g} kind={kind} selected={selected} onSelect={setSelected} />
+    if (page === 'trends') return <TrendsPage key={fkey} g={g} />
     return (
       <div className={'map-page' + (insp ? '' : ' no-insp')}>
         <div className="map-main">
@@ -458,6 +464,10 @@ export default function App() {
                   <button type="button" className="quiet" onClick={() => lastGsp.set(selGroups[0])} disabled={selGroups.length < 2}>Только первая</button></div>}
               </div>
             </details>
+            {page === 'pressure'
+              ? <span className="muted small" title="Давление считается по группе и объекту в целом">Фильтр скважин: не влияет на давление</span>
+              : <WellFilter tab={page} wells={(g!.all?.wells ?? g!.wells).map(String)} groups={g!.groups ?? []} value={wfilter} onChange={setWfilter}
+                  groupOf={w => (g!.all?.groupOf ?? g!.groupOf)?.[w] ?? g!.gsp} />}
             {app!.gsps.length > 1 && <GroupColorsButton groups={app!.gsps} onChange={() => setColorTick(n => n + 1)} />}
             <div className="segmented" role="radiogroup" aria-label="Вид">
               {['Отбор', 'Закачка'].map(k => <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => lastKind.set(k)}>{k}</button>)}</div>
