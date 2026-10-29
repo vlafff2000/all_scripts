@@ -1,5 +1,6 @@
 import { isMulti, type GspData, type SeasonData, type SeasonInfo, type WaterRec } from './api'
 import type { SeasonScope } from './prefs'
+import { paletteAt, type PaletteDef } from './palette'
 
 export const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
 export const MONTH_NAME = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
@@ -219,6 +220,16 @@ export interface PaintData {
   vals: Map<number, PaintVal>; lo: number; hi: number; stops: string[]; title: string; fmt: (v: number) => string; note: string
   /** Подписи под шкалой в легенде: только края (для очерёдности) или ещё середина. */
   mid?: boolean; scopeNote?: string
+  /** Ключ палитры для настройки («entry», «gis-delta», …); по умолчанию — режим раскраски. */
+  palKey?: string
+  /** Палитра, выбранная инженером; без неё цвета берутся из stops поровну. */
+  pal?: PaletteDef
+}
+
+/** Цвет значения по раскраске: палитра инженера либо палитра режима. */
+export function paintColor(pd: PaintData, v: number): string {
+  const t = (v - pd.lo) / (pd.hi - pd.lo)
+  return pd.pal ? paletteAt(pd.pal, t) : rampColor(pd.stops, t)
 }
 
 export function rampColor(stops: string[], t: number): string {
@@ -252,7 +263,7 @@ export function gisPaint(values: Record<string, number>, dates: Record<string, s
   const vals = new Map<number, PaintVal>(entries.map(([w, v]) => [Number(w), { v, label: f(v), tip: `${title}: ${f(v)}${dates[w] ? ' · замер ' + dates[w] : ''}` }]))
   if (delta) {
     const m = Math.max(Math.abs(Math.min(...nums)), Math.abs(Math.max(...nums))) || 1
-    return { vals, lo: -m, hi: m, stops: DELTA_STOPS, title, fmt: f, note: note.join(' '), mid: true }
+    return { vals, lo: -m, hi: m, stops: DELTA_STOPS, title, fmt: f, note: note.join(' '), mid: true, palKey: 'gis-delta' }
   }
   const lo = Math.min(...nums), hi = Math.max(...nums)
   return { vals, lo, hi: hi > lo ? hi : lo + 1, stops: SEASON_STOPS, title, fmt: f, note: note.join(' ') }

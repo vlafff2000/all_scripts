@@ -1,16 +1,19 @@
 import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, type SeasonScope } from './prefs'
+import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import PolyPanel from './PolyPanel'
 import { sortLabels } from './legendOrder'
 import BgPanel from './BgPanel'
+import LayersGrip from './LayersGrip'
 import { bgAlign, bgOpacity, bgShow, useBgUrl } from './background'
 import { alignTransform, applyAffine, FLIP_Y, polyAlign, polyStyles, styleOf, usePolygons } from './polygons'
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
-import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
+import PaletteEditor from './PaletteEditor'
+import { defOf, gradientStops, setOverride, usePaletteOverride } from './palette'
+import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, type PaintData, paintFor, rampColor, paintColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
 
 /** Цвета вариантов критерия: одинаковы на карте, в списке вариантов панели и в подписях изолиний. */
 /** Кровля пласта: от синего (глубже) к светло-жёлтому (выше). */
@@ -79,12 +82,12 @@ const Glyph = memo(function Glyph(p: {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={pal.surface} stroke={pal.muted} strokeWidth={rmax * 0.04} strokeDasharray={`${rmax * 0.09} ${rmax * 0.07}`} />)
   } else if (p.paint) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.paint.color} stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
-  } else if (!p.sectors || p.gcolor) {
+  } else if (!p.sectors) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.gcolor || pal.gas} stroke={pal.surface} strokeWidth={ring} />)
   } else {
     const sum = p.months.reduce((s, v) => s + v, 0) || 1
     const parts = p.order.filter(m => p.months[m] > 0)
-    if (parts.length <= 1) els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.monthColors[parts[0] ?? 0] || pal.gas} stroke={pal.surface} strokeWidth={ring} />)
+    if (parts.length <= 1) els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.monthColors[parts[0] ?? 0] || pal.gas} stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
     else {
       let a0 = 0
       for (const m of parts) {
@@ -92,7 +95,7 @@ const Glyph = memo(function Glyph(p: {
         els.push(<path key={m} d={sectorPath(x, y, r, a0, a1)} fill={p.monthColors[m]} stroke={pal.surface} strokeWidth={rmax * 0.03} strokeLinejoin="round" />)
         a0 = a1
       }
-      els.push(<circle key="o" cx={x} cy={y} r={r} fill="none" stroke={pal.surface} strokeWidth={ring} />)
+      els.push(<circle key="o" cx={x} cy={y} r={r} fill="none" stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
     }
   }
   // вода: по кольцу на каждый месяц с водой, снаружи друг от друга (раньше — ближе к кругу), цвет — месяц, толщина ∝ л/ч; водный фактор — кружок на внешнем кольце
@@ -301,6 +304,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const geo = useMemo(() => place(g, calc, spread), [g, calc, spread])
   const [frameAll, setFrameAll] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
+  const layersSize = usePref(layersBox)
   const { placed, spacing, far } = geo
   const obsBox = frameAll && gis && (gis.obs.on || gis.obs.geoOn) && !spread ? shownFunds(gis.obs).filter(o => o.x !== undefined) : []
   const bounds = useMemo(() => {
@@ -346,7 +350,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return { mode: keys.length === 1 && keys[0] === season ? 'one' : scopeMode, keys, calcs: multi.calcs }
   }, [multi, scopeMode, picked, season])
   const calcPaint: PaintData | null = useMemo(() => paintFor(options.paint, g, calc, kind, season, a, b, options.paint === 'entry' || options.paint === 'wf' ? scope : undefined), [options.paint, g, calc, kind, season, a, b, scope])
-  const paintData: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : options.paint === 'gis' ? gis?.paint ?? null : calcPaint
+  const rawPaint: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : options.paint === 'gis' ? gis?.paint ?? null : calcPaint
+  // палитра: изменённая инженером или режима по умолчанию; ручной диапазон, если он задан и корректен
+  const palOv = usePaletteOverride(rawPaint?.palKey ?? options.paint)
+  const paintData: PaintData | null = useMemo(() => {
+    if (!rawPaint || !palOv) return rawPaint
+    const lo = palOv.lo ?? rawPaint.lo, hi = palOv.hi ?? rawPaint.hi
+    return { ...rawPaint, pal: palOv, ...(hi > lo ? { lo, hi } : {}) }
+  }, [rawPaint, palOv])
   const wm = useMemo(() => waterMonths(water), [water])
   // кольца воды скважины: один месяц — одно кольцо (замеры месяца сводятся к максимуму)
   const rings = useMemo(() => {
@@ -585,7 +596,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const paints = useMemo(() => {
     if (!paintData) return null
     const m = new Map<number, { color: string; label: string }>()
-    paintData.vals.forEach((v, well) => m.set(well, { color: rampColor(paintData.stops, (v.v - paintData.lo) / (paintData.hi - paintData.lo)), label: v.label }))
+    paintData.vals.forEach((v, well) => m.set(well, { color: paintColor(paintData, v.v), label: v.label }))
     return m
   }, [paintData])
   const groupsOn = usePref(groupColoring)
@@ -714,7 +725,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 if (byGroup) { for (const n of c.idx) { const gn = g.groupOf![String(placed[n].well)]; cnt.set(gn, (cnt.get(gn) || 0) + 1) } const top = [...cnt.entries()].sort((u, v) => v[1] - u[1])[0]; ringC = groupColor(top[0]); fill = ringC }
                 if (paintData) {
                   const vs = c.idx.map(n => paintData.vals.get(placed[n].well)?.v).filter((v): v is number => v !== undefined)
-                  fill = vs.length ? rampColor(paintData.stops, (vs.reduce((p2, q2) => p2 + q2, 0) / vs.length - paintData.lo) / (paintData.hi - paintData.lo)) : pal.muted
+                  fill = vs.length ? paintColor(paintData, vs.reduce((p2, q2) => p2 + q2, 0) / vs.length) : pal.muted
                 }
                 const wet = c.idx.filter(n => (water.get(placed[n].well) || []).some(w => (w.flow ?? 0) > 0)).length
                 const title = `${c.idx.length} скв. рядом: ${fmtMln(c.total)} млн м³` + (win.sumAll > 0 ? ` (${fmtPct(c.total / win.sumAll)})` : '') + (wet ? `, с водой: ${wet}` : '') + (byGroup ? ' · ' + [...cnt.entries()].sort((u, v) => v[1] - u[1]).map(e => e[0] + ': ' + e[1]).join(', ') : '') + ' · нажмите или приблизьте карту'
@@ -740,7 +751,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const obsLayer = obsPts.length ? <g aria-label="Наблюдательные и геофизические скважины">
     {obsPts.map(o => {
       const pv = paintData?.vals.get(o.well), r = rd * 0.5, x = o.x!, y = -o.y!, geo = o.fund === 'geophysical'
-      const fill = pv && paintData ? rampColor(paintData.stops, (pv.v - paintData.lo) / (paintData.hi - paintData.lo)) : pal.surface
+      const fill = pv && paintData ? paintColor(paintData, pv.v) : pal.surface
       return <g key={o.well}>
         <path d={geo ? `M${x},${y - r}L${x + r},${y + r * 0.8}L${x - r},${y + r * 0.8}Z` : `M${x},${y - r}L${x + r},${y}L${x},${y + r}L${x - r},${y}Z`} fill={fill} stroke={pal.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
         <text x={x} y={y - r - 3 / K} fontSize={10 / K} textAnchor="middle" fill={pal.ink} stroke={pal.bg} strokeWidth={3 / K} paintOrder="stroke">{o.well}{pv ? ' · ' + pv.label : ''}</text>
@@ -766,7 +777,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up) }
                 el.addEventListener('pointermove', move); el.addEventListener('pointerup', up)
               }}><b>№ {tipWell.well}</b>{tipWell.dir && <span className="tip-dir">{tipWell.dir}</span>}{multiG && g.groupOf?.[String(tipWell.well)] && <span className="tip-dir">{g.groupOf[String(tipWell.well)]}</span>}</div>
-            {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? rampColor(paintData.stops, (paintData.vals.get(tipWell.well)!.v - paintData.lo) / (paintData.hi - paintData.lo)) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
+            {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? paintColor(paintData, paintData.vals.get(tipWell.well)!.v) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
             <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
             <div className="tip-share"><span><i style={{ width: Math.min(100, share * 100 * 4) + '%' }} /></span>{share > 0 ? fmtPct(share) + ' ГСП' : 'не работала'}</div>
             <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
@@ -914,7 +925,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           <rect width={LW} height={paintData ? 92 : legH} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
           {paintData ? <>
             <text x={14} y={22} fontSize={12.5} fontWeight={700} fill={pal.ink}>{paintData.title}</text>
-            <defs><linearGradient id="paintramp" x1="0" x2="1">{[0, 0.25, 0.5, 0.75, 1].map(t => <stop key={t} offset={t} stopColor={rampColor(paintData.stops, t)} />)}</linearGradient></defs>
+            <defs><linearGradient id="paintramp" x1="0" x2="1">{gradientStops(paintData.pal ?? defOf(paintData.stops)).map((g2, k) => <stop key={k} offset={g2.offset} stopColor={g2.color} />)}</linearGradient></defs>
             <rect x={14} y={32} width={LW - 28} height={10} rx={5} fill="url(#paintramp)" />
             <text x={14} y={57} fontSize={11} fill={pal.muted}>{paintData.fmt(paintData.lo)}</text>
             {paintData.mid && <text x={LW / 2} y={57} fontSize={11} fill={pal.muted} textAnchor="middle">{paintData.fmt((paintData.lo + paintData.hi) / 2)}</text>}
@@ -967,7 +978,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       <div className="map-view-ctl no-export">
         <button type="button" className={'view-btn' + (layersOpen ? ' on' : '')} onClick={() => setLayersOpen(v => !v)} aria-expanded={layersOpen} title="Как показывать скважины">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 1.5 5.5 8 9l6.5-3.5L8 2ZM1.5 8.5 8 12l6.5-3.5M1.5 11.5 8 15l6.5-3.5" /></svg><span className="view-label">Вид карты</span></button>
-        {layersOpen && <div className="layers" role="dialog" aria-label="Вид карты">
+        {layersOpen && <div className="layers" role="dialog" aria-label="Вид карты" style={layersSize ? { width: layersSize.w, height: layersSize.h } : undefined}>
+          <div className="layers-body">
           <section><h4>Цвет</h4>
             <select value={options.paint} onChange={e => onOptions({ paint: e.target.value as Paint })} aria-label="Раскраска">{PAINTS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
             {options.paint === 'atlas' && atlas && <>
@@ -988,6 +1000,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               <button type="button" onClick={() => refWells.set(REF_PRESET_AN2025)} title="Скв. 56, 83, 220, 182, 237, 264, 437, 520 (ГСП 1, 2, 3, 3, 4, 5, 8, 9)">Таблица 1.2 АН-2025</button>
               <p className="muted small">Цвет маркера — группа скважины в проекте Атласа, остальные скважины — фон. Список — решение инженера.</p>
             </>}
+            {paintData && rawPaint && <details className="pal-det"><summary>Палитра{palOv ? ' · изменена' : ''}</summary>
+              <PaletteEditor def={paintData.pal ?? defOf(rawPaint.stops)} base={defOf(rawPaint.stops)} auto={[rawPaint.lo, rawPaint.hi]}
+                onChange={d => setOverride(rawPaint.palKey ?? options.paint, d)} onReset={() => setOverride(rawPaint.palKey ?? options.paint, null)} />
+            </details>}
             {!paintData && !isRef && <div className="segmented" role="radiogroup" aria-label="Секторы на круге">
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
               <button type="button" role="radio" aria-checked={options.sectors === 'plain'} onClick={() => onOptions({ sectors: 'plain' })}>Один цвет</button></div>}
@@ -1002,7 +1018,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           {!isRef && <section><h4>Круги</h4>
             <label className="row"><span>Размер</span><input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
             <label className="row"><span>Подпись</span><select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
-            {multiG && <label className="check" title="Круг скважины окрашивается цветом её группы (при раскраске по значению цвет группы — обводка)"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
+            {multiG && <label className="check" title="Цвет группы: заливка круга, а при секторах по месяцам или раскраске по значению — обводка"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
             <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
             <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
             {!paintData && <label className="check" title="Размер кругов считается от максимума всего сезона, а не выбранного окна"><input type="checkbox" checked={options.fixed} onChange={e => onOptions({ fixed: e.target.checked })} />Шкала по всему сезону</label>}
@@ -1022,6 +1038,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             <label className="check"><input type="checkbox" checked={options.water} onChange={e => onOptions({ water: e.target.checked })} />Вынос воды</label>
             <label className="check"><input type="checkbox" checked={options.share} onChange={e => onOptions({ share: e.target.checked })} />Доля ГСП у подписи</label>
           </section>}
+          </div>
+          <LayersGrip />
         </div>}
       </div>
       {box && <div className="selbox no-export" style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}

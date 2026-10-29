@@ -20,6 +20,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from pxg_base import window
 from . import gis_source, models as tnav_models, polygons, roof as roof_mod
 from .project import PATH_KEYS, Project
 
@@ -416,6 +417,7 @@ def build_app() -> Starlette:
     runlog.setup("Карты")
     routes = [
         *runlog.routes(),
+        window.second_window_route(),
         Route("/api/state", state),
         Route("/api/config", config, methods=["POST"]),
         Route("/api/load", load, methods=["POST"]),

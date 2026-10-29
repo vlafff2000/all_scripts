@@ -135,7 +135,20 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .view-btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px var(--shadow); }
 .view-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 .view-btn:hover, .view-btn.on { border-color: var(--accent); color: var(--accent-strong); }
-.layers { width: 268px; max-height: calc(100vh - 220px); overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px var(--shadow-strong); padding: 6px 14px 12px; font-size: 14px; }
+.layers { position: relative; display: flex; flex-direction: column; width: 460px; max-width: calc(100vw - 100px); max-height: calc(100vh - 150px); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px var(--shadow-strong); font-size: 14px; }
+/* прокручивается только содержимое: ручки растягивания остаются на краях окна */
+.layers-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 14px 12px; }
+.layers-grip { position: absolute; z-index: 2; touch-action: none; }
+.layers-grip.lg-w { left: -4px; top: 14px; bottom: 14px; width: 8px; cursor: ew-resize; }
+.layers-grip.lg-s { left: 14px; right: 14px; bottom: -4px; height: 8px; cursor: ns-resize; }
+.layers-grip.lg-sw { left: -4px; bottom: -4px; width: 16px; height: 16px; cursor: nesw-resize; }
+.layers-grip.lg-sw::after { content: ''; position: absolute; left: 4px; bottom: 4px; width: 8px; height: 8px; border-left: 2px solid var(--line-strong); border-bottom: 2px solid var(--line-strong); }
+/* привязка по трём точкам: свёрнута по умолчанию, в развёрнутом виде три строки помещаются в ширину окна */
+.poly-align > summary { cursor: pointer; font-weight: 700; padding: 2px 0; }
+.poly-align[open] > summary { margin-bottom: 4px; }
+.layers .poly-align .row { grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr); }
+.layers .poly-align .row input[type=number] { width: 100%; min-width: 0; }
+.layers .poly-align .row select { width: 100%; min-width: 0; }
 .layers section { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
 .layers section:last-child { border-bottom: 0; padding-bottom: 2px; }
 .layers h4 { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -287,3 +300,18 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 .group-menu-row { display: flex; gap: 6px; margin-top: 4px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
 .gdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .map-chip .gdot { margin-right: 5px; }
+
+/* Редактор палитры (как в дизайнере геологии tNavigator) */
+.pal-det > summary { cursor: pointer; font-size: 13px; color: var(--ink); }
+.pal-ed { display: grid; gap: 8px; margin-top: 8px; }
+.pal-bar-wrap { position: relative; padding-bottom: 20px; }
+.pal-bar { height: 22px; border-radius: 6px; border: 1px solid var(--line); cursor: copy; }
+.pal-marks { position: absolute; left: 0; right: 0; top: 24px; height: 0; }
+.pal-mark { position: absolute; top: 0; width: 14px; height: 16px; margin-left: -7px; padding: 0; border: 2px solid var(--muted); border-radius: 3px 3px 7px 7px; cursor: ew-resize; touch-action: none; }
+.pal-mark.on { border-color: var(--accent-strong); box-shadow: 0 0 0 2px var(--accent-soft); }
+.pal-stop, .pal-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pal-stop input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; }
+.pal-hex { width: 76px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 3px 6px; font-family: monospace; }
+.pal-pos { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.pal-pos input { width: 52px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 3px 5px; text-align: right; }
+.pal-pos input.pal-rng { width: 70px; }

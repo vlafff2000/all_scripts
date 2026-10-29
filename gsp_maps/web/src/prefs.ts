@@ -3,6 +3,9 @@ import { useSyncExternalStore } from 'react'
 /** Настройка, которая помнится между запусками (localStorage, если он доступен). */
 export interface Pref<T> { get: () => T; set: (v: T) => void; subscribe: (cb: () => void) => () => void }
 
+/** Настройки, которые у каждого окна свои (размеры, свёрнутость): между окнами не синхронизируются. */
+const PER_WINDOW = new Set(['gsp.sidebar.collapsed', 'gsp.layersBox', 'gsp.inspector'])
+
 export function pref<T>(key: string, initial: T, parse?: (raw: unknown) => T): Pref<T> {
   const listeners = new Set<() => void>()
   let value = initial
@@ -10,6 +13,20 @@ export function pref<T>(key: string, initial: T, parse?: (raw: unknown) => T): P
     const raw = key ? localStorage.getItem(key) : null
     if (raw !== null) value = parse ? parse(JSON.parse(raw)) : (JSON.parse(raw) as T)
   } catch { /* хранилище недоступно или значение повреждено */ }
+  // второе окно программы меняет ту же настройку: подхватываем из события хранилища
+  if (key && !PER_WINDOW.has(key)) {
+    try {
+      window.addEventListener('storage', e => {
+        if (e.key !== key || e.storageArea !== localStorage || e.newValue === null) return
+        try {
+          const next = parse ? parse(JSON.parse(e.newValue)) : (JSON.parse(e.newValue) as T)
+          if (JSON.stringify(next) === JSON.stringify(value)) return
+          value = next
+          listeners.forEach(l => l())
+        } catch { /* повреждённое значение */ }
+      })
+    } catch { /* нет window */ }
+  }
   return {
     get: () => value,
     set: v => {
@@ -29,6 +46,11 @@ export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'mod
 /** Выбранный параметр Атласа («таблица|колонка») и агрегация; запоминаются между сеансами. */
 export const atlasParam = pref<string>('gsp.atlasParam', '', raw => String(raw || ''))
 export const atlasAgg = pref<string>('gsp.atlasAgg', 'mean', raw => String(raw || 'mean'))
+/** Размер окна «Вид карты» (px), если его растянули; null — размер по умолчанию. */
+export const layersBox = pref<{ w: number; h: number } | null>('gsp.layersBox', null, raw => {
+  const o = raw as { w?: unknown; h?: unknown } | null
+  return o && Number.isFinite(Number(o.w)) && Number.isFinite(Number(o.h)) ? { w: Math.max(Number(o.w), 300), h: Math.max(Number(o.h), 240) } : null
+})
 /** ГИС и ГВК на карте: пачка, показатель, сезон, сезон для сравнения («Δ») и закреплённые инженером замеры («скважина:дата,…»). */
 export const gisPack = pref<string>('gsp.gisPack', '', raw => String(raw || ''))
 export const gisMetric = pref<string>('gsp.gisMetric', 'gvk_abs_m', raw => String(raw || 'gvk_abs_m'))

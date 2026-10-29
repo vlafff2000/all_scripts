@@ -60,6 +60,36 @@ def app_window(url: str, profile: str):
         return None
 
 
+_second: dict = {"open": None}
+
+
+def open_second(hash_part: str = "") -> bool:
+    """Открыть второе окно той же программы (для второго монитора); False, если окно открыть нечем (сервер без окна)."""
+    fn = _second["open"]
+    if fn is None:
+        return False
+    try:
+        fn("#" + hash_part.lstrip("#") if hash_part else "")
+    except Exception:
+        return False
+    return True
+
+
+def second_window_route():
+    """Маршрут POST /api/second-window {hash}: оба окна обслуживает один и тот же сервер."""
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    async def handler(request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        part = str(body.get("hash", ""))[:100] if isinstance(body, dict) else ""
+        return JSONResponse({"opened": open_second(part)})
+    return Route("/api/second-window", handler, methods=["POST"])
+
+
 def run(browser: bool = False, port: int = 0, title: str = "Работа с исходными данными", app_factory=None, app_profile: str = "") -> int:
     import uvicorn
 
@@ -88,11 +118,13 @@ def run(browser: bool = False, port: int = 0, title: str = "Работа с ис
             pass
         try:
             webview.create_window(title, url, width=1280, height=860, min_size=(900, 600))
+            _second["open"] = lambda h: webview.create_window(title + " — окно 2", url + h, width=1280, height=860, min_size=(900, 600))
             webview.start()
             server.should_exit = True
             return 0
         except Exception as error:  # например, нет WebView2
             print("Окно приложения не открылось (%s), открываю в браузере" % error)
+    _second["open"] = lambda h: webbrowser.open(url + h)
     if app_profile:  # окно приложения через Chromium; закрыли окно — сервер останавливается
         proc = app_window(url, app_profile)
         if proc is not None:
