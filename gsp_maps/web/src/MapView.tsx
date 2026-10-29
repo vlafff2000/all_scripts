@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import PolyPanel from './PolyPanel'
+import { sortLabels } from './legendOrder'
 import BgPanel from './BgPanel'
 import { bgAlign, bgOpacity, bgShow, useBgUrl } from './background'
 import { alignTransform, applyAffine, FLIP_Y, polyAlign, polyStyles, styleOf, usePolygons } from './polygons'
@@ -692,8 +693,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     if (!isRef) return { groups: [] as { name: string; wells: number[] }[], missing: [] as number[] }
     const onMap = new Set(placed.map(q => q.well)), by = new Map<string, number[]>(), missing: number[] = []
     for (const w of refNums) { if (!onMap.has(w)) { missing.push(w); continue } const gn = g.groupOf?.[String(w)] || g.gsp; by.set(gn, [...(by.get(gn) || []), w]) }
-    const order = g.groups ?? [g.gsp]
-    return { groups: [...by.entries()].sort((u, v) => order.indexOf(u[0]) - order.indexOf(v[0])).map(([name, wells]) => ({ name, wells })), missing }
+    return { groups: sortLabels([...by.entries()], e => e[0]).map(([name, wells]) => ({ name, wells })), missing }
   }, [isRef, refNums, placed, g])
 
   const layer = useMemo(() => {
@@ -1028,7 +1028,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       <div className="map-chips no-export">
         {group.length > 1 && <span className="map-chip accent">Выбрано скважин: {group.length}<button type="button" onClick={() => onGroup([])} aria-label="Сбросить выбор">×</button></span>}
         {isRef && refInfo.missing.length > 0 && <span className="map-chip warn" title="Этих скважин из списка нет на карте выбранных групп">Не на карте: {refInfo.missing.join(', ')}{multiG ? '' : ' (выберите «Весь объект»)'}</span>}
-        {multiG && !isRef && g.groups!.map(n => <span key={n} className="map-chip" title={byGroup ? 'Цвет круга — группа' : n}><i className="gdot" style={{ background: groupColor(n) }} />{n}</span>)}
+        {multiG && !isRef && sortLabels(g.groups!, n => n).map(n => <span key={n} className="map-chip" title={byGroup ? 'Цвет круга — группа' : n}><i className="gdot" style={{ background: groupColor(n) }} />{n}</span>)}
         {far.length > 0 && <span className="map-chip" title={'Далёкие скважины: ' + far.join(', ')}>{frameAll ? 'Показаны все скважины' : `За кадром: ${far.length} скв.`}<button type="button" onClick={() => setFrameAll(v => !v)}>{frameAll ? 'Основная группа' : 'Показать'}</button></span>}
         {spread && placed.length > 1 && <span className="map-chip" title="Скважины разнесены для читаемости: взаимное расположение сохранено, расстояния условные">Схема, расстояния условные</span>}
         {options.paint === 'gis' && gis && [gis.error, isoWarn && gis.iso.on ? isoWarn : '', gis.roof.on && !roofLines?.length ? [gis.roof.grid ? '' : gis.roof.note, roofWarn].filter(Boolean).join(' ') : ''].filter(Boolean).map((t, k) =>
