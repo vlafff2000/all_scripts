@@ -121,4 +121,6 @@ export const clusterWells = pref<boolean>('gsp.cluster', true)
 export const groupColoring = pref<boolean>('gsp.groupcolor', true)
 /** Опорная сетка на карте: список номеров скважин (по умолчанию таблица 1.2 отчёта АН-2025) и размер их маркера относительно фоновых скважин. */
 export const refWells = pref<string>('gsp.refWells', '56, 83, 220, 182, 237, 264, 437, 520', raw => String(raw ?? ''))
+/** Квадратная координатная сетка на фоне карты (по XY); выключена — остаётся только фон. */
+export const mapGrid = pref<boolean>('gsp.mapgrid', true)
 export const refSize = pref<number>('gsp.refSize', 2, raw => { const v = Number(raw); return v >= 1 && v <= 8 ? v : 2 })

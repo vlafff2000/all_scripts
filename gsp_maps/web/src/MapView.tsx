@@ -1,6 +1,6 @@
 import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, refWells, refSize, usePref, type SeasonScope } from './prefs'
+import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
@@ -633,8 +633,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   }
   const clustersRef = useRef<number[][]>([])
   // координатная сетка (только для настоящих координат XY)
+  const gridOn = usePref(mapGrid)
   const grid = useMemo(() => {
-    if (!unit || !placed.length) return null
+    if (!gridOn || !unit || !placed.length) return null
     const mx0 = ((0 - view.tx) / view.k - fit.ox) / fit.s, mx1 = ((size.w - view.tx) / view.k - fit.ox) / fit.s
     const my0 = ((0 - view.ty) / view.k - fit.oy) / fit.s, my1 = ((size.h - view.ty) / view.k - fit.oy) / fit.s
     const st = niceStep(Math.max(mx1 - mx0, my1 - my0), 7)
@@ -642,7 +643,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     for (let v = Math.ceil(mx0 / st) * st; v <= mx1; v += st) xs.push(v)
     for (let v = Math.ceil(my0 / st) * st; v <= my1; v += st) ys.push(v)
     return { xs, ys }
-  }, [unit, placed.length, view, fit.s, fit.ox, fit.oy, size])
+  }, [gridOn, unit, placed.length, view, fit.s, fit.ox, fit.oy, size])
   // «пятно» месторождения: объединение мягких кругов вокруг скважин
   const halo = useCluster ? rd * 1.7 : Math.max(rmax * 1.5, spacing * 0.9)
 
@@ -964,6 +965,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               <button type="button" role="radio" aria-checked={options.sectors === 'months'} onClick={() => onOptions({ sectors: 'months' })} title="Круг разделён на секторы по месяцам">По месяцам</button>
               <button type="button" role="radio" aria-checked={options.sectors === 'plain'} onClick={() => onOptions({ sectors: 'plain' })}>Один цвет</button></div>}
           </section>
+          {unit && <section><h4>Фон</h4>
+            <label className="check" title="Квадратная сетка с подписями координат; выключена — на карте остаётся только фон"><input type="checkbox" checked={gridOn} onChange={e => mapGrid.set(e.target.checked)} />Координатная сетка</label>
+          </section>}
           {!isRef && <section><h4>Круги</h4>
             <label className="row"><span>Размер</span><input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
             <label className="row"><span>Подпись</span><select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
