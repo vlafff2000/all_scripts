@@ -13,7 +13,7 @@ import pandas as pd
 
 from pxg_core import runlog, workspace
 
-from . import atlas_source, gis_source, inputs, observers, wellmap
+from . import atlas_source, gdi_source, gis_source, inputs, observers, wellmap
 from .store import KIND_BY_NAME, KIND_NAMES, OTBOR, ZAKACHKA, Store
 
 PATH_KEYS = ["map", "atlas_storage", "atlas_project", "polygons", "background"]    # карта-сетка Excel — необязательный запасной источник положений
@@ -434,6 +434,13 @@ class Project:
         values, warn = self.atlas.parameter_values(table, column, agg, start, end)
         return {"table": table, "column": column, "agg": agg, "title": atlas_source.PARAM_TABLES[table],
                 "values": {str(w): v for w, v in values.items()}, "warnings": warn}
+
+    def gdi_catalog(self) -> dict:
+        return gdi_source.catalog(self.atlas) if self.atlas is not None else {"seasons": [], "wells": 0, "note": ""}
+
+    def gdi_payload(self, mode: str, ref: Optional[float], season: str) -> dict:
+        assert self.atlas is not None
+        return gdi_source.values(self.atlas, mode, ref, season)
 
     def gis_catalog(self) -> dict:
         return gis_source.catalog(self.atlas) if self.atlas is not None else {"packs": [], "seasons": [], "metrics": [], "note": ""}

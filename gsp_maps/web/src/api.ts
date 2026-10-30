@@ -173,3 +173,9 @@ export const getModelValues = (keyword: string, start: string, end: string, agg:
 export interface SummaryData { columns: string[]; rows: (string | number | null)[][] }
 export const getSummary = async (gsp: string, kind: string, season: string, mode: string) =>
   viewSummary(await call<SummaryData>('/api/summary?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season) + '&mode=' + mode), gsp)
+
+/** ГДИ, приведённые к опорной ΔP² (mode q) или к опорному расходу (mode dp2); flags — пометки по скважинам (экстраполяция, слабая подгонка). */
+export interface GdiCatalog { seasons: string[]; wells: number; note: string }
+export interface GdiValues { mode: 'q' | 'dp2'; ref: number | null; auto: number | null; values: Record<string, number>; flags: Record<string, string>; dates: Record<string, string>; unit: string; title: string; note: string }
+export const getGdiCatalog = () => call<GdiCatalog>('/api/gdi')
+export const getGdiValues = (mode: string, ref: string, season: string) => call<GdiValues>('/api/gdi/values?' + new URLSearchParams({ mode, ref, season }))

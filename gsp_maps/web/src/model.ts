@@ -210,9 +210,9 @@ export function scopeKeys(mode: SeasonScope, picked: string[], seasons: SeasonIn
 export interface Scope { mode: SeasonScope; keys: string[]; calcs: Map<string, SeasonCalc> }
 
 /** Раскраска карты: по умолчанию круги по расходу газа, остальные режимы красят скважины одной шкалой. */
-export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis' | 'ref'
+export type Paint = 'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis' | 'gdi' | 'ref'
 export const PAINTS: [Paint, string][] = [
-  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'], ['atlas', 'Параметр Атласа'], ['model', 'Модели tNavigator'], ['gis', 'ГИС и ГВК'], ['ref', 'Опорная сетка'],
+  ['flow', 'Расход газа'], ['entry', 'Ввод по дате'], ['depth', 'Глубина перфорации'], ['wf', 'Обводнённость'], ['atlas', 'Параметр Атласа'], ['model', 'Модели tNavigator'], ['gis', 'ГИС и ГВК'], ['gdi', 'ГДИ на опорную точку'], ['ref', 'Опорная сетка'],
 ]
 export const ATLAS_AGGS: [string, string][] = [['mean', 'среднее'], ['sum', 'сумма'], ['last', 'последнее'], ['count', 'число записей']]
 export interface PaintVal { v: number; label: string; tip: string }
@@ -279,8 +279,19 @@ export function atlasPaint(values: Record<string, number>, title: string, note: 
   return { vals, lo, hi: hi > lo ? hi : lo + 1, stops: SEASON_STOPS, title, fmt: fmt1, note: note.join(' ') }
 }
 
+/** ГДИ, приведённые к опорной точке: шкала от наименьшего до наибольшего значения, в подсказке — дата исследования и пометки. */
+export function gdiPaint(r: { values: Record<string, number>; flags: Record<string, string>; dates: Record<string, string>; unit: string; title: string; ref: number | null; mode: 'q' | 'dp2' }, note: string): PaintData | null {
+  const entries = Object.entries(r.values)
+  if (!entries.length) return null
+  const nums = entries.map(([, v]) => v)
+  const lo = Math.min(...nums), hi = Math.max(...nums)
+  const refText = r.ref === null ? '' : (r.mode === 'q' ? 'при ΔP² ' : 'при Q ') + fmt1(r.ref) + (r.mode === 'q' ? ' кгс²/см⁴' : ' тыс. м³/сут')
+  const vals = new Map<number, PaintVal>(entries.map(([w, v]) => [Number(w), { v, label: fmt1(v), tip: `${r.title} ${refText}: ${fmt1(v)} ${r.unit}${r.dates[w] ? ' · исследование ' + r.dates[w] : ''}${r.flags[w] ? ' · ' + r.flags[w] : ''}` }]))
+  return { vals, lo, hi: hi > lo ? hi : lo + 1, stops: SEASON_STOPS, title: (r.mode === 'q' ? 'Q ' : 'ΔP² ') + refText + ', ' + r.unit, fmt: fmt1, note, palKey: 'gdi-' + r.mode }
+}
+
 export function paintFor(paint: Paint, g: GspData, calc: SeasonCalc, kind: string, season: string, a: number, b: number, scope?: Scope): PaintData | null {
-  if (paint === 'flow' || paint === 'atlas' || paint === 'model' || paint === 'gis' || paint === 'ref') return null   // параметр Атласа и модели считаются в API и передаются отдельно
+  if (paint === 'flow' || paint === 'atlas' || paint === 'model' || paint === 'gis' || paint === 'gdi' || paint === 'ref') return null   // параметр Атласа и модели считаются в API и передаются отдельно
   const vals = new Map<number, PaintVal>()
   const multi = !!scope && scope.mode !== 'one' && scope.keys.length > 0
   const keys = multi ? scope!.keys : [season]
