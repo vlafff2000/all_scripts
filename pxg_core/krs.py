@@ -345,8 +345,35 @@ def add_revisions(data: KrsData, new: pd.DataFrame, season: str) -> List[Tuple[s
     return notes
 
 
-def read_new_revisions(path: str, sand_words: Sequence[str] = ("да", "есть", "х", "x", "1", "песок")) -> pd.DataFrame:
-    """Таблица вскрытий КРУ нового сезона: столбец с номером скважины и столбец «песок» (да/нет, х, есть/нет)."""
+def _read_word_revisions(path: str, filter_regex: str = "", tables: Optional[List[int]] = None) -> pd.DataFrame:
+    """Ревизия КРУ нового сезона в Word — тем же разбором, что в Газовом Атласе (pxg_core/revision_report.py, копия из Атласа):
+    таблицы с «№ скв.», метки ГСП над таблицей; скважина, названная в ревизии, даёт «Песок: Да» (фильтр по тексту строки — как в Атласе)."""
+    from pxg_core import revision_report as rr
+    try:
+        entries, issues, _source, hints = rr.parse_revision(path, layout={"docx_tables": tables} if tables else None, filter_regex=filter_regex)
+    except rr.InputError as e:
+        raise ValueError(str(e))
+    rows, notes = [], [("предупреждение" if "непонятн" in i or "нет данных" in i else "заметка", i) for i in issues]
+    for gsp, entry in entries.items():
+        for w in entry.wells:
+            n = well_number(w)
+            if n is None:
+                continue
+            if not re.fullmatch(r"\d+", w):
+                notes.append(("предупреждение", "Вскрытия КРУ (Word): номер «%s» (%s) приведён к скважине %d" % (w, gsp, n)))
+            rows.append({"Скважина": n, "Песок": "Да", "Примечание": "Word, %s" % gsp})
+    df = pd.DataFrame(rows, columns=["Скважина", "Песок", "Примечание"]).drop_duplicates("Скважина", keep="last")
+    df.attrs["notes"] = notes
+    df.attrs["season_hints"] = ["%s-%d" % (h[:4], int(h[:4]) + 1) for h in hints]
+    return df
+
+
+def read_new_revisions(path: str, sand_words: Sequence[str] = ("да", "есть", "х", "x", "1", "песок"),
+                       filter_regex: str = "", tables: Optional[List[int]] = None) -> pd.DataFrame:
+    """Вскрытия КРУ нового сезона. Основной формат — Word (.docx), как в Газовом Атласе; дополнительно Excel/CSV:
+    столбец с номером скважины и столбец «песок» (да/нет, х, есть/нет)."""
+    if path.lower().endswith(".docx"):
+        return _read_word_revisions(path, filter_regex, tables)
     df = pd.read_csv(path, sep=None, engine="python") if path.lower().endswith((".csv", ".txt")) else pd.read_excel(path)
     well_col = next((c for c in df.columns if re.search(r"скв", str(c), re.I)), None)
     sand_col = next((c for c in df.columns if re.search(r"песок|вынос|пескопроявл", str(c), re.I)), None)

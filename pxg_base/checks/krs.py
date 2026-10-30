@@ -34,12 +34,18 @@ def check_krs(values: Dict[str, str]) -> Report:
         rep.error("SEASON", "Укажите сезон вскрытий КРУ")
     elif kru:
         try:
-            new = krs.read_new_revisions(kru)
+            tables = [int(x) for x in re.split(r"[,;\s]+", (values.get("kru_tables") or "").strip()) if x] or None
+            new = krs.read_new_revisions(kru, filter_regex=(values.get("kru_filter") or "").strip(), tables=tables)
+            for level, text in new.attrs.get("notes", []):
+                (rep.warn if level == "предупреждение" else rep.note)("KRS", text)
+            hints = new.attrs.get("season_hints", [])
+            if hints and season and season not in hints:
+                rep.warn("SEASON", "В Word-ревизии указан сезон %s, а выбран %s" % (", ".join(hints), season))
             rep.saw("вскрытия КРУ: %d скважин, песок у %d" % (len(new), int(new["Песок"].eq("Да").sum())))
             known = set(data.wells["Скважина"])
             for w in new["Скважина"]:
                 if w not in known:
                     rep.warn("WELL", "Скважины %d из вскрытий КРУ нет в таблице анализа" % w)
-        except ValueError as exc:
+        except ValueError as exc:      # в том числе неверные номера таблиц и нечитаемый Word
             rep.error("HEADER", str(exc), file=kru)
     return rep
