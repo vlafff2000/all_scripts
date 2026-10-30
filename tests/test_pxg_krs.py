@@ -110,3 +110,13 @@ def test_module_runs(tmp_path, monkeypatch):
         p.reset_index().to_excel(xw, sheet_name="Приоритет", index=False)
     assert krs.read_manual(str(tmp_path / "prev.xlsx")) == {11: 2}
     assert (tmp_path / "Таблица_анализа_обновлённая.xlsx").exists()
+
+
+def test_check_reports_notes(tmp_path):
+    from pxg_base import checks
+    src = tmp_path / "t.xlsx"
+    make_table(src)
+    rep = checks.run("Анализ_технического_состояния_скважин_КРС", {"table": str(src), "season": "2025/26"})
+    assert any(i.code == "SEASON" for i in rep.issues)
+    rep = checks.run("Анализ_технического_состояния_скважин_КРС", {"table": str(src), "season": "2025-2026"})
+    assert not any(i.level == "ошибка" for i in rep.issues)
