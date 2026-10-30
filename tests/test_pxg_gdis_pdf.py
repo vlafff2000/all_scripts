@@ -107,6 +107,33 @@ def test_rows_match_sample_layout():
     assert df["Рзаб, кгс/см2"].tolist() == [104.797, 104.044, 102.86]
 
 
+def test_delivery_method_from_dikt_washer_or_kru():
+    dm = module.delivery_method
+    assert dm("ДИКТ-50", "стац", [None], [10, 15]) == ("в атмосферу", "")
+    assert dm("", "", [None], [10]) == ("в атмосферу", "")         # диаметр шайбы без слова ДИКТ
+    assert dm("", "ИД", [55, 100], [None]) == ("в шлейф", "")
+    assert dm("", "", [None, None], [None])[0] == "" and dm("", "", [None], [None])[1]
+    assert dm("ДИКТ", "", [30], [10])[0] == ""                      # оба признака: решает инженер
+
+
+def test_rows_have_method_column_and_note_when_unknown():
+    rows, notes = module.rows_of_study(study(), 1, 2)
+    df = pd.DataFrame(rows, columns=module.COLUMNS)
+    assert list(df.columns)[-1] == "метод" and df["метод"].notna().sum() <= 1
+    assert (df["метод"].iloc[0] is not None) or any(f == "метод" for f, _ in notes)
+
+
+def test_old_base_gets_method_by_block(tmp_path):
+    cols = module.COLUMNS[:-1]
+    old = pd.DataFrame([[1, 37, 1, "2025-08-04", "стац", "ДИКТ-50"] + [None] * 10 + [10, None, None, None, None, None, None, None],
+                        [None] * 14 + [2, None, 15] + [None] * 7,
+                        [2, 31, 1, "2024-08-04", "ИД", "стац"] + [None] * 10 + [55] + [None] * 7], columns=cols)
+    f = tmp_path / "old.xlsx"
+    old.to_excel(f, sheet_name="Лист1", index=False)
+    got = module.read_db(str(f))
+    assert got["метод"].tolist()[0::2] == ["в атмосферу", "в шлейф"] and got["метод"].isna().tolist()[1]
+
+
 def test_read_studies_groups_templates_and_build_lists_gaps():
     scans = [scan("gdis_2026.txt"), scan("gdis_2019.txt")]
     studies, templates = module.read_studies(scans)
