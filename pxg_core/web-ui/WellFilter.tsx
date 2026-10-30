@@ -20,12 +20,18 @@ const readStored = (key: string): WellFilterValue | null => {
   } catch { return null }
 }
 
-/** Фильтр вкладки в localStorage (ключ вкладки): другие вкладки его не видят. Пустой фильтр — null. */
+/** Фильтр вкладки в localStorage (ключ вкладки): другие вкладки его не видят, а второе окно программы получает. Пустой фильтр — null. */
 export function useWellFilter(tab: string): [WellFilterValue | null, (v: WellFilterValue | null) => void] {
   const key = 'pxg.wellfilter.' + tab
   const [state, setState] = useState<{ key: string; value: WellFilterValue | null }>(() => ({ key, value: readStored(key) }))
   // вкладка сменилась — берём фильтр новой вкладки сразу, без кадра со старым
   const value = useMemo(() => (state.key === key ? state.value : readStored(key)), [state, key])
+  // второе окно программы изменило фильтр этой вкладки
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => { if (e.key === key && e.storageArea === localStorage) setState({ key, value: readStored(key) }) }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [key])
   const save = (v: WellFilterValue | null) => {
     const next = isActive(v) ? v : null
     setState({ key, value: next })

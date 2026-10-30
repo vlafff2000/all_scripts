@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getModules, type ModuleInfo } from './api'
 import ModulePage from './ModulePage'
 import { sidebarCollapsed, theme, usePref, type Theme } from './prefs'
+import { WindowButtons } from '../../../pxg_core/web-ui/WindowButtons'
 
 const routeOf = () => decodeURIComponent(location.hash.replace(/^#\/?/, ''))
 
@@ -115,6 +116,7 @@ export default function App() {
             </section>
           ))}
         </nav>
+        <WindowButtons page={route} />
         <div className="theme-switch segmented" role="radiogroup" aria-label="Тема">
           {([['light', 'Светлая'], ['dark', 'Тёмная'], ['system', 'Авто']] as [Theme, string][]).map(([t, label]) => (
             <button key={t} type="button" role="radio" aria-checked={currentTheme === t} onClick={() => theme.set(t)}

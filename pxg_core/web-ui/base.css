@@ -165,3 +165,7 @@ kbd { font-family: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; b
   .shell.shell .sidebar .theme-switch .side-label { display: none; }
   .shell.shell .sidebar .side-search + nav { margin-top: 0; }
 }
+
+.window-buttons { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.window-buttons .quiet[aria-pressed='true'] { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
+.collapsed .window-buttons { display: none; }

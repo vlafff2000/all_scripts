@@ -24,6 +24,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from pxg_base.window import second_window_route
 from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, histmodel, historymode, model_compare, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .gdi_adapt import export_charts
 from .project import Project
@@ -1505,6 +1506,7 @@ def build_app() -> Starlette:
     runlog.setup("ГДМ")
     routes = [
         *runlog.routes(),
+        second_window_route(),
         Route("/api/state", state),
         Route("/api/preview", preview),
         Route("/api/trial", trial, methods=["POST"]),
