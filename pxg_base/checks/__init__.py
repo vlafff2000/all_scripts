@@ -37,6 +37,7 @@ REGISTRY: Dict[str, str] = {
     "БД_ГИС_Беларусь": "gis_word:check_gis_word",
     "База_ГДИ_из_отчётов_PDF": "gdis:check_gdis",
     "Шаблон_конструкции_из_свода_скважин": "construction:check_construction",
+    "Анализ_технического_состояния_скважин_КРС": "krs:check_krs",
 }
 
 
