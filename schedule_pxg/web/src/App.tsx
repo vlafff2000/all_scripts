@@ -13,6 +13,7 @@ import Adapt from './Adapt'
 import AdaptExport from './AdaptExport'
 import Planshet from './Planshet'
 import { AppState, getState } from './api'
+import { WindowButtons } from '../../../pxg_core/web-ui/WindowButtons'
 
 type Tab = 'import' | 'quality' | 'techmaps' | 'averaging' | 'scenarios' | 'strategies' | 'charts' | 'results' | 'history' | 'adapt' | 'adapt-export' | 'planshet'
 const NAV: [string, [Tab, string, string][]][] = [
@@ -61,6 +62,7 @@ export default function App() {
           ))}
         </nav>
         {st && !collapsed && <p className="muted small side-project" title={st.folder}>Проект: {st.folder}</p>}
+        <WindowButtons page={tab} />
         <div className="theme-switch segmented" role="radiogroup" aria-label="Тема">
           {([['light', 'Светлая'], ['dark', 'Тёмная'], ['system', 'Авто']] as [Theme, string][]).map(([t, label]) => (
             <button key={t} type="button" role="radio" aria-checked={currentTheme === t} onClick={() => theme.set(t)}

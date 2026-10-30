@@ -1,27 +1,5 @@
-import { useSyncExternalStore } from 'react'
-
-/** Настройка, которая помнится между запусками (localStorage, если он доступен). */
-export interface Pref<T> { get: () => T; set: (v: T) => void; subscribe: (cb: () => void) => () => void }
-
-export function pref<T>(key: string, initial: T, parse?: (raw: unknown) => T): Pref<T> {
-  const listeners = new Set<() => void>()
-  let value = initial
-  try {
-    const raw = key ? localStorage.getItem(key) : null
-    if (raw !== null) value = parse ? parse(JSON.parse(raw)) : (JSON.parse(raw) as T)
-  } catch { /* хранилище недоступно или значение повреждено */ }
-  return {
-    get: () => value,
-    set: v => {
-      value = v
-      try { if (key) localStorage.setItem(key, JSON.stringify(v)) } catch { /* ignore */ }
-      listeners.forEach(l => l())
-    },
-    subscribe: cb => { listeners.add(cb); return () => listeners.delete(cb) },
-  }
-}
-
-export const usePref = <T,>(p: Pref<T>): T => useSyncExternalStore(p.subscribe, p.get)
+export { pref, usePref, type Pref } from '../../../pxg_core/web-ui/pref'
+import { pref } from '../../../pxg_core/web-ui/pref'
 
 export type Theme = 'light' | 'dark' | 'system'
 export const theme = pref<Theme>('pxg.theme', 'system', raw => (raw === 'dark' || raw === 'light' ? raw : 'system'))

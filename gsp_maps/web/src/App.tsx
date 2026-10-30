@@ -17,7 +17,8 @@ import { bubbleScale, hideIdle, minValue, labelMode, paintMode, atlasParam, atla
 import Timeline from './Timeline'
 import { WellFilter, useWellFilter } from '../../../pxg_core/web-ui/WellFilter'
 import { setWellView } from './wellView'
-import { linkWindows, openSecondWindow, useShared } from './sync'
+import { useShared } from '../../../pxg_core/web-ui/windows'
+import { WindowButtons } from '../../../pxg_core/web-ui/WindowButtons'
 
 const PAGES = [
   { id: 'map', title: 'Карта', icon: 'M8 1.5a4.5 4.5 0 0 1 4.5 4.5c0 3-4.5 8.5-4.5 8.5S3.5 9 3.5 6A4.5 4.5 0 0 1 8 1.5Zm0 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z' },
@@ -79,7 +80,6 @@ export default function App() {
   const [selected, setSelected] = useState<number | null>(null)
   const [group, setGroup] = useState<number[]>([])
   const pick = useCallback((w: number | null) => { setSelected(w); setGroup([]) }, [])
-  const linked = usePref(linkWindows)
   useShared('season', seasonKey, setSeasonKey)
   useShared('selected', selected, setSelected)
   useShared('group', group, setGroup)
@@ -449,6 +449,7 @@ export default function App() {
         <nav aria-label="Разделы"><ul>{groupedNav.map(p => (
           <li key={p.id}><a href={'#/' + p.id} aria-current={p.id === page ? 'page' : undefined} title={p.title}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d={p.icon} /></svg><span className="side-label">{p.title}</span></a></li>))}</ul></nav>
+        <WindowButtons page={page} other={page === 'map' ? 'table' : 'map'} />
         <div className="theme-switch segmented" role="radiogroup" aria-label="Тема">
           {([['light', 'Светлая'], ['dark', 'Тёмная'], ['system', 'Авто']] as [Theme, string][]).map(([t, label]) => (
             <button key={t} type="button" role="radio" aria-checked={currentTheme === t} onClick={() => theme.set(t)} title={t === 'system' ? 'Как в системе' : label + ' тема'}>
@@ -491,10 +492,7 @@ export default function App() {
                 {seasons.find(s => s.key === season)?.manual && <option value={'manual:' + kind}>{kind} (вручную)</option>}
                 {seasons.find(s => s.key === season)?.manual && <option value="auto">Вернуть по Атласу</option>}
               </select></label>}
-            <span className="spacer" />
-            <button type="button" className="quiet" onClick={() => openSecondWindow(page === 'map' ? 'table' : 'map')} title="Открыть эту же программу во втором окне (для второго монитора)">Второе окно</button>
-            <button type="button" className="quiet" onClick={() => linkWindows.set(!linked)} aria-pressed={linked} title="Связь окон: выбранная скважина, сезон и период совпадают в обоих окнах">{linked ? 'Окна связаны' : 'Окна независимы'}</button>
-            {page === 'compare' && <><button type="button" className="quiet" onClick={() => tipMode.set(tmode === 'dock' ? 'float' : 'dock')} title="Подсказка при наведении: в панели сведений или плавающая у курсора">{tmode === 'dock' ? 'Подсказка: в панели' : 'Подсказка: плавающая'}</button><button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сравнения">Сведения</button></>}
+            {page === 'compare' && <><span className="spacer" /><button type="button" className="quiet" onClick={() => tipMode.set(tmode === 'dock' ? 'float' : 'dock')} title="Подсказка при наведении: в панели сведений или плавающая у курсора">{tmode === 'dock' ? 'Подсказка: в панели' : 'Подсказка: плавающая'}</button><button type="button" className="quiet" onClick={() => inspectorOpen.set(!insp)} aria-pressed={insp} title="Панель сравнения">Сведения</button></>}
             {page === 'map' && <>
               <input className="find" inputMode="numeric" placeholder="Скважина №" aria-label="Найти скважину" value={find} onChange={e => goFind(e.target.value)} />
               <span className="spacer" />

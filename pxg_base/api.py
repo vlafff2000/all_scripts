@@ -20,6 +20,7 @@ import uuid
 
 from starlette.responses import Response
 
+from .window import second_window_route
 from . import checks, jobs
 from .registry import MODULES, PLANNED, TITLES
 from .webspec import get as get_spec
@@ -237,6 +238,7 @@ def build_app() -> Starlette:
     runlog.setup("Работа с исходными данными")
     routes = [
         *runlog.routes(),
+        second_window_route(),
         Route("/api/modules", modules),
         Route("/api/jobs", start_job, methods=["POST"]),
         Route("/api/jobs", job_list, methods=["GET"]),

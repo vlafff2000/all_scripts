@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { pref } from './prefs'
+import { pref } from './pref'
 
 /** Связь окон: выбранная скважина, сезон и окно дат совпадают в обоих окнах (BroadcastChannel; оба окна открыты с одного сервера). */
-export const linkWindows = pref<boolean>('gsp.linkWindows', true)
+export const linkWindows = pref<boolean>('pxg.linkWindows', true)
 
-const CHANNEL = 'gsp.windows'
+const CHANNEL = 'pxg.windows'
 let chan: BroadcastChannel | null = null
 try { chan = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(CHANNEL) : null } catch { chan = null }
 
