@@ -112,6 +112,51 @@ def test_module_runs(tmp_path, monkeypatch):
     assert (tmp_path / "Таблица_анализа_обновлённая.xlsx").exists()
 
 
+def make_word_revision(path, season="2025/26"):
+    """Минимальный .docx: абзацы и таблица «№ скв.» с меткой ГСП над ней — как ревизия КРУ в Газовом Атласе."""
+    import zipfile
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    p = lambda t: '<w:p><w:r><w:t>%s</w:t></w:r></w:p>' % t
+    row = lambda *c: "<w:tr>%s</w:tr>" % "".join("<w:tc>%s</w:tc>" % p(x) for x in c)
+    body = (p("Ревизия КРУ, сезон %s" % season) + p("ГСП-1") +
+            "<w:tbl>" + row("№ скв.", "Описание ревизии") + row("11", "разрушение фильтра, песок") + row("13", "износ") + "</w:tbl>" +
+            p("ГСП 2") + "<w:tbl>" + row("№ скв.", "Описание ревизии") + row("99", "износ") + "</w:tbl>")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("word/document.xml", '<w:document xmlns:w="%s"><w:body>%s</w:body></w:document>' % (W, body))
+
+
+def test_word_revision_like_atlas(tmp_path):
+    doc = tmp_path / "rev.docx"
+    make_word_revision(doc)
+    new = krs.read_new_revisions(str(doc))
+    assert sorted(new["Скважина"]) == [11, 13, 99] and set(new["Песок"]) == {"Да"}
+    assert new.attrs["season_hints"] == ["2025-2026"]
+    assert set(krs.read_new_revisions(str(doc), filter_regex="песок")["Скважина"]) == {11}
+    with pytest.raises(ValueError):
+        krs.read_new_revisions(str(doc), tables=[7])
+
+
+def test_module_word_revision(tmp_path, monkeypatch):
+    src = tmp_path / "t.xlsx"
+    make_table(src)
+    doc = tmp_path / "rev.docx"
+    make_word_revision(doc)
+    spec = importlib.util.spec_from_file_location("krs_mod2", os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pxg_base", "modules", "Анализ_технического_состояния_скважин_КРС.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.chdir(tmp_path)
+    assert mod.main(["--table", str(src), "--kru", str(doc), "--season", "2025-2026"]) == 0
+    x = pd.read_excel(tmp_path / "КРС_для_Атласа.xlsx", sheet_name=None)
+    rev = x["Ревизии КРУ"]
+    assert set(rev[rev["Сезон"] == "2025-2026"]["Скважина"]) == {11, 13, 99}
+    p = x["Приоритет"].set_index("Скважина")
+    assert p.loc[13, "Приоритет (расчёт)"] == 3 and p.loc[11, "Приоритет (расчёт)"] == 2
+    from pxg_base import checks
+    rep = checks.run("Анализ_технического_состояния_скважин_КРС", {"table": str(src), "kru": str(doc), "season": "2025-2026"})
+    assert not any(i.level == "ошибка" for i in rep.issues)
+
+
 def test_check_reports_notes(tmp_path):
     from pxg_base import checks
     src = tmp_path / "t.xlsx"
