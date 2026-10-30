@@ -35,6 +35,7 @@ def main(argv=None):
         date="дата конструкции ДД.ММ.ГГГГ (по умолчанию «По состоянию на» из шапки свода)",
         atlas_storage="папка хранилища Атласа (по умолчанию GAS_ATLAS_STORAGE)",
         atlas_project="id проекта Атласа (по умолчанию самый свежий с расходами)",
+        rotor="учитывать высоту стола ротора в а.о. (да/нет, по умолчанию да)",
         alt_file="«Глубины_перфораций.xlsx» с альтитудами, если проекта Атласа нет")
     path = параметры.ask_path("Свод скважин (Excel)", args.file)
     if not path:
@@ -58,7 +59,8 @@ def main(argv=None):
         kinds[i.level] = kinds.get(i.level, 0) + 1
     print("🔎 Проверка свода: %s" % (", ".join("%s: %d" % kv for kv in sorted(kinds.items())) or "замечаний нет"))
     atlas_alt, source = load_altitudes(args)
-    for f in wc.export(book, os.getcwd(), atlas_alt, source):
+    rotor = параметры.yes(args.rotor if args.rotor is not None else "да")
+    for f in wc.export(book, os.getcwd(), atlas_alt, source, rotor):
         print("✅ %s" % os.path.basename(f))
     return 0
 

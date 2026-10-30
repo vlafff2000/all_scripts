@@ -35,6 +35,7 @@ def check_construction(values: Dict[str, str]) -> Report:
     if atlas_alt is not None:
         wc.compare_altitudes(book, atlas_alt, source)
         rep.saw("альтитуды сверены с источником: %s (%d скважин)" % (source, len(atlas_alt)))
+    wc.ao_table(book, atlas_alt, rotor=(values.get("rotor", "1") in ("1", "true", "y", "да")))   # замечания о высоте стола
     rep.saw("%d скважин, %d элементов конструкции" % (len(book.wells), sum(len(w.elements) for w in book.wells)))
     for i in book.issues:
         rep.add(LEVEL[i.level], i.code, i.message, file=path, row=i.row, well=i.well, hint=i.hint)

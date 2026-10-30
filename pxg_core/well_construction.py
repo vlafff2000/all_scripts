@@ -10,8 +10,9 @@
   Свод_скважин_разбор.xlsx     — «Паспорт» (основные данные и наземная часть), «Работы» (проведённые работы с датами),
                                «Конструкция а.о.» (те же элементы в абсолютных отметках), «Сверка альтитуд» (свод и Атлас),
                                «Соответствие столбцов» (что куда попало), «Проверка» (замечания к своду).
-Глубины свода — по стволу (MD). Абсолютная отметка: а.о. = −(глубина − альтитуда), как в Атласе; считается по альтитуде Атласа
-и по альтитуде свода рядом: какую взять, решает инженер. Высота стола ротора в а.о. не входит (Атлас её не учитывает).
+Глубины свода — по стволу (MD) от стола ротора. Абсолютная отметка: а.о. = альтитуда + высота стола ротора − глубина
+(флажок `rotor`; без него а.о. = альтитуда − глубина, как в Атласе по умолчанию). Считается по альтитуде Атласа и по альтитуде
+свода рядом: какую взять, решает инженер. Нет высоты стола у скважины при включённом флажке — а.о. пуста и есть замечание.
 Проверка только сообщает: спорные значения не правятся молча, а попадают в «Проверку» с причиной; решение за инженером.
 """
 from __future__ import annotations
@@ -481,14 +482,20 @@ def compare_altitudes(book: Book, atlas: Optional[Dict[str, float]], source: str
                                        "Высота стола ротора (свод), м", "Статус"])
 
 
-def ao_table(book: Book, atlas: Optional[Dict[str, float]] = None) -> pd.DataFrame:
-    """Элементы конструкции в абсолютных отметках: а.о. = −(глубина − альтитуда); две альтитуды рядом, без выбора за инженера."""
+def ao_table(book: Book, atlas: Optional[Dict[str, float]] = None, rotor: bool = True) -> pd.DataFrame:
+    """Элементы конструкции в абсолютных отметках: а.о. = альтитуда [+ высота стола ротора] − глубина; две альтитуды рядом."""
     rows = []
     for w in book.wells:
         a_svod, a_atlas = _svod_alt(w, ALT_LABEL), (atlas or {}).get(_key(w.number))
+        table_h = _svod_alt(w, TABLE_LABEL)
+        if rotor and table_h is None and w.elements:
+            book.add("предупреждение", "ALT", "Нет высоты стола ротора: а.о. не посчитана (флажок «учитывать высоту стола ротора»)",
+                     w.number, w.rows[0], "Заполните «Высота стола ротора» в своде или снимите флажок")
 
         def ao(depth, alt):
-            return None if alt is None else round(alt - depth, 2)
+            if alt is None or (rotor and table_h is None):
+                return None
+            return round(alt + (table_h if rotor else 0.0) - depth, 2)
         for e in w.elements:
             rows.append([w.number, e["Элемент"], e["Верх"], e["Низ"], a_atlas, ao(e["Верх"], a_atlas), ao(e["Низ"], a_atlas),
                          a_svod, ao(e["Верх"], a_svod), ao(e["Низ"], a_svod)])
@@ -551,7 +558,7 @@ def _style(ws, widths: Optional[Dict[str, int]] = None) -> None:
                 cell.number_format = "DD.MM.YYYY"
 
 
-def export(book: Book, out_dir: str, atlas_alt: Optional[Dict[str, float]] = None, atlas_source: str = "") -> List[str]:
+def export(book: Book, out_dir: str, atlas_alt: Optional[Dict[str, float]] = None, atlas_source: str = "", rotor: bool = True) -> List[str]:
     os.makedirs(out_dir, exist_ok=True)
     atlas = os.path.join(out_dir, ATLAS_FILE)
     report = os.path.join(out_dir, REPORT_FILE)
@@ -561,7 +568,7 @@ def export(book: Book, out_dir: str, atlas_alt: Optional[Dict[str, float]] = Non
     with pd.ExcelWriter(report, engine="openpyxl", date_format="DD.MM.YYYY") as xw:
         altitudes = compare_altitudes(book, atlas_alt, atlas_source)     # раньше «Проверки»: добавляет замечания о расхождении
         for name, table in (("Паспорт", passport_table(book)), ("Работы", works_table(book)),
-                            ("Конструкция а.о.", ao_table(book, atlas_alt)), ("Сверка альтитуд", altitudes),
+                            ("Конструкция а.о.", ao_table(book, atlas_alt, rotor)), ("Сверка альтитуд", altitudes),
                             ("Соответствие столбцов", pd.DataFrame(book.mapping)), ("Проверка", issues_table(book))):
             table.to_excel(xw, sheet_name=name, index=False)
             _style(xw.sheets[name])
