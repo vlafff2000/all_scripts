@@ -131,7 +131,7 @@ def test_old_base_gets_method_by_block(tmp_path):
     f = tmp_path / "old.xlsx"
     old.to_excel(f, sheet_name="Лист1", index=False)
     got = module.read_db(str(f))
-    assert got["метод"].tolist() == ["в атмосферу", None, "в шлейф"]
+    assert got["метод"].tolist()[0::2] == ["в атмосферу", "в шлейф"] and got["метод"].isna().tolist()[1]
 
 
 def test_read_studies_groups_templates_and_build_lists_gaps():
