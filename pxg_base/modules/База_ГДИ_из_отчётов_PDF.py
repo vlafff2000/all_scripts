@@ -30,7 +30,7 @@ from pxg_core.parallel import map_jobs
 COLUMNS = ["№ п/п", "№скв", "ГСП", "дата", "метод исслед.", "способ исслед.", "a", "b", "DPmax кгс/см2",
            "Qmax тыс.м3/сут", "Рст. тр, кгс/см2", "Рст. затр, кгс/см2", "Тст. тр, \n˚С", "Тст. затр, ˚С", "№ режима",
            "Qгаза тыс.м3/сут", "% КРУ", "Руст. тр, кгс/см2", "Руст. затр, кгс/см2", "Туст. ˚С", "Рпл, \nна ИП кгс/см2",
-           "Рзаб, кгс/см2", "DP кгс/см2", "примечание"]
+           "Рзаб, кгс/см2", "DP кгс/см2", "примечание", "метод"]
 SHEET = "Лист1"
 METHODS = {"ИД": "стац"}          # «метод исследования» отчёта → запись в базе
 NUMERIC = ("a", "b", "DPmax кгс/см2", "Qmax тыс.м3/сут", "Рпл, \nна ИП кгс/см2")
@@ -38,6 +38,33 @@ UNRESOLVED_COLUMNS = ["Файл", "Скважина", "Дата", "Поле", "�
 HOW = {
     "ГСП": "вписать ГСП в «Лист1» или указать таблицу «скважина → ГСП» (--groups) и запустить заново",
 }
+
+
+IN_FLOWLINE, IN_ATMOSPHERE = "в шлейф", "в атмосферу"
+
+
+def delivery_method(sposob, method_text, kru, dshb) -> Tuple[str, str]:
+    """Метод исследования по способу вывода газа: в атмосферу (ДИКТ, диаметры шайбы) или в шлейф (% раскрытия КРУ).
+
+    `kru` и `dshb` — значения по режимам. Возвращает (метод, замечание): без признаков или при двух сразу метод пуст,
+    решает инженер (замечание попадает на лист «Не распознано»)."""
+    dikt = bool(re.search(r"дикт", "%s %s" % (sposob or "", method_text or ""), re.I))
+    washer = any(to_number(v) is not None for v in dshb)
+    krus = any(to_number(v) is not None for v in kru)
+    if (dikt or washer) and krus:
+        return "", "в отчёте и ДИКТ/шайба, и %% КРУ: метод не выбран, проставьте «%s» или «%s» вручную" % (IN_ATMOSPHERE, IN_FLOWLINE)
+    if dikt or washer:
+        return IN_ATMOSPHERE, ""
+    if krus:
+        return IN_FLOWLINE, ""
+    return "", "нет ни ДИКТ и диаметров шайбы, ни % КРУ: метод (в шлейф / в атмосферу) не определён"
+
+
+def to_number(v):
+    try:
+        return None if v is None or str(v).strip() == "" else float(str(v).replace(",", "."))
+    except ValueError:
+        return None
 
 
 def num(x, nd: int = 10):
@@ -53,6 +80,10 @@ def rows_of_study(study: kart.Study, n: int, group) -> Tuple[List[list], List[tu
         method = study.method_raw.strip().lower()
         notes.append(("метод исслед.", "метод «%s» не сопоставлен с принятым в базе (ИД → «стац»): записан как есть"
                       % study.method_raw))
+    flow_method, why = delivery_method(sposob, study.method_raw, [r.cells.get("kru") for r in study.modes],
+                                       [r.cells.get("dshb") for r in study.modes])
+    if why:
+        notes.append(("метод", why))
     modes = [r for r in study.modes if r.q is not None]
     used = [r for r in modes if r.in_calc] or modes
     top = max(used, key=lambda r: r.q) if used else None
@@ -84,6 +115,8 @@ def rows_of_study(study: kart.Study, n: int, group) -> Tuple[List[list], List[tu
         row[22] = num(dp, 4)
         if not r.in_calc:
             row[23] = "режим не вошёл в расчёт a и b"
+        if i == 0:
+            row[24] = flow_method or None
         out.append(row)
     return out, notes
 
@@ -119,10 +152,29 @@ def read_db(path: str) -> Optional[pd.DataFrame]:
     df = pd.read_excel(path, sheet_name=SHEET if SHEET in pd.ExcelFile(path).sheet_names else 0)
     df = df.iloc[:, :len(COLUMNS)]
     same = [re.sub(r"\s+", "", str(a)) == re.sub(r"\s+", "", b) for a, b in zip(df.columns, COLUMNS)]
-    if not all(same) or df.shape[1] < len(COLUMNS) - 1:
+    if not all(same) or df.shape[1] < len(COLUMNS) - 2:
         raise ValueError("прежняя база не в формате образца (столбцы «№ п/п», «№скв», «ГСП», «дата», … «примечание»): %s" % path)
     df.columns = COLUMNS[:df.shape[1]]
-    return df.reindex(columns=COLUMNS)
+    df = df.reindex(columns=COLUMNS)
+    return fill_method(df)
+
+
+def fill_method(df: pd.DataFrame) -> pd.DataFrame:
+    """Прежняя база без «метод»: по блоку исследования. ДИКТ в способе — «в атмосферу» (в % КРУ у таких строк стоят
+    диаметры шайбы), иначе есть % КРУ — «в шлейф»; без признаков пусто."""
+    df = df.copy()
+    df["метод"] = df["метод"].astype(object)
+    if df["метод"].notna().any() or df.empty:
+        return df
+    starts = list(df.index[df["№скв"].notna()]) + [len(df)]
+    for a, b in zip(starts, starts[1:]):
+        block = df.iloc[a:b]
+        dikt = bool(re.search(r"дикт", " ".join(str(v) for v in block.iloc[0][["метод исслед.", "способ исслед."]] if not pd.isna(v)), re.I))
+        if dikt:
+            df.iloc[a, df.columns.get_loc("метод")] = IN_ATMOSPHERE
+        elif block["% КРУ"].map(to_number).notna().any():
+            df.iloc[a, df.columns.get_loc("метод")] = IN_FLOWLINE
+    return df
 
 
 def db_keys(df: Optional[pd.DataFrame]) -> set:
@@ -184,6 +236,7 @@ def summary(files: int, studies: List[kart.Study], new_rows: pd.DataFrame, bad: 
             ["Скважин", wells], ["Строк-режимов", len(new_rows)], ["Исследований в прежней базе (сохранены)", kept],
             ["Замечаний (лист «Не распознано»)", len(bad)],
             ["Столбец «% КРУ»", "берётся из отчёта по режимам, если он там есть (исследование в шлейф); иначе пуст (диаметр шайбы Dшб — на листе «Режимы (подробно)»)"],
+            ["Столбец «метод»", "«в атмосферу» — в отчёте ДИКТ или диаметры шайбы; «в шлейф» — есть % КРУ; нет признаков или оба сразу — пусто (замечание)"],
             ["Допущение: способ исследования", "берётся из отчёта («ДИКТ» + число); если его нет — пусто"],
             ["Допущение: Тст. затр", "равна Тст. тр: в отчёте одна температура статики Ту"],
             ["Допущение: Qmax и DPmax", "дебит и dP режима с наибольшим дебитом среди вошедших в расчёт"],
