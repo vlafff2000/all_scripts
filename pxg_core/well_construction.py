@@ -8,7 +8,10 @@
   Конструкция_для_Атласа.xlsx — один лист «Конструкция» в формате «Шаблон_конструкции.xlsx» Атласа (одна строка = один
                                элемент: колонна, НКТ, пакер, фильтр, перфорация, интервал пласта);
   Свод_скважин_разбор.xlsx     — «Паспорт» (основные данные и наземная часть), «Работы» (проведённые работы с датами),
+                               «Конструкция а.о.» (те же элементы в абсолютных отметках), «Сверка альтитуд» (свод и Атлас),
                                «Соответствие столбцов» (что куда попало), «Проверка» (замечания к своду).
+Глубины свода — по стволу (MD). Абсолютная отметка: а.о. = −(глубина − альтитуда), как в Атласе; считается по альтитуде Атласа
+и по альтитуде свода рядом: какую взять, решает инженер. Высота стола ротора в а.о. не входит (Атлас её не учитывает).
 Проверка только сообщает: спорные значения не правятся молча, а попадают в «Проверку» с причиной; решение за инженером.
 """
 from __future__ import annotations
@@ -51,6 +54,8 @@ LEVELS = ("ошибка", "предупреждение", "заметка")
 DATE_RE = re.compile(r"(\d{1,2}\.\d{1,2}\.\d{4})\s*[-–—]\s*(\d{1,2}\.\d{1,2}\.\d{4})")
 HEADER_DATE_RE = re.compile(r"состоянию\s+на:?\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.I)
 WORKS_SUB = "проведенные на скважине работы"
+ALT_LABEL, TABLE_LABEL = "Альтитуда, м", "Высота стола ротора, м"
+ALT_TOLERANCE = 1.0      # м: как допуск сверки альтитуд в Атласе (`atlas/base_model.py: TOLERANCE`)
 
 
 @dataclass
@@ -413,6 +418,85 @@ def _target(group: str, sub: str) -> Tuple[str, str]:
     return "Паспорт", "в шаблон конструкции не идёт"
 
 
+# ---------------------------------------------------------------- альтитуды и а.о.
+
+def _key(number) -> str:
+    """Номер скважины как в Атласе: «31», «31.0» и 31 — одна скважина."""
+    text = str(number).strip()
+    try:
+        return str(int(float(text)))
+    except ValueError:
+        return text
+
+
+def atlas_altitudes(storage: str = "", project: str = "") -> Tuple[Dict[str, float], str]:
+    """Альтитуды проекта Атласа (таблица `well_geo`): ({скважина: м}, подпись источника). Проект не задан — самый свежий с расходами."""
+    from gsp_maps import atlas_source as src
+    root = src.storage_root(storage)
+    projects = src.list_projects(root)
+    pid = project.strip() or src.default_project(projects)
+    if root is None or not pid:
+        raise ValueError("Проект Атласа не найден: укажите папку хранилища (storage) и проект.")
+    data = src.AtlasData(root, pid)
+    _, alt, _ = data.geo()
+    return {_key(w): float(a) for w, a in alt.items()}, "проект Атласа «%s»" % data.name
+
+
+def file_altitudes(path: str) -> Tuple[Dict[str, float], str]:
+    """Альтитуды из файла Атласа/Карт «Глубины_перфораций.xlsx» (лист «альтитуды»)."""
+    from gsp_maps.inputs import read_perforations
+    _, alt = read_perforations(path)
+    return {_key(w): float(a) for w, a in alt.items()}, "файл «%s»" % os.path.basename(path)
+
+
+def _svod_alt(w: Well, label: str):
+    v, _ = _num(w.main.get(label))
+    return v
+
+
+def compare_altitudes(book: Book, atlas: Optional[Dict[str, float]], source: str = "") -> pd.DataFrame:
+    """Сверка альтитуд свода с Атласом; расхождение больше допуска — в «Проверку». Ничего не исправляет."""
+    rows = []
+    for w in book.wells:
+        a_svod, a_atlas = _svod_alt(w, ALT_LABEL), (atlas or {}).get(_key(w.number))
+        table_h = _svod_alt(w, TABLE_LABEL)
+        if atlas is None:
+            status = "Атлас не задан"
+        elif a_svod is None and a_atlas is None:
+            status = "нет нигде"
+        elif a_svod is None:
+            status = "нет в своде"
+        elif a_atlas is None:
+            status = "нет в Атласе"
+        else:
+            status = "совпадает" if abs(a_svod - a_atlas) <= ALT_TOLERANCE else "расходится"
+        diff = round(a_svod - a_atlas, 2) if a_svod is not None and a_atlas is not None else None
+        rows.append([w.number, a_svod, a_atlas, diff, table_h, status])
+        if status == "расходится":
+            book.add("предупреждение", "ALT", "Альтитуда свода %g м, в Атласе %g м (разница %+g м)" % (a_svod, a_atlas, diff), w.number,
+                     w.rows[0], "а.о. в таблице «Конструкция а.о.» посчитана по обеим; решение за инженером")
+        elif status in ("нет в Атласе", "нет в своде", "нет нигде"):
+            book.add("заметка", "ALT", "Альтитуда: %s" % status, w.number, w.rows[0])
+    return pd.DataFrame(rows, columns=["Скважина", "Альтитуда свода, м", "Альтитуда Атласа, м", "Свод − Атлас, м",
+                                       "Высота стола ротора (свод), м", "Статус"])
+
+
+def ao_table(book: Book, atlas: Optional[Dict[str, float]] = None) -> pd.DataFrame:
+    """Элементы конструкции в абсолютных отметках: а.о. = −(глубина − альтитуда); две альтитуды рядом, без выбора за инженера."""
+    rows = []
+    for w in book.wells:
+        a_svod, a_atlas = _svod_alt(w, ALT_LABEL), (atlas or {}).get(_key(w.number))
+
+        def ao(depth, alt):
+            return None if alt is None else round(alt - depth, 2)
+        for e in w.elements:
+            rows.append([w.number, e["Элемент"], e["Верх"], e["Низ"], a_atlas, ao(e["Верх"], a_atlas), ao(e["Низ"], a_atlas),
+                         a_svod, ao(e["Верх"], a_svod), ao(e["Низ"], a_svod)])
+    return pd.DataFrame(rows, columns=["Скважина", "Элемент", "Верх (MD), м", "Низ (MD), м", "Альтитуда Атласа, м",
+                                       "Верх а.о. (Атлас), м", "Низ а.о. (Атлас), м", "Альтитуда свода, м",
+                                       "Верх а.о. (свод), м", "Низ а.о. (свод), м"])
+
+
 # ---------------------------------------------------------------- выгрузка
 
 def atlas_table(book: Book) -> pd.DataFrame:
@@ -467,7 +551,7 @@ def _style(ws, widths: Optional[Dict[str, int]] = None) -> None:
                 cell.number_format = "DD.MM.YYYY"
 
 
-def export(book: Book, out_dir: str) -> List[str]:
+def export(book: Book, out_dir: str, atlas_alt: Optional[Dict[str, float]] = None, atlas_source: str = "") -> List[str]:
     os.makedirs(out_dir, exist_ok=True)
     atlas = os.path.join(out_dir, ATLAS_FILE)
     report = os.path.join(out_dir, REPORT_FILE)
@@ -475,7 +559,9 @@ def export(book: Book, out_dir: str) -> List[str]:
         atlas_table(book).to_excel(xw, sheet_name="Конструкция", index=False)
         _style(xw.sheets["Конструкция"])
     with pd.ExcelWriter(report, engine="openpyxl", date_format="DD.MM.YYYY") as xw:
+        altitudes = compare_altitudes(book, atlas_alt, atlas_source)     # раньше «Проверки»: добавляет замечания о расхождении
         for name, table in (("Паспорт", passport_table(book)), ("Работы", works_table(book)),
+                            ("Конструкция а.о.", ao_table(book, atlas_alt)), ("Сверка альтитуд", altitudes),
                             ("Соответствие столбцов", pd.DataFrame(book.mapping)), ("Проверка", issues_table(book))):
             table.to_excel(xw, sheet_name=name, index=False)
             _style(xw.sheets[name])

@@ -158,7 +158,7 @@ def test_export_files(svod, tmp_path):
     assert atlas.sheetnames == ["Конструкция"]
     assert [c.value for c in atlas["Конструкция"][1]] == wc.ATLAS_COLUMNS
     report = pd.ExcelFile(files[1])
-    assert report.sheet_names == ["Паспорт", "Работы", "Соответствие столбцов", "Проверка"]
+    assert report.sheet_names == ["Паспорт", "Работы", "Конструкция а.о.", "Сверка альтитуд", "Соответствие столбцов", "Проверка"]
     passport = report.parse("Паспорт")
     assert "Фонтанная арматура" not in passport.columns and "ФА: Тип" in passport.columns
     mapping = report.parse("Соответствие столбцов")
@@ -182,3 +182,36 @@ def test_run_from_form_and_check(svod, tmp_path, monkeypatch):
     assert job["status"] == "done", job
     names = {os.path.basename(f["path"]) if isinstance(f, dict) else os.path.basename(f) for f in job.get("files", [])}
     assert {wc.ATLAS_FILE, wc.REPORT_FILE} <= names
+
+
+def test_altitude_comparison_and_ao(svod):
+    book = wc.read(str(svod), date="01.11.2025")
+    atlas = {"31": 128.5, "32": 131.0, "33": None}
+    atlas = {k: v for k, v in atlas.items() if v is not None}
+    cmp = wc.compare_altitudes(book, atlas, "тест").set_index("Скважина")
+    assert cmp.loc["31", "Статус"] == "совпадает" and cmp.loc["32", "Статус"] == "расходится"
+    assert cmp.loc["32", "Свод − Атлас, м"] == -2.5 and cmp.loc["33", "Статус"] == "нет в Атласе"
+    assert any(i.code == "ALT" and i.well == "32" and i.level == "предупреждение" for i in book.issues)
+    ao = wc.ao_table(book, atlas)
+    perf = ao[(ao["Скважина"] == "32") & (ao["Элемент"] == "Интервал перфорации")].iloc[0]
+    assert perf["Верх а.о. (Атлас), м"] == 131.0 - 810 and perf["Верх а.о. (свод), м"] == 128.5 - 810
+    nkt = ao[(ao["Скважина"] == "33") & (ao["Элемент"] == "Эксплуатационная колонна")].iloc[0]
+    assert pd.isna(nkt["Верх а.о. (Атлас), м"]) and nkt["Низ а.о. (свод), м"] == 128.5 - 900
+
+
+def test_atlas_altitudes_from_project_storage(svod, tmp_path):
+    pytest.importorskip("pyarrow")
+    root = tmp_path / "storage"
+    snap = root / "projects" / "p1" / "snapshots" / "s1"
+    snap.mkdir(parents=True)
+    pd.DataFrame({"well": ["31", "32"], "x": [1.0, 2.0], "y": [1.0, 2.0], "altitude": [128.5, 131.0],
+                  "perf_top": [float("nan")] * 2, "perf_bottom": [float("nan")] * 2}).to_parquet(snap / "well_geo.parquet")
+    import json
+    (root / "projects" / "p1" / "manifest.json").write_text(json.dumps(
+        {"id": "p1", "name": "Тест", "snapshot": "s1", "revision": 1, "updated": "2026-01-01", "tables": {"well_geo": 2, "production": 1}}))
+    alt, source = wc.atlas_altitudes(str(root))
+    assert alt == {"31": 128.5, "32": 131.0} and "Тест" in source
+    rep = checks.run("Шаблон_конструкции_из_свода_скважин", {"file": str(svod), "date": "01.11.2025", "atlas_storage": str(root)})
+    assert any(i.code == "ALT" and i.well == "32" for i in rep.issues)
+    files = wc.export(wc.read(str(svod), date="01.11.2025"), str(tmp_path / "o"), alt, source)
+    assert {"Конструкция а.о.", "Сверка альтитуд"} <= set(pd.ExcelFile(files[1]).sheet_names)
