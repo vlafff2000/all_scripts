@@ -3,7 +3,7 @@ import { pref } from '../../../pxg_core/web-ui/pref'
 
 export type Theme = 'light' | 'dark' | 'system'
 export const theme = pref<Theme>('gsp.theme', 'system', raw => (raw === 'dark' || raw === 'light' ? raw : 'system'))
-export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis' | 'ref'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf', 'atlas', 'model', 'gis', 'ref'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
+export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis' | 'gdi' | 'ref'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf', 'atlas', 'model', 'gis', 'gdi', 'ref'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
 /** Выбранный параметр Атласа («таблица|колонка») и агрегация; запоминаются между сеансами. */
 export const atlasParam = pref<string>('gsp.atlasParam', '', raw => String(raw || ''))
 export const atlasAgg = pref<string>('gsp.atlasAgg', 'mean', raw => String(raw || 'mean'))
@@ -107,3 +107,12 @@ export const refWells = pref<string>('gsp.refWells', '56, 83, 220, 182, 237, 264
 /** Квадратная координатная сетка на фоне карты (по XY); выключена — остаётся только фон. */
 export const mapGrid = pref<boolean>('gsp.mapgrid', true)
 export const refSize = pref<number>('gsp.refSize', 2, raw => { const v = Number(raw); return v >= 1 && v <= 8 ? v : 2 })
+
+/** Режим «ГДИ на опорную точку»: приведение к опорной ΔP² (q) или к опорному расходу (dp2), своё опорное значение («» — из данных), сезон исследований. */
+export const gdiMode = pref<'q' | 'dp2'>('gsp.gdiMode', 'q', raw => (raw === 'dp2' ? 'dp2' : 'q'))
+export const gdiRef = pref<string>('gsp.gdiRef', '', raw => String(raw ?? ''))
+export const gdiSeason = pref<string>('gsp.gdiSeason', '', raw => String(raw || ''))
+/** Подписи скважин: шрифт («» — по умолчанию), множитель размера и свой цвет («» — автоматически). */
+export const labelFont = pref<string>('gsp.labelFont', '', raw => String(raw || ''))
+export const labelSize = pref<number>('gsp.labelSize', 1, raw => { const v = Number(raw); return v >= 0.5 && v <= 2.5 ? v : 1 })
+export const labelColor = pref<string>('gsp.labelColor', '', raw => (/^#[0-9a-f]{6}$/i.test(String(raw)) ? String(raw) : ''))

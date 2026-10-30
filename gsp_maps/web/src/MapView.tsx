@@ -1,8 +1,8 @@
 import Chart from './MiniChart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
+import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
-import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo } from './api'
+import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo, type GdiCatalog, type GdiValues } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
 import PolyPanel from './PolyPanel'
 import { sortLabels } from './legendOrder'
@@ -39,6 +39,8 @@ export interface GisPicker {
   onChange: (p: { pack?: string; metric?: string; season?: string; against?: string; pins?: Record<string, string>; iso?: boolean; isoStep?: string; isoReach?: string; source?: 'fact' | 'model' | 'delta'; roofOn?: boolean; roofModel?: string; roofLayer?: string; roofStep?: string; gwcOn?: boolean; gwcMode?: 'unified' | 'plane' | 'idw'; gwcPar?: Partial<GwcParams>; gwcToggle?: string; gwcReset?: boolean; awOn?: boolean; awModel?: string; awDate?: string; awMode?: AwMode; awDepth?: AwDepth; awPreset?: string; awMulti?: boolean; awSpec?: string; awOutlier?: string; awToggle?: string; awReset?: boolean }) => void
 }
 /** Растр кровли в координатах карты (Y вниз): z по строкам, NaN — нет значения. */
+/** Режим «ГДИ на опорную точку»: что выбрано, значения от API и готовая раскраска. */
+export interface GdiPicker { cat: GdiCatalog | null; mode: 'q' | 'dp2'; ref: string; season: string; data: GdiValues | null; paint: PaintData | null; error: string; onChange: (p: { mode?: 'q' | 'dp2'; ref?: string; season?: string }) => void }
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
 interface Props {
@@ -46,6 +48,7 @@ interface Props {
   options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; title: string
   /** Параметр Атласа: только на странице карты. */
   atlas?: AtlasPicker
+  gdi?: GdiPicker
   gis?: GisPicker
   models?: ModelsPanel
   /** Режим сравнения: общий масштаб кругов и общий вид (зум/сдвиг) у двух карт. */
@@ -68,10 +71,14 @@ const readPal = (): Pal => ({
   muted: css('--muted') || '#5f7178', line: css('--line') || '#dbe3e5', accent: css('--accent') || '#149ba5', water: css('--map-water') || WATER, gas: css('--map-gas') || GAS,
 })
 
+/** Вид подписей скважин: шрифт (пусто — по умолчанию), множитель размера, цвет (пусто — автоматически). */
+interface LabelFmt { family: string; size: number; color: string }
+const FONTS: [string, string][] = [['', 'по умолчанию'], ['Arial, Helvetica, sans-serif', 'Arial'], ['"Times New Roman", Times, serif', 'Times New Roman'], ['"Courier New", Courier, monospace', 'Courier New'], ['Consolas, Menlo, monospace', 'Consolas'], ['Georgia, serif', 'Georgia']]
+
 const Glyph = memo(function Glyph(p: {
   well: number; x: number; y: number; r: number; rmax: number; total: number; share: number; months: number[]; order: number[]; monthColors: string[]
   sectors: boolean; paint?: { color: string; label: string } | null; water: { factor: number | null; flow: number | null; color: string }[]; maxFlow: number; showShare: boolean
-  selected: boolean; label: string; dim: boolean; hot?: boolean; gcolor?: string; pal: Pal
+  selected: boolean; label: string; dim: boolean; hot?: boolean; gcolor?: string; pal: Pal; lf?: LabelFmt
 }) {
   const { x, y, rmax, pal } = p
   const idle = p.paint === undefined ? !(p.total > 0) : !p.paint
@@ -117,8 +124,9 @@ const Glyph = memo(function Glyph(p: {
   }
   // подпись: внутри крупного круга — белым, у мелкого — рядом, цветом текста с ореолом фона
   const two = p.paint ? p.paint.label : ''
-  const fs = rmax * (p.label.length > 4 ? 0.3 : p.label.length > 3 ? 0.36 : 0.42)
-  const inside = !idle && r >= fs * (p.label.length > 3 ? 1.5 : 1.1)
+  const fs0 = rmax * (p.label.length > 4 ? 0.3 : p.label.length > 3 ? 0.36 : 0.42), fs = fs0 * (p.lf?.size ?? 1)
+  const inside = !idle && r >= fs0 * (p.label.length > 3 ? 1.5 : 1.1)
+  const ff = p.lf?.family || undefined, fc = p.lf?.color || ''
   const share = !idle && p.paint === undefined && p.showShare && p.share >= 0.02 ? (p.share * 100).toFixed(p.share >= 0.1 ? 0 : 1).replace('.', ',') + ' %' : ''
   const lx = inside ? x : x + r + rmax * 0.1, ly = y
   return (
@@ -127,9 +135,9 @@ const Glyph = memo(function Glyph(p: {
       {p.selected && <circle cx={x} cy={y} r={r + rmax * 0.26} fill={pal.accent} fillOpacity={0.16} stroke={pal.accent} strokeWidth={rmax * 0.06} />}
       {els}
       {p.label && (inside
-        ? <text x={lx} y={ly - (two || (share && r > fs * 2) ? fs * 0.38 : 0)} fontSize={fs} textAnchor="middle" dominantBaseline="central" fontWeight={700} fill="#fff"
+        ? <text x={lx} y={ly - (two || (share && r > fs * 2) ? fs * 0.38 : 0)} fontSize={fs} fontFamily={ff} textAnchor="middle" dominantBaseline="central" fontWeight={700} fill={fc || '#fff'}
             stroke="rgba(30,8,12,.45)" strokeWidth={fs * 0.14} paintOrder="stroke" strokeLinejoin="round">{p.label}</text>
-        : <text x={lx} y={ly} fontSize={fs * 0.9} dominantBaseline="central" fontWeight={700} fill={idle ? pal.muted : pal.ink}
+        : <text x={lx} y={ly} fontSize={fs * 0.9} fontFamily={ff} dominantBaseline="central" fontWeight={700} fill={fc || (idle ? pal.muted : pal.ink)}
             stroke={pal.bg} strokeWidth={fs * 0.28} paintOrder="stroke" strokeLinejoin="round">{p.label}{share && <tspan fontWeight={400} fill={pal.muted}> · {share}</tspan>}</text>)}
       {inside && (two || (share && r > fs * 2)) && <text x={x} y={y + fs * 0.62} fontSize={fs * 0.62} textAnchor="middle" dominantBaseline="central" fill="#fff" fillOpacity={0.92}
         stroke="rgba(30,8,12,.4)" strokeWidth={fs * 0.08} paintOrder="stroke">{two || share}</text>}
@@ -272,7 +280,7 @@ function GisControls({ gwcShares, catalog, pack, metric, season, against, pins, 
   </>
 }
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView, atlas, gis, models }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView, atlas, gis, gdi, models }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
@@ -350,7 +358,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     return { mode: keys.length === 1 && keys[0] === season ? 'one' : scopeMode, keys, calcs: multi.calcs }
   }, [multi, scopeMode, picked, season])
   const calcPaint: PaintData | null = useMemo(() => paintFor(options.paint, g, calc, kind, season, a, b, options.paint === 'entry' || options.paint === 'wf' ? scope : undefined), [options.paint, g, calc, kind, season, a, b, scope])
-  const rawPaint: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : options.paint === 'gis' ? gis?.paint ?? null : calcPaint
+  const rawPaint: PaintData | null = options.paint === 'atlas' ? atlas?.paint ?? null : options.paint === 'model' ? models?.paint ?? null : options.paint === 'gis' ? gis?.paint ?? null : options.paint === 'gdi' ? gdi?.paint ?? null : calcPaint
   // палитра: изменённая инженером или режима по умолчанию; ручной диапазон, если он задан и корректен
   const palOv = usePaletteOverride(rawPaint?.palKey ?? options.paint)
   const paintData: PaintData | null = useMemo(() => {
@@ -423,6 +431,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const themeKey = document.documentElement.dataset.theme || ''
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const pal = useMemo(readPal, [themeKey])
+  const lfFont = usePref(labelFont), lfSize = usePref(labelSize), lfColor = usePref(labelColor)
+  const lf = useMemo<LabelFmt>(() => ({ family: lfFont, size: lfSize, color: lfColor }), [lfFont, lfSize, lfColor])
   const zoomBy = (f: number) => setView(v => {
     const px = size.w / 2, py = size.h / 2, k = Math.max(0.4, Math.min(24, v.k * f))
     return { k, tx: px - ((px - v.tx) / v.k) * k, ty: py - ((py - v.ty) / v.k) * k }
@@ -742,13 +752,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 months={win.months[n] || EMPTY} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
                 paint={paints ? paints.get(q.well) ?? null : undefined}
                 water={options.water ? rings.get(q.well) || EMPTY : EMPTY} maxFlow={maxFlow} showShare={options.share}
-                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
+                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} lf={lf} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
               )
             })}
       </>
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, rd, isRef, refNums, refK, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
+  }, [lf, items, rd, isRef, refNums, refK, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
   // наблюдательные (ромб) и геофизические (треугольник) скважины вне групп: в координатах карты; при «схеме» положения условные, поэтому они не рисуются
   const obsLayer = obsPts.length ? <g aria-label="Наблюдательные и геофизические скважины">
     {obsPts.map(o => {
@@ -966,6 +976,15 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             </g>}
           </>}
         </g>}
+        {multiG && !isRef && !compact && (() => {
+          // легенда цветов групп рисуется в самой картинке (не HTML-чипами), поэтому попадает и в PNG
+          const names = sortLabels(g.groups!, n => n), w = Math.max(...names.map(n => n.length)) * 7 + 44, h = 30 + 18 * names.length
+          return <g transform={`translate(${size.w - 14 - w} 66)`} aria-label="Цвета групп">
+            <rect width={w} height={h} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
+            <text x={12} y={20} fontSize={11.5} fontWeight={700} fill={pal.ink}>Группы</text>
+            {names.map((n, i) => <g key={n} transform={`translate(12 ${36 + 18 * i})`}><circle r={5.5} fill={groupColor(n)} /><text x={13} fontSize={11.5} dominantBaseline="central" fill={pal.ink}>{n}</text></g>)}
+          </g>
+        })()}
         {unit && <g transform={`translate(${size.w - 64 - bar * K} ${size.h - 24})`}>
           <rect x={-6} y={-20} width={bar * K + 12} height={26} rx={6} fill={pal.surface} fillOpacity={0.85} />
           <path d={`M0,-2V0H${bar * K}V-2`} fill="none" stroke={pal.ink} strokeWidth={1.5} />
@@ -992,6 +1011,19 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               <select value={atlas.agg} onChange={e => atlas.onPick(atlas.pick, e.target.value)} aria-label="Агрегация">
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
+            </>}
+            {options.paint === 'gdi' && gdi && <>
+              <div className="segmented" role="radiogroup" aria-label="Приведение ГДИ">
+                <button type="button" role="radio" aria-checked={gdi.mode === 'q'} onClick={() => gdi.onChange({ mode: 'q', ref: '' })} title="Расход при одной и той же депрессии ΔP² у всех скважин">Q при опорной ΔP²</button>
+                <button type="button" role="radio" aria-checked={gdi.mode === 'dp2'} onClick={() => gdi.onChange({ mode: 'dp2', ref: '' })} title="Депрессия ΔP² при одном и том же расходе у всех скважин">ΔP² при опорном Q</button></div>
+              <label className="row" title="Пусто — из данных: наименьший из максимальных замеров по скважинам, так ни одна скважина не экстраполируется. Решение инженера: можно ввести своё значение">
+                <span>{gdi.mode === 'q' ? 'Опорная ΔP², кгс²/см⁴' : 'Опорный Q, тыс. м³/сут'}</span>
+                <input type="text" inputMode="decimal" key={gdi.mode + String(gdi.data?.auto ?? '')} defaultValue={gdi.ref} placeholder={gdi.data?.auto != null ? fmt1(gdi.data.auto) : 'из данных'} style={{ width: 90 }} aria-label="Опорное значение ГДИ"
+                  onBlur={e => gdi.onChange({ ref: e.target.value.trim().replace(',', '.') })} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} /></label>
+              {(gdi.cat?.seasons.length ?? 0) > 1 && <select value={gdi.season} onChange={e => gdi.onChange({ season: e.target.value })} aria-label="Сезон исследований ГДИ">
+                <option value="">Последнее исследование скважины</option>{gdi.cat!.seasons.map(s => <option key={s} value={s}>Сезон: {s}</option>)}</select>}
+              <p className="muted small">По исследованию считается ΔP² = a·Q + b·Q² (a, b ≥ 0), все скважины приводятся к одной точке. Скважины вне диапазона замеров или со слабой подгонкой помечены в подсказке, на карте они остаются: решение за инженером.</p>
+              {(gdi.error || gdi.data?.note || gdi.cat?.note) && <p className="muted small" role={gdi.error ? 'alert' : undefined}>{gdi.error || gdi.data?.note || gdi.cat?.note}</p>}
             </>}
             {options.paint === 'gis' && gis && <GisControls {...gis} isoNote={iso?.note ?? gis.isoNote} gwcNote={gwc?.note ?? ''} gwcShares={gwc?.shares ?? []} awNote={awNote} roof={{ ...gis.roof, note: [gis.roof.note, roofWarn].filter(Boolean).join(' ') }} />}
             {options.paint === 'gis' && gis?.roof.on && <details className="pal-det"><summary>Палитра подложки кровли{roofOv ? ' · изменена' : ''}</summary>
@@ -1023,6 +1055,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           {!isRef && <section><h4>Круги</h4>
             <label className="row"><span>Размер</span><input type="range" min={0.4} max={2.5} step={0.1} value={options.scale} onChange={e => onOptions({ scale: Number(e.target.value) })} /></label>
             <label className="row"><span>Подпись</span><select value={options.labels} onChange={e => onOptions({ labels: e.target.value as 'num' | 'val' | 'none' })}><option value="num">номер</option><option value="val">расход</option><option value="none">нет</option></select></label>
+            {options.labels !== 'none' && <details className="pal-det"><summary>Шрифт подписей{lfFont || lfSize !== 1 || lfColor ? ' · изменён' : ''}</summary>
+              <label className="row"><span>Шрифт</span><select value={lfFont} onChange={e => labelFont.set(e.target.value)} aria-label="Шрифт подписей скважин">{FONTS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+              <label className="row"><span>Размер</span><input type="range" min={0.5} max={2.5} step={0.1} value={lfSize} onChange={e => labelSize.set(Number(e.target.value))} aria-label="Размер подписей скважин" /></label>
+              <label className="row"><span>Цвет</span><input type="color" value={lfColor || '#1b2a31'} onChange={e => labelColor.set(e.target.value)} aria-label="Цвет подписей скважин" />
+                <button type="button" className="quiet" onClick={() => labelColor.set('')} disabled={!lfColor}>Автоматически</button></label>
+              <button type="button" className="quiet" onClick={() => { labelFont.set(''); labelSize.set(1); labelColor.set('') }} disabled={!lfFont && lfSize === 1 && !lfColor}>Сбросить подписи</button>
+            </details>}
             {multiG && <label className="check" title="Цвет группы: заливка круга, а при секторах по месяцам или раскраске по значению — обводка"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
             <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
             <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
@@ -1057,7 +1096,6 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       <div className="map-chips no-export">
         {group.length > 1 && <span className="map-chip accent">Выбрано скважин: {group.length}<button type="button" onClick={() => onGroup([])} aria-label="Сбросить выбор">×</button></span>}
         {isRef && refInfo.missing.length > 0 && <span className="map-chip warn" title="Этих скважин из списка нет на карте выбранных групп">Не на карте: {refInfo.missing.join(', ')}{multiG ? '' : ' (выберите «Весь объект»)'}</span>}
-        {multiG && !isRef && sortLabels(g.groups!, n => n).map(n => <span key={n} className="map-chip" title={byGroup ? 'Цвет круга — группа' : n}><i className="gdot" style={{ background: groupColor(n) }} />{n}</span>)}
         {far.length > 0 && <span className="map-chip" title={'Далёкие скважины: ' + far.join(', ')}>{frameAll ? 'Показаны все скважины' : `За кадром: ${far.length} скв.`}<button type="button" onClick={() => setFrameAll(v => !v)}>{frameAll ? 'Основная группа' : 'Показать'}</button></span>}
         {spread && placed.length > 1 && <span className="map-chip" title="Скважины разнесены для читаемости: взаимное расположение сохранено, расстояния условные">Схема, расстояния условные</span>}
         {options.paint === 'gis' && gis && [gis.error, isoWarn && gis.iso.on ? isoWarn : '', gis.roof.on && !roofLines?.length ? [gis.roof.grid ? '' : gis.roof.note, roofWarn].filter(Boolean).join(' ') : ''].filter(Boolean).map((t, k) =>

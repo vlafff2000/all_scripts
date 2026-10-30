@@ -155,6 +155,28 @@ async def gis_values(request: Request):
         return _err(str(e), 404)
 
 
+async def gdi_catalog(request: Request):
+    """Сезоны исследований ГДИ в проекте Атласа (для режима «ГДИ на опорную депрессию или расход»)."""
+    if PROJECT.atlas is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    return JSONResponse(await run_in_threadpool(PROJECT.gdi_catalog))
+
+
+async def gdi_values(request: Request):
+    """ГДИ по скважинам, приведённые к опорной ΔP² (mode=q) или к опорному расходу (mode=dp2); ref пусто — из данных."""
+    if PROJECT.atlas is None:
+        return _err("Данные ещё не загружены из проекта Атласа.", 409)
+    q = request.query_params
+    try:
+        ref = float((q.get("ref") or "").replace(",", ".")) if (q.get("ref") or "").strip() else None
+    except ValueError:
+        return _err("Опорное значение должно быть числом.", 400)
+    try:
+        return JSONResponse(await run_in_threadpool(PROJECT.gdi_payload, q.get("mode") or "q", ref, q.get("season") or ""))
+    except ValueError as e:
+        return _err(str(e), 404)
+
+
 async def gis_model(request: Request):
     """ГВК модели и отклонение от факта из последнего сравнения в ГДМ (пачка и сезон замера)."""
     from tnav_results import gwc_share
@@ -430,6 +452,8 @@ def build_app() -> Starlette:
         Route("/api/param", param),
         Route("/api/gis", gis_catalog),
         Route("/api/gis/values", gis_values),
+        Route("/api/gdi", gdi_catalog),
+        Route("/api/gdi/values", gdi_values),
         Route("/api/gis/model", gis_model),
         Route("/api/gis/model-wells", gis_model_wells),
         Route("/api/gis/model-wells-variants", gis_model_wells_variants),
