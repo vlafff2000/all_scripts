@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react'
 import { Dynamics, ModelEntry, compareVolume } from './api'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
-const fmt = (x: number | null | undefined, d = 0) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
 
 /** Линии по датам у каждой модели на общем графике (как в Газовом Атласе: зум, подсказка, закрепление точек). */
@@ -36,12 +37,11 @@ export default function ModelDynamics({ models }: { models: ModelEntry[] }) {
     } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
   }
 
-  const rows = (d: Dynamics, unit: string) => (
-    <table className="raw"><thead><tr><th>Модель</th><th>С</th><th>По</th><th>Было, {unit}</th><th>Стало, {unit}</th><th>Изменение</th><th>Изменение, %</th></tr></thead>
-      <tbody>{d.models.map(m => { const s = d.series[m]; const p = s.points; const c = s.change
-        return <tr key={m}><td>{m}</td><td>{c ? c.from : '—'}</td><td>{c ? c.to : '—'}</td>
-          <td className="num">{p.length ? fmt(p[0].value, 1) : '—'}</td><td className="num">{p.length > 1 ? fmt(p[p.length - 1].value, 1) : '—'}</td>
-          <td className="num">{c ? fmt(c.delta, 1) : '—'}</td><td className="num">{c ? fmt(c.percent, 1) : '—'}</td></tr> })}</tbody></table>
+  const rows = (d: Dynamics, unit: string, title: string) => (
+    <Tables scope={'sched-dyn-' + title} tables={[tableOf('dyn', title,
+      ['Модель', ['С', 'date'], ['По', 'date'], ['Было, ' + unit, 'number', 1], ['Стало, ' + unit, 'number', 1], ['Изменение', 'number', 1], ['Изменение, %', 'number', 1]],
+      d.models.map(m => { const s = d.series[m]; const p = s.points; const c = s.change
+        return [m, c ? c.from : null, c ? c.to : null, p.length ? p[0].value : null, p.length > 1 ? p[p.length - 1].value : null, c ? c.delta : null, c ? c.percent : null] }))]} />
   )
 
   return (
@@ -62,11 +62,9 @@ export default function ModelDynamics({ models }: { models: ModelEntry[] }) {
       {msg && <p className="note warn">{msg}</p>}
       {res && <>
         {res.notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
-        <h3 style={{ marginTop: 12 }}>Газонасыщенный поровый объём, м³ пор.</h3>
-        {rows(res.volume, 'м³ пор.')}
+        {rows(res.volume, 'м³ пор.', 'Газонасыщенный поровый объём')}
         <DynPlot d={res.volume} unit="м³ пор." title="Газонасыщенный поровый объём" />
-        <h3 style={{ marginTop: 12 }}>ГВК, среднее по площади, м</h3>
-        {rows(res.gwc, 'м')}
+        {rows(res.gwc, 'м', 'ГВК, среднее по площади')}
         <DynPlot d={res.gwc} unit="м, TVDSS" title="ГВК, среднее по площади" />
       </>}
     </section>

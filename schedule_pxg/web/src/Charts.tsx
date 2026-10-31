@@ -8,9 +8,10 @@ import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { dayNum, isoOfDay, mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 import type { Chart } from '../../../pxg_core/web-ui/chart/chartTypes'
 import { AppState, ChartSeries, ChartsView, getCharts } from './api'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
 const BY: [string, string][] = [['total', 'по объекту'], ['group', 'по группам'], ['well', 'по скважинам'], ['season', 'по сезонам (наложение)']]
-const fmt = (x: number, d = 2) => x.toLocaleString('ru-RU', { maximumFractionDigits: d })
 
 /** Ступенчатая линия: расход постоянен на шаге (точки в первые и последние сутки шага); накопленный — ломаная по концам шагов. */
 function toPoints(s: ChartSeries, cum: boolean, seasonAxis: boolean): [number, number][] {
@@ -108,8 +109,8 @@ export default function Charts({ st }: { st: AppState }) {
         {chartR && chartC && (chartR.series.length ? <div className="chart-stack"><ChartView chart={chartR} excludeMode={false} onExclude={() => {}} /><ChartView chart={chartC} excludeMode={false} onExclude={() => {}} /></div>
           : <p className="note warn">Нет рядов для графика: в проекте нет скважин этой группы или не построен календарь. Проверьте «Импорт» и «Сценарии».</p>)}
         {data.scenarios.flatMap(s => s.notes.map(n => s.name + ': ' + n)).map((n, i) => <p key={i} className="note warn">{n}</p>)}
-        {totals.length > 0 && <table className="raw"><thead><tr><th>Сценарий</th><th>Ряд</th><th>Вид</th><th>Объём, млн м³</th></tr></thead>
-          <tbody>{totals.map((t, i) => <tr key={i}><td>{t.scenario}</td><td>{t.label}</td><td>{t.kind}</td><td className="num">{fmt(t.total / 1e6, 3)}</td></tr>)}</tbody></table>}
+        {totals.length > 0 && <Tables scope="sched-charts-totals" tables={[tableOf('totals', 'Объём по сценариям',
+          ['Сценарий', 'Ряд', 'Вид', ['Объём, млн м³', 'number', 3]], totals.map(t => [t.scenario, t.label, t.kind, t.total / 1e6]))]} />}
       </section>}
     </main>
   )

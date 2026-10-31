@@ -3,6 +3,8 @@ import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 import CriterionPicker from './CriterionPicker'
 import { CompareResult, CompareRow, CriterionCfg, ModelEntry, comparePlanshet } from './api'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
 const MAX_COMBOS = 12
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
@@ -108,10 +110,10 @@ export default function GwcCompare({ models, criterion, alts }: { models: ModelE
           не достигнут: {res.skipped['не достигнут'] || 0}; газа нет: {res.skipped['газа нет'] || 0}; нет модели: {res.skipped['нет модели'] || 0}.</p>
         <div className="row"><span className="muted small">Статистика по:</span>
           {([['pack', 'пачкам'], ['season', 'сезонам'], ['group', 'группам'], ['series', 'модели · критерию']] as const).map(([k, l]) => <label key={k}><input type="radio" checked={by === k} onChange={() => setBy(k)} /> {l}</label>)}</div>
-        <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th></th><th>n</th><th>Среднее, м</th><th>Медиана, м</th><th>СКО, м</th><th>MAE, м</th><th>RMSE, м</th><th>min, м</th><th>max, м</th><th>доля |Δ|&lt;1 м</th></tr></thead>
-          <tbody>{[['Все', all] as [string, Stat | null], ...groups.map(g => [g || '—', stat(used.filter(r => (r[by] || '') === g).map(r => r.delta as number))] as [string, Stat | null])].map(([name, s]) =>
-            s && <tr key={name}><td>{name}</td><td className="num">{s.n}</td><td className="num">{fmt(s.mean)}</td><td className="num">{fmt(s.median)}</td><td className="num">{fmt(s.std)}</td>
-              <td className="num">{fmt(s.mae)}</td><td className="num">{fmt(s.rmse)}</td><td className="num">{fmt(s.min)}</td><td className="num">{fmt(s.max)}</td><td className="num">{fmt(s.share * 100, 0)}%</td></tr>)}</tbody></table></div>
+        <Tables scope="sched-gwc-stat" tables={[tableOf('stat', 'Статистика Δ ГВК',
+          [({ pack: 'Пачка', season: 'Сезон', group: 'Группа', series: 'Модель · критерий' })[by], ['n', 'number', 0], ['Среднее, м', 'number', 2], ['Медиана, м', 'number', 2], ['СКО, м', 'number', 2], ['MAE, м', 'number', 2], ['RMSE, м', 'number', 2], ['min, м', 'number', 2], ['max, м', 'number', 2], ['доля |Δ|<1 м, %', 'number', 0]],
+          ([['Все', all] as [string, Stat | null], ...groups.map(g => [g || '—', stat(used.filter(r => (r[by] || '') === g).map(r => r.delta as number))] as [string, Stat | null])])
+            .flatMap(([name, s]) => (s ? [[name, s.n, s.mean, s.median, s.std, s.mae, s.rmse, s.min, s.max, s.share * 100]] : [])))]} />
         {scatter && <ChartView chart={scatter} excludeMode={false} onExclude={() => {}} />}
         {bars && <ChartView chart={bars} excludeMode={false} onExclude={() => {}} />}
         <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th>В статистике</th><th>Модель · критерий</th><th>Скважина</th><th>Группа</th><th>Замер</th><th>Сезон</th><th>Срез модели</th><th>Пачка</th><th>ГВК факт, м</th><th>ГВК модель, м</th><th>Δ, м</th><th>Статус</th></tr></thead>

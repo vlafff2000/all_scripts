@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 
 import PageHead from './PageHead'
 import { AppState, HistoryBody, HistoryView, downloadHistoryLog, downloadHistoryResidual, downloadHistorySchedule, pickFile, runHistory } from './api'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
 const KINDS: Record<string, string> = { закачка: 'закачка', отбор: 'отбор', нейтральный: 'нейтральный' }
 const fmt = (x: number) => Math.round(x).toLocaleString('ru-RU')
@@ -91,11 +93,9 @@ export default function History({ st }: { st: AppState }) {
             Наибольшее расхождение с ПЗРГ после поправки: {view.correction.worst.toFixed(2)} %.
             {view.window && <> Окно рабочего дебита: {view.window.lo}–{view.window.hi} тыс. м³/сут.</>}
             {view.correction.unallocated > 0 && <> Не распределено (нечему): {fmt(view.correction.unallocated)} м³.</>}</p>
-          <table className="raw"><thead><tr><th>С</th><th>По</th><th>Метод</th><th>ПЗРГ, м³</th><th>Коэфф.</th><th>После, м³</th><th>Расхожд., %</th><th>Не распред., м³</th><th>Комментарий</th></tr></thead>
-            <tbody>{view.log.map((r, i) => <tr key={i} className={r.method === 'SKIP' || r.method === 'NO_WELLS' || r.category >= 2 ? 'bad' : ''}>
-              <td>{r.start}</td><td>{r.end}</td><td>{r.method}</td><td className="num">{fmt(r.pzrg)}</td><td className="num">{r.coef.toFixed(4)}</td>
-              <td className="num">{fmt(r.total_after)}</td><td className="num">{r.discrepancy.toFixed(2)}</td>
-              <td className="num">{r.unallocated > 0 ? fmt(r.unallocated) : ''}</td><td>{r.comment}</td></tr>)}</tbody></table>
+          <Tables scope="sched-history-log" tables={[tableOf('log', 'Журнал поправки по периодам',
+            [['С', 'date'], ['По', 'date'], 'Метод', ['ПЗРГ, м³', 'number', 0], ['Коэфф.', 'number', 4], ['После, м³', 'number', 0], ['Расхожд., %', 'number', 2], ['Не распред., м³', 'number', 0], 'Комментарий'],
+            view.log.map(r => [r.start, r.end, r.method, r.pzrg, r.coef, r.total_after, r.discrepancy, r.unallocated > 0 ? r.unallocated : null, r.comment]))]} />
         </>}
         {view.residual && <>
           <h3>Невязка по суткам (до поправки)</h3>
@@ -104,16 +104,14 @@ export default function History({ st }: { st: AppState }) {
           {view.residual.rows.length > 0 && <>
             <p className="muted small">Сутки с невязкой от 2 %{view.residual.total > view.residual.shown && <> — {view.residual.shown} самых больших из {view.residual.total}</>}; все сутки — в CSV.
               «За 3 суток» — невязка по сумме трёх соседних суток: если она мала, а за сутки велика, это сдвиг учётных суток, а не ошибка скважин.</p>
-            <table className="raw"><thead><tr><th>Дата</th><th>Вид</th><th>ПЗРГ, м³</th><th>Скважины, м³</th><th>Невязка, м³</th><th>%</th><th>За 3 суток, %</th><th>Подсказка</th></tr></thead>
-              <tbody>{view.residual.rows.map((r, i) => <tr key={i}><td>{r.date}</td><td>{KINDS[r.kind] || r.kind}</td><td className="num">{fmt(r.pzrg)}</td>
-                <td className="num">{fmt(r.wells)}</td><td className="num">{fmt(r.residual)}</td><td className="num">{r.pct.toFixed(1)}</td>
-                <td className="num">{r.pct3.toFixed(1)}</td><td>{r.hint}</td></tr>)}</tbody></table>
+            <Tables scope="sched-history-residual" tables={[tableOf('residual', 'Невязка по суткам',
+              [['Дата', 'date'], 'Вид', ['ПЗРГ, м³', 'number', 0], ['Скважины, м³', 'number', 0], ['Невязка, м³', 'number', 0], ['%', 'number', 1], ['За 3 суток, %', 'number', 1], 'Подсказка'],
+              view.residual.rows.map(r => [r.date, KINDS[r.kind] || r.kind, r.pzrg, r.wells, r.residual, r.pct, r.pct3, r.hint]))]} />
           </>}
         </>}
         <h3>Шаги{view.table.length < view.steps && <span className="muted small"> — первые {view.table.length} из {view.steps}</span>}</h3>
-        <table className="raw"><thead><tr><th>С</th><th>По</th><th>Вид</th><th>Скважин</th><th>Расход, м³/сут</th><th>Объём шага, м³</th></tr></thead>
-          <tbody>{view.table.map((r, i) => <tr key={i}><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td className="num">{r[3]}</td>
-            <td className="num">{fmt(r[4])}</td><td className="num">{fmt(r[5])}</td></tr>)}</tbody></table>
+        <Tables scope="sched-history-steps" tables={[tableOf('steps', 'Шаги', [['С', 'date'], ['По', 'date'], 'Вид', ['Скважин', 'number', 0], ['Расход, м³/сут', 'number', 0], ['Объём шага, м³', 'number', 0]],
+          view.table.map(r => [r[0], r[1], r[2], r[3], r[4], r[5]]))]} />
       </section>}
     </main>
   )

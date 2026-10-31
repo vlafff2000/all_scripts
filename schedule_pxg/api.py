@@ -7,7 +7,7 @@ import datetime as dt
 import io
 import os
 
-from pxg_core import fs_browse, group_colors, runlog, well_presets, workspace
+from pxg_core import fs_browse, group_colors, runlog, table_export, well_presets, workspace
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -1591,6 +1591,7 @@ def build_app() -> Starlette:
         Route("/api/results/wellprofile", results_well_profile),
         Route("/api/results/report", results_report),
         *fs_browse.routes(),
+        *table_export.routes(),
         *group_colors.routes(),
         *well_presets.routes(_presets_folder),
         Route("/api/wells", wells_get),
