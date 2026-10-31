@@ -1,5 +1,7 @@
 import { Fragment, useState } from 'react'
 import { ModelEntry, PressureCompare, PressureStat, comparePressure } from './api'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
@@ -84,9 +86,9 @@ export default function ModelCompare({ models }: { models: ModelEntry[] }) {
           </tr>)}</tbody></table>
         </div>
         <h3 style={{ marginTop: 12 }}>Статистика по моделям (без исключённых строк)</h3>
-        <table className="raw"><thead><tr><th>Модель</th><th>Точек</th><th>Среднее Δ, кгс/см²</th><th>Среднее |Δ|</th><th>Максимум |Δ|</th></tr></thead>
-          <tbody>{res.models.map(n => { const s: PressureStat = res.stats[n]; return <tr key={n}>
-            <td>{n}</td><td className="num">{s.n}</td><td className="num">{fmt(s.mean, 2)}</td><td className="num">{fmt(s.mean_abs, 2)}</td><td className="num">{fmt(s.max_abs, 2)}</td></tr> })}</tbody></table>
+        <Tables scope="sched-pressure-stat" tables={[tableOf('stat', 'Статистика по моделям',
+          ['Модель', ['Точек', 'number', 0], ['Среднее Δ, кгс/см²', 'number', 2], ['Среднее |Δ|, кгс/см²', 'number', 2], ['Максимум |Δ|, кгс/см²', 'number', 2]],
+          res.models.map(n => { const s: PressureStat = res.stats[n]; return [n, s.n, s.mean, s.mean_abs, s.max_abs] }))]} />
         {res.models.map(n => { const w = Object.entries(res.stats[n].wells); return w.length ? <p key={n} className="small">{n} по скважинам: {w.map(([k, v]) => k + ' — ' + v.n + ' т., среднее Δ ' + fmt(v.mean, 1)).join('; ')}</p> : null })}
       </>}
     </section>

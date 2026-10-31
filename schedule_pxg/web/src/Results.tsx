@@ -6,7 +6,8 @@ import ModelDynamics from './ModelDynamics'
 import { IndicatorRow, ModelsView, ResultsInfo, getIndicators, getModels, getResultSeries, getWellGwc, WellGwcRow, getResults, getResultsReport, pickFile, pickFolder, setModelFolders, setModelSelection } from './api'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
-const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
 interface Line { label: string; pts: [string, number][] }
 
@@ -166,9 +167,9 @@ export default function Results() {
         </div>
         {notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
         {shown.length > 0 && <>
-          <table className="raw"><thead><tr><th>Модель</th><th>Дата</th><th>Газонас. объём, м³ пор.</th><th>ГВК мин, м</th><th>ГВК среднее, м</th><th>ГВК по площади, м</th><th>ГВК макс, м</th></tr></thead>
-            <tbody>{shown.map(n => { const r = last(n); return r ? <tr key={n}><td>{label(n)}</td><td>{r.date}</td><td className="num">{fmt(r.gas_pore_volume, 0)}</td>
-              <td className="num">{fmt(r.gwc_min, 1)}</td><td className="num">{fmt(r.gwc_mean, 1)}</td><td className="num">{fmt(r.gwc_mean_area, 1)}</td><td className="num">{fmt(r.gwc_max, 1)}</td></tr> : <tr key={n}><td>{label(n)}</td><td colSpan={6} className="muted">нет данных</td></tr> })}</tbody></table>
+          <Tables scope="sched-results-idx" tables={[tableOf('idx', 'Показатели по выбранным моделям',
+            ['Модель', ['Дата', 'date'], ['Газонас. объём, м³ пор.', 'number', 0], ['ГВК мин, м', 'number', 1], ['ГВК среднее, м', 'number', 1], ['ГВК по площади, м', 'number', 1], ['ГВК макс, м', 'number', 1]],
+            shown.map(n => { const r = last(n); return [label(n), r?.date ?? null, r?.gas_pore_volume ?? null, r?.gwc_min ?? null, r?.gwc_mean ?? null, r?.gwc_mean_area ?? null, r?.gwc_max ?? null] }))]} />
           <p className="muted small">В таблице последний из посчитанных шагов; с выбранной датой — ближайший к ней шаг рестарта.</p>
           <Plot lines={line(r => r.gas_pore_volume)} unit="м³ пор." title="Газонасыщенный поровый объём" link="sched-results" />
           <Plot lines={line(r => r.gwc_mean_area)} unit="м" title="ГВК, среднее по площади" link="sched-results" />
@@ -194,10 +195,11 @@ export default function Results() {
         {gwShown.map(n => { const rs = gwRows[n]; const lastD = rs.reduce((m, r) => (r.date > m ? r.date : m), ''); const cur = rs.filter(r => r.date === lastD)
           return <div key={n} style={{ overflowX: 'auto' }}>
             <p className="muted small">{label(n)}: на {lastD}{rs.some(r => r.date !== lastD) ? ' (график — по всем шагам)' : ''}</p>
-            <table className="raw"><thead><tr><th>Скважина</th><th>Колонн с газом</th><th>Сверху вниз: граница, м</th><th>Сверху вниз: интерполяция, м</th><th>Нижний газ: граница, м</th><th>Нижний газ: интерполяция, м</th><th>Пометка</th></tr></thead>
-              <tbody>{cur.map(r => <tr key={r.well}><td>{r.well}</td><td className="num">{r.columns}</td><td className="num">{fmt(r.cell_top_down, 1)}</td><td className="num">{fmt(r.interp_top_down, 1)}</td>
-                <td className="num">{fmt(r.cell_lowest, 1)}</td><td className="num">{fmt(r.interp_lowest, 1)}</td>
-                <td className="small">{r.columns === 0 ? 'газа нет' : [r.torn ? 'разорванный контакт' : '', r.at_grid_edge ? 'газ до низа сетки' : ''].filter(Boolean).join(', ')}</td></tr>)}</tbody></table></div> })}
+            <Tables scope="sched-results-gwc" tables={[tableOf('gwc-' + n, 'ГВК по скважинам: ' + label(n),
+              ['Скважина', ['Колонн с газом', 'number', 0], ['Сверху вниз: граница, м', 'number', 1], ['Сверху вниз: интерполяция, м', 'number', 1], ['Нижний газ: граница, м', 'number', 1], ['Нижний газ: интерполяция, м', 'number', 1], 'Пометка'],
+              cur.map(r => [r.well, r.columns, r.cell_top_down, r.interp_top_down, r.cell_lowest, r.interp_lowest,
+                r.columns === 0 ? 'газа нет' : [r.torn ? 'разорванный контакт' : '', r.at_grid_edge ? 'газ до низа сетки' : ''].filter(Boolean).join(', ')]))]} />
+          </div> })}
         <Plot lines={gwLines} unit="м, TVDSS" title="ГВК по скважинам (сверху вниз, интерполяция)" link="sched-results-g" />
       </section>}
     </main>

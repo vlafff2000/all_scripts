@@ -7,6 +7,8 @@ import { viewCatalog } from './wellView'
 import GwcCompare from './GwcCompare'
 import CriterionPicker from './CriterionPicker'
 import { CriterionCfg, CriterionPreset, FactWell, GisObs, ModelEntry, WellProfile, getCriterionPresets, getModelPerfs, ModelPerfRow, getModels, getPlanshetCatalog, getPlanshetFacts, getSources, getWellProfile, pickFile, pickFolder, setSources } from './api'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/')
@@ -389,9 +391,9 @@ export default function Planshet() {
           </div>
           <p className="muted small">Глубины — абсолютные отметки, вниз — меньше (со знаком минус); шкала глубины и шкалы 0…1 одинаковые у всех скважин. Узкая полоса слева — перфорация. Колесо мыши — масштаб, перетаскивание — сдвиг, двойной щелчок — сброс; подсказка — по наведению. MD = альтитуда − отметка (для наклонной скважины приближение).
             Линия цвета воды — ГВК: у факта по пачкам из базы ГИС, у каждой модели — свой цвет (легенда справа): сверху вниз, граница ячейки (сплошная) и интерполяция Sg (пунктир). Газ — по критерию, который указан в легенде; критерий применяется при «Построить».</p>
-          {rowsOut.length > 1 && <table className="raw"><thead><tr><th>Скважина</th><th>Замер</th><th>Сезон</th><th>Альтитуда, м</th><th>ГВК факт, м</th>{models.filter(m => !hidden.includes(m.id)).map(m => <th key={m.id}>ГВК {m.name}, м</th>)}</tr></thead>
-            <tbody>{rowsOut.map(({ it, tracks }) => <tr key={it.fact.well + it.fact.date}><td>{it.fact.well}</td><td>{it.fact.date || '—'}</td><td>{it.fact.season || '—'}</td><td className="num">{fmt(it.fact.altitude)}</td>
-              {tracks.map((t, k) => <td key={k} className="num">{gwcOf(t).length ? gwcOf(t).map(z => fmt(z)).join('; ') : '—'}</td>)}</tr>)}</tbody></table>}
+          {rowsOut.length > 1 && <Tables scope="sched-planshet-gwc" tables={[tableOf('gwc', 'ГВК по скважинам',
+            ['Скважина', ['Замер', 'date'], 'Сезон', ['Альтитуда, м', 'number', 1], ['ГВК факт, м', 'text'], ...models.filter(m => !hidden.includes(m.id)).map(m => 'ГВК ' + m.name + ', м')],
+            rowsOut.map(({ it, tracks }) => [it.fact.well, it.fact.date || null, it.fact.season || null, it.fact.altitude, ...tracks.map(t => { const z = gwcOf(t); return z.length ? z.map(v => fmt(v)).join('; ') : null })]))]} />}
         </div>}
       </section>
       <GwcCompare models={models} criterion={crit} alts={alts} />

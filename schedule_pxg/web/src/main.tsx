@@ -14,6 +14,7 @@ import { mountLogButton } from '../../../pxg_core/web-ui/LogButton'
 import '../../../pxg_core/web-ui/busybar.css'
 import { mountBusyBar } from '../../../pxg_core/web-ui/BusyBar'
 import '../../../pxg_core/web-ui/chart/chart-shell.css'
+import '../../../pxg_core/web-ui/table/table.css'
 import './styles.css'
 import './app.css'
 
