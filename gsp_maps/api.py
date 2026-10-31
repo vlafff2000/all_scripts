@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import os
 
-from pxg_core import fs_browse, group_colors, runlog, well_presets
+from pxg_core import fs_browse, group_colors, runlog, table_export, well_presets
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -472,6 +472,7 @@ def build_app() -> Starlette:
         Route("/api/export", export, methods=["POST"]),
         Route("/api/image", save_image, methods=["POST"]),
         *fs_browse.routes(),
+        *table_export.routes(),
         *well_presets.routes(lambda: _project_folder()),
         *group_colors.routes(),
         Route("/api/open-folder", open_folder, methods=["POST"]),
