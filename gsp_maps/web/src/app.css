@@ -73,11 +73,6 @@ table.mini { width: 100%; border-collapse: collapse; font-size: 13px; } .mini th
 @keyframes spin { to { transform: rotate(360deg); } }
 .log { margin: 8px 0; background: #10181c; color: #d3dfe3; padding: 10px 12px; border-radius: var(--radius); white-space: pre-wrap; font: 13px/1.45 ui-monospace, Consolas, 'DejaVu Sans Mono', monospace; }
 .scroll { overflow: auto; max-height: calc(100vh - 230px); }
-table.data { border-collapse: collapse; width: 100%; font-size: 14px; }
-.data th, .data td { padding: 5px 10px; border-bottom: 1px solid var(--line-soft); text-align: left; }
-.data thead th { position: sticky; top: 0; background: var(--head-bg); font-size: 13px; z-index: 1; }
-.data th button { background: none; border: 0; padding: 0; cursor: pointer; font-weight: 700; color: var(--ink); font-size: 13px; text-align: inherit; }
-.data tbody tr:hover { background: var(--row-hover); }
 .barcell { position: relative; } .barcell i { position: absolute; left: 0; top: 3px; bottom: 3px; background: var(--bar); } .barcell.neg i { background: var(--bar-negative); left: auto; right: 0; } .barcell span { position: relative; }
 .pchart { width: 100%; height: auto; margin-top: 6px; touch-action: none; }
 .pchart .grid { stroke: var(--chart-grid, var(--line-soft)); } .pchart .ax { font-size: 11px; fill: var(--muted); } .pchart .cross { stroke: var(--muted); stroke-dasharray: 3 3; }
@@ -114,7 +109,7 @@ table.matrix { border-collapse: separate; border-spacing: 0; font-size: 12px; }
 .k-o { color: #e63946; } .k-z { color: #149ba5; }
 td.st.prod { background: #c8e6c9; color: #1b4d1f; } td.st.inj { background: #bbdefb; color: #0d3b66; } td.st.idle { background: #ffe0b2; color: #7a4a00; } td.st.none { background: var(--line-soft); }
 :root[data-theme='dark'] td.st.prod { background: #1f4a25; color: #c8e6c9; } :root[data-theme='dark'] td.st.inj { background: #174568; color: #cfe8ff; } :root[data-theme='dark'] td.st.idle { background: #5a3a10; color: #ffe0b2; }
-.data tbody tr.sel { background: var(--accent-soft); } .data tbody tr { cursor: pointer; }
+
 .matrix td.on { color: var(--ink); font-weight: 700; }
 
 .share-legend span { cursor: default; padding: 1px 6px; border-radius: 4px; } .share-legend span.on { background: var(--accent-soft); color: var(--ink); }

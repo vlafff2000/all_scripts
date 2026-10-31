@@ -210,7 +210,7 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
             <option value="unstable">неустойчивые</option><option value="worse">R² стало хуже</option></select></label>
           <span className="muted small">Нажмите на строку, чтобы посмотреть график скважины; на заголовок — сортировать.</span>
         </div>
-        <div className="scroll" style={{ maxHeight: 460 }}><table className="raw"><thead><tr>{COLS.map(([k, t]) => th(k, t))}<th>Замечания</th></tr></thead>
+        <div className="scroll" style={{ maxHeight: 460 }}><table className="data-grid dense pick"><thead><tr>{COLS.map(([k, t]) => th(k, t))}<th>Замечания</th></tr></thead>
           <tbody>{rows.map(r => <tr key={id(r)} className={(r.ok ? '' : 'warnrow ') + (id(r) === well ? 'sel' : '')} onClick={() => setWell(id(r))} style={id(r) === well ? { background: 'var(--accent-soft)' } : undefined}>
             {COLS.map(([k, , f]) => <td key={k}>{f(r)}</td>)}<td className="muted small">{[...r.problems, ...r.notes].join('; ')}</td></tr>)}</tbody></table></div>
         {view.failures.length > 0 && <details><summary className="muted small">Пропущено скважин: {view.failures.length}</summary>
@@ -257,7 +257,7 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
 
         {view.groups.length > 0 && <>
           <h3>По группам: суммарный дебит при депрессиях ГДИ, тыс. м³/сут</h3>
-          <div className="scroll" style={{ maxHeight: 260 }}><table className="raw"><thead><tr><th>Группа</th><th>Скважин</th><th>ГДИ</th><th>Модель до</th><th>Ошибка до, %</th><th>Модель после</th><th>Ошибка после, %</th></tr></thead>
+          <div className="scroll" style={{ maxHeight: 260 }}><table className="data-grid dense pick"><thead><tr><th>Группа</th><th>Скважин</th><th>ГДИ</th><th>Модель до</th><th>Ошибка до, %</th><th>Модель после</th><th>Ошибка после, %</th></tr></thead>
             <tbody>{view.groups.map(g => <tr key={g.group}><td>{g.group}</td><td>{g.wells}</td><td>{fmt(g.q_gdi, 1)}</td><td>{fmt(g.q_before, 1)}</td><td>{fmt(g.err_before, 1)}</td><td>{fmt(g.q_after, 1)}</td><td>{fmt(g.err_after, 1)}</td></tr>)}</tbody></table></div>
         </>}
       </>}

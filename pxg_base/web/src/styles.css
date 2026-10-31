@@ -53,11 +53,6 @@ button.quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--line-
 @keyframes pulse { from { opacity: .35 } to { opacity: 1 } }
 .out-dir { font-size: 13px; word-break: break-all; }
 .log { margin: 0; background: #10181c; color: #d3dfe3; padding: 12px 14px; border-radius: var(--radius); max-height: 380px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 13px/1.45 ui-monospace, Consolas, 'DejaVu Sans Mono', monospace; }
-table.files { border-collapse: collapse; width: 100%; font-size: 14px; }
-.files th, .files td { padding: 6px 10px; border-bottom: 1px solid var(--line-soft); text-align: left; }
-.files thead th { background: var(--head-bg); font-size: 13px; }
-.files .number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.files a { color: var(--accent-strong); }
 .history h3, .console-card h3 { font-size: 16px; margin-bottom: 8px; }
 .history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .history .row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: none; border: 0; border-radius: var(--radius); padding: 6px 8px; cursor: pointer; }

@@ -55,7 +55,7 @@ export default function GdisPanel({ folder, mapping, method, onClose }: { folder
         <details key={t.id} open={templates.length === 1 || t.files === Math.max(...templates.map(x => x.files))} className="card">
           <summary><strong>Шаблон {t.id}</strong> · {t.program || 'программа не указана'} · файлов: {t.files}{t.saved ? ' · есть сохранённое сопоставление' : ''}
             <span className="muted"> (например, {t.names.slice(0, 3).join(', ')})</span></summary>
-          <table className="files qc">
+          <table className="data-grid qc">
             <thead><tr><th>Поле базы</th><th>Величина отчёта</th><th>Пример значений</th><th>Откуда</th></tr></thead>
             <tbody>{t.rows.map(row => {
               const cur = pick[t.id]?.[row.key] ?? null

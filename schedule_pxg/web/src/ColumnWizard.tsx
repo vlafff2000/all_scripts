@@ -104,7 +104,7 @@ export default function ColumnWizard({ st, setSt, initialPath, onClose }:
                 <span className="muted small">на листе {pv.total} строк, показаны первые {pv.rows.length}</span>
               </div>
               <div className="scroll">
-                <table className="raw">
+                <table className="data-grid dense pick">
                   <tbody>
                     {pv.rows.map((r, i) => (
                       <tr key={i} className={i === pv.headerRow ? 'hdr' : ''} onClick={() => open(String(pv.sheet), i)} title="Нажмите, чтобы сделать эту строку заголовком">
@@ -163,7 +163,7 @@ export default function ColumnWizard({ st, setSt, initialPath, onClose }:
                     {trial.groups && trial.groups.wells > 0 && <> Групп найдено: <b>{trial.groups.groups}</b> (у {trial.groups.wells} скважин).</>}
                     {' '}{Object.entries(trial.kinds).map(([k, n]) => k + ': ' + n).join(', ')}.</p>
                   <div className="scroll">
-                    <table className="raw">
+                    <table className="data-grid dense pick">
                       <thead><tr><th>Скважина</th><th>Дата</th><th>Расход, м³/сут</th><th>Часы работы</th><th>Закачка / отбор</th></tr></thead>
                       <tbody>{trial.sample.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c ?? '—'}</td>)}</tr>)}</tbody>
                     </table>

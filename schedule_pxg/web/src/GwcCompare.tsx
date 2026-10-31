@@ -116,7 +116,7 @@ export default function GwcCompare({ models, criterion, alts }: { models: ModelE
             .flatMap(([name, s]) => (s ? [[name, s.n, s.mean, s.median, s.std, s.mae, s.rmse, s.min, s.max, s.share * 100]] : [])))]} />
         {scatter && <ChartView chart={scatter} excludeMode={false} onExclude={() => {}} />}
         {bars && <ChartView chart={bars} excludeMode={false} onExclude={() => {}} />}
-        <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th>В статистике</th><th>Модель · критерий</th><th>Скважина</th><th>Группа</th><th>Замер</th><th>Сезон</th><th>Срез модели</th><th>Пачка</th><th>ГВК факт, м</th><th>ГВК модель, м</th><th>Δ, м</th><th>Статус</th></tr></thead>
+        <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th>В статистике</th><th>Модель · критерий</th><th>Скважина</th><th>Группа</th><th>Замер</th><th>Сезон</th><th>Срез модели</th><th>Пачка</th><th>ГВК факт, м</th><th>ГВК модель, м</th><th>Δ, м</th><th>Статус</th></tr></thead>
           <tbody>{rows.map(r => <tr key={r.key} style={off.includes(r.key) ? { opacity: 0.5 } : undefined}>
             <td><input type="checkbox" disabled={r.delta === null} checked={r.delta !== null && !off.includes(r.key)} onChange={() => toggle(r.key)} aria-label="Учитывать в статистике" /></td>
             <td className="small">{r.series || '—'}</td>

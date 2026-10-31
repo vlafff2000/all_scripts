@@ -129,7 +129,7 @@ export default function WorkPage({ g, calc, kind, season, selected, onSelect }: 
         </table></div>)}
       {data && tab === 'seasons' && <p className="muted hint">Число в клетке — дней с расходом. Зелёные — отбор, синие — закачка, оранжевые — не работала, серые — нет данных; жёлтая точка — скважина была открыта, а расхода нет.</p>}
       {data && tab === 'order' && (order.length ? (
-        <div className="scroll"><table className="data">
+        <div className="scroll"><table className="data-grid pick">
           <thead><tr><th className="number">№</th><th className="number">Скв.</th><th>Первый расход</th><th className="number">Позже первой, дн.</th><th className="number">Дней с расходом</th><th className="number">Накоплено, млн м³</th><th className="number">«Открыта, расхода нет», дн.</th></tr></thead>
           <tbody>{order.map(r => (
             <tr key={r.w} className={selected === r.w ? 'sel' : ''} onClick={() => onSelect(r.w)}><td className="number">{r.rank}</td><td className="number"><b>{r.w}</b></td><td>{fmtDay(r.first)}</td>

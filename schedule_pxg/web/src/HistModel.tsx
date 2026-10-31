@@ -93,7 +93,7 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
       {msg && <p className="note warn">{msg}</p>}
       {res?.notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
       {res && <>
-        <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th>Сезон</th><th>Вид</th><th>С</th><th>По</th><th>Сравнено, сут</th><th>История, тыс. м³</th><th>Модель, тыс. м³</th><th>Эталон, тыс. м³</th>
+        <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th>Сезон</th><th>Вид</th><th>С</th><th>По</th><th>Сравнено, сут</th><th>История, тыс. м³</th><th>Модель, тыс. м³</th><th>Эталон, тыс. м³</th>
           <th>Модель − эталон, тыс. м³</th><th>История − эталон, тыс. м³</th><th>Пометка</th><th>Причина</th></tr></thead>
           <tbody>{res.seasons.map(s => { const t = s.total; return <tr key={s.name} style={t && bad(t.label) ? { background: 'rgba(220,80,60,.12)' } : undefined}>
             <td><button className="link" onClick={() => setPick(s.name)}>{s.name}</button></td><td>{s.kind}</td>
@@ -111,14 +111,14 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
             <span className="muted small">период сравнения {sel.compared?.start} — {sel.compared?.end}</span></div>
           {sel.notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
           {byWell && <ChartView chart={byWell} excludeMode={false} onExclude={() => {}} />}
-          <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th>В итоге</th><th>Скважина</th><th>Группа</th><th>История, тыс. м³/сут</th><th>Модель, тыс. м³/сут</th><th>Разница, тыс. м³/сут</th>
+          <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th>В итоге</th><th>Скважина</th><th>Группа</th><th>История, тыс. м³/сут</th><th>Модель, тыс. м³/сут</th><th>Разница, тыс. м³/сут</th>
             <th>История, тыс. м³</th><th>Модель, тыс. м³</th><th>Разница, %</th><th>Пометка</th><th>Причина</th></tr></thead>
             <tbody>{sel.rows.filter(r => !only || bad(r.label) || r.status === 'превышение').map(r => <tr key={r.key} style={r.excluded ? { opacity: 0.5 } : undefined}>
               <td><input type="checkbox" checked={!r.excluded} onChange={() => toggle(r.key, r.well, false)} aria-label="Учитывать в итоге" />
                 <button title="Исключить скважину из всех сезонов" disabled={busy} onClick={() => toggle(r.key, r.well, true)}>{excluded.includes('*|' + r.well) ? '↺' : '∅'}</button></td>
               <td>{r.well}</td><td>{r.group || '—'}</td><td className="num">{fmt(r.hist_avg)}</td><td className="num">{fmt(r.model_avg)}</td><td className="num">{fmt(r.diff_avg)}</td>
               <td className="num">{fmt(r.hist, 0)}</td><td className="num">{fmt(r.model, 0)}</td><td className="num">{fmt(r.pct, 0)}</td><td>{r.label}</td><td className="small">{r.why}</td></tr>)}</tbody></table></div>
-          {sel.groups.length > 0 && <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th>Группа</th><th>История, тыс. м³</th><th>Модель, тыс. м³</th><th>Разница, тыс. м³</th><th>%</th></tr></thead>
+          {sel.groups.length > 0 && <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th>Группа</th><th>История, тыс. м³</th><th>Модель, тыс. м³</th><th>Разница, тыс. м³</th><th>%</th></tr></thead>
             <tbody>{sel.groups.map(g => <tr key={g.group}><td>{g.group}</td><td className="num">{fmt(g.hist, 0)}</td><td className="num">{fmt(g.model, 0)}</td><td className="num">{fmt(g.diff, 0)}</td><td className="num">{fmt(g.pct, 0)}</td></tr>)}</tbody></table></div>}
         </>}
       </>}

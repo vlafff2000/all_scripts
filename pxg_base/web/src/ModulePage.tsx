@@ -241,7 +241,7 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
           <p className="muted out-dir">Папка результатов: <code>{job.out_dir}</code></p>
           <pre ref={logRef} className="log" tabIndex={0}>{log.length ? log.join('\n') : 'Ждём вывода модуля…'}</pre>
           {job.files.length > 0 && (
-            <table className="files">
+            <table className="data-grid">
               <thead><tr><th>Файл результата</th><th className="number">Размер</th></tr></thead>
               <tbody>{job.files.map(f => (
                 <tr key={f}><td><a href={fileUrl(job.id, f)}>{f}</a></td><td className="number">{size(job.sizes?.[f] ?? 0)}</td></tr>

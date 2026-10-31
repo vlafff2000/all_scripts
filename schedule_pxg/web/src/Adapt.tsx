@@ -122,7 +122,7 @@ export default function Adapt() {
         </div>}
         {colsInfo && <div className="row"><button onClick={applyCols} disabled={busy}>Применить столбцы</button>
           {check && <span className={check.ok ? 'ok' : 'warn'}>{check.ok ? 'Столбцы применены.' : 'Нужно поправить столбцы.'}</span>}</div>}
-        {check && <div className="scroll"><table className="raw"><thead><tr><th>Роль</th><th>Столбец</th><th>Разобрано значений</th><th>Примеры</th></tr></thead>
+        {check && <div className="scroll"><table className="data-grid dense pick"><thead><tr><th>Роль</th><th>Столбец</th><th>Разобрано значений</th><th>Примеры</th></tr></thead>
           <tbody>{check.roles.map(r => <tr key={r.role} className={r.valid ? '' : 'warnrow'}><td>{r.title}</td><td>{r.col || '—'}</td><td>{r.valid} из {r.total}</td><td className="muted small">{r.examples.join(' · ')}</td></tr>)}</tbody></table>
           {check.problems.map((x, i) => <p key={i} className="note warn">{x}</p>)}</div>}
         {colsInfo && <p className="muted small">Строк в файле: {colsInfo.rows}. Давления должны быть абсолютными.</p>}
@@ -185,7 +185,7 @@ export default function Adapt() {
           <button onClick={() => guard(async () => { const d = await pickFolder(out); if (d) setOut(d) })} disabled={busy}>Выбрать папку…</button>
         </div>
         <p className="muted small">Файл выбирать не нужно: программа сама создаст в этой папке код и данные. Если папку не указать, откроется окно выбора папки.</p>
-        <div className="scroll" style={{ maxHeight: 520 }}><table className="raw"><thead><tr>
+        <div className="scroll" style={{ maxHeight: 520 }}><table className="data-grid dense pick"><thead><tr>
           <th /><th>Скв. БД</th><th>В модели</th><th>ГДИ в БД</th><th>Прошли</th><th>Взято</th><th>Качество</th><th>Возраст, лет</th><th>Режимов</th><th>a</th><th>b</th>
           <th>WPIMULT от</th><th>до</th><th>D до</th><th>Примечание</th></tr></thead>
           <tbody>{rows.map(r => {
@@ -201,7 +201,7 @@ export default function Adapt() {
           })}</tbody></table></div>
         <h3>Исследования ГДИ</h3>
         <p className="muted small">Что решила программа, и почему. Выберите для каждого исследования: брать, не брать или оставить решение программы. Исследование, которое программа забраковала, можно взять вручную: замечание останется в таблице.</p>
-        <div className="scroll" style={{ maxHeight: 420 }}><table className="raw"><thead><tr>
+        <div className="scroll" style={{ maxHeight: 420 }}><table className="data-grid dense pick"><thead><tr>
           <th>Скв. БД</th><th>В модели</th><th>Дата</th><th>Качество (программа)</th><th>Замечание программы</th><th>Решение инженера</th><th>В расчёте</th><th>Режимов</th><th>a</th><th>b</th></tr></thead>
           <tbody>{sel.studies.map(s => {
             const d = decisionOf(s.manual)

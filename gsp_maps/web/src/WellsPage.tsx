@@ -133,7 +133,7 @@ export default function WellsPage({ g, calc, kind, season, a, b, selected, onSel
       <section className="card wells-table">
         <h3>Скважины набора, {fmtDay2(a, b)}</h3>
         <div className="table-scroll">
-          <table className="data"><thead><tr><th>Скв.</th><th>Направление</th><th className="number">Объём, млн м³</th><th className="number">Доля</th><th className="number">В среднем, тыс. м³/сут</th><th className="number">Дней</th><th className="number">Сезон, млн м³</th><th className="number">К прошлому сезону</th></tr></thead>
+          <table className="data-grid pick"><thead><tr><th>Скв.</th><th>Направление</th><th className="number">Объём, млн м³</th><th className="number">Доля</th><th className="number">В среднем, тыс. м³/сут</th><th className="number">Дней</th><th className="number">Сезон, млн м³</th><th className="number">К прошлому сезону</th></tr></thead>
             <tbody>{sorted.map(r => (
               <tr key={r.w} className={selected === r.w ? 'sel' : ''} onClick={() => onSelect(r.w)}>
                 <td><b>{r.w}</b></td><td className="muted">{dir(r.w)}</td><td className="number">{fmtMln(r.total)}</td><td className="number">{sum > 0 ? fmtPct(Math.max(0, r.total) / sum) : '—'}</td>

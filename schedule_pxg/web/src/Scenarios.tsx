@@ -127,7 +127,7 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
             </div>
             <p className="muted small">Карты идут по кругу: [закачка, отбор] — каждый год; [закачка A, отбор, закачка B, отбор] — чередование A, B, A…</p>
           </>}
-          {cal.length > 0 && <div className="scroll sc-cal"><table className="raw"><thead><tr><th>Год начала</th><th>Тех.карта</th><th>% сезона</th><th>Подпись</th><th /></tr></thead>
+          {cal.length > 0 && <div className="scroll sc-cal"><table className="data-grid dense pick"><thead><tr><th>Год начала</th><th>Тех.карта</th><th>% сезона</th><th>Подпись</th><th /></tr></thead>
             <tbody>{cal.map((e, i) => (
               <tr key={i}>
                 <td><input className="sc-num" value={e.year} onChange={ev => upd(i, { year: num(ev.target.value) })} /></td>
@@ -159,7 +159,7 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
           </div>
           {build && <>
             <p className="note">Шагов: {build.steps}. Расхождений с тех.картой сверх допуска: {build.over} из {build.rows}. {build.stitch.length ? 'Стык: есть замечания.' : 'Стык сезонов без дыр и наложений.'}</p>
-            <div className="scroll"><table className="raw"><thead><tr><th>Тех.карта</th><th>Год</th><th>%</th><th>С</th><th>По</th><th>Шагов</th><th>Сверх допуска</th></tr></thead>
+            <div className="scroll"><table className="data-grid dense pick"><thead><tr><th>Тех.карта</th><th>Год</th><th>%</th><th>С</th><th>По</th><th>Шагов</th><th>Сверх допуска</th></tr></thead>
               <tbody>{build.seasons.map((s, i) => <tr key={i}><td>{s.techmap}{s.strategy && <span className="muted small" title="Объёмы заменены стратегией"> · стратегия</span>}</td><td>{s.year}</td><td className="num">{s.percent}</td><td>{s.from}</td><td>{s.to}</td>
                 <td className="num">{s.steps}</td><td className={'num' + (s.over ? ' bad' : '')}>{s.over}</td></tr>)}</tbody></table></div>
             {build.gaps.length > 0 && <p className="muted small">Между сезонами скважины закрыты (нейтральный шаг): {build.gaps.map(g => g.from + ' — ' + g.to + ' (' + g.days + ' сут)').join('; ')}.</p>}

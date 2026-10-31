@@ -56,7 +56,7 @@ export default function LegendPanel({ file, onClose }: { file: string; onClose: 
       {saved && <p className="note info">{saved}</p>}
       {!busy && shown.length === 0 && <p className="note info">Нечего проверять: все цвета распознаны. Снимите фильтр, чтобы увидеть всю легенду.</p>}
       {shown.length > 0 && (
-        <table className="files qc">
+        <table className="data-grid qc">
           <thead><tr><th>Лист</th><th>Цвет</th><th>Пачка</th><th className="number">Строк</th><th>Почему так</th><th /></tr></thead>
           <tbody>{shown.map(r => (
             <tr key={key(r)}>
