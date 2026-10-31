@@ -125,7 +125,12 @@ def run(browser: bool = False, port: int = 0, title: str = "Работа с ис
         except Exception as error:  # например, нет WebView2
             print("Окно приложения не открылось (%s), открываю в браузере" % error)
     _second["open"] = lambda h: webbrowser.open(url + h)
-    if app_profile:  # окно приложения через Chromium; закрыли окно — сервер останавливается
+    if not app_profile:  # профиль по умолчанию: свой у каждой программы, обычный браузер пользователя не затрагивается
+        import os
+        import re
+        slug = re.sub(r"[^0-9A-Za-zА-Яа-я]+", "_", title).strip("_") or "app"
+        app_profile = os.path.join(os.path.expanduser("~"), ".pxg", "app_window", slug)
+    if app_profile:  # окно приложения через Chromium (Яндекс, Chromium, Chrome); закрыли окно — сервер останавливается
         proc = app_window(url, app_profile)
         if proc is not None:
             started = time.monotonic()
