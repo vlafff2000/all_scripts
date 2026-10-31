@@ -8,13 +8,14 @@ chartSync.ts, chart.css). Копия не правится руками; еди�
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 DEST = HERE / "pxg_core" / "web-ui" / "chart"
-FILES = ["ChartView.tsx", "ChartSettings.tsx", "chartStyle.ts", "chartHover.ts", "chartTheme.ts", "chartAxes.ts", "chartPrefs.ts", "chartSync.ts", "chart.css"]
+FILES = ["ChartView.tsx", "ChartSettings.tsx", "chartStyle.ts", "chartHover.ts", "chartTheme.ts", "chartAxes.ts", "chartPrefs.ts", "chartSync.ts", "chart.css", "richText.ts", "RichField.tsx"]
 
 # (файл, что заменить, на что): без серверного рендера кнопка «Скачать» заменяется сохранением PNG из ECharts
 PATCHES = [
@@ -22,13 +23,32 @@ PATCHES = [
     ("chartHover.ts", "from './api'", "from './chartTypes'"),
     ("ChartSettings.tsx", "from './api'", "from './chartTypes'"),
     ("chartStyle.ts", "from './api'", "from './chartTypes'"),
-    ("ChartView.tsx", "  onDownload: (format: string, dpi: number) => Promise<void>\n",
-     "  onDownload?: (format: string, dpi: number) => Promise<void>\n"),
-    ("ChartView.tsx", "          <DownloadMenu onDownload={onDownload} />\n",
-     "          {onDownload ? <DownloadMenu onDownload={onDownload} /> : <button type=\"button\" className=\"quiet small\" title=\"Сохранить график как PNG\"\n"
+    ("chartAxes.ts", "from './api'", "from './chartTypes'"),
+    ("ChartView.tsx", "  onDownload: (format: string, dpi: number, view: ChartExportView) => Promise<void>\n",
+     "  onDownload?: (format: string, dpi: number, view: ChartExportView) => Promise<void>\n"),
+    ("ChartView.tsx", "          <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} />\n",
+     "          {onDownload ? <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} /> : <button type=\"button\" className=\"quiet small\" title=\"Сохранить график как PNG\"\n"
      "            onClick={() => { const url = instance.current?.getDataURL({ pixelRatio: 2, backgroundColor: state.current.tokens?.surface }); if (!url) return\n"
      "              const a = document.createElement('a'); a.href = url; a.download = (chart.title || 'график') + '.png'; a.click() }}>PNG</button>}\n"),
 ]
+
+
+def gen_types(api: str) -> str:
+    """chartTypes.ts: контракт графика из web/src/api.ts Атласа (Cell, оформление, ось, ряд, график, вид для выгрузки)."""
+    cell = re.search(r"^export type Cell = .*$", api, re.M).group(0)
+    a = api.index("/** Ручное оформление оси")
+    b = api.index("export interface Stat ")
+    c = api.index("/** Вид графика на экране для выгрузки")
+    d = api.index("\n}\n", c) + 3
+    return "import type { Look } from './chartStyle'\n" + cell + "\n" + api[a:b].replace("export interface HeatMap", "export interface HeatMap") + "\n" + api[c:d] + "\n"
+
+
+def gen_format(text: str) -> str:
+    """format.ts без formatCell (он зависит от таблиц Атласа)."""
+    text = re.sub(r"^import type \{ Cell, Column \} from './api'\n\n?", "", text)
+    i = text.index("export function formatCell")
+    j = text.index("\n}\n", i) + 3
+    return text[:i].rstrip() + "\n" + text[j:]
 
 
 def sha(src: Path) -> str:
@@ -48,8 +68,13 @@ def main() -> int:
         return 2
     rev = sha(atlas)
     diff = 0
-    for name in FILES:
-        text = (src / name).read_text(encoding="utf-8")
+    for name in FILES + ["chartTypes.ts", "format.ts"]:
+        if name == "chartTypes.ts":
+            text = gen_types((src / "api.ts").read_text(encoding="utf-8"))
+        elif name == "format.ts":
+            text = gen_format((src / "format.ts").read_text(encoding="utf-8"))
+        else:
+            text = (src / name).read_text(encoding="utf-8")
         for f, a, b in PATCHES:
             if f == name:
                 if a not in text:

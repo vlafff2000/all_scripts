@@ -30,3 +30,18 @@ jobs:
           python -m pip install pandas pyarrow numpy scipy openpyxl matplotlib xlsxwriter xlrd odfpy starlette uvicorn pytest httpx
       - name: Tests on generated source files
         run: python -m pytest -q tests
+  charts-drift:
+    # Копия графиков Атласа (pxg_core/web-ui/chart) не должна отставать: правило единообразия. Не блокирует остальное, но краснеет.
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: vlafff2000/gas_atlas
+          path: gas_atlas
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Сверка копии графиков с Атласом
+        run: python tools/sync_charts_from_atlas.py gas_atlas --check

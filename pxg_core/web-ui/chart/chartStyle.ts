@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartStyle.ts @ ab133ef. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartStyle.ts @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Личный вид рядов графика (окно «Настройка»): цвет, линия, маркеры. Хранится в браузере; данные и расчёт не меняются.
 import type { Chart, Series } from './chartTypes'
 
@@ -15,6 +15,8 @@ export interface Look {
   shape?: MarkerShape
   size?: number           // размер отметки, px
   markerColor?: string    // цвет отметок линии, если отличается от линии
+  opacity?: number        // прозрачность линии и отметок: 1 — непрозрачно
+  valueLabels?: boolean   // подписи значений над столбцами (целые, Times New Roman)
 }
 
 export const MARKER_SHAPES: { value: MarkerShape; label: string }[] = [
@@ -49,13 +51,39 @@ const SYMBOLS: Record<MarkerShape, string> = { circle: 'circle', square: 'rect',
 /** Символ ECharts для выбранной формы; без выбора — форма из модуля. */
 export const markerSymbol = (shape: MarkerShape | undefined, fallback: string) => (shape ? SYMBOLS[shape] : fallback)
 
-/** Ключ графика в хранилище: заголовок и подписи осей (как ключ границ Y). */
-export const chartLookKey = (chart: Chart) => `${chart.title}|${chart.y.label}|${chart.y2?.label ?? ''}`
-/** Ключ ряда внутри графика: группа или имя, и вид ряда. */
+/** Ключ ряда в общем хранилище: группа или имя, и вид ряда. Не зависит от графика, заголовка и набора скважин:
+ *  один и тот же год, сезон или группа получает один и тот же вид на всех графиках. */
 export const seriesLookKey = (s: Series) => `${s.group || s.name}|${s.kind}`
+
+/** Год, по которому ряд узнаётся как год или сезон («2024», «2023/2024», «Сезон 2024»): цвет по умолчанию не зависит от набора рядов. */
+export const yearOfKey = (key: string): number | null => {
+  const m = /(?:^|\D)((?:19|20)\d{2})(?!\d)/.exec(key)
+  return m ? Number(m[1]) : null
+}
+
+/** Личный вид, относящийся к рядам этого графика: из общего хранилища берутся только его ключи. */
+export function looksOf(chart: Chart, all: Record<string, Look>): Record<string, Look> {
+  return Object.fromEntries(chart.series.map(seriesLookKey).filter(k => all[k]).map(k => [k, all[k]]))
+}
 
 /** График с личным видом рядов: у каждого ряда, для которого он задан, появляется поле look. */
 export function applyLooks(chart: Chart, looks: Record<string, Look> | undefined): Chart {
   if (!looks || Object.keys(looks).length === 0) return chart
-  return { ...chart, series: chart.series.map(s => { const look = looks[seriesLookKey(s)]; return look ? { ...s, look } : s }) }
+  const series = chart.series.map(s => {
+    const own = looks[seriesLookKey(s)]
+    if (!own) return s
+    const look = { ...s.look, ...own }      // вид из макета (конструктор) дополняется личным видом браузера
+    return { ...s, look, ...(look.opacity !== undefined ? { opacity: look.opacity } : {}) }
+  })
+  // цвет правой шкалы следует за цветом её рядов: когда у всех рядов шкалы задан один цвет, шкала берёт его
+  const out: Chart = { ...chart, series }
+  for (const name of ['y2', 'y3', 'y4', 'y5'] as const) {
+    const axis = chart[name]
+    if (!axis?.color) continue
+    const mine = series.filter(s => (s.axis ?? 'y') === name)
+    const colors = new Set(mine.map(s => s.look?.color))
+    const only = colors.size === 1 ? [...colors][0] : undefined
+    if (only) out[name] = { ...axis, color: only }
+  }
+  return out
 }

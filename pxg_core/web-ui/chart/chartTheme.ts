@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartTheme.ts @ ab133ef. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartTheme.ts @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Оформление графиков Атласа 6: одна система для всех разделов.
 // Цвета — роли (чернила, сетка, поверхность) из CSS-переменных --chart-*, чтобы тёмная тема меняла их в одном месте.
 
@@ -46,6 +46,16 @@ export function chartTokens(el: Element): ChartTokens {
 }
 
 export const FONT = "'PT Sans', 'Segoe UI', system-ui, sans-serif"
+
+/** Шрифты, которые можно выбрать для графика (те же, что в выгрузке, atlas/engine/core/fonts.py): подпись и семейство CSS. */
+export const FONT_CHOICES: { value: string; label: string; css: string }[] = [
+  { value: 'default', label: 'Стандартный', css: "'DejaVu Sans', 'Segoe UI', system-ui, sans-serif" },
+  { value: 'times', label: 'Times New Roman', css: "'Times New Roman', 'Liberation Serif', Times, serif" },
+  { value: 'arial_narrow', label: 'Arial Narrow', css: "'Arial Narrow', 'Liberation Sans Narrow', 'Atlas Sans Narrow', Arial, sans-serif" },
+  { value: 'calibri', label: 'Calibri', css: "Calibri, Carlito, 'Segoe UI', sans-serif" },
+]
+/** Семейство CSS по ключу шрифта; без ключа — шрифт приложения. */
+export const fontCss = (key: string | undefined) => FONT_CHOICES.find(f => f.value === key)?.css ?? FONT
 
 /** Цвет с прозрачностью: '#rrggbb' → rgba(). */
 export function alpha(hex: string, a: number) {
