@@ -1,4 +1,4 @@
-import Chart from './MiniChart'
+import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
@@ -792,7 +792,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             {paintData && <div className="tip-paint"><i style={{ background: paintData.vals.has(tipWell.well) ? paintColor(paintData, paintData.vals.get(tipWell.well)!.v) : 'transparent' }} />{paintData.vals.get(tipWell.well)?.tip || 'Нет данных для этой раскраски'}</div>}
             <div className="tip-hero">{st.total > 0 ? fmtMln(st.total) : '0'}<small> млн м³ за окно</small></div>
             <div className="tip-share"><span><i style={{ width: Math.min(100, share * 100 * 4) + '%' }} /></span>{share > 0 ? fmtPct(share) + ' ГСП' : 'не работала'}</div>
-            <Chart days={calc.days} mode="bars" win={[a, b]} compact interactive fmt={fmtTh} unit="тыс. м³/сут" height={104} label="Суточный расход скважины"
+            <Chart days={calc.days} mode="bars" win={[a, b]} compact fmt={fmtTh} unit="тыс. м³/сут" label="Суточный расход скважины"
               series={[{ key: 'd', label: 'Расход', color: pal.gas, y: row.map(v => Math.max(0, v)) }]} />
             <div className="tip-kpis"><div><span>в среднем</span><b>{fmtTh(st.mean)}</b><small>тыс. м³/сут</small></div><div><span>дней с расходом</span><b>{st.days}</b><small>из {b - a + 1}</small></div></div>
             {ws.length > 0 && <div className="tip-water">{ws.map((w, i) => (

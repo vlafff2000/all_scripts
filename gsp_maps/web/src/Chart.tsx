@@ -8,7 +8,7 @@ import { fmtDay } from './model'
 export interface Series { key: string | number; label: string; color: string; y: number[]; x?: number[]; dash?: boolean; bold?: boolean; area?: boolean }
 interface Props {
   days?: number[]; labels?: string[]; series: Series[]; mode: 'bars' | 'lines'; win?: [number, number]
-  fmt: (v: number) => string; unit: string; label: string
+  fmt: (v: number) => string; unit: string; label: string; compact?: boolean
   /** прочие свойства прежнего графика (height, group, yScale, barColor…) принимаются, но не нужны: общий график сам их ведёт */
   height?: number; group?: string; yScale?: boolean; onPick?: (j: number) => void
   xRange?: [number, number]; stack?: boolean; highlight?: string | null; gapDays?: number; barColor?: (j: number) => string | undefined
@@ -25,7 +25,7 @@ const scaleOf = (fmt: (v: number) => string) => {
 }
 
 /** График приложения «Карты»: общий ChartView из Газового Атласа (подсказки, перекрестие, закрепление, зум, оси, PNG, тёмная тема). */
-export default function Chart({ days = [], labels, series, mode, win, fmt, unit, label, xRange, stack, highlight, gapDays = 45, barColor }: Props) {
+export default function Chart({ days = [], labels, series, mode, win, fmt, unit, label, compact, xRange, stack, highlight, gapDays = 45, barColor }: Props) {
   const chart = useMemo(() => {
     const k = scaleOf(fmt)
     const isTime = series.some(s => s.x) || (!labels && days.length > 0)
@@ -62,5 +62,5 @@ export default function Chart({ days = [], labels, series, mode, win, fmt, unit,
     if (events.length) c.events = events
     return c
   }, [days, labels, series, mode, win, fmt, unit, label, xRange, stack, highlight, gapDays, barColor])
-  return <ChartView chart={chart} excludeMode={false} onExclude={() => {}} />
+  return <ChartView chart={chart} compact={compact} excludeMode={false} onExclude={() => {}} />
 }

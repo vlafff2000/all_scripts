@@ -267,14 +267,6 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 
 /* интерактивные графики (ECharts) */
 .chart { position: relative; width: 100%; }
-.chart-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0 0 4px; font-size: 12px; }
-.chart-bar button { font: inherit; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
-.chart-bar button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
-.chart-bar button:disabled { opacity: .45; cursor: default; }
-.chart-hint { color: var(--muted); font-size: 11px; flex-basis: 100%; }
-.chart-axes { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; font-size: 12px; color: var(--muted); }
-.chart-axes input { width: 84px; min-width: 0; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
-.chart-axes span:nth-of-type(2) { margin-left: 8px; }
 .tip.docked { pointer-events: auto; }
 
 .side-grip { position: absolute; left: -9px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; border-radius: 4px; touch-action: none; }
