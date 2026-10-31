@@ -42,7 +42,7 @@ export default function TechMaps({ st, setSt }: { st: AppState; setSt: (s: AppSt
       <section className="card">
         <h2>Библиотека тех.карт</h2>
         {st.techmaps.length === 0 ? <p className="muted">Пока пусто. Загрузите файл «Утверждённые объёмы» ниже и сохраните его в проект.</p> : (
-          <table className="raw"><thead><tr><th>Название</th><th>Вид</th><th>Месяцы</th><th>Групп</th><th>Итого, млн м³</th><th /></tr></thead>
+          <table className="data-grid dense pick"><thead><tr><th>Название</th><th>Вид</th><th>Месяцы</th><th>Групп</th><th>Итого, млн м³</th><th /></tr></thead>
             <tbody>{st.techmaps.map(t => (
               <tr key={t.name}>
                 <td><button className="link" onClick={() => open(t.name)}>{t.name}</button></td>
@@ -58,7 +58,7 @@ export default function TechMaps({ st, setSt }: { st: AppState; setSt: (s: AppSt
           <h2>Сопоставление групп</h2>
           <p className="muted">Название группы в тех.карте и в базе данных (импортированный Excel) может отличаться, например «9» и «ГСП 9».
             Доли осреднения и ручные правки хранятся под группой базы. Совпавшие автоматически можно поправить вручную.</p>
-          <table className="raw"><thead><tr><th>Группа тех.карты</th><th>Тех.карты</th><th>Объём, млн м³</th><th>Группа базы данных</th><th>Скв.</th><th /></tr></thead>
+          <table className="data-grid dense pick"><thead><tr><th>Группа тех.карты</th><th>Тех.карты</th><th>Объём, млн м³</th><th>Группа базы данных</th><th>Скв.</th><th /></tr></thead>
             <tbody>{gm.rows.map(r => (
               <tr key={r.key}>
                 <th>{r.key}</th><td>{r.techmaps.join(', ')}</td><td className="num">{fmt(r.volume)}</td>
@@ -95,7 +95,7 @@ export default function TechMaps({ st, setSt }: { st: AppState; setSt: (s: AppSt
           </div>
           <p className="muted">Объёмы по группам, млн м³. Проверка: {view.summary}</p>
           <div className="scroll">
-            <table className="raw">
+            <table className="data-grid dense pick">
               <thead><tr><th>Группа</th><th>Скв.</th>{tm.months.map(m => <th key={m}>{m}</th>)}<th>Всего</th></tr></thead>
               <tbody>
                 <tr><th>Рабочих дней</th><td />{tm.months.map(m => <td key={m} className="num">{tm.days[m]}</td>)}<td /></tr>

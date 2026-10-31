@@ -73,7 +73,7 @@ export default function ModelCompare({ models }: { models: ModelEntry[] }) {
       {res && <>
         <p className="muted small">Исключено вручную: {res.excluded_count}. Допуск по датам: {res.tolerance_days} сут.</p>
         <div style={{ overflowX: 'auto' }}>
-          <table className="raw"><thead><tr><th>Скважина</th><th>Дата</th><th>Замер, кгс/см²</th>
+          <table className="data-grid dense pick"><thead><tr><th>Скважина</th><th>Дата</th><th>Замер, кгс/см²</th>
             {res.models.map(n => <th key={n} colSpan={2}>{n}: модель / Δ</th>)}
             <th>Подсказка</th><th>Исключить</th></tr></thead>
           <tbody>{res.rows.map(r => <tr key={r.key} className={r.excluded ? 'muted' : ''}>

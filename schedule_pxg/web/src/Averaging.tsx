@@ -203,7 +203,7 @@ export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppS
         <div className="card">
           <h2>Скважины и совет <span className="muted small">сезоны {v.years.join(', ')}</span></h2>
           <div className="row"><button className="primary" disabled={busy} onClick={() => act(() => avgAdvice(kind))}>Применить совет ко всем</button></div>
-          <div className="scroll"><table className="raw"><thead><tr><th>Группа</th><th>Скважина</th><th>Совет</th><th>Ошибка отл. года</th><th>Выбрано</th><th>Простой</th><th>Правок</th></tr></thead>
+          <div className="scroll"><table className="data-grid dense pick"><thead><tr><th>Группа</th><th>Скважина</th><th>Совет</th><th>Ошибка отл. года</th><th>Выбрано</th><th>Простой</th><th>Правок</th></tr></thead>
             <tbody>{v.wells.map(w => <tr key={w.well} className={w.well === sel ? 'hdr' : ''} onClick={() => setSel(w.well)}>
               <td>{w.group}</td><td>{w.well}</td><td>{w.advice ? w.advice.join('+') : '—'}<span className="muted small"> {w.adviceBy}</span></td>
               <td>{w.holdout == null ? '—' : w.holdout.toFixed(2)}</td><td>{w.chosen ? w.chosen.join('+') : '—'}{w.choice ? '' : <span className="muted small"> (по совету)</span>}</td>
@@ -213,7 +213,7 @@ export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppS
         <div className="card">
           <h2>Тепловая карта: ошибка отложенного года</h2>
           <div className="muted small">Строка — скважина, столбец — комбинация сезонов. Зелёное — хорошо, красное — плохо; пусто — комбинация содержит отложенный год или не из чего считать. Рамка — выбранная комбинация. Клик по ячейке — выбрать.</div>
-          <div className="scroll"><table className="raw heat"><thead><tr><th>Скв.</th>{v.combos.map(c => <th key={c}>{c.split('+').map(y => y.slice(2)).join('+')}</th>)}</tr></thead>
+          <div className="scroll"><table className="data-grid dense pick heat"><thead><tr><th>Скв.</th>{v.combos.map(c => <th key={c}>{c.split('+').map(y => y.slice(2)).join('+')}</th>)}</tr></thead>
             <tbody>{v.heat.map(h => {
               const wr = v.wells.find(x => x.well === h.well)
               return <tr key={h.well}><th>{h.well}</th>{h.values.map((x, i) => {
@@ -243,7 +243,7 @@ export default function Averaging({ st, setSt }: { st: AppState; setSt: (s: AppS
               {(wv.autoMonths[String(y)] || []).length > 0 && <span className="muted small">без: {wv.autoMonths[String(y)].map(m => m.slice(0, 3)).join(', ')}</span>}</label>
           })}</div>
           <h3>Комбинации <button className="link" onClick={() => act(() => avgChoose(kind, wv.well, null))}>вернуть выбор по совету</button></h3>
-          <div className="scroll"><table className="raw"><thead><tr><th>Сезоны</th><th>Лет</th><th>Отл. год</th><th>Близость</th><th>Разброс</th><th /></tr></thead>
+          <div className="scroll"><table className="data-grid dense pick"><thead><tr><th>Сезоны</th><th>Лет</th><th>Отл. год</th><th>Близость</th><th>Разброс</th><th /></tr></thead>
             <tbody>{wv.table.map(r => <tr key={r.years} className={r.chosen || (!row.choice && r.advice) ? 'hdr' : ''} onClick={() => act(() => avgChoose(kind, wv.well, combo(r.years)))}>
               <td>{r.years}{r.advice ? ' ★' : ''}</td><td>{r.n}</td><td>{r.holdout == null ? '—' : r.holdout.toFixed(2)}</td>
               <td>{r.closeness == null ? '—' : r.closeness.toFixed(2)}</td><td>{r.stability == null ? '—' : r.stability.toFixed(2)}</td><td>{r.chosen ? 'выбрано' : ''}</td></tr>)}</tbody></table></div>

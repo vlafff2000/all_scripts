@@ -118,7 +118,7 @@ export default function Strategies({ st, setSt }: { st: AppState; setSt: (s: App
 
       {view && <section className="card">
         <h2>{view.techmap}, {view.year} <span className="muted small">— {view.kind || 'вид не задан'}, млн м³{view.custom ? ' · стратегия задана' : ' · как в тех.карте'}</span></h2>
-        <table className="raw">
+        <table className="data-grid dense pick">
           <thead><tr><th>Группа</th>{view.months.map(m => <th key={m}>{m} <button className="lk" disabled={busy} title={colLocked(m) ? 'Снять замок со всего месяца' : 'Зафиксировать весь месяц'}
             onClick={() => op(colLocked(m) ? 'unlock' : 'lock', { month: m })}>{colLocked(m) ? '🔒' : '🔓'}</button><div className="muted small">{view.days[m] ?? '—'} дн.</div></th>)}<th>За сезон</th><th>% от сезона</th></tr></thead>
           <tbody>

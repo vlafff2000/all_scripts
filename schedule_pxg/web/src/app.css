@@ -13,11 +13,6 @@ button:disabled { opacity: .5; cursor: default; }
 .note { background: var(--accent-soft); color: var(--info-ink); padding: 8px 10px; border-radius: var(--radius); }
 .note.warn { background: var(--warn-soft); color: var(--warn); }
 .scroll { overflow: auto; max-height: 360px; border: 1px solid var(--line); border-radius: var(--radius); }
-table.raw { border-collapse: collapse; font-size: 12px; width: 100%; }
-table.raw td, table.raw th { border-bottom: 1px solid var(--line-soft); padding: 3px 8px; white-space: nowrap; text-align: left; }
-table.raw tbody tr { cursor: pointer; }
-table.raw tr.hdr { background: var(--accent-soft); font-weight: 700; }
-table.raw thead th { background: var(--head-bg); position: sticky; top: 0; }
 .tpl-item { display: flex; justify-content: space-between; align-items: center; }
 /* Шаг 6 «Адаптация по ГДИ»: графики по 2 в ряд; название одной строкой (кнопки уходят на свою строку, длинное название обрезается с многоточием). */
 .adapt-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(480px, 100%), 1fr)); gap: 12px; margin: 8px 0 14px; }
@@ -78,7 +73,7 @@ tr.tot td { border-top: 2px solid #999; }
 .sc-fields input, .sc-fields select, .sc-wide { width: 100%; box-sizing: border-box; }
 .sc-pattern { padding: 8px 10px; background: var(--head-bg); border-radius: var(--radius); }
 .sc-num { width: 80px; box-sizing: border-box; }
-.sc-cal table.raw td, .sc-cal table.raw th { padding: 4px 8px; }
+.sc-cal table.data-grid td, .sc-cal table.data-grid th { padding: 4px 8px; }
 .sc-actions { margin-top: 12px; }
 .sc-end { margin-left: auto; }
 button.danger { color: var(--bad); border-color: var(--bad); background: var(--surface); }
@@ -111,8 +106,6 @@ a.btn { display: inline-flex; align-items: center; padding: 6px 12px; border: 1p
 a.btn:hover { border-color: var(--accent); }
 .wizard { display: flex; flex-direction: column; gap: 10px; }
 .src-help a { color: var(--accent-strong); }
-.raw tr.dim { opacity: .55; }
-.raw td.bad { color: var(--bad); font-weight: 700; }
 
 .lk { border: 0; background: none; padding: 0 2px; cursor: pointer; font-size: 12px; opacity: .55; }
 .lk:hover { opacity: 1; }

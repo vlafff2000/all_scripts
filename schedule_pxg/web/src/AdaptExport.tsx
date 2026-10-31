@@ -239,7 +239,7 @@ export default function AdaptExport() {
           <button onClick={() => setAll([])}>Ничего</button>
           <button onClick={() => setAll(shownWithCurves.map(id))} disabled={!shownWithCurves.length}>По фильтру ({shownWithCurves.length})</button>
         </div>
-        <div className="scroll exp-list"><table className="raw"><thead><tr>
+        <div className="scroll exp-list"><table className="data-grid dense pick"><thead><tr>
           <th><input type="checkbox" aria-label="Отметить все в списке" checked={shownWithCurves.length > 0 && shownWithCurves.every(r => checked.has(id(r)))}
             onChange={e => toggleShown(e.target.checked)} /></th>
           <th>Скв.</th><th>ГДИ</th><th>R² после</th><th>WPIMULT</th><th>Замечания</th></tr></thead>
@@ -389,7 +389,7 @@ export default function AdaptExport() {
         {!chosen.length && view && <p className="note">Нет исследований с кривыми для выгрузки.</p>}
         {note && <p className="note">{note}</p>}
         {reasons.length > 0 && <div className="exp-reasons">
-          <table className="raw"><thead><tr><th>Исследование (скважина, дата)</th><th>Причина</th></tr></thead>
+          <table className="data-grid dense pick"><thead><tr><th>Исследование (скважина, дата)</th><th>Причина</th></tr></thead>
             <tbody>{reasons.map((e, i) => <tr key={i}><td>{e['График']}</td><td>{e['Ошибка']}</td></tr>)}</tbody></table>
         </div>}
         {msg && view && <p className="note warn">{msg}</p>}

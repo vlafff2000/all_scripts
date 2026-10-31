@@ -132,7 +132,7 @@ export default function Results() {
         </div>
         {models.length === 0
           ? <p className="muted">{view.folders.length ? 'В выбранных папках моделей не найдено.' : 'Папки не добавлены.'}</p>
-          : <div style={{ overflowX: 'auto' }}><table className="raw"><thead><tr><th></th><th>Модель</th><th>Папка</th><th>Период расчёта</th><th>Файлы</th></tr></thead>
+          : <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th></th><th>Модель</th><th>Папка</th><th>Период расчёта</th><th>Файлы</th></tr></thead>
             <tbody>{models.map(m => { const r = infos[m.id]; return <tr key={m.id}>
               <td><input type="checkbox" checked={m.selected} disabled={busy} onChange={() => toggle(m.id)} aria-label={'Показывать ' + m.name} /></td>
               <td>{m.name}</td>

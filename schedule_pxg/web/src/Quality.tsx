@@ -56,7 +56,7 @@ export default function Quality() {
       {v && v.total > 0 && <>
         <section className="card">
           <h2>Сводка <span className="muted small">находок {v.total}, из них ошибок {v.errors}</span></h2>
-          <div className="scroll"><table className="raw"><thead><tr><th>Набор</th><th>Проверка</th><th>Уровень</th><th>Находок</th><th /></tr></thead>
+          <div className="scroll"><table className="data-grid dense pick"><thead><tr><th>Набор</th><th>Проверка</th><th>Уровень</th><th>Находок</th><th /></tr></thead>
             <tbody>{v.summary.map((s, i) => <tr key={i}>
               <td>{label(s.dataset)}</td><td>{s.check}</td><td>{s.level}</td><td>{s.count}</td>
               <td><button disabled={busy} onClick={() => exclude({ check: s.check, dataset: s.dataset, level: s.level }, 'Исключено строк: {n}')}>Исключить все</button></td></tr>)}</tbody></table></div>
@@ -74,7 +74,7 @@ export default function Quality() {
             <button onClick={markShown}>Отметить показанные</button>
             <button className="primary" disabled={busy || !marked.size} onClick={() => exclude({ ids: Array.from(marked) }, 'Исключено строк: {n}')}>Исключить отмеченные ({marked.size})</button>
           </div>
-          <div className="scroll"><table className="raw"><thead><tr><th /><th>Набор</th><th>Скважина</th><th>Дата</th><th>Вид</th><th>Проверка</th><th>Уровень</th><th>Значение</th><th>Пояснение</th></tr></thead>
+          <div className="scroll"><table className="data-grid dense pick"><thead><tr><th /><th>Набор</th><th>Скважина</th><th>Дата</th><th>Вид</th><th>Проверка</th><th>Уровень</th><th>Значение</th><th>Пояснение</th></tr></thead>
             <tbody>{shown.map(r => <tr key={r.id + r.check} className={r.excluded ? 'dim' : ''}>
               <td><input type="checkbox" checked={marked.has(r.id)} disabled={r.excluded} onChange={() => toggle(r.id)} aria-label="Отметить строку" /></td>
               <td>{label(r.dataset)}</td><td>{r.well || 'по объекту'}</td><td>{r.date}</td><td>{r.kind}</td><td>{r.check}</td>
@@ -85,7 +85,7 @@ export default function Quality() {
       {v && v.excludedRows.length > 0 && <section className="card">
         <h2>Исключено из расчётов <span className="muted small">{v.excludedRows.length}</span></h2>
         <div className="row"><button disabled={busy} onClick={() => guard(async () => { await excludeRows({ all_restore: true }); setV(await getQuality(jump)); setMsg('Все строки возвращены.') })}>Вернуть все</button></div>
-        <div className="scroll" style={{ maxHeight: 240 }}><table className="raw"><thead><tr><th>Набор</th><th>Скважина</th><th>Дата</th><th>Вид</th><th /></tr></thead>
+        <div className="scroll" style={{ maxHeight: 240 }}><table className="data-grid dense pick"><thead><tr><th>Набор</th><th>Скважина</th><th>Дата</th><th>Вид</th><th /></tr></thead>
           <tbody>{v.excludedRows.slice(0, 500).map(r => <tr key={r.id}><td>{label(r.dataset)}</td><td>{r.well || 'по объекту'}</td><td>{r.date}</td><td>{r.kind}</td>
             <td><button disabled={busy} onClick={() => exclude({ ids: [r.id], on: false }, 'Строка возвращена.')}>Вернуть</button></td></tr>)}</tbody></table></div>
       </section>}
