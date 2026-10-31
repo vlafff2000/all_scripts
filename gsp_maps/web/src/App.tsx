@@ -515,7 +515,7 @@ export default function App() {
               <span className="spacer" />
               {g && <Issues notes={g.layout.notes} warnings={g.warnings} />}
               <details className="export-menu" ref={exportRef}>
-                <summary><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11" /></svg>{batch ? `PNG ${batch.i + 1}/${batch.keys.length}` : 'Выгрузка'}</summary>
+                <summary><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11" /></svg>{batch ? `PNG ${batch.i + 1}/${batch.keys.length}` : 'Скачать'}</summary>
                 <div className="menu" onClick={() => exportRef.current?.removeAttribute('open')}>
                   <button type="button" onClick={excel}>Excel<small>Таблицы сезона, доли, давление</small></button>
                   <button type="button" onClick={png}>Картинка карты<small>PNG текущего вида</small></button>
