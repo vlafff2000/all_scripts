@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from pxg_core import fs_browse, runlog, well_presets, workspace_api
+from pxg_core import fs_browse, runlog, table_export, well_presets, workspace_api
 import subprocess
 import sys
 from pathlib import Path
@@ -243,6 +243,7 @@ def build_app() -> Starlette:
         Route("/api/jobs", start_job, methods=["POST"]),
         Route("/api/jobs", job_list, methods=["GET"]),
         *fs_browse.routes(),
+        *table_export.routes(),
         *workspace_api.routes(),
         *well_presets.routes(well_presets.atlas_project_folder),      # пресеты скважин: общие с Атласом (нет проекта Атласа — каталог пользователя)
         Route("/api/check", run_check, methods=["POST"]),
