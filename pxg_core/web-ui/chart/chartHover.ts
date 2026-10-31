@@ -1,13 +1,16 @@
-// Копия gas_atlas web/src/chartHover.ts @ ab133ef. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartHover.ts @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Плавная подсказка графика: значения кривых между замерами (линейная интерполяция), ближайшая точка
 // с запасом в несколько пикселей для щелчка и выбор кривой, к которой ближе курсор. Чистые функции без DOM,
 // чтобы не зависеть от отрисовки и работать на миллионе точек: поиск двоичный, пиксели считаются только у кандидатов.
 import type { Axis, Cell, Series } from './chartTypes'
 
+/** Порядок шкал Y: основная и правые (как Y_NAMES в chartAxes). */
+const Y_ORDER = ['y', 'y2', 'y3', 'y4', 'y5']
+
 export interface Track {
   index: number                 // номер серии в chart.series и в option.series
   series: Series
-  axis: 0 | 1                   // 1 — вторая шкала справа
+  axis: number                  // 0 — основная шкала, 1 — вторая справа, 2 — третья (правее второй) и так далее
   xs: Float64Array              // x без пустых, по возрастанию, если monotonic
   ys: Float64Array              // NaN — разрыв линии
   src: Uint32Array              // номер исходной точки (для ids и labels)
@@ -15,11 +18,12 @@ export interface Track {
   curve: boolean                // линия: значение между замерами интерполируется
   points: boolean               // отдельные отметки: на них можно навести и щёлкнуть
   bar: boolean
+  step: boolean                 // ступенчатая линия: между замерами держится значение предыдущего
   order: Uint32Array | null     // порядок по x для поиска точек, когда x не возрастает
 }
 
 export interface View {
-  toPixel: (x: number, y: number, axis: 0 | 1) => [number, number]
+  toPixel: (x: number, y: number, axis: number) => [number, number]
   fromPixel: (px: number, py: number) => [number, number]
   visible: (t: Track) => boolean
 }
@@ -41,7 +45,7 @@ export function toNumber(v: Cell, scale: Axis['scale']): number {
 }
 
 /** marked — видны ли на линии отметки замеров (на них наводят и щёлкают). */
-export function buildTracks(series: Series[], x: Axis, y2: boolean, marked: (s: Series) => boolean = s => s.markers): Track[] {
+export function buildTracks(series: Series[], x: Axis, yCount: number, marked: (s: Series) => boolean = s => s.markers): Track[] {
   if (x.scale === 'category') return []
   const tracks: Track[] = []
   series.forEach((s, index) => {
@@ -66,9 +70,9 @@ export function buildTracks(series: Series[], x: Axis, y2: boolean, marked: (s: 
       monotonic = true
     }
     const track: Track = {
-      index, series: s, axis: s.axis === 'y2' && y2 ? 1 : 0,
+      index, series: s, axis: Math.max(0, Y_ORDER.indexOf(s.axis ?? 'y')) < yCount ? Math.max(0, Y_ORDER.indexOf(s.axis ?? 'y')) : 0,
       xs: xs.subarray(0, m), ys: ys.subarray(0, m), src: src.subarray(0, m), monotonic,
-      curve: s.kind === 'line', bar: s.kind === 'bar',
+      curve: s.kind === 'line', bar: s.kind === 'bar', step: s.kind === 'line' && !!s.step,
       points: s.kind === 'points' || (s.kind === 'line' && marked(s)),
       order: null,
     }
@@ -104,7 +108,7 @@ export type HoverMode = 'smooth' | 'facts'
 const FACT_RADIUS = 32        // в режиме замеров кривая показывается, если её замер не дальше этого по x
 
 export function hover(tracks: Track[], view: View, px: number, py: number, scaleX: Axis['scale'],
-  scaleY: (axis: 0 | 1) => Axis['scale'], mode: HoverMode = 'smooth'): Hover {
+  scaleY: (axis: number) => Axis['scale'], mode: HoverMode = 'smooth'): Hover {
   const [dx] = view.fromPixel(px, py)
   const [dxR] = view.fromPixel(px + POINT_RADIUS, py)
   const [dxL] = view.fromPixel(px - POINT_RADIUS, py)
@@ -126,7 +130,8 @@ export function hover(tracks: Track[], view: View, px: number, py: number, scale
         if (!Number.isFinite(ys[i])) continue
         const [qx, qy] = view.toPixel(xs[i], ys[i], t.axis)
         const d = Math.hypot(qx - px, qy - py)
-        if (d <= POINT_RADIUS && (!point || d < point.distance)) point = { track: t, k: i, x: xs[i], y: ys[i], px: qx, py: qy, distance: d }
+        // при равном расстоянии сомнительная точка (оверлей поверх основного ряда) побеждает, иначе двойной щелчок не сработает
+        if (d <= POINT_RADIUS && (!point || d < point.distance || (d === point.distance && t.series.suspect))) point = { track: t, k: i, x: xs[i], y: ys[i], px: qx, py: qy, distance: d }
       }
     }
     // значение кривой под курсором
@@ -153,6 +158,7 @@ export function hover(tracks: Track[], view: View, px: number, py: number, scale
       const k = lowerBound(xs, dx, null)
       let x = NaN, y = NaN, near = k
       if (k < xs.length && xs[k] === dx) { x = dx; y = ys[k] }
+      else if (t.step && k > 0 && k < xs.length && Number.isFinite(ys[k - 1])) { x = dx; y = ys[k - 1]; near = k - 1 }      // ступень: значение держится до следующей точки
       else if (k > 0 && k < xs.length && Number.isFinite(ys[k - 1]) && Number.isFinite(ys[k])) {
         const ly = scaleY(t.axis) === 'log'
         const a = lx ? Math.log(xs[k - 1]) : xs[k - 1], b = lx ? Math.log(xs[k]) : xs[k]
