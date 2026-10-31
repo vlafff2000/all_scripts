@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Icon } from '../../../pxg_core/web-ui/Icon'
 import { GroupColorsButton } from '../../../pxg_core/web-ui/GroupColorsButton'
 import { refreshBackground } from './background'
 import { refreshPolygons } from './polygons'
@@ -462,7 +463,7 @@ export default function App() {
         <div className="brand">
           <a href="#/" className="brand-link"><span className="brand-mark" aria-hidden="true" /><span className="brand-name">Карты</span></a>
           <button type="button" className="side-toggle" onClick={() => sidebarCollapsed.set(!collapsed)} aria-expanded={!collapsed} title={collapsed ? 'Показать меню' : 'Свернуть меню'}>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d={collapsed ? 'M6 3.5 10.5 8 6 12.5' : 'M10 3.5 5.5 8 10 12.5'} /></svg></button>
+            <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} /></button>
         </div>
         <nav aria-label="Разделы"><ul>{groupedNav.map(p => (
           <li key={p.id}><a href={'#/' + p.id} aria-current={p.id === page ? 'page' : undefined} title={p.title}>
@@ -471,9 +472,7 @@ export default function App() {
         <div className="theme-switch segmented" role="radiogroup" aria-label="Тема">
           {([['light', 'Светлая'], ['dark', 'Тёмная'], ['system', 'Авто']] as [Theme, string][]).map(([t, label]) => (
             <button key={t} type="button" role="radio" aria-checked={currentTheme === t} onClick={() => theme.set(t)} title={t === 'system' ? 'Как в системе' : label + ' тема'}>
-              {t === 'light' ? <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" /><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1" /></svg>
-                : t === 'dark' ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5Z" /></svg>
-                : <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1" /><path d="M6 13.5h4" /></svg>}
+              <Icon name={t === 'light' ? 'sun' : t === 'dark' ? 'moon' : 'screen'} />
               <span className="side-label">{label}</span></button>))}
         </div>
       </aside>
