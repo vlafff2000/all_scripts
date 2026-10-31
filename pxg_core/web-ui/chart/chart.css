@@ -1,4 +1,4 @@
-/* Копия gas_atlas web/src/chart.css @ ab133ef. Не править: tools/sync_charts_from_atlas.py обновляет копию. */
+/* Копия gas_atlas web/src/chart.css @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию. */
 /* Графики: подсказка, переключатель вида, слой перекрестия. Роли цветов — переменные --chart-*. */
 :root {
   --chart-ink: #1b2a31;
@@ -12,7 +12,9 @@
 .chart-stage { position: relative; }
 .chart-overlay { position: absolute; inset: 0; pointer-events: none; }
 /* Название графика переносится по словам целиком: обрезанный заголовок не даёт понять, какой график открыт */
-.chart figcaption > span:first-child { min-width: 0; line-height: 1.3; overflow-wrap: anywhere; }
+.chart figcaption { flex-wrap: wrap; row-gap: 4px; }
+.chart figcaption > span:first-child { flex: 1 1 16em; min-width: 0; line-height: 1.3; overflow-wrap: break-word; }
+.chart figcaption .chart-actions { margin-left: auto; }
 .chart-actions { display: flex; align-items: center; gap: 10px; font-weight: 400; flex-shrink: 0; }
 .chart-tools { display: inline-flex; gap: 2px; }
 .chart-tools button.icon {
@@ -75,11 +77,18 @@
 .chart-legend-wrap { padding: 2px 4px 4px; }
 .chart-legend { display: grid; gap: 2px; max-height: 76px; overflow: hidden; }
 .chart-legend.open { max-height: none; }
+/* легенда справа от графика (настройка «График → Легенда») */
+.chart-body.legend-right { display: flex; gap: 8px; align-items: flex-start; }
+.chart-body.legend-right .chart-stage { flex: 1 1 auto; min-width: 0; }
+.chart-legend-wrap.side { flex: 0 0 200px; max-width: 30%; padding-top: 34px; }
+.chart-legend-wrap.side .chart-legend { max-height: none; }
+.chart-legend-wrap.side .legend-row { display: grid; }
+.chart-legend-wrap.side .legend-item { white-space: normal; text-align: left; }
 .legend-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; row-gap: 0; }
-.legend-title { font-size: 12px; color: var(--chart-muted); min-width: 74px; padding-right: 4px; }
+.legend-title { font-size: var(--legend-size, 12px); color: var(--chart-muted); min-width: 74px; padding-right: 4px; }
 .legend-item {
   display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 6px; border-radius: 4px;
-  font-size: 12px; color: var(--chart-ink); cursor: pointer; white-space: nowrap;
+  font-size: var(--legend-size, 12px); color: var(--chart-ink); cursor: pointer; white-space: nowrap; font-family: inherit;
 }
 .legend-item:hover { background: var(--chart-grid); }
 .legend-item[aria-pressed='false'] { color: var(--chart-faint); }
@@ -155,6 +164,7 @@
 .cs-editor select { font: inherit; padding: 3px 6px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
 .cs-range { display: flex; align-items: center; gap: 8px; }
 .cs-range input { flex: 1; min-width: 0; }
+.cs-range input[type='color'] { flex: 0 0 44px; }
 .cs-range output { min-width: 48px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cs-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .cs-actions button { font: inherit; font-size: 12px; padding: 4px 10px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
@@ -164,9 +174,58 @@
   .cs-body { grid-template-columns: 1fr; }
   .cs-list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 120px; }
 }
+
+.cs-editor .cs-auto { font: inherit; font-size: 12px; padding: 1px 8px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.cs-editor .cs-auto:disabled { opacity: .5; cursor: default; }
+.cs-editor input[type='text'], .cs-editor input[type='number'] { font: inherit; padding: 3px 6px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; min-width: 0; }
+.cs-hint { margin: 0; font-size: 12px; color: var(--muted); }
+.cs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cs-row label { grid-template-columns: 1fr; gap: 2px; }
 .axis-editor .axis-step span { display: flex; gap: 4px; }
 .axis-editor .axis-step span input { flex: 1; min-width: 0; }
 .axis-editor select { font: inherit; padding: 4px 4px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
+
+/* таблица под графиком (классы производительности, вариант «точка + таблица») */
+.chart-table-wrap { overflow-x: auto; margin-top: 6px; }
+.chart-table { width: max-content; border-collapse: collapse; font-family: 'Times New Roman', 'Liberation Serif', serif; font-size: 14px; margin: 0 auto; }
+.chart-table td:last-child { min-width: 0; white-space: nowrap; }
+.chart-table th, .chart-table td { border: 1px solid var(--chart-axis, #c9d4d7); padding: 2px 8px; text-align: center; white-space: nowrap; }
+.chart-table tbody th { text-align: left; font-weight: 400; }
+.chart-table tbody th i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; }
+
+/* тепловая карта (ГСП × сезоны) */
+.heat-wrap { overflow-x: auto; padding: 4px 0 8px; }
+.heat-table { border-collapse: separate; border-spacing: 2px; font-family: 'Times New Roman', 'Liberation Serif', serif; font-size: 13px; margin: 0 auto; }
+.heat-table th { font-weight: 600; padding: 3px 8px; white-space: nowrap; }
+.heat-table tbody th { text-align: right; }
+.heat-table td:last-child { white-space: nowrap; }
+.heat-table td { min-width: 72px; height: 30px; text-align: center; border-radius: 3px; }
+.heat-table .heat-missing { color: var(--chart-muted, #5f7178); font-size: 11px; background: repeating-linear-gradient(135deg, #eceff0 0 4px, #dfe4e6 4px 8px); }
+.heat-scale { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 8px; font-size: 12px; color: var(--chart-muted, #5f7178); }
+.heat-scale i { width: 220px; height: 10px; border-radius: 3px; }
+.heat-ends { width: 220px; display: flex; justify-content: space-between; }
+
+.chart-table-wrap.aligned { overflow-x: visible; }
+.chart-table.aligned { width: 100%; table-layout: fixed; margin: 0; }
+.chart-table.aligned th, .chart-table.aligned td { padding: 2px 0; }
+.chart-table.aligned tbody th { padding-left: 6px; overflow: hidden; text-overflow: ellipsis; }
+.chart-table.aligned td:first-of-type { font-weight: 600; }
+
+.strip-wrap { padding: 4px 8px 8px; overflow: auto; max-height: 640px; }
+.strip-panels { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.strip-panels { display: block; }
+.strip-group { margin-bottom: 8px; }
+.strip-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.strip-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 5px; border: 1px solid var(--chart-axis, #c9d4d7); border-radius: 4px; font-family: 'Times New Roman', 'Liberation Serif', serif; font-size: 12px; }
+.strip-chip b { font-weight: 600; min-width: 24px; text-align: right; }
+.strip-chip em { font-style: normal; font-weight: 600; opacity: .7; }
+.strip-chip .dots { display: inline-flex; gap: 1px; }
+.strip-chip .dots i { width: 9px; height: 12px; border-radius: 1px; background: var(--chart-axis, #e4eaec); opacity: .45; }
+.strip-chip .dots i.on { opacity: 1; }
+.strip-chip .dots i.miss { background: repeating-linear-gradient(45deg, #fff4d6 0 2px, #8a5a00 2px 4px); outline: 1px solid #8a5a00; outline-offset: -1px; opacity: 1; }
+.strip-sub { font-weight: 600; margin: 0 0 4px; font-family: 'Times New Roman', 'Liberation Serif', serif; }
+.strip-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; }
+.strip-legend i { display: inline-block; width: 12px; height: 12px; margin-right: 5px; border-radius: 2px; vertical-align: -2px; }
 
 /* Мини-вариант графика (compact): подсказки на карте и карточки — тот же ChartView без заголовка, кнопок, легенды и навигатора */
 figure.chart.compact { border: 0; padding: 0; background: transparent; }

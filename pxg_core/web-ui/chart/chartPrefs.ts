@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartPrefs.ts @ ab133ef. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartPrefs.ts @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Общие настройки вида, запоминаются в браузере: подсказка графиков, события на оси, тема, свёрнутые панели.
 import { useSyncExternalStore } from 'react'
 import type { HoverMode } from './chartHover'
@@ -6,11 +6,27 @@ import type { Look } from './chartStyle'
 
 export interface Pref<T> { get: () => T; set: (next: T) => void; subscribe: (f: () => void) => () => void }
 
+/** Размеры панелей и свёрнутость меню у каждого окна свои; остальные настройки подхватываются из второго окна. */
+const PER_WINDOW = /(sidebar\.collapsed|layersBox|inspector)$/
+
 /** Значение в localStorage с подписчиками: меняется в одном месте — обновляются все графики и панели. */
 export function pref<T>(key: string, fallback: T, parse: (raw: string) => T = raw => JSON.parse(raw) as T): Pref<T> {
   const listeners = new Set<() => void>()
   let value = fallback
   try { const raw = key ? localStorage.getItem(key) : null; if (raw !== null) value = parse(raw) } catch { /* без хранилища — по умолчанию */ }
+  if (key && !PER_WINDOW.test(key)) {
+    try {
+      window.addEventListener('storage', e => {
+        if (e.key !== key || e.storageArea !== localStorage || e.newValue === null) return
+        try {
+          const next = parse(e.newValue)
+          if (JSON.stringify(next) === JSON.stringify(value)) return
+          value = next
+          listeners.forEach(f => f())
+        } catch { /* повреждённое значение */ }
+      })
+    } catch { /* нет window */ }
+  }
   return {
     get: () => value,
     set: next => {
@@ -35,6 +51,9 @@ export const thinCharts = pref<boolean>('atlas.chart.thin', true, raw => raw !==
 
 /** Сплошная кривая: плотные ряды замеров (давление, уровень) рисуются сглаженной линией — среднее по подряд идущим замерам. */
 export const smoothLines = pref<boolean>('atlas.chart.smooth', false, raw => raw === 'true')
+
+/** Графиков в ряду: 0 — подбирается по ширине, 1–3 — задано вручную (плитка по скважинам). */
+export const chartColumns = pref<number>('atlas.chart.columns', 0, raw => { const n = Number(raw); return n >= 1 && n <= 3 ? n : 0 })
 
 /** Виды событий, скрытые на всех графиках (щелчок по пункту «События» в легенде). */
 export const hiddenEvents = pref<string[]>('atlas.chart.hiddenEvents', [])
@@ -68,14 +87,25 @@ export const paramsCollapsed = pref<boolean>('atlas.params.collapsed', false)
 export const tableBars = pref<boolean>('atlas.table.bars', true)
 
 /** Общий масштаб по времени: прокрутка бегунка на одном графике двигает все графики по времени. */
+/** Связь таблицы с графиками по времени: курсор на графике подсвечивает строку, наведение на строку ставит курсор на графики. */
+export const tableSync = pref<boolean>('atlas.table.sync', true, raw => raw !== 'false')
+
 export const zoomSync = pref<boolean>('atlas.chart.zoomSync', true)
 
 /** Ручные границы шкал Y по графикам (ключ — заголовок и подписи осей): помнятся между запусками. */
+export const savedRanges = pref<Record<string, Partial<Record<'y' | 'y2' | 'y3' | 'y4' | 'y5', [number, number] | null>>>>('atlas.chart.ranges', {})
 /** Основной интервал делений осей по графикам (ключ как у savedRanges): ось → шаг. */
-export const savedSteps = pref<Record<string, Partial<Record<'x' | 'y' | 'y2', { n: number; unit: 'num' | 'year' | 'month' | 'week' | 'day' }>>>>('atlas.chart.steps', {})
-export const savedRanges = pref<Record<string, { y: [number, number] | null; y2: [number, number] | null }>>('atlas.chart.ranges', {})
-/** Личный вид рядов по графикам («Настройка»): ключ графика → ключ ряда → вид. Помнится между запусками. */
-export const chartLooks = pref<Record<string, Record<string, Look>>>('atlas.chart.looks', {})
+export const savedSteps = pref<Record<string, Partial<Record<'x' | 'y' | 'y2' | 'y3' | 'y4' | 'y5', { n: number; unit: 'num' | 'year' | 'month' | 'week' | 'day' }>>>>('atlas.chart.steps', {})
+/** Личный вид рядов («Настройка») — общий для всех графиков: ключ ряда (группа или имя и вид) → вид. Помнится между запусками.
+ *  Раньше вид хранился по графикам (ключ — заголовок), поэтому смена набора скважин его теряла: при первом запуске переносится. */
+export const seriesLooks = pref<Record<string, Look>>('atlas.series.looks', legacyLooks())
+function legacyLooks(): Record<string, Look> {
+  try {
+    if (localStorage.getItem('atlas.series.looks') !== null) return {}
+    const old = JSON.parse(localStorage.getItem('atlas.chart.looks') ?? '{}') as Record<string, Record<string, Look>>
+    return Object.assign({}, ...Object.values(old))
+  } catch { return {} }
+}
 /** Границы Y, разосланные всем графикам раздела с той же подписью и единицей оси (не хранится). */
 export const sharedRange = pref<{ key: string; range: [number, number]; n: number } | null>('', null)
 
