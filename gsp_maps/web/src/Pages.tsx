@@ -3,7 +3,7 @@ import Chart from './Chart'
 import { exportExcel, getSummary, openFolder, pickPath, saveConfig, type AppState, type GspData, type SummaryData } from './api'
 import { Tables } from '../../../pxg_core/web-ui/table/Tables'
 import { tableOf, type ColumnSpec } from '../../../pxg_core/web-ui/table/tableBuild'
-import { SeasonCalc, fmt1, fmtDay, fmtTh, waterByWell } from './model'
+import { SeasonCalc, WATER, fmt1, fmtDay, fmtTh, waterByWell } from './model'
 
 export function TablePage({ g, calc, kind, season, a, b, mode }: { g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number; mode: string }) {
   const [view, setView] = useState<'window' | 'season' | 'all'>('window')
@@ -60,7 +60,8 @@ function WindowTable({ g, calc, kind, season, a, b, tabs }: { g: GspData; calc: 
       <p className="muted">{g.gsp} · {kind} {season} · {fmtDay(calc.days[a])} — {fmtDay(calc.days[b])}. Окно времени задаётся на странице «Карта».</p>
       <Tables scope="gsp-window" tables={[tableOf('window', 'Скважины окна времени',
         [['Скв.', 'text'], 'Направление', ['Накоплено, млн м³', 'number', 2], ['Средний, тыс. м³/сут', 'number', 1], ['Дней', 'number', 0], ['Доля, %', 'number', 1], ['Вода, л/ч', 'number', 0], ['ВФ', 'number', 1]],
-        sorted.map(r => [String(r.w), r.dir, r.total / 1e6, r.mean / 1e3, r.days, r.share ? r.share * 100 : null, r.fl || null, r.wf || null]))]} />
+        sorted.map(r => [String(r.w), r.dir, r.total / 1e6, r.mean / 1e3, r.days, r.share ? r.share * 100 : null, r.fl || null, r.wf || null]), '',
+        [{ rows: sorted.flatMap((r, k) => (r.wf ? [k] : [])), columns: ['c7'], fill: '', font: WATER.slice(1), border: '' }])]} />
     </section>
   )
 }

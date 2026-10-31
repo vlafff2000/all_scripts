@@ -54,6 +54,11 @@ function PathField({ param, value, onChange, invalid }: { param: Param; value: s
 }
 
 
+// цвета уровня замечания в таблице: ошибка — красный, предупреждение — жёлтый, заметка — серый
+const LEVEL_PAINT: Record<string, { fill: string; font: string }> = {
+  'ошибка': { fill: 'fde8e6', font: '8c1d18' }, 'предупреждение': { fill: 'fff4d6', font: '7a5200' }, 'заметка': { fill: 'eef1f2', font: '5c6b70' },
+}
+
 function QcPanel({ report, moduleId }: { report: QcReport; moduleId: string }) {
   const [level, setLevel] = useState('')
   // фильтр скважин: замечания без скважины (по файлу, листу) остаются всегда
@@ -79,7 +84,8 @@ function QcPanel({ report, moduleId }: { report: QcReport; moduleId: string }) {
       {wf.active && <p className="muted out-dir">Фильтр скважин прячет замечания других скважин; числа по уровням выше — по всем замечаниям.</p>}
       {rows.length === 0 ? <p className="note info">{report.issues.length ? 'В этом уровне замечаний нет.' : 'Замечаний нет.'}</p> : (
         <Tables scope={'base-qc-' + moduleId} tables={[tableOf('qc', 'Замечания проверки исходных данных', ['Уровень', 'Тип замечания', 'Что не так', 'Где', 'Значение'],
-          rows.map(i => [i.level, report.codes[i.code] ?? i.code, i.message + (i.hint ? ' → ' + i.hint : ''), where(i), i.value]))]} />
+          rows.map(i => [i.level, report.codes[i.code] ?? i.code, i.message + (i.hint ? ' → ' + i.hint : ''), where(i), i.value]), '',
+          Object.entries(LEVEL_PAINT).map(([lv, p]) => ({ rows: rows.flatMap((i, k) => (i.level === lv ? [k] : [])), columns: ['c0'], border: '', ...p })))]} />
       )}
       {report.hidden.length > 0 && <p className="muted">Однотипные замечания сверх лимита не показаны: {report.hidden.map(h => `${h.level} ${report.codes[h.code] ?? h.code} — ${h.count}`).join('; ')}.</p>}
     </section>
