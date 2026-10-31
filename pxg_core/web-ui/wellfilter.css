@@ -1,11 +1,11 @@
-/* Фильтр скважин вкладки (WellFilter.tsx): поле с окном «группы, скважины, пресеты» — как в Газовом Атласе. */
+/* Фильтр скважин вкладки (WellFilter.tsx): поле с окном «группы, скважины, пресеты». Общий файл pxg_core/web-ui, в Атлас копируется скриптом. */
 .well-filter.active .field-button { border-color: var(--accent); background: var(--accent-soft); }
 .well-filter-panel { width: min(440px, calc(100vw - 32px)); }
 .well-filter-hint { margin: 0; font-size: 12px; color: var(--muted); }
 .well-filter-fields { display: flex; flex-wrap: wrap; gap: 8px; }
 .well-filter-fields .multi { min-width: 0; }
-.well-filter-preset select, .well-filter-save input { border: 0; background: transparent; padding: 0; font-weight: 700; max-width: 100%; }
-.well-filter-save { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.well-filter-save input { border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 8px; font-weight: normal; flex: 1 1 140px; }
+.well-filter-preset { max-width: 100%; }
+.well-filter-preset select { border: 0; background: transparent; padding: 0; font-weight: 700; max-width: 100%; }
 .well-filter-error { margin: 0; color: var(--danger); font-size: 12px; }
 .well-filter-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.well-filter-legacy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; border-top: 1px solid var(--line-soft); padding-top: 8px; }

@@ -1,6 +1,6 @@
 """Копирует общий проводник из all_scripts в Газовый Атлас (копия, правится только здесь).
 
-Источник правды — pxg_core/fs_browse.py (сервер /api/fs/*), pxg_core/group_colors.py (сквозные цвета групп) и pxg_core/web-ui/FilePicker.tsx + filepicker.css (окно выбора) и desktopDownload.ts (скачивание через проводник).
+Источник правды — pxg_core/fs_browse.py (сервер /api/fs/*), pxg_core/group_colors.py (сквозные цвета групп) и pxg_core/web-ui/FilePicker.tsx + filepicker.css (окно выбора) и desktopDownload.ts (скачивание через проводник), а также MultiSelect/пресеты скважин (wellPresets.ts, wellList.ts, wellpicker.css, wellfilter.css), WindowButtons и BusyBar.
 Копии байт в байт совпадают с источником: Атлас не правит их руками.
 
     python tools/sync_fs_browse_to_atlas.py [путь_к_gas_atlas]            # обновить копии
@@ -23,6 +23,14 @@ FILES = [
     (HERE / "pxg_core" / "web-ui" / "groupColors.ts", Path("web") / "src" / "groupColors.ts"),
     (HERE / "pxg_core" / "web-ui" / "GroupColorsButton.tsx", Path("web") / "src" / "GroupColorsButton.tsx"),
     (HERE / "pxg_core" / "web-ui" / "groupcolors.css", Path("web") / "src" / "groupcolors.css"),
+    (HERE / "pxg_core" / "web-ui" / "MultiSelect.tsx", Path("web") / "src" / "MultiSelect.tsx"),
+    (HERE / "pxg_core" / "web-ui" / "wellpicker.css", Path("web") / "src" / "wellpicker.css"),
+    (HERE / "pxg_core" / "web-ui" / "wellList.ts", Path("web") / "src" / "wellList.ts"),
+    (HERE / "pxg_core" / "web-ui" / "wellPresets.ts", Path("web") / "src" / "wellPresets.ts"),
+    (HERE / "pxg_core" / "web-ui" / "wellfilter.css", Path("web") / "src" / "wellfilter.css"),
+    (HERE / "pxg_core" / "web-ui" / "WindowButtons.tsx", Path("web") / "src" / "WindowButtons.tsx"),
+    (HERE / "pxg_core" / "web-ui" / "BusyBar.tsx", Path("web") / "src" / "BusyBar.tsx"),
+    (HERE / "pxg_core" / "web-ui" / "busybar.css", Path("web") / "src" / "busybar.css"),
 ]
 
 

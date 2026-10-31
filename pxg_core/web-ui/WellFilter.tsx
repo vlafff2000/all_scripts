@@ -6,9 +6,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { MultiSelect } from './MultiSelect'
 import './multiselect.css'
 import './wellfilter.css'
+import { presetSource, type PresetSource, type WellPreset } from './wellPresets'
+import './wellfilter.css'
 
 export interface WellFilterValue { groups: string[]; wells: string[] }
-export interface WellPreset { id: string; kind: string; label: string; wells: string[] }
+export type { WellPreset }
 
 const isActive = (f: WellFilterValue | null | undefined) => Boolean(f && (f.groups.length || f.wells.length))
 
@@ -62,30 +64,25 @@ interface Props {
   value: WellFilterValue | null
   onChange: (v: WellFilterValue | null) => void
   builtin?: WellPreset[]                      // готовые пресеты программы (по группам и т. п.), поверх общих
+  presets?: PresetSource                      // откуда брать общие пресеты (по умолчанию /api/well-presets)
 }
 
-export function WellFilter({ wells, groups, groupOf, value, onChange, builtin = [] }: Props) {
+export function WellFilter({ wells, groups, groupOf, value, onChange, builtin = [], presets: source = presetSource() }: Props) {
   const [open, setOpen] = useState(false)
   const [g, setG] = useState<string[]>([])           // черновик, применяется кнопкой «Применить»
   const [w, setW] = useState<string[]>([])
   const [presets, setPresets] = useState<WellPreset[]>([])
-  const [name, setName] = useState('')
   const [error, setError] = useState('')
   const active = isActive(value)
   const keep = useMemo(() => wellKeeper(value, groupOf), [value, groupOf])
   const shown = useMemo(() => wells.filter(keep).length, [wells, keep])
 
-  const send = (url: string, init?: RequestInit) => fetch(url, init).then(async r => {
-    const body = await r.json().catch(() => ({}))
-    if (!r.ok) throw new Error(body.error ?? `Ошибка ${r.status}`)
-    return body as { presets: WellPreset[] }
-  })
   useEffect(() => {
     if (!open) return
-    send('/api/well-presets').then(r => setPresets(r.presets)).catch(() => setPresets([]))
-  }, [open])
+    source.list().then(setPresets).catch(() => setPresets([]))
+  }, [open, source])
 
-  const openPanel = () => { setG(value?.groups ?? []); setW(value?.wells ?? []); setError(''); setName(''); setOpen(o => !o) }
+  const openPanel = () => { setG(value?.groups ?? []); setW(value?.wells ?? []); setError(''); setOpen(o => !o) }
   const apply = (groupsNext: string[], wellsNext: string[]) => {
     onChange(groupsNext.length || wellsNext.length ? { groups: groupsNext, wells: wellsNext } : null)
     setOpen(false)
@@ -95,14 +92,6 @@ export function WellFilter({ wells, groups, groupOf, value, onChange, builtin = 
     const p = all.find(x => x.id === id)
     if (p) { setG([]); setW(p.wells.filter(x => wells.includes(x))) }
   }
-  const savePreset = async () => {
-    setError('')
-    try {
-      const r = await send('/api/well-presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, wells: w }) })
-      setPresets(r.presets); setName('')
-    } catch (e) { setError((e as Error).message) }
-  }
-
   return (
     <div className={'multi well-filter' + (active ? ' active' : '')}>
       <button type="button" className="field-button" aria-expanded={open} onClick={openPanel}
@@ -118,7 +107,7 @@ export function WellFilter({ wells, groups, groupOf, value, onChange, builtin = 
           </p>
           <div className="well-filter-fields">
             {groups.length > 0 && <MultiSelect label="Группы" options={groups} value={g} onChange={setG} emptyMeaning="все" />}
-            <MultiSelect label="Скважины" options={wells} value={w} onChange={setW} emptyMeaning="все" prefix="№ " />
+            <MultiSelect label="Скважины" options={wells} value={w} onChange={setW} emptyMeaning="все" prefix="№ " presets={source} />
           </div>
           <label className="field well-filter-preset">
             <span className="field-label">Применить пресет</span>
@@ -127,11 +116,6 @@ export function WellFilter({ wells, groups, groupOf, value, onChange, builtin = 
               {all.map(p => <option key={p.id} value={p.id}>{p.label} ({p.wells.length})</option>)}
             </select>
           </label>
-          <div className="well-filter-save">
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Название пресета" aria-label="Название пресета" />
-            <button type="button" className="quiet" disabled={!name.trim() || !w.length} onClick={savePreset}
-              title="Сохранить выбранные скважины как пресет, общий для всех вкладок">Сохранить скважины как пресет</button>
-          </div>
           {error && <p className="well-filter-error" role="alert">{error}</p>}
           <div className="well-filter-actions">
             <button type="button" className="primary" onClick={() => apply(g, w)}>Применить</button>
