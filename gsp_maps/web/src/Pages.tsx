@@ -1,21 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import Chart from './Chart'
 import { exportExcel, getSummary, openFolder, pickPath, saveConfig, type AppState, type GspData, type SummaryData } from './api'
-import { SeasonCalc, WATER, fmt1, fmtDay, fmtInt, fmtMln, fmtPct, fmtTh, waterByWell } from './model'
-
-type SortKey = string
-function useSort<T>(rows: T[], init: SortKey, get: (r: T, k: SortKey) => number | string) {
-  const [key, setKey] = useState(init), [desc, setDesc] = useState(true)
-  const sorted = useMemo(() => [...rows].sort((p, q) => {
-    const x = get(p, key), y = get(q, key)
-    const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'ru')
-    return desc ? -c : c
-  }), [rows, key, desc, get])
-  const th = (k: SortKey, label: string, num = true) => (
-    <th className={num ? 'number sortable' : 'sortable'} aria-sort={key === k ? (desc ? 'descending' : 'ascending') : 'none'}>
-      <button type="button" onClick={() => (key === k ? setDesc(!desc) : (setKey(k), setDesc(true)))}>{label}{key === k ? (desc ? ' ↓' : ' ↑') : ''}</button></th>)
-  return { sorted, th }
-}
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf, type ColumnSpec } from '../../../pxg_core/web-ui/table/tableBuild'
+import { SeasonCalc, fmt1, fmtDay, fmtTh, waterByWell } from './model'
 
 export function TablePage({ g, calc, kind, season, a, b, mode }: { g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number; mode: string }) {
   const [view, setView] = useState<'window' | 'season' | 'all'>('window')
@@ -43,16 +31,6 @@ function SummaryTable({ g, kind, season, mode, tabs }: { g: GspData; kind: strin
     getSummary(g.gsp, kind, season, mode).then(d => live && setData(d)).catch(e => live && setErr(String(e.message || e)))
     return () => { live = false }
   }, [g.gsp, kind, season, mode])
-  const [key, setKey] = useState<number>(-1), [desc, setDesc] = useState(true)
-  const rows = useMemo(() => {
-    if (!data) return []
-    if (key < 0) return data.rows
-    return [...data.rows].sort((p, q) => {
-      const x = p[key], y = q[key], c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x ?? '').localeCompare(String(y ?? ''), 'ru')
-      return desc ? -c : c
-    })
-  }, [data, key, desc])
-  const fmtCell = (v: string | number | null, c: string) => v === null || v === '' ? '—' : typeof v === 'number' ? (/дней|Дней|Скважина|Замеров/.test(c) ? fmtInt(v) : fmt1(v)) : v
   return (
     <section className="card table-card">
       {tabs}
@@ -60,12 +38,10 @@ function SummaryTable({ g, kind, season, mode, tabs }: { g: GspData; kind: strin
       {err && <div className="note warning">{err}</div>}
       {!data && !err && <p className="muted">Считаю…</p>}
       {data && !data.rows.length && <p className="muted">За выбранный сезон нет данных.</p>}
-      {data && data.rows.length > 0 && <div className="scroll"><table className="data">
-        <thead><tr>{data.columns.map((c, i) => (
-          <th key={c} className={i > 1 ? 'number sortable' : 'sortable'} aria-sort={key === i ? (desc ? 'descending' : 'ascending') : 'none'}>
-            <button type="button" onClick={() => (key === i ? setDesc(!desc) : (setKey(i), setDesc(true)))}>{colLabel(c)}{key === i ? (desc ? ' ↓' : ' ↑') : ''}</button></th>))}</tr></thead>
-        <tbody>{rows.map((r, n) => <tr key={n}>{r.map((v, i) => <td key={i} className={typeof v === 'number' ? 'number' : ''}>{i === 0 ? <b>{fmtCell(v, data.columns[i])}</b> : fmtCell(v, data.columns[i])}</td>)}</tr>)}</tbody>
-      </table></div>}
+      {data && data.rows.length > 0 && <Tables scope="gsp-summary" tables={[tableOf('summary', 'Сводка', data.columns.map((c, i) => {
+          const num = data.rows.some(r => typeof r[i] === 'number')
+          return [colLabel(c), num ? 'number' : 'text', num ? (/дней|Дней|Скважина|Замеров/.test(c) ? 0 : 1) : null] as ColumnSpec
+        }), data.rows)]} />}
     </section>
   )
 }
@@ -77,21 +53,14 @@ function WindowTable({ g, calc, kind, season, a, b, tabs }: { g: GspData; calc: 
     const sum = out.reduce((s, r) => s + Math.max(0, r.total), 0)
     return out.map(r => ({ ...r, share: sum > 0 && r.total > 0 ? r.total / sum : 0 }))
   }, [calc, g, a, b, water])
-  const get = useMemo(() => (r: (typeof rows)[number], k: string) => (r as unknown as Record<string, number | string>)[k], [])
-  const { sorted, th } = useSort(rows, 'total', get)
-  const mx = Math.max(1, ...rows.map(r => r.total))
+  const sorted = useMemo(() => [...rows].sort((p, q) => q.total - p.total), [rows])
   return (
     <section className="card table-card">
       {tabs}
       <p className="muted">{g.gsp} · {kind} {season} · {fmtDay(calc.days[a])} — {fmtDay(calc.days[b])}. Окно времени задаётся на странице «Карта».</p>
-      <div className="scroll"><table className="data">
-        <thead><tr>{th('w', 'Скв.')}{th('dir', 'Направление', false)}{th('total', 'Накоплено, млн м³')}{th('mean', 'Средний, м³/сут')}{th('days', 'Дней')}{th('share', 'Доля')}{th('fl', 'Вода, л/ч')}{th('wf', 'ВФ')}</tr></thead>
-        <tbody>{sorted.map(r => (
-          <tr key={r.w}><td className="number"><b>{r.w}</b></td><td>{r.dir}</td>
-            <td className="number barcell"><i style={{ width: Math.max(0, r.total / mx) * 100 + '%' }} /><span>{fmtMln(r.total)}</span></td>
-            <td className="number">{fmtTh(r.mean)}</td><td className="number">{r.days}</td><td className="number">{r.share ? fmtPct(r.share) : '—'}</td>
-            <td className="number">{r.fl ? fmtInt(r.fl) : '—'}</td><td className="number" style={{ color: r.wf ? WATER : undefined }}>{r.wf ? fmt1(r.wf) : '—'}</td></tr>))}</tbody>
-      </table></div>
+      <Tables scope="gsp-window" tables={[tableOf('window', 'Скважины окна времени',
+        [['Скв.', 'text'], 'Направление', ['Накоплено, млн м³', 'number', 2], ['Средний, тыс. м³/сут', 'number', 1], ['Дней', 'number', 0], ['Доля, %', 'number', 1], ['Вода, л/ч', 'number', 0], ['ВФ', 'number', 1]],
+        sorted.map(r => [String(r.w), r.dir, r.total / 1e6, r.mean / 1e3, r.days, r.share ? r.share * 100 : null, r.fl || null, r.wf || null]))]} />
     </section>
   )
 }
@@ -123,10 +92,8 @@ export function PressurePage({ g, kind, season, range }: { g: GspData; kind: str
 }
 
 export function TrendsPage({ g }: { g: GspData }) {
-  const get = useMemo(() => (r: GspData['trends'][number], k: string) => (r as unknown as Record<string, number | string>)[k], [])
-  const { sorted, th } = useSort(g.trends, 'Тренд_расхода', get)
+  const sorted = useMemo(() => [...g.trends].sort((p, q) => q.Тренд_расхода - p.Тренд_расхода), [g.trends])
   if (!g.trends.length) return <section className="card"><p className="muted">Тренды считаются по скважинам, у которых есть минимум два сезона отбора.</p></section>
-  const mx = Math.max(1, ...g.trends.map(r => Math.abs(r.Тренд_расхода)))
   const ordered = [...g.trends].sort((p, q) => q.Тренд_расхода - p.Тренд_расхода)
   return (
     <section className="card table-card">
@@ -135,13 +102,9 @@ export function TrendsPage({ g }: { g: GspData }) {
         barColor={j => (ordered[j].Тренд_расхода < 0 ? '#d55e00' : '#149ba5')}
         series={[{ key: 't', label: 'Тренд расхода', color: '#149ba5', y: ordered.map(r => r.Тренд_расхода) }]} />
       <p className="muted">Наклон прямой по среднему суточному расходу в сезонах отбора: сколько тыс. м³/сут скважина добавляет (или теряет) за сезон. Водный фактор — по среднему за сезон.</p>
-      <div className="scroll"><table className="data">
-        <thead><tr>{th('Скважина', 'Скв.')}{th('Направление', 'Направление', false)}{th('Средний_расход', 'Средний расход, тыс. м³/сут')}{th('Тренд_расхода', 'Тренд расхода, тыс. м³/сут за сезон')}{th('Тренд_воды', 'Тренд воды (ВФ за сезон)')}</tr></thead>
-        <tbody>{sorted.map(r => (
-          <tr key={r.Скважина}><td className="number"><b>{r.Скважина}</b></td><td>{r.Направление}</td><td className="number">{fmtTh(r.Средний_расход)}</td>
-            <td className={'number barcell ' + (r.Тренд_расхода < 0 ? 'neg' : '')}><i style={{ width: Math.abs(r.Тренд_расхода) / mx * 100 + '%' }} /><span>{r.Тренд_расхода > 0 ? '+' : ''}{fmtTh(r.Тренд_расхода)}</span></td>
-            <td className="number">{r.Тренд_воды ? (r.Тренд_воды > 0 ? '+' : '') + fmt1(r.Тренд_воды) : '—'}</td></tr>))}</tbody>
-      </table></div>
+      <Tables scope="gsp-trends" tables={[tableOf('trends', 'Тренды по скважинам',
+        [['Скв.', 'text'], 'Направление', ['Средний расход, тыс. м³/сут', 'number', 1], ['Тренд расхода, тыс. м³/сут за сезон', 'number', 1], ['Тренд воды (ВФ за сезон)', 'number', 1]],
+        sorted.map(r => [String(r.Скважина), r.Направление, r.Средний_расход / 1e3, r.Тренд_расхода / 1e3, r.Тренд_воды || null]))]} />
     </section>
   )
 }
