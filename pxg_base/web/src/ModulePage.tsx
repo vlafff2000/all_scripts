@@ -5,6 +5,8 @@ import GdisPanel from './GdisPanel'
 import { usePanelFilter } from './PanelFilter'
 import { checkUrl, fileUrl, getJob, getJobs, openFolder, pickPath, runCheck, startJob, type Job, type ModuleInfo, type Param, type QcReport } from './api'
 import { loadForm, saveForm } from './prefs'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
 const STATUS = { running: 'Выполняется', done: 'Готово', failed: 'Завершено с ошибкой' } as const
 
@@ -51,7 +53,6 @@ function PathField({ param, value, onChange, invalid }: { param: Param; value: s
   )
 }
 
-const LEVEL_CLASS: Record<string, string> = { 'ошибка': 'failed', 'предупреждение': 'warn', 'заметка': 'idle' }
 
 function QcPanel({ report, moduleId }: { report: QcReport; moduleId: string }) {
   const [level, setLevel] = useState('')
@@ -77,17 +78,8 @@ function QcPanel({ report, moduleId }: { report: QcReport; moduleId: string }) {
       {wf.node}
       {wf.active && <p className="muted out-dir">Фильтр скважин прячет замечания других скважин; числа по уровням выше — по всем замечаниям.</p>}
       {rows.length === 0 ? <p className="note info">{report.issues.length ? 'В этом уровне замечаний нет.' : 'Замечаний нет.'}</p> : (
-        <table className="files qc">
-          <thead><tr><th>Уровень</th><th>Что не так</th><th>Где</th><th>Значение</th></tr></thead>
-          <tbody>{rows.map((i, k) => (
-            <tr key={k}>
-              <td><span className={'chip small ' + LEVEL_CLASS[i.level]}>{i.level}</span><div className="muted">{report.codes[i.code] ?? i.code}</div></td>
-              <td>{i.message}{i.hint && <div className="muted">→ {i.hint}</div>}</td>
-              <td className="muted">{where(i)}</td>
-              <td>{i.value}</td>
-            </tr>
-          ))}</tbody>
-        </table>
+        <Tables scope={'base-qc-' + moduleId} tables={[tableOf('qc', 'Замечания проверки исходных данных', ['Уровень', 'Тип замечания', 'Что не так', 'Где', 'Значение'],
+          rows.map(i => [i.level, report.codes[i.code] ?? i.code, i.message + (i.hint ? ' → ' + i.hint : ''), where(i), i.value]))]} />
       )}
       {report.hidden.length > 0 && <p className="muted">Однотипные замечания сверх лимита не показаны: {report.hidden.map(h => `${h.level} ${report.codes[h.code] ?? h.code} — ${h.count}`).join('; ')}.</p>}
     </section>

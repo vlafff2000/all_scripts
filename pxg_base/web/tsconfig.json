@@ -14,5 +14,5 @@
     "types": ["vite/client"],
     "paths": { "react": ["./node_modules/@types/react"], "react/*": ["./node_modules/@types/react/*"], "react-dom/*": ["./node_modules/@types/react-dom/*"] }
   },
-  "include": ["src", "vite.config.ts", "../../pxg_core/web-ui/*.tsx"]
+  "include": ["src", "vite.config.ts", "../../pxg_core/web-ui/*.tsx", "../../pxg_core/web-ui/chart/chartPrefs.ts", "../../pxg_core/web-ui/chart/chartSync.ts", "../../pxg_core/web-ui/chart/format.ts", "../../pxg_core/web-ui/table/*.ts", "../../pxg_core/web-ui/table/*.tsx"]
 }
