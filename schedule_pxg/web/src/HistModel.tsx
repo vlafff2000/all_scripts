@@ -72,7 +72,7 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
         <span className="muted small" title="Только если единицы сводки не распознаны: множитель к м³/сут">Множитель единиц:</span><input style={{ width: 70 }} placeholder="авто" value={unitK} onChange={e => setUnitK(e.target.value)} />
         <button className="primary" disabled={busy || !model} onClick={() => run()}>Сопоставить</button>
         {res && <button disabled={busy} onClick={() => run({ seasons: [] })} title="Сбросить ручные границы сезонов">Подобрать сезоны заново</button>}
-        {res && <button disabled={busy} onClick={() => histModelXlsx(body()).catch(e => setMsg((e as Error).message))}>Выгрузить в Excel</button>}
+        {res && <button disabled={busy} onClick={() => histModelXlsx(body()).catch(e => setMsg((e as Error).message))}>Скачать Excel</button>}
         {busy && <span className="muted small">считаю…</span>}
       </div>
       <div className="row" style={{ flexWrap: 'wrap' }}>
