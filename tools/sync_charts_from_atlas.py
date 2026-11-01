@@ -26,8 +26,8 @@ PATCHES = [
     ("chartAxes.ts", "from './api'", "from './chartTypes'"),
     ("ChartView.tsx", "  onDownload: (format: string, dpi: number, view: ChartExportView) => Promise<void>\n",
      "  onDownload?: (format: string, dpi: number, view: ChartExportView) => Promise<void>\n"),
-    ("ChartView.tsx", "          <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} />\n",
-     "          {onDownload ? <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} /> : <button type=\"button\" className=\"quiet small\" title=\"Сохранить график как PNG\"\n"
+    ("ChartView.tsx", "          <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} screen={{ name: chart.title, file: screenFile }} />\n",
+     "          {onDownload ? <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} screen={{ name: chart.title, file: screenFile }} /> : <button type=\"button\" className=\"quiet small\" title=\"Сохранить график как PNG\"\n"
      "            onClick={() => { const url = instance.current?.getDataURL({ pixelRatio: 2, backgroundColor: state.current.tokens?.surface }); if (!url) return\n"
      "              const a = document.createElement('a'); a.href = url; a.download = (chart.title || 'график') + '.png'; a.click() }}>PNG</button>}\n"),
 ]

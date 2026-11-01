@@ -1,11 +1,12 @@
-// Копия gas_atlas web/src/ChartView.tsx @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/ChartView.tsx @ 9c7fe1f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import * as echarts from 'echarts/core'
 import { BarChart, BoxplotChart, LineChart, ScatterChart } from 'echarts/charts'
-import { AxisPointerComponent, DataZoomComponent, GridComponent, LegendComponent, ToolboxComponent, TooltipComponent, VisualMapContinuousComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
+import { AxisPointerComponent, DataZoomComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, MarkPointComponent, ToolboxComponent, TooltipComponent, VisualMapContinuousComponent } from 'echarts/components'
+import { AxisBreak } from 'echarts/features'
+import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
 import type { ChartExportView, ChartStyle, Axis, Chart, ChartEvent, Series, WindowReply } from './chartTypes'
 import { axisTitle, escapeHtml, formatDate, formatNumber } from './format'
 import { echartsRich, plainRich, richHtml } from './richText'
@@ -13,20 +14,32 @@ import { RichText } from './RichField'
 import { alpha, chartTokens, FONT, fontCss, PALETTE, palette, seriesColor, setDarkPalette, type ChartTokens } from './chartTheme'
 import { buildTracks, decimalsFor, hover, placeTip, toNumber, type Hover, type HoverMode, type Track, type View } from './chartHover'
 import { STEP_UNITS, MAX_TICKS, calendarTicks, parseStep, stepText, type AxisStep, type StepUnit, Y_BAND, Y_NAMES, axisAt, formatBound, parseBound, fitAxisName, rightAxes, rightOffset, shiftRange, wheelFactor, yAxesOf, yIndex, zoomRange, type AxisName, type Range, type YName } from './chartAxes'
-import { seriesLooks, hiddenEvents, smoothLines, thinCharts, pinSync, pinSyncKind, savedRanges, savedSteps, setHoverMode, sharedRange, zoomSync, useAppliedTheme, useHoverMode, usePref } from './chartPrefs'
-import { applyLooks, looksOf, markerSymbol, seriesLookKey, yearOfKey, type Look } from './chartStyle'
-import { ChartSettings } from './ChartSettings'
+import { seriesLooks, projectFormats, chartFont, formatScope, hiddenEvents, smoothLines, thinCharts, pinSync, pinSyncKind, savedRanges, savedSteps, setHoverMode, sharedRange, zoomSync, useAppliedTheme, useHoverMode, usePref } from './chartPrefs'
+import { looksOf, markerSymbol, seriesLookKey, yearOfKey, type Look } from './chartStyle'
+import { applyFormat, mergeFormats, type ChartFormat } from './chartFormat'
+import { FormatPane, type FormatElement } from './FormatPane'
+import { formatDoc, setFormatDoc, type FormatScope } from './projectLooks'
 import { nextSyncId, pinShared, publish, publishZoom, sharedPins, sharedZoom, subscribe, subscribeZoom, synced, unpinShared } from './chartSync'
+import { saveFileWithPicker } from './desktopDownload'
 import './chart.css'
 
 echarts.use([BarChart, BoxplotChart, LineChart, ScatterChart, GridComponent, LegendComponent, ToolboxComponent, TooltipComponent,
-  DataZoomComponent, AxisPointerComponent, VisualMapContinuousComponent, CanvasRenderer])
+  DataZoomComponent, AxisPointerComponent, VisualMapContinuousComponent, MarkAreaComponent, MarkLineComponent, MarkPointComponent, AxisBreak, CanvasRenderer, SVGRenderer])
 
 export { PALETTE }
 const SYMBOL = { circle: 'circle', square: 'rect', diamond: 'diamond', triangle: 'triangle' } as const
 const DASH: Record<string, string | number[]> = {
   solid: 'solid', dash: [6, 4], dot: [1.5, 3.5], dashdot: [8, 3, 2, 3], longdash: [12, 4],
 }
+/** Единицы отображения оси (как в Excel): подписи делятся на множитель, к единице добавляется ×10ⁿ. */
+const UNIT_FACTOR = { thousands: [1e3, '×10³'], millions: [1e6, '×10⁶'], billions: [1e9, '×10⁹'] } as const
+const numeric = (a: Axis) => a.scale === 'value' || a.scale === 'log'
+const unitFactor = (a: Axis) => (a.style?.units && numeric(a) ? UNIT_FACTOR[a.style.units][0] : 1)
+const shownUnit = (a: Axis) => (a.style?.units && numeric(a) ? [UNIT_FACTOR[a.style.units][1], a.unit].filter(Boolean).join(' ') : a.unit)
+/** Деления оси: наружу, внутрь, через ось (ECharts рисует наружу и длиннее), нет. */
+const tickOpt = (mark: string | undefined, color: string, fallback: boolean, length: number) => mark
+  ? { show: mark !== 'none', inside: mark === 'in', length: mark === 'cross' ? length * 1.6 : length, lineStyle: { color } }
+  : { show: fallback }
 const LARGE = 5000          // точек в серии: дальше облако рисуется пакетно, линия — с прореживанием LTTB
 const DENSE = 400           // точек в серии: плотнее — белые обводки отметок закрывают линию, поэтому рисуется сплошная линия без отметок
 const SMOOTH_BINS = 500     // точек сглаженной линии (среднее по подряд идущим замерам) в режиме «Сплошная кривая»
@@ -44,6 +57,11 @@ const eventColor = (kind: ChartEvent['kind'], tk: ChartTokens) =>
 
 interface Props {
   chart: Chart
+  /** Оформление одного графика (страница выгрузки): вместо оформления проекта на график ложится этот документ, панель «Формат» правит его.
+   *  Оформление проекта на графике уже есть (его наложил сервер). */
+  format?: { doc: ChartFormat; onDoc: (doc: ChartFormat) => void; label: string }
+  /** Тип графика — id модуля: оформление проекта для этого типа (settings.chart_formats.types) ложится поверх темы. */
+  module?: string
   /** Мини-вариант (подсказка на карте, карточка): без заголовка, кнопок, легенды и навигатора; высота — переменная --chart-h (104px по умолчанию). Подсказка, перекрестие и зум остаются теми же. */
   compact?: boolean
   excludeMode: boolean
@@ -96,13 +114,25 @@ function binned(rows: unknown[][], bins: number) {
   }
   return out
 }
-const dashOf = (s: Series) => DASH[s.dash || (s.dashed ? 'dash' : 'solid')]
+const dashOf = (s: Series) => DASH[s.look?.dash || s.dash || (s.dashed ? 'dash' : 'solid')]
 
 function colorOf(chart: Chart) {
   const groups = [...new Set(chart.series.map(key))]
   const p = palette()
   // год и сезон берут цвет по своему году: тот же год — тот же цвет на любом графике, даже когда набор рядов меняется
   return (s: Series) => s.look?.color ? s.look.color : s.color ? seriesColor(s.color) : p[(yearOfKey(key(s)) ?? groups.indexOf(key(s))) % p.length]
+}
+
+/** Штриховка столбцов (decal ECharts): диагональ, обратная, сетки, точки, горизонталь, вертикаль. */
+function decalOf(kind: NonNullable<Look['hatch']>, color = '#000000') {
+  const line = (rotation: number) => ({ symbol: 'rect', dashArrayX: [1, 0], dashArrayY: [2, 3], rotation, color })
+  if (kind === 'diag') return line(Math.PI / 4)
+  if (kind === 'back') return line(-Math.PI / 4)
+  if (kind === 'horizontal') return line(0)
+  if (kind === 'vertical') return line(Math.PI / 2)
+  if (kind === 'cross') return [line(Math.PI / 4), line(-Math.PI / 4)]
+  if (kind === 'grid') return [line(0), line(Math.PI / 2)]
+  return { symbol: 'circle', symbolSize: 0.6, dashArrayX: [3, 3], dashArrayY: [3, 3], color }
 }
 
 const NARROW = 5     // сегмент стопки уже 5 % высоты: число не помещается внутрь — выноска или точка
@@ -247,7 +277,7 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
   const dual = alignedYAxes(chart, base)
   const twin = yCount(chart) > 1 && Y_NAMES.slice(0, yCount(chart)).every((_, i) => yAxisAt(chart, i).scale === 'value')      // ручные границы тоже делятся на 5
   const manyRight = rightAxes(chart).length > 1
-  const rightNames = yAxesOf(chart).map(a => fitAxisName(plainRich(a.label), a.unit, Y_BAND - 8, a.style?.title_size ?? 12))
+  const rightNames = yAxesOf(chart).map(a => fitAxisName(plainRich(a.label), shownUnit(a), Y_BAND - 8, a.style?.title_size ?? 12))
   const nameLines = manyRight ? Math.max(...rightNames.slice(1).map(n => n.lines)) : 1
   const axis = (a: Axis, position: 'x' | YName) => {
     const plain = axisBase(a, position), fixed = (position === 'x' ? null : manual[position]) ?? pin?.[position], grid = position !== 'x' ? dual?.[position] : undefined
@@ -283,31 +313,45 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
     const ink = a.color || cs.text_color || tk.muted
     const showGrid = !cs.grid || cs.grid === 'both' || cs.grid === (y ? 'h' : 'v')
     const dateFormat = as.date_format ? as.date_format.replace(/(dd|MM|yyyy)/g, '{$1}') : null
-    const nameRich = echartsRich(axisTitle(a.label, a.unit), as.title_size ?? 12)
+    const nameRich = echartsRich(axisTitle(a.label, shownUnit(a)), as.title_size ?? 12)
+    const factor = unitFactor(a)
+    const titleFont = { fontWeight: as.title_bold ? 700 : undefined, fontStyle: as.title_italic ? 'italic' : undefined }
+    const along = as.title_place === 'middle'                // название вдоль оси: Y — повернуто, по середине; X — по середине
+    const atEnd = !y && as.title_place === 'end'
+    const lineColor = as.line_color || a.color || tk.axis
+    const minorBy = as.minor_step && a.step ? Math.max(1, Math.round(a.step / as.minor_step)) : undefined
+    const minorGrid = cs.minor_grid === 'show' && (position === 'y' || position === 'x') && numeric(a)
     return {
       type: a.scale, inverse: a.inverse, scale: !zero,
       min: a.scale === 'category' ? undefined : a.minimum ?? (zero ? 0 : undefined),
       max: a.scale === 'category' ? undefined : a.maximum ?? undefined,
       interval: a.step && a.scale === 'value' ? a.step : undefined,
+      ...(as.break_lo !== undefined && as.break_hi !== undefined && (a.scale === 'value' || a.scale === 'time') ? { breaks: [{ start: as.break_lo, end: as.break_hi, gap: 8 }] } : {}),
       minInterval: (a.unit === 'скв.' || a.unit === 'ед.') && a.scale === 'value' ? 1 : undefined,      // скважин — целое число, делений по 0,5 не бывает
       data: a.scale === 'category' ? a.categories ?? [] : undefined,
       name: narrow ? narrow.text : nameRich.text,
-      // подпись шкалы Y — горизонтально над осью, читается без наклона головы
-      nameLocation: y ? (a.inverse ? 'start' : 'end') : 'middle', nameGap: y ? 14 : 30,
-      ...(narrow?.cut ? { triggerEvent: true, tooltip: { show: true, formatter: () => richHtml(axisTitle(a.label, a.unit)) } } : {}),
-      nameTextStyle: y
-        ? { color: ink, fontSize: as.title_size ?? 12, fontFamily: family, align: position === 'y' ? 'left' : 'right', ...(narrow ? { verticalAlign: 'bottom', lineHeight: 15 } : {}), padding: position === 'y' ? [0, 0, 0, -44] : [0, -8 - rightOffset(Y_NAMES.indexOf(position as YName)), 0, 0], rich: nameRich.rich }
-        : { color: ink, fontSize: as.title_size ?? 12, fontFamily: family, rich: nameRich.rich },
-      axisLine: { show: !y || Y_NAMES.indexOf(position as YName) >= 2 || !!a.color, lineStyle: { color: a.color || tk.axis } },
+      // подпись шкалы Y — горизонтально над осью, читается без наклона головы; «вдоль оси» — повернута, как в Excel
+      nameLocation: y ? (along ? 'middle' : a.inverse ? 'start' : 'end') : atEnd ? 'end' : 'middle', nameGap: y ? (along ? 46 : 14) : atEnd ? 8 : 30,
+      ...(y && along ? { nameRotate: position === 'y' ? 90 : -90 } : {}),
+      ...(narrow?.cut ? { triggerEvent: true, tooltip: { show: true, formatter: () => richHtml(axisTitle(a.label, shownUnit(a))) } } : {}),
+      nameTextStyle: y && !along
+        ? { color: ink, fontSize: as.title_size ?? 12, fontFamily: family, ...titleFont, align: position === 'y' ? 'left' : 'right', ...(narrow ? { verticalAlign: 'bottom', lineHeight: 15 } : {}), padding: position === 'y' ? [0, 0, 0, -44] : [0, -8 - rightOffset(Y_NAMES.indexOf(position as YName)), 0, 0], rich: nameRich.rich }
+        : { color: ink, fontSize: as.title_size ?? 12, fontFamily: family, ...titleFont, rich: nameRich.rich },
+      axisLine: { show: as.line ?? (!y || Y_NAMES.indexOf(position as YName) >= 2 || !!a.color || !!as.line_color), lineStyle: { color: lineColor, width: as.line_width ?? 1 } },
       ...(y && rightOffset(Y_NAMES.indexOf(position as YName)) ? { offset: rightOffset(Y_NAMES.indexOf(position as YName)) } : {}),
-      axisTick: { show: false },
+      axisTick: tickOpt(as.ticks, lineColor, false, 5),
+      ...(as.minor_ticks || minorGrid ? { minorTick: { ...tickOpt(as.minor_ticks ?? 'none', lineColor, false, 3), ...(minorBy ? { splitNumber: minorBy } : {}) } } : {}),
+      ...(minorGrid ? { minorSplitLine: { show: true, lineStyle: { color: cs.minor_grid_color || tk.grid, width: cs.minor_grid_width ?? 0.5, type: DASH[cs.minor_grid_dash ?? 'dot'], opacity: 0.6 } } } : {}),
       axisLabel: {
         color: ink, fontSize: as.tick_size ?? 11, fontFamily: family, hideOverlap: true, margin: 10,
+        fontWeight: as.tick_bold ? 700 : undefined, fontStyle: as.tick_italic ? 'italic' : undefined,
+        ...(as.label_rotate ? { rotate: as.label_rotate } : {}),
         ...(a.scale === 'time'
           ? dateFormat ? { formatter: dateFormat } : { formatter: { year: '{yyyy}', month: '{MM}.{yyyy}', day: '{dd}.{MM}', hour: '{HH}:{mm}', minute: '{HH}:{mm}', second: '{HH}:{mm}:{ss}', none: '{dd}.{MM}.{yyyy}' } }
-          : a.scale === 'category' ? {} : { formatter: (v: number) => formatNumber(v, as.decimals ?? null) }),
+          : a.scale === 'category' ? {} : { formatter: (v: number) => formatNumber(v / factor, as.decimals ?? null) }),
       },
-      splitLine: { show: showGrid && (position === 'y' || position === 'x') && (y || a.scale !== 'category'), lineStyle: { color: chart.style?.grid_color || tk.grid, width: 1 } },
+      splitLine: { show: showGrid && (position === 'y' || position === 'x') && (y || a.scale !== 'category'),
+        lineStyle: { color: cs.grid_color || tk.grid, width: cs.grid_width ?? 1, ...(cs.grid_dash ? { type: DASH[cs.grid_dash] } : {}) } },
     }
   }
 
@@ -329,7 +373,11 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
     ...(colored.length ? { visualMap: { type: 'continuous', min: shadeLo, max: shadeHi === shadeLo ? shadeLo + 1 : shadeHi, dimension: 4, seriesIndex: colored.map(c => c.i),
       right: 4, top: 'middle', itemHeight: 150, itemWidth: 12, calculable: false, text: [`${shadeTitle}\n${shadeFmt(shadeHi)}`, shadeFmt(shadeLo)],
       inRange: { color: ['#440154', '#3b528b', '#21908d', '#5dc863', '#fde725'] }, textStyle: { color: tk.ink, fontSize: 11 } } } : {}),
-    grid: { left: chart.table?.aligned ? ALIGN_LABEL + ALIGN_FUND : 64, right: (yCount(chart) > 1 ? Y_BAND * (yCount(chart) - 1) : chart.callouts === 'box' && chart.series.some(x => x.segments) ? 44 : 20) + (colored.length ? 110 : 0), top: Math.max(34, 22 + 15 * nameLines), bottom: navigator ? 80 : 44 },
+    grid: { left: chart.table?.aligned ? ALIGN_LABEL + ALIGN_FUND : 64, right: (yCount(chart) > 1 ? Y_BAND * (yCount(chart) - 1) : chart.callouts === 'box' && chart.series.some(x => x.segments) ? 44 : 20) + (colored.length ? 110 : 0), top: Math.max(34, 22 + 15 * nameLines), bottom: navigator ? 80 : 44,
+      // область построения: фон и рамка (модель оформления: plot_background, plot_border_*)
+      ...(chart.style?.plot_background || chart.style?.plot_border_color || chart.style?.plot_border_width ? { show: true,
+        backgroundColor: chart.style.plot_background || 'transparent', borderColor: chart.style.plot_border_color || tk.axis,
+        borderWidth: chart.style.plot_border_color || chart.style.plot_border_width ? chart.style.plot_border_width ?? 1 : 0 } : {}) },
     xAxis: axis(chart.x, 'x'),
     yAxis: rightAxes(chart).length ? yAxesOf(chart).map((a, i) => axis(a, Y_NAMES[i])) : axis(chart.y, 'y'),
     // легенда — своя, под графиком (ChartLegend); компонент ECharts скрыт и только хранит, какие серии видны
@@ -381,9 +429,16 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
         restore: { title: 'Сбросить масштаб' },
       },
     },
-    series: withBands(chart.series.map(s => {
+    series: withAnnotations(withBands(chart.series.map(s => {
       const L: Look = s.look ?? {}
       const c = L.color ?? color(s)
+      const hollow = L.hollow ?? s.hollow
+      // граница маркера и подписи данных из оформления (модель v2): не заданное — как задано модулем
+      const edge = (fallback: string, width: number) => ({ borderColor: L.marker_border ?? fallback, borderWidth: L.marker_border_width ?? width })
+      const dataLabel = (position: string, fallbackDecimals: number | null) => ({
+        show: true, position: L.label_position ?? position, distance: 2, fontFamily: fontCss('times'), fontSize: L.label_size ?? 11, color: tk.ink,
+        formatter: (p: { value: unknown }) => { const v = Number(Array.isArray(p.value) ? p.value[1] : p.value)
+          return Number.isFinite(v) ? formatNumber(v, L.label_decimals ?? fallbackDecimals) : '' } })
       const blur = total <= BLUR_LIMIT
       const emphasis = { focus: blur ? 'series' : 'none', blurScope: 'coordinateSystem' }
       const blurred = { lineStyle: { opacity: 0.25 }, itemStyle: { opacity: 0.25 } }
@@ -424,10 +479,9 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
           return { ...common, data: items, type: 'bar', barMaxWidth: 64, barGap: '12%', barCategoryGap: '55%', itemStyle: { color: c, borderColor: tk.ink, borderWidth: 0.4 }, emphasis: { focus: 'none', itemStyle: { color: c } } }
         }
         return { ...common, type: 'bar', ...(own ? { z: 1.5, barMaxWidth: 48, barMinWidth: 1 } : wide ? { z: 1.5, barMaxWidth: 64, barMinWidth: 14 } : { barMaxWidth: 24 }), barGap: '12%',
-          itemStyle: { color: c, borderRadius: own && s.stack ? 0 : [4, 4, 0, 0], ...(L.opacity !== undefined ? { opacity: L.opacity } : wide ? { opacity: 0.6 } : {}) },
+          itemStyle: { color: c, borderRadius: own && s.stack ? 0 : [4, 4, 0, 0], ...(L.hatch ? { decal: decalOf(L.hatch, L.hatch_color) } : {}), ...(L.opacity !== undefined ? { opacity: L.opacity } : wide ? { opacity: 0.6 } : {}) },
           // подписи значений: целые, над столбиком; при тесноте ECharts прячет лишние, чтобы соседние не налезали
-          ...(L.valueLabels ? { label: { show: true, position: 'top', distance: 2, fontFamily: fontCss('times'), fontSize: 11, color: tk.ink,
-            formatter: (p: { value: unknown }) => String(Math.round(Number(Array.isArray(p.value) ? p.value[1] : p.value))) }, labelLayout: { hideOverlap: true } } : {}),
+          ...(L.valueLabels ? { label: dataLabel('top', 0), labelLayout: { hideOverlap: true } } : {}),
           emphasis: { focus: 'none', itemStyle: { color: c } } }
       }
       const width = L.width ?? (s.width || 2)
@@ -439,7 +493,8 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
         return { ...common, type: 'line', z: s.fill ? 1 : s.markers ? 3 : 2, connectNulls: false, ...(s.step ? { step: 'end' } : {}),
           sampling: rows.length > LARGE && !markers && thinCharts.get() ? 'lttb' : undefined,
           showSymbol: markers, showAllSymbol: 'auto', symbol: markers ? markerSymbol(L.shape, SYMBOL[s.symbol]) : 'none', symbolSize: L.size ?? (rows.length > 150 ? 4 : s.markers ? 7 : 5),
-          itemStyle: s.hollow ? { color: tk.surface, borderColor: mc, borderWidth: 1.8 } : { color: mc, borderColor: tk.surface, borderWidth: 1.5 },
+          itemStyle: hollow ? { color: tk.surface, ...edge(mc, 1.8) } : { color: mc, ...edge(tk.surface, 1.5) },
+          ...(L.valueLabels ? { label: dataLabel('top', null), labelLayout: { hideOverlap: true } } : {}),
           lineStyle: { color: c, width, type: L.dash ? DASH[L.dash] : dashOf(s), cap: 'round', join: 'round', opacity: L.line === false ? 0 : s.opacity < 1 && !s.fill ? s.opacity : 1 },
           ...(area ? { areaStyle: { color: c, opacity: s.fill ? L.opacity ?? 0.6 : 0.6 } } : {}),
           emphasis: { ...emphasis, lineStyle: { width: width + 1 } } }
@@ -453,15 +508,51 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
         formatter: (p: { dataIndex: number }) => captions[p.dataIndex] ?? '',
       } : undefined
       // hideOverlap: соседние подписи не налезают друг на друга — скрытая подпись видна в подсказке точки
-      return { ...common, type: 'scatter', z: s.hollow ? 4 : 3, symbol: L.marker === false ? 'none' : markerSymbol(L.shape, SYMBOL[s.symbol]), symbolSize: L.size ?? (big ? 5 : s.hollow ? 10 : 9),
-        large: big, largeThreshold: LARGE, progressive: 0, ...(caption ? { label: caption, labelLayout: { hideOverlap: true } } : {}),
+      const labels = caption ?? (L.valueLabels && !big ? dataLabel('top', null) : undefined)
+      return { ...common, type: 'scatter', z: hollow ? 4 : 3, symbol: L.marker === false ? 'none' : markerSymbol(L.shape, SYMBOL[s.symbol]), symbolSize: L.size ?? (big ? 5 : hollow ? 10 : 9),
+        large: big, largeThreshold: LARGE, progressive: 0, ...(labels ? { label: labels, labelLayout: { hideOverlap: true } } : {}),
         itemStyle: {
-          ...(s.hollow
-            ? { color: 'rgba(255,255,255,0)', borderColor: c, borderWidth: 1.8 }
-            : big ? { color: alpha(c, 0.55) } : { color: c, borderColor: tk.surface, borderWidth: 1.5 }),
+          ...(hollow
+            ? { color: 'rgba(255,255,255,0)', ...edge(L.markerColor ?? c, 1.8) }
+            : big ? { color: alpha(c, 0.55) } : { color: L.markerColor ?? c, ...edge(tk.surface, 1.5) }),
           ...(s.opacity < 1 ? { opacity: s.opacity } : {}) } }
-    }), chart, tk),
+    }), chart, tk), chart),
   }
+}
+
+/** Аннотации графика (style.annotations): линии уровня, полосы и подписи в координатах данных — markLine, markArea, markPoint на первом ряду основной оси. */
+function withAnnotations(series: Record<string, unknown>[], chart: Chart): Record<string, unknown>[] {
+  const list = chart.style?.annotations ?? []
+  if (!list.length || !series.length) return series
+  const timeX = chart.x.scale === 'time', numericX = chart.x.scale === 'value' || chart.x.scale === 'log' || timeX
+  const num = (t: string | undefined, time: boolean) => parseBound(t ?? '', time)
+  const lines: unknown[] = [], areas: unknown[] = [], points: unknown[] = []
+  for (const a of list) {
+    const color = a.color ?? '#c0392b', size = a.size ?? 12
+    const lineStyle = { color, width: a.width ?? 1.5, type: a.dash === 'dot' ? 'dotted' : !a.dash || a.dash === 'solid' ? 'solid' : 'dashed' }
+    const label = a.text ? { show: true, formatter: a.text, color, fontSize: size, position: 'insideEndTop' } : { show: false }
+    if (a.kind === 'hline') { const v = num(a.value, false); if (v !== null) lines.push({ yAxis: v, lineStyle, label }) }
+    else if (a.kind === 'vline') { const v = numericX ? num(a.value, timeX) : null; if (v !== null) lines.push({ xAxis: v, lineStyle, label }) }
+    else if (a.kind === 'hband') {
+      const lo = num(a.value, false), hi = num(a.to, false)
+      if (lo !== null && hi !== null) areas.push([{ yAxis: Math.min(lo, hi), name: a.text, itemStyle: { color, opacity: 0.16 }, label: { ...label, position: 'insideTop' } }, { yAxis: Math.max(lo, hi) }])
+    } else if (a.kind === 'vband') {
+      const lo = numericX ? num(a.value, timeX) : null, hi = numericX ? num(a.to, timeX) : null
+      if (lo !== null && hi !== null) areas.push([{ xAxis: Math.min(lo, hi), name: a.text, itemStyle: { color, opacity: 0.16 }, label: { ...label, position: 'insideTop' } }, { xAxis: Math.max(lo, hi) }])
+    } else if (a.kind === 'text') {
+      const x = numericX ? num(a.x, timeX) : null, y = num(a.y, false)
+      if (x !== null && y !== null && a.text) points.push({ coord: [x, y], symbol: 'none', label: { show: true, formatter: a.text, color, fontSize: size } })
+    }
+  }
+  if (!lines.length && !areas.length && !points.length) return series
+  const at = Math.max(0, chart.series.findIndex(s => (s.axis ?? 'y') === 'y'))
+  const head = series[at] ?? series[0]
+  const prev = (head.markArea as { data?: unknown[] } | undefined)?.data ?? []
+  const next = { ...head,
+    ...(lines.length ? { markLine: { silent: true, symbol: 'none', animation: false, data: lines } } : {}),
+    ...(areas.length || prev.length ? { markArea: { silent: true, z: 0, data: [...prev, ...areas] } } : {}),
+    ...(points.length ? { markPoint: { silent: true, animation: false, data: points } } : {}) }
+  return series.map(x => (x === head ? next : x))
 }
 
 /** Годы над столбцами: подложка и подпись полосой (markArea) на первом ряду. */
@@ -521,7 +612,7 @@ function suspectClick(st: { pending: null | { id: string; dataset: string; timer
   st.pending = { id, dataset, timer }
 }
 
-export function ChartView({ chart: given, compact, excludeMode, onExclude, onConfirm, onOpenWell, mapLink, onDownload, onCopy, fetchWindow }: Props) {
+export function ChartView({ chart: given, module, format, compact, excludeMode, onExclude, onConfirm, onOpenWell, mapLink, onDownload, onCopy, fetchWindow }: Props) {
   const box = useRef<HTMLDivElement>(null)
   const overlay = useRef<HTMLCanvasElement>(null)
   const tip = useRef<HTMLDivElement>(null)
@@ -534,11 +625,30 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
   }, [given, patch])
   const looksAll = usePref(seriesLooks)
   const looks = useMemo(() => looksOf(given, looksAll), [given, looksAll])
-  const chart = useMemo(() => applyLooks(windowed, looks), [windowed, looks])
+  const store = usePref(projectFormats)
+  const baseFont = usePref(chartFont)
+  const general = useMemo<ChartFormat | undefined>(() => baseFont === 'base' ? undefined : { chart: { font: baseFont } }, [baseFont])
+  // оформление проекта: общий шрифт → тема (стиль, оси, вид рядов из «Настройки») → тип графика; на экране сразу, без пересчёта
+  const chart = useMemo(() => format ? applyFormat(windowed, mergeFormats(general, format.doc)) : applyFormat(windowed, mergeFormats(general, { chart: store.theme?.chart, axes: store.theme?.axes, series: looks },
+    module ? store.types?.[module] : undefined)), [windowed, looks, store, module, format, general])
   const [settings, setSettings] = useState(false)
+  const [element, setElement] = useState<FormatElement>('chart')
+  const scope = usePref(formatScope)
+  const setScope = (v: FormatScope) => formatScope.set(v)
+  const over = useRef(false)                            // указатель над этим графиком: Ctrl+1 открывает формат именно его
+  /** Формат выбранного элемента (двойной щелчок, правая кнопка, Ctrl+1): панель открывается на нём, график остаётся виден. */
+  const openFormat = (el: FormatElement) => { setElement(el); setSettings(true) }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!over.current || !(e.ctrlKey || e.metaKey) || e.key !== '1' || compact) return
+      e.preventDefault(); setSettings(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [compact])
   const thinned = given.series.map((s, i) => [s, i] as const).filter(([s]) => s.total > s.x.length)
   const state = useRef({
-    ranges: NO_RANGES as Manual, steps: NO_STEPS as Steps, setSteps: (() => {}) as (s: Steps) => void, setRanges: (() => {}) as (r: Manual) => void, openEditor: (() => {}) as (a: AxisName) => void, fitY: (() => {}) as () => void, lastChart: null as Chart | null,
+    ranges: NO_RANGES as Manual, steps: NO_STEPS as Steps, setSteps: (() => {}) as (s: Steps) => void, setRanges: (() => {}) as (r: Manual) => void, openEditor: (() => {}) as (a: AxisName) => void, openFormat: (() => {}) as (e: FormatElement) => void, fitY: (() => {}) as () => void, lastChart: null as Chart | null,
     chart: given, base: given, fetchWindow, patch: null as Patch | null, pin: null as AxisPin | null, ensure: (() => {}) as () => void,
     edges: (() => null) as () => [number, number] | null,
     applyZoom: (() => {}) as () => void,
@@ -548,6 +658,7 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
     id: nextSyncId(), sync: syncKey(chart), events: [] as Plotted[], hiddenEvents: new Set<string>(), pins: [] as Pin[],
     renderPins: (() => {}) as () => void, reconcile: (() => {}) as () => void,
   })
+  state.current.openFormat = openFormat
   const mode = useHoverMode()
   const smooth = usePref(smoothLines)
   const theme = useAppliedTheme()
@@ -575,6 +686,48 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
     seriesLooks.set({ ...rest, ...next })
   }
   /** Что видит инженер: личный вид рядов, ручные границы Y, текущее окно по X, скрытые пункты легенды. */
+  /** «Скачать как на экране»: поле графика рисует сам ECharts, легенду (она на странице — разметка) добавляем его же компонентом, чтобы она попала в файл. */
+  const screenFile = async (kind: 'png' | 'svg', dpi: number): Promise<Blob> => {
+    const ch = instance.current
+    if (!ch) throw new Error('График ещё не нарисован')
+    const shown = ch.getOption() as { dataZoom?: { type?: string }[]; grid?: { left?: number; right?: number; top?: number; bottom?: number }[] }
+    const st = chart.style, pos = st?.legend ?? 'bottom'
+    const items = legendModel(chart, excludeMode, mode).items
+    let w = ch.getWidth(), h = ch.getHeight()
+    let grid = shown.grid
+    let legendOpt: Record<string, unknown> = { show: false }
+    if (pos !== 'hide' && items.length) {
+      const side = pos === 'left' || pos === 'right'
+      const size = st?.legend_size ?? 12
+      // высота/ширина под легенду: число строк оцениваем по длине подписей (ECharts переносит пункты сам)
+      const each = items.map(i => 36 + i.label.length * size * 0.5)
+      const rows = side ? items.length : Math.max(1, Math.ceil(each.reduce((a, b) => a + b, 0) / Math.max(200, w - 20)))
+      const room = side ? Math.round(Math.max(...each) + 20) : 14 + rows * (size + 7)
+      if (side) w += room; else h += room
+      grid = (shown.grid ?? []).map(g => ({ ...g,
+        left: (g.left ?? 0) + (pos === 'left' ? room : 0), right: (g.right ?? 0) + (pos === 'right' ? room : 0),
+        top: (g.top ?? 0) + (pos === 'top' ? room : 0), bottom: (g.bottom ?? 0) + (pos === 'bottom' ? room : 0) }))
+      const label = new Map(items.map(i => [i.name, i.label]))
+      legendOpt = { show: true, type: 'plain', data: items.map(i => i.name), orient: side ? 'vertical' : 'horizontal',
+        [pos === 'left' ? 'left' : pos === 'right' ? 'right' : 'left']: pos === 'top' || pos === 'bottom' ? 'center' : 6,
+        ...(pos === 'top' ? { top: 6 } : pos === 'bottom' ? { bottom: 6 } : { top: 'middle' }),
+        selected: Object.fromEntries(items.map(i => [i.name, !hidden.has(i.name)])), selectedMode: false,
+        formatter: (n: string) => label.get(n) ?? n, itemWidth: 22, itemHeight: 10,
+        textStyle: { fontSize: size, color: st?.text_color ?? '#1f2933', ...((st?.legend_font ?? st?.font) ? { fontFamily: fontCss(st?.legend_font ?? st?.font) } : {}) } }
+    }
+    const host = document.createElement('div')
+    const ratio = kind === 'png' ? Math.max(1, dpi / 96) : 1
+    const copy = echarts.init(host, undefined, { renderer: kind === 'png' ? 'canvas' : 'svg', ssr: kind === 'svg', width: w, height: h, devicePixelRatio: ratio })
+    try {
+      const option = { ...shown, animation: false, toolbox: undefined, grid, legend: legendOpt, dataZoom: (shown.dataZoom ?? []).filter(z => z.type !== 'slider'),
+        backgroundColor: st?.background ?? '#ffffff' }
+      copy.setOption(option as echarts.EChartsCoreOption, { notMerge: true })
+      if (kind === 'svg') return new Blob([copy.renderToSVGString()], { type: 'image/svg+xml' })
+      const url = copy.getDataURL({ type: 'png', pixelRatio: ratio, backgroundColor: st?.background ?? '#ffffff' })
+      return (await fetch(url)).blob()
+    } finally { copy.dispose() }
+  }
+
   const screenView = (): ChartExportView => {
     const st = state.current, view: ChartExportView = {}
     if (looks && Object.keys(looks).length) view.looks = looks
@@ -1105,8 +1258,19 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
       if (a === 'x') ch.dispatchAction({ type: 'dataZoom', dataZoomIndex: 0, startValue: next[0], endValue: next[1] })
       else st.setRanges({ ...st.ranges, [a]: next })
     }
+    /** Ряд под указателем: отметка точки или кривая не дальше 10 px. */
+    const seriesUnder = (): number | null => {
+      const h = st.current
+      const t = h?.point?.track ?? (h?.focus && h.focus.distance < 10 ? h.focus.track : null)
+      return t ? t.index : null
+    }
     zr.on('dblclick', (e: { offsetX: number; offsetY: number }) => {
       if (zone(e.offsetX, e.offsetY)) return
+      if (!st.chart.id.startsWith('builder')) {      // как в Excel: ряд — формат ряда, пустое поле — формат области построения; масштаб сбрасывает кнопка ↺
+        const under = seriesUnder()
+        st.openFormat(under !== null ? 'series:' + under : 'chart')
+        return
+      }
       st.setRanges(NO_RANGES)
       ch.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })
     })
@@ -1174,6 +1338,16 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
     }
     host.addEventListener('wheel', onAxisWheel, { passive: false, capture: true })
     host.addEventListener('dblclick', onAxisDblclick)
+    // правая кнопка: формат элемента под указателем — ось, ряд или график (вместо меню браузера)
+    const onContext = (e: MouseEvent) => {
+      if (st.chart.id.startsWith('builder')) return
+      const box = host.getBoundingClientRect()
+      const a = zone(e.clientX - box.left, e.clientY - box.top)
+      e.preventDefault()
+      const under = a ? null : seriesUnder()
+      st.openFormat(a ? 'axis:' + a : under !== null ? 'series:' + under : 'chart')
+    }
+    host.addEventListener('contextmenu', onContext)
     host.addEventListener('pointerdown', onAxisDown)
     host.addEventListener('pointermove', onAxisMove)
     host.addEventListener('pointerup', onAxisUp)
@@ -1307,7 +1481,7 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
       window.removeEventListener('keydown', onKey); host.removeEventListener('click', onUnpin); host.removeEventListener('click', onOpen)
       host.removeEventListener('pointerdown', onGrab); host.removeEventListener('pointermove', onDrag)
       host.removeEventListener('pointerup', onDrop); host.removeEventListener('pointercancel', onDrop)
-      host.removeEventListener('wheel', onAxisWheel, { capture: true }); host.removeEventListener('dblclick', onAxisDblclick)
+      host.removeEventListener('wheel', onAxisWheel, { capture: true }); host.removeEventListener('dblclick', onAxisDblclick); host.removeEventListener('contextmenu', onContext)
       host.removeEventListener('pointerdown', onAxisDown); host.removeEventListener('pointermove', onAxisMove)
       host.removeEventListener('pointerup', onAxisUp); host.removeEventListener('pointercancel', onAxisUp)
       if (st.frame) cancelAnimationFrame(st.frame)
@@ -1386,6 +1560,10 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
   const legendEl = chart.style?.legend === 'hide' || compact ? null : (
     <ChartLegend model={legend} position={chart.style?.legend} fmt={chart.style} hidden={hidden} facetOff={facetOff} events={chart.events ?? []}
         offEvents={offEvents} onHighlight={highlight}
+        onFormat={chart.id.startsWith('builder') ? undefined : hit => {
+          const i = !hit ? -1 : hit.facet ? chart.series.findIndex(s => s.facets?.[hit.facet!] === hit.value) : chart.series.findIndex(s => key(s) === hit.name)
+          openFormat(i >= 0 ? 'series:' + i : 'chart')
+        }}
         onToggle={(name, only) => setHidden(h => {
           if (only) {
             const others = legend.items.map(i => i.name).filter(n => n !== name)
@@ -1410,9 +1588,12 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
   )
 
   return (
-    <figure className={'chart' + (excludeMode ? ' exclude-mode' : '') + (compact ? ' compact' : '')}>
+    <figure className={'chart' + (excludeMode ? ' exclude-mode' : '') + (compact ? ' compact' : '')} style={frameStyle(chart.style)}
+      onMouseEnter={() => { over.current = true }} onMouseLeave={() => { over.current = false }}>
       <figcaption>
-        <RichText value={chart.title} style={titleStyle(chart.style)} />
+        <span onDoubleClick={() => !compact && !chart.id.startsWith('builder') && openFormat('chart')} title="Двойной щелчок — формат заголовка">
+          <RichText value={chart.title} style={titleStyle(chart.style)} />
+        </span>
         <span className="chart-actions">
           {chart.x.scale !== 'category' && <>
             <span className="chart-tools">
@@ -1438,7 +1619,7 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
                 title="Те же границы оси Y — на все графики раздела с такой же осью">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" /><rect x="9" y="2.5" width="4.5" height="4.5" rx="1" /><rect x="2.5" y="9" width="4.5" height="4.5" rx="1" /><rect x="9" y="9" width="4.5" height="4.5" rx="1" /></svg>
               </button>}
-              <button type="button" className="icon" onClick={resetZoom} title="Сбросить масштаб и границы осей (или двойной щелчок по графику). Двойной щелчок по оси — ввести границы, колесо над осью — масштаб оси, перетаскивание оси — сдвиг">
+              <button type="button" className="icon" onClick={resetZoom} title="Сбросить масштаб и границы осей. Двойной щелчок по оси — ввести границы, колесо над осью — масштаб оси, перетаскивание оси — сдвиг">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.6-3.7" /><path d="M3 2.5v3h3" /></svg>
               </button>
             </span>
@@ -1451,21 +1632,32 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
           </>}
           {!chart.id.startsWith('builder') && <span className="chart-tools">
             <button type="button" className={'icon' + (settings ? ' on' : '')} aria-pressed={settings} onClick={() => setSettings(v => !v)}
-              title="Настройка графика: цвет, толщина и стиль линии, маркеры (форма, размер, цвет) для каждого ряда — как в Excel">
+              title="Формат графика: заголовок, легенда, сетка, оси, цвет и маркеры рядов — как в Excel">
               <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v1.9M8 12.3v1.9M1.8 8h1.9M12.3 8h1.9M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3" /></svg>
             </button>
           </span>}
           {onCopy && <CopyButton onCopy={() => onCopy(screenView())} />}
-          {onDownload ? <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} /> : <button type="button" className="quiet small" title="Сохранить график как PNG"
+          {onDownload ? <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} screen={{ name: chart.title, file: screenFile }} /> : <button type="button" className="quiet small" title="Сохранить график как PNG"
             onClick={() => { const url = instance.current?.getDataURL({ pixelRatio: 2, backgroundColor: state.current.tokens?.surface }); if (!url) return
               const a = document.createElement('a'); a.href = url; a.download = (chart.title || 'график') + '.png'; a.click() }}>PNG</button>}
         </span>
       </figcaption>
-      {settings && createPortal(<ChartSettings title={chart.title} series={chart.series} colorOf={colorOf(chart)} looks={looks ?? {}}
-        onChange={setLooks} onClose={() => setSettings(false)} />, document.body)}
+      {settings && createPortal(format ? (
+        <FormatPane chart={chart} element={element} onElement={setElement} scope="project" onScope={() => {}} scopeLabel={format.label}
+          doc={format.doc} onDoc={format.onDoc} colorOf={colorOf(chart)} looks={format.doc.series ?? {}}
+          onLooks={series => format.onDoc({ ...format.doc, series: Object.keys(series).length ? series : undefined })}
+          onReplace={format.onDoc} onClose={() => setSettings(false)} />
+      ) : (
+        <FormatPane chart={chart} element={element} onElement={setElement} scope={module ? scope : 'project'}
+          onScope={module ? setScope : () => {}} doc={formatDoc(store, module ? scope : 'project', module ?? '')}
+          onDoc={doc => setFormatDoc(module ? scope : 'project', module ?? '', doc)} colorOf={colorOf(chart)} looks={looks ?? {}}
+          onLooks={setLooks} onReplace={d => { setFormatDoc(module ? scope : 'project', module ?? '', d); setLooks(d.series ?? {}) }}
+          onClose={() => setSettings(false)} />), document.body)}
       {thinned.length > 0 && <ThinNote chart={chart} thinned={thinned.map(([, i]) => i)} windowed={!!patch && patch.base === given} patch={patch} />}
+      {chart.style?.subtitle && <p className="chart-subtitle" style={chart.style.subtitle_size ? { fontSize: chart.style.subtitle_size } : undefined}>{chart.style.subtitle}</p>}
       {legendEl && chart.style?.legend === 'top' && legendEl}
-      <div className={chart.style?.legend === 'right' && legendEl ? 'chart-body legend-right' : 'chart-body'}>
+      <div className={(chart.style?.legend === 'right' || chart.style?.legend === 'left') && legendEl ? 'chart-body legend-right' : 'chart-body'}>
+      {legendEl && chart.style?.legend === 'left' && legendEl}
       <div className="chart-stage" ref={stage} style={chart.style?.background ? { background: chart.style.background } : undefined}>
         <div ref={box} className="chart-canvas" role="img" aria-label={chart.title} />
         <canvas ref={overlay} className="chart-overlay" aria-hidden="true" />
@@ -1492,6 +1684,7 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
           <span className="axis-buttons">
             <button type="submit" className="primary">Применить</button>
             <button type="button" onClick={() => commitEditor(true)}>Авто</button>
+            {!chart.id.startsWith('builder') && <button type="button" onClick={() => { openFormat('axis:' + editor.axis); setEditor(null) }}>Формат оси…</button>}
             <button type="button" onClick={() => setEditor(null)}>Закрыть</button>
           </span>
         </form>}
@@ -1499,7 +1692,7 @@ export function ChartView({ chart: given, compact, excludeMode, onExclude, onCon
       {legendEl && chart.style?.legend === 'right' && legendEl}
       </div>
       {chart.table && <ChartTableView table={chart.table} colors={chart.series.map(colorOf(chart))} />}
-      {legendEl && chart.style?.legend !== 'top' && chart.style?.legend !== 'right' && legendEl}
+      {legendEl && (!chart.style?.legend || chart.style.legend === 'bottom') && legendEl}
     </figure>
   )
 }
@@ -1537,12 +1730,20 @@ function titleStyle(st: ChartStyle | undefined): CSSProperties | undefined {
   return Object.keys(out).length ? out : undefined
 }
 
+/** Рамка и фон всего рисунка (модель оформления: border_color, border_width, background). */
+function frameStyle(st: ChartStyle | undefined): CSSProperties | undefined {
+  if (!st?.border_color && !st?.border_width) return undefined
+  return { borderColor: st.border_color, borderWidth: st.border_width ?? 1, borderStyle: 'solid' }
+}
+
 /** Шрифт и размер легенды: размер — переменная CSS, её читают пункты легенды. */
 function legendStyle(st: ChartStyle | undefined): CSSProperties | undefined {
   if (!st) return undefined
   const out: Record<string, string | number> = {}
   if (st.legend_font || st.font) out.fontFamily = fontCss(st.legend_font ?? st.font)
   if (st.legend_size) out['--legend-size'] = st.legend_size + 'px'
+  if (st.legend_columns) out['--legend-cols'] = st.legend_columns
+  if (st.legend_background) out['--legend-bg'] = st.legend_background
   if (st.text_color) out.color = st.text_color
   return Object.keys(out).length ? out as CSSProperties : undefined
 }
@@ -1551,6 +1752,7 @@ function legendStyle(st: ChartStyle | undefined): CSSProperties | undefined {
 
 interface LegendItem {
   name: string; color: string; dash: string | number[]; line: boolean; symbol: string | null; hollow: boolean
+  label: string          // подпись в легенде: имя ряда или «имя в легенде» из оформления
   facets: Map<string, string>[]      // признаки серий этого пункта (у пункта может быть несколько серий)
 }
 interface FacetValue { value: string; color: string | null; dash: string | number[] | null }
@@ -1569,7 +1771,8 @@ function legendModel(chart: Chart, excludeMode: boolean, mode: HoverMode): Legen
       if (!chart.series.some(o => key(o) === name && o.legend)) continue
       const first = chart.series.find(o => key(o) === name && o.legend)!
       item = {
-        name, color: color(first), dash: dashOf(first), line: first.kind === 'line', hollow: first.hollow,
+        name, label: first.look?.legend_name || name, color: color(first), dash: dashOf(first), line: first.kind === 'line' && first.look?.line !== false,
+        hollow: first.look?.hollow ?? first.hollow,
         symbol: first.kind === 'points' || (first.kind === 'line' && hasMarkers(first, excludeMode, mode)) ? first.symbol : null,
         facets: [],
       }
@@ -1617,10 +1820,11 @@ interface LegendProps {
   model: LegendModel; hidden: Set<string>; facetOff: Set<string>; events: ChartEvent[]; offEvents: string[]
   onToggle: (name: string, only: boolean) => void; onFacet: (facet: string, value: string, only: boolean) => void
   onEvent: (kind: string) => void; onHighlight: (name: string | null) => void
+  onFormat?: (hit: DOMStringMap | null) => void      // правая кнопка: формат ряда под указателем или графика
   position?: ChartStyle['legend']; fmt?: ChartStyle      // ручное оформление: положение, шрифт, размер
 }
 
-function ChartLegend({ model, hidden, facetOff, events, offEvents, onToggle, onFacet, onEvent, onHighlight, position, fmt }: LegendProps) {
+function ChartLegend({ model, hidden, facetOff, events, offEvents, onToggle, onFacet, onEvent, onHighlight, onFormat, position, fmt }: LegendProps) {
   const [open, setOpen] = useState(false)
   const [overflow, setOverflow] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -1633,13 +1837,14 @@ function ChartLegend({ model, hidden, facetOff, events, offEvents, onToggle, onF
   if (model.items.length < 2 && !kinds.length) return null
   const hint = 'Щелчок — скрыть или показать, двойной щелчок — только этот'
   return (
-    <div className={'chart-legend-wrap' + (position === 'right' ? ' side' : '')} style={legendStyle(fmt)}>
-      <div ref={root} className={'chart-legend' + (open ? ' open' : '')}>
+    <div className={'chart-legend-wrap' + (position === 'right' || position === 'left' ? ' side' : '')} style={legendStyle(fmt)}
+      onContextMenu={onFormat ? e => { e.preventDefault(); onFormat((e.target as HTMLElement).closest<HTMLElement>('.legend-item')?.dataset ?? null) } : undefined}>
+      <div ref={root} className={'chart-legend' + (open ? ' open' : '') + (fmt?.legend_columns ? ' cols' : '') + (fmt?.legend_border ? ' boxed' : '')}>
         {model.facets.map(f => (
           <div key={f.name} className="legend-row">
             <span className="legend-title">{f.name}</span>
             {f.values.map(v => (
-              <button key={v.value} type="button" className="legend-item" aria-pressed={!facetOff.has(f.name + '\u0001' + v.value)} title={hint}
+              <button key={v.value} type="button" className="legend-item" data-facet={f.name} data-value={v.value} aria-pressed={!facetOff.has(f.name + '\u0001' + v.value)} title={hint}
                 onClick={e => onFacet(f.name, v.value, e.detail > 1)}>
                 {(v.color || v.dash) && <Swatch color={v.color ?? 'var(--chart-ink)'} dash={v.dash} line />}
                 <span>{v.value}</span>
@@ -1651,11 +1856,11 @@ function ChartLegend({ model, hidden, facetOff, events, offEvents, onToggle, onF
           <div className="legend-row">
             {model.facets.length > 0 && <span className="legend-title">Кривые</span>}
             {model.plain.map(i => (
-              <button key={i.name} type="button" className="legend-item" aria-pressed={!hidden.has(i.name)} title={hint}
+              <button key={i.name} type="button" className="legend-item" data-name={i.name} aria-pressed={!hidden.has(i.name)} title={hint}
                 onClick={e => onToggle(i.name, e.detail > 1)}
                 onMouseEnter={() => onHighlight(i.name)} onMouseLeave={() => onHighlight(null)}>
                 <Swatch color={i.color} dash={i.dash} line={i.line} symbol={i.symbol} hollow={i.hollow} />
-                <span>{i.name}</span>
+                <span>{i.label}</span>
               </button>
             ))}
           </div>
@@ -1751,7 +1956,11 @@ export function CopyButton({ onCopy }: { onCopy: () => Promise<Blob> }) {
   )
 }
 
-export function DownloadMenu({ onDownload }: { onDownload: (format: string, dpi: number) => Promise<void> }) {
+export function DownloadMenu({ onDownload, screen }: {
+  onDownload: (format: string, dpi: number) => Promise<void>
+  /** Пилот: файл, который рисует сам экранный график (ECharts), без Matplotlib. */
+  screen?: { name: string; file: (kind: 'png' | 'svg', dpi: number) => Promise<Blob> }
+}) {
   const [open, setOpen] = useState(false)
   const [format, setFormat] = useState('svg')
   const [dpi, setDpi] = useState(300)
@@ -1766,7 +1975,13 @@ export function DownloadMenu({ onDownload }: { onDownload: (format: string, dpi:
   }, [open])
   const go = async () => {
     setBusy(true); setFailure('')
-    try { await onDownload(format, dpi); setOpen(false) } catch (e) { setFailure((e as Error).message) } finally { setBusy(false) }
+    try {
+      if (format.startsWith('screen-')) {
+        const kind = format === 'screen-svg' ? 'svg' : 'png'
+        await saveFileWithPicker(screen!.file(kind, dpi), `${screen!.name.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'график'}.${kind}`)
+      } else await onDownload(format, dpi)
+      setOpen(false)
+    } catch (e) { setFailure((e as Error).message) } finally { setBusy(false) }
   }
   return (
     <div className="download" ref={root}>
@@ -1776,9 +1991,10 @@ export function DownloadMenu({ onDownload }: { onDownload: (format: string, dpi:
           <label className="inline-field">Формат
             <select value={format} onChange={e => setFormat(e.target.value)}>
               <option value="svg">SVG</option><option value="pdf">PDF</option><option value="png">PNG</option><option value="xlsx">XLSX (график и данные)</option>
+              {screen && <optgroup label="Как на экране (ECharts)"><option value="screen-svg">SVG как на экране</option><option value="screen-png">PNG как на экране</option></optgroup>}
             </select>
           </label>
-          {format !== 'xlsx' && <label className="inline-field">DPI
+          {format !== 'xlsx' && format !== 'screen-svg' && <label className="inline-field">DPI
             <select value={dpi} onChange={e => setDpi(Number(e.target.value))}>
               {[300, 600, 1200].map(d => <option key={d} value={d}>{d}</option>)}
             </select>

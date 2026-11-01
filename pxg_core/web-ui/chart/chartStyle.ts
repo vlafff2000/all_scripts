@@ -1,9 +1,9 @@
-// Копия gas_atlas web/src/chartStyle.ts @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
-// Личный вид рядов графика (окно «Настройка»): цвет, линия, маркеры. Хранится в браузере; данные и расчёт не меняются.
+// Копия gas_atlas web/src/chartStyle.ts @ 9c7fe1f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Вид рядов графика (окно «Настройка»): цвет, линия, маркеры. Хранится в проекте (projectLooks.ts); данные и расчёт не меняются.
 import type { Chart, Series } from './chartTypes'
 
 export type MarkerShape = 'circle' | 'square' | 'diamond' | 'triangle' | 'plus' | 'x' | 'star'
-export type LineStyleName = 'solid' | 'dash' | 'dot'
+export type LineStyleName = 'solid' | 'dash' | 'dot' | 'dashdot' | 'longdash'
 
 /** Поля, которые пользователь задал вручную; не заданное берётся по умолчанию из модуля. */
 export interface Look {
@@ -17,6 +17,17 @@ export interface Look {
   markerColor?: string    // цвет отметок линии, если отличается от линии
   opacity?: number        // прозрачность линии и отметок: 1 — непрозрачно
   valueLabels?: boolean   // подписи значений над столбцами (целые, Times New Roman)
+  // модель v2 (atlas/chart_style.py): граница маркера, полый маркер, подписи данных, имя в легенде
+  marker_border?: string; marker_border_width?: number; hollow?: boolean
+  label_position?: 'top' | 'bottom' | 'left' | 'right' | 'inside' | 'center'; label_decimals?: number; label_size?: number
+  legend_name?: string
+  // линия тренда ряда (web/src/trend.ts, atlas/trend.py)
+  trend?: 'linear' | 'poly' | 'log' | 'power' | 'exp' | 'moving'; trend_order?: number; trend_period?: number
+  trend_label?: boolean; trend_color?: string; trend_width?: number
+  // штриховка столбцов для чёрно-белой печати
+  // погрешность (доверительный интервал): в процентах или абсолютная, усы или граничные линии
+  err_mode?: 'percent' | 'abs'; err_value?: number; err_style?: 'bars' | 'band'
+  hatch?: 'diag' | 'back' | 'cross' | 'grid' | 'dots' | 'horizontal' | 'vertical'; hatch_color?: string
 }
 
 export const MARKER_SHAPES: { value: MarkerShape; label: string }[] = [
@@ -33,6 +44,8 @@ export const LINE_STYLES: { value: LineStyleName; label: string }[] = [
   { value: 'solid', label: 'Сплошная' },
   { value: 'dash', label: 'Штриховая' },
   { value: 'dot', label: 'Пунктирная' },
+  { value: 'dashdot', label: 'Штрихпунктирная' },
+  { value: 'longdash', label: 'Длинный штрих' },
 ]
 
 // Крест и звезда — контуры в условных координатах [-1, 1]; ECharts растягивает их до размера отметки.
