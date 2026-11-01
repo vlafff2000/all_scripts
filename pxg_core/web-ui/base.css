@@ -169,3 +169,8 @@ kbd { font-family: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; b
 .window-buttons { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .window-buttons .quiet[aria-pressed='true'] { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
 .collapsed .window-buttons { display: none; }
+
+/* Кнопки «Отменить / Вернуть»: одинаковы во всех разделах */
+.undo-buttons { display: inline-flex; gap: 4px; align-items: center; }
+.undo-buttons svg { width: 14px; height: 14px; vertical-align: -2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.undo-buttons button:disabled { opacity: .45; cursor: default; }

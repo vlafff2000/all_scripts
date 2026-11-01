@@ -5,6 +5,7 @@ import GdisPanel from './GdisPanel'
 import { usePanelFilter } from './PanelFilter'
 import { checkUrl, fileUrl, getJob, getJobs, openFolder, pickPath, runCheck, startJob, type Job, type ModuleInfo, type Param, type QcReport } from './api'
 import { loadForm, saveForm } from './prefs'
+import { UndoButtons, useUndo, useUndoValue } from '../../../pxg_core/web-ui/useUndo'
 import { Tables } from '../../../pxg_core/web-ui/table/Tables'
 import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
@@ -109,6 +110,10 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
   const [now, setNow] = useState(Date.now() / 1000)
   const [copied, setCopied] = useState('')
   const logRef = useRef<HTMLPreElement>(null)
+  // Отмена (Ctrl+Z) правок формы: значения полей и папка результатов
+  const undo = useUndo({ onNotice: setCopied })
+  useUndoValue(values, setValues, undo, 'изменение полей формы')
+  useUndoValue(outDir, setOutDir, undo, 'изменение папки результатов')
 
   const reloadHistory = () => getJobs().then(js => setHistory(js.filter(j => j.module === module.id))).catch(() => undefined)
   useEffect(() => { reloadHistory() }, [module.id])
@@ -168,6 +173,7 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
           <h1>{module.title}</h1>
           <p className="lede">{module.description}</p>
         </div>
+        <UndoButtons undo={undo} />
       </header>
 
       {!module.web ? (

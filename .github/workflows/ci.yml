@@ -45,3 +45,5 @@ jobs:
           python-version: '3.13'
       - name: Сверка копии графиков с Атласом
         run: python tools/sync_charts_from_atlas.py gas_atlas --check
+      - name: Сверка копии отмены действий с Атласом
+        run: python tools/sync_undo_from_atlas.py gas_atlas --check

@@ -1,4 +1,4 @@
-/** Общий набор значков 16×16 (контур задаётся CSS: stroke/fill кнопки). Источник — web/src/Icon.tsx Атласа (gas_atlas). */
+/** Общий набор значков 16×16 (контур задаётся CSS: stroke/fill кнопки). Копия лежит в all_scripts/pxg_core/web-ui. */
 const PATHS = {
   'chevron-left': 'M10 3.5 5.5 8 10 12.5',
   'chevron-right': 'M6 3.5 10.5 8 6 12.5',
@@ -8,6 +8,8 @@ const PATHS = {
   moon: 'M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5Z',
   screen: 'M6 13.5h4',
   search: 'm10.5 10.5 3 3',
+  undo: 'M6 3 2.5 6.5 6 10M2.5 6.5h6.5a4 4 0 0 1 0 8H7',
+  redo: 'M10 3l3.5 3.5L10 10M13.5 6.5H7a4 4 0 0 0 0 8h2',
 } as const
 export type IconName = keyof typeof PATHS
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { UndoButtons, useUndo, useUndoValue } from '../../../pxg_core/web-ui/useUndo'
 import { usePanelFilter } from './PanelFilter'
 import { getGisLegend, saveGisLegend, type LegendRow } from './api'
 
@@ -16,6 +17,8 @@ export default function LegendPanel({ file, onClose }: { file: string; onClose: 
   const [saved, setSaved] = useState('')
 
   const key = (r: LegendRow) => r.sheet + '|' + r.color
+  const undo = useUndo({ onNotice: setSaved })
+  useUndoValue(pick, setPick, undo, 'выбор пачки', file)
   const load = async () => {
     setBusy(true); setError('')
     try {
@@ -35,7 +38,15 @@ export default function LegendPanel({ file, onClose }: { file: string; onClose: 
   const confirm = async (which: LegendRow[]) => {
     setError(''); setSaved('')
     try {
-      const r = await saveGisLegend(file, which.map(x => ({ sheet: x.sheet, color: x.color, pack: pick[key(x)] ?? '' })))
+      const after = which.map(x => ({ sheet: x.sheet, color: x.color, pack: pick[key(x)] ?? '' }))
+      // до подтверждения строка либо была запомнена (тогда pack — запомненная пачка), либо нет (тогда запоминание снимается)
+      const before = which.map(x => ({ sheet: x.sheet, color: x.color, pack: x.confirmed ? x.pack : '' }))
+      const r = await saveGisLegend(file, after)
+      undo.push({
+        label: which.length === 1 ? `подтверждение пачки (лист ${which[0].sheet})` : `подтверждение пачек (${which.length})`,
+        undo: async () => { await saveGisLegend(file, before); await load() },
+        redo: async () => { await saveGisLegend(file, after); await load() },
+      })
       setSaved(`Запомнено строк: ${r.saved}. Запуск и проверка подставят этот выбор.`)
       await load()
     } catch (e) { setError((e as Error).message) }
@@ -47,6 +58,7 @@ export default function LegendPanel({ file, onClose }: { file: string; onClose: 
         <strong>Легенда пачек</strong>
         <span className="muted">{busy ? 'Читаю книгу…' : open ? `Требуют проверки: ${open} из ${rows.length}` : `Всё подтверждено или по умолчанию (${rows.length})`}</span>
         <span className="spacer" />
+        <UndoButtons undo={undo} />
         <label className="check"><input type="checkbox" checked={onlyOpen} onChange={e => setOnlyOpen(e.target.checked)} /><span>только требующие проверки</span></label>
         <button type="button" className="quiet" onClick={onClose}>Закрыть</button>
       </div>
