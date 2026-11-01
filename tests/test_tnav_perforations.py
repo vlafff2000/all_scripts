@@ -120,3 +120,15 @@ def test_base_model_params(tmp_path):
     assert "B" not in r["wells"] and any("нет I" in n for n in r["notes"])        # без I,J и WELSPECS запись пропущена с заметкой
     cmp = base_model.compare(r["wells"], {"A1": 148.0, "B": 1.0})
     assert [(c["well"], c["ok"], c["diff"]) for c in cmp] == [("A1", False, 2.0)]
+
+
+def test_inventory_lists_files_and_keywords(tmp_path):
+    from tnav_results import base_model
+    (tmp_path / "inc").mkdir()
+    (tmp_path / "inc" / "pvt.inc").write_text("PVTG\n1 2 3 /\n/\nDENSITY\n 800 1000 1 /\n")
+    (tmp_path / "m.data").write_text("START\n 1 JAN 2020 /\nINCLUDE\n'inc/pvt.inc' /\nINCLUDE\n'inc/none.inc' /\nWELSPECS\n 'W1' G 1 1 1* GAS /\n/\n")
+    r = base_model.inventory(str(tmp_path / "m.data"))
+    assert [(f["name"], f["parent"], f["found"]) for f in r["files"]] == [("m.data", "", True), ("pvt.inc", "m.data", True), ("inc/none.inc", "m.data", False)]
+    assert r["keywords"]["PVTG"]["files"] == ["pvt.inc"] and r["keywords"]["DENSITY"]["count"] == 1
+    assert r["keywords"]["WELSPECS"]["count"] == 1 and r["keywords"]["INCLUDE"]["count"] == 2
+    assert any("none.inc" in n for n in r["notes"])

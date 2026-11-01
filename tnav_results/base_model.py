@@ -49,3 +49,76 @@ def compare(model: Dict[str, dict], file_values: Dict[str, float], field: str = 
             continue
         out.append({"well": well, "model": m, "file": f, "diff": m - f, "ok": abs(m - f) <= tol})
     return out
+
+
+BIG_FILE = 30 * 1024 * 1024
+
+
+def inventory(path: str) -> dict:
+    """Опись входных файлов модели: какие файлы подключены (.data и дерево INCLUDE/IMPORT) и какие ключевые слова в них встречаются.
+
+    Ничего не интерпретирует, только перечисляет: {files: [{path, name, parent, line, found, size}], keywords: {СЛОВО: {count, files}},
+    notes}. Ключевое слово — первый токен строки, записанный заглавными (одиночный) или известный читалке; числа и «/» не считаются.
+    Какие слова читаются и куда попадают, решает вызывающая сторона (каталог в Атласе)."""
+    import os
+    from . import perforations as P
+
+    if not path.lower().endswith((".data", ".inc", ".include", ".sch", ".schedule", ".txt")):
+        found = P.find_data_files(path)
+        path = found[0] if found else ""
+    files: List[dict] = []
+    kws: Dict[str, dict] = {}
+    notes: List[str] = []
+
+    def walk(p: str, parent: str, line: int, seen: tuple, depth: int) -> None:
+        ap = os.path.abspath(p)
+        if depth > 12 or ap in seen:
+            notes.append("INCLUDE зациклен или слишком вложен: %s" % p)
+            return
+        entry = {"path": ap, "name": os.path.basename(p), "parent": parent, "line": line, "found": True, "size": 0}
+        files.append(entry)
+        try:
+            entry["size"] = os.path.getsize(ap)
+            if entry["size"] > BIG_FILE:      # сетка и кубы на сотни МБ: только строки из одного слова, без разбора записей
+                entry["big"] = True
+                with open(ap, "r", encoding="utf-8", errors="replace") as f:
+                    for ln, raw in enumerate(f, 1):
+                        w = raw.strip()
+                        if 3 <= len(w) <= 24 and P._WORD.match(w) and w.isupper():
+                            d = kws.setdefault(w, {"count": 0, "files": []})
+                            d["count"] += 1
+                            if entry["name"] not in d["files"]:
+                                d["files"].append(entry["name"])
+                return
+            with open(ap, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError as e:
+            entry["found"] = False
+            notes.append("файл не открыт: %s (%s)" % (p, e))
+            return
+        toks = P._tokenize(text)
+        base = os.path.dirname(ap)
+        for n, t in enumerate(toks):
+            key = t.text.upper()
+            if not (P._WORD.match(t.text) and t.first and (key in P.KNOWN or (t.alone and t.text.isupper() and len(key) >= 3))):
+                continue
+            d = kws.setdefault(key, {"count": 0, "files": []})
+            d["count"] += 1
+            if entry["name"] not in d["files"]:
+                d["files"].append(entry["name"])
+            if key in ("INCLUDE", "IMPORT") and n + 1 < len(toks):
+                name = P._unquote(toks[n + 1].text)
+                cand = [os.path.join(base, name), os.path.join(os.path.dirname(files[0]["path"]), name)]
+                real = next((c for c in cand if os.path.isfile(c)), None)
+                if real:
+                    walk(real, entry["name"], t.line, seen + (ap,), depth + 1)
+                else:
+                    files.append({"path": os.path.join(base, name), "name": name, "parent": entry["name"], "line": t.line,
+                                  "found": False, "size": 0})
+                    notes.append("%s: INCLUDE-файл не найден: %s" % (entry["name"], name))
+
+    if path and os.path.isfile(path):
+        walk(path, "", 0, (), 0)
+    else:
+        notes.append("рядом с моделью нет файла .data")
+    return {"files": files, "keywords": kws, "notes": notes}
