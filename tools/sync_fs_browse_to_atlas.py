@@ -19,6 +19,7 @@ FILES = [
     (HERE / "pxg_core" / "group_colors.py", Path("atlas") / "group_colors.py"),
     (HERE / "pxg_core" / "web-ui" / "FilePicker.tsx", Path("web") / "src" / "FilePicker.tsx"),
     (HERE / "pxg_core" / "web-ui" / "filepicker.css", Path("web") / "src" / "filepicker.css"),
+    (HERE / "pxg_core" / "web-ui" / "pickerSelection.ts", Path("web") / "src" / "pickerSelection.ts"),
     (HERE / "pxg_core" / "web-ui" / "desktopDownload.ts", Path("web") / "src" / "desktopDownload.ts"),
     (HERE / "pxg_core" / "web-ui" / "groupColors.ts", Path("web") / "src" / "groupColors.ts"),
     (HERE / "pxg_core" / "web-ui" / "GroupColorsButton.tsx", Path("web") / "src" / "GroupColorsButton.tsx"),
