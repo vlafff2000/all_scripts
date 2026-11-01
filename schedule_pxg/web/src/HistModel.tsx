@@ -1,3 +1,4 @@
+import { PeriodDate } from '../../../pxg_core/web-ui/PeriodDate'
 import { useMemo, useState } from 'react'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
@@ -97,8 +98,8 @@ export default function HistModel({ models }: { models: ModelEntry[] }) {
           <th>Модель − эталон, тыс. м³</th><th>История − эталон, тыс. м³</th><th>Пометка</th><th>Причина</th></tr></thead>
           <tbody>{res.seasons.map(s => { const t = s.total; return <tr key={s.name} style={t && bad(t.label) ? { background: 'rgba(220,80,60,.12)' } : undefined}>
             <td><button className="link" onClick={() => setPick(s.name)}>{s.name}</button></td><td>{s.kind}</td>
-            <td><input type="date" style={{ width: 140 }} value={s.start} disabled={busy} onChange={e => e.target.value && editSeason(s, { start: e.target.value })} /></td>
-            <td><input type="date" style={{ width: 140 }} value={s.end} disabled={busy} onChange={e => e.target.value && editSeason(s, { end: e.target.value })} /></td>
+            <td><PeriodDate value={s.start} end={false} disabled={busy} onChange={v => v && editSeason(s, { start: v })} /></td>
+            <td><PeriodDate value={s.end} end disabled={busy} onChange={v => v && editSeason(s, { end: v })} /></td>
             <td className="num">{s.compared?.days ?? '—'}</td>
             <td className="num">{fmt(t?.hist, 0)}</td><td className="num">{fmt(t?.model, 0)}</td><td className="num">{fmt(t?.ref, 0)}</td>
             <td className="num">{t && t.ref !== null ? fmt(t.model - t.ref, 0) : '—'}</td><td className="num">{fmt(t?.hist_vs_ref, 0)}</td>

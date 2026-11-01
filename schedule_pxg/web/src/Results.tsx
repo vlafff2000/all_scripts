@@ -1,3 +1,4 @@
+import { PeriodDate } from '../../../pxg_core/web-ui/PeriodDate'
 import { saveBlobAs } from '../../../pxg_core/web-ui/desktopDownload'
 import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
@@ -162,7 +163,7 @@ export default function Results() {
         <h3>Показатели по выбранным моделям</h3>
         <div className="row">
           <span className="muted small">Порог Sg:</span><input style={{ width: 70 }} value={sg} onChange={e => setSg(e.target.value)} />
-          <span className="muted small">Дата (пусто — все шаги):</span><input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          <span className="muted small">Дата (пусто — все шаги):</span><PeriodDate value={date} end={false} onChange={v => setDate(v ?? '')} />
           <button className="primary" disabled={busy} onClick={calc}>Посчитать</button>
         </div>
         {notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
@@ -187,7 +188,7 @@ export default function Results() {
           Две глубины: по границе ячейки и по интерполяции Sg. Глубина — TVDSS, м (со знаком минус).</p>
         <div className="row">
           <span className="muted small">Sgr, если нет SGCR:</span><input style={{ width: 70 }} value={sgr} onChange={e => setSgr(e.target.value)} />
-          <span className="muted small">Дата (пусто — все шаги):</span><input type="date" value={gwDate} onChange={e => setGwDate(e.target.value)} />
+          <span className="muted small">Дата (пусто — все шаги):</span><PeriodDate value={gwDate} end={false} onChange={v => setGwDate(v ?? '')} />
           <input style={{ width: 260 }} placeholder="скважины через запятую (пусто — все)" value={gw} onChange={e => setGw(e.target.value)} />
           <button className="primary" disabled={busy} onClick={gwcWells}>Посчитать ГВК</button>
         </div>

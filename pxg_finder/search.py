@@ -86,13 +86,18 @@ def parse_size(text: str) -> Optional[Tuple[str, int]]:
         return None
 
 
-def parse_date(text: str) -> Optional[float]:
+def parse_date(text: str, end: bool = False) -> Optional[float]:
+    """Дата → метка времени. Неполная («2020», «03.2020», «2020-03») — начало периода или, при end, его последний день."""
     t = text.strip()
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y-%m", "%Y"):
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y-%m", "%m.%Y", "%Y"):
         try:
-            return dt.datetime.strptime(t, fmt).timestamp()
+            d = dt.datetime.strptime(t, fmt)
         except ValueError:
-            pass
+            continue
+        if end and fmt in ("%Y-%m", "%m.%Y", "%Y"):
+            year, month = (d.year + 1, 1) if fmt == "%Y" else ((d.year + (d.month == 12), d.month % 12 + 1))
+            d = dt.datetime(year, month, 1) - dt.timedelta(days=1)
+        return d.timestamp()
     return None
 
 
@@ -167,7 +172,7 @@ def build_filters(body: Dict[str, Any]) -> Filters:
     if body.get("dateFrom"):
         f.mt_from = parse_date(str(body["dateFrom"]))
     if body.get("dateTo"):
-        d = parse_date(str(body["dateTo"]))
+        d = parse_date(str(body["dateTo"]), end=True)
         f.mt_to = d + 86400 if d is not None else None
     if body.get("want") in ("files", "folders"):
         f.want = body["want"]

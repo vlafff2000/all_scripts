@@ -1,3 +1,4 @@
+import { PeriodDate } from '../../../pxg_core/web-ui/PeriodDate'
 import { useEffect, useRef, useState } from 'react'
 import { emptySearch } from './types'
 import type { SearchSpec } from './types'
@@ -40,8 +41,8 @@ export default function SearchBar({ folder, spec, indexed, onSearch, onClear, in
             <label>Что искать<select value={s.want} onChange={e => change({ want: e.target.value as SearchSpec['want'] })}><option value="all">файлы и папки</option><option value="files">только файлы</option><option value="folders">только папки</option></select></label>
             <label>Размер от<input value={s.sizeMin} placeholder="напр. 500kb" onChange={e => change({ sizeMin: e.target.value })} /></label>
             <label>Размер до<input value={s.sizeMax} placeholder="напр. 10mb" onChange={e => change({ sizeMax: e.target.value })} /></label>
-            <label>Изменён с<input type="date" value={s.dateFrom} onChange={e => change({ dateFrom: e.target.value })} /></label>
-            <label>Изменён по<input type="date" value={s.dateTo} onChange={e => change({ dateTo: e.target.value })} /></label>
+            <label>Изменён с<PeriodDate value={s.dateFrom} end={false} onChange={v => change({ dateFrom: v ?? '' })} /></label>
+            <label>Изменён по<PeriodDate value={s.dateTo} end onChange={v => change({ dateTo: v ?? '' })} /></label>
           </div>
           <div className="fx-checks">
             <label><input type="checkbox" checked={s.regex} onChange={e => change({ regex: e.target.checked })} /> регулярное выражение</label>
