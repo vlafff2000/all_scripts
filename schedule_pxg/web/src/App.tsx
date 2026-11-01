@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ResourceBadge } from '../../../pxg_core/web-ui/ResourceBadge'
 import { Icon } from '../../../pxg_core/web-ui/Icon'
 import { sidebarCollapsed, theme, usePref, type Theme } from './prefs'
 import Averaging from './Averaging'
@@ -73,6 +74,7 @@ export default function App() {
             </button>
           ))}
         </div>
+        <ResourceBadge />
       </aside>
       {tab === 'adapt' ? <Adapt /> : tab === 'adapt-export' ? <AdaptExport /> : tab === 'planshet' ? <Planshet /> : tab === 'history' && st ? <History st={st} /> : tab === 'charts' && st ? <Charts st={st} /> : tab === 'results' && st ? <Results /> : tab === 'averaging' && st ? <Averaging st={st} setSt={setSt} /> : tab === 'scenarios' && st ? <Scenarios st={st} setSt={setSt} /> : tab === 'strategies' && st ? <Strategies st={st} setSt={setSt} /> : tab === 'quality' && st ? <Quality /> : tab === 'techmaps' && st ? <TechMaps st={st} setSt={setSt} /> : st ? <Import st={st} setSt={setSt} /> : <main className="workspace" />}
     </div>

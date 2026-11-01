@@ -7,7 +7,7 @@ import datetime as dt
 import io
 import os
 
-from pxg_core import fs_browse, group_colors, runlog, table_export, well_presets, workspace
+from pxg_core import fs_browse, group_colors, resources, runlog, table_export, well_presets, workspace
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -1506,6 +1506,7 @@ def build_app() -> Starlette:
     runlog.setup("ГДМ")
     routes = [
         *runlog.routes(),
+        *resources.routes(),
         second_window_route(),
         Route("/api/state", state),
         Route("/api/preview", preview),
