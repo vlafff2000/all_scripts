@@ -1,13 +1,32 @@
-// Копия gas_atlas web/src/chartTypes.ts @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartTypes.ts @ 9c7fe1f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import type { Look } from './chartStyle'
 export type Cell = string | number | boolean | null
 /** Ручное оформление оси; пусто — авто (atlas/chart_style.py). */
-export interface AxisStyle { decimals?: number; date_format?: string; font?: string; tick_size?: number; title_size?: number }
+export type TickMark = 'out' | 'in' | 'cross' | 'none'
+export interface AxisStyle {
+  decimals?: number; date_format?: string; font?: string; tick_size?: number; title_size?: number
+  title_bold?: boolean; title_italic?: boolean; tick_bold?: boolean; tick_italic?: boolean
+  // модель v2 (atlas/chart_style.py): деления, линия оси, поворот подписей, единицы отображения, положение названия, доп. шаг, пересечение
+  ticks?: TickMark; minor_ticks?: TickMark; line?: boolean; line_color?: string; line_width?: number; label_rotate?: number
+  units?: 'thousands' | 'millions' | 'billions'; title_place?: 'end' | 'middle'; minor_step?: number; cross?: number
+  break_lo?: number; break_hi?: number         // разрыв оси: вырезаемый диапазон (мс у оси дат)
+}
 /** Ручное оформление графика: заголовок, шрифты, легенда, сетка, фон (atlas/chart_style.py). */
+/** Аннотация графика (atlas/chart_style.py): линия уровня, полоса или подпись в координатах данных; числа и даты — текстом, как границы осей. */
+export interface Annotation {
+  kind: 'hline' | 'vline' | 'hband' | 'vband' | 'text'
+  value?: string; to?: string; x?: string; y?: string; text?: string
+  color?: string; width?: number; dash?: string; size?: number
+}
 export interface ChartStyle {
   title_font?: string; title_size?: number; title_bold?: boolean; title_color?: string; title_align?: 'left' | 'center' | 'right'
-  font?: string; text_color?: string; legend?: 'bottom' | 'top' | 'right' | 'hide'; legend_font?: string; legend_size?: number
+  font?: string; text_color?: string; legend?: 'bottom' | 'top' | 'right' | 'left' | 'hide'; legend_font?: string; legend_size?: number
   grid?: 'both' | 'h' | 'v' | 'none'; grid_color?: string; background?: string; plot_background?: string
+  grid_width?: number; minor_grid?: 'show' | 'hide'; minor_grid_color?: string; minor_grid_width?: number
+  // модель v2: подзаголовок, легенда слева, колонки, рамка и фон легенды, штрих сетки, рамки рисунка и области построения
+  subtitle?: string; subtitle_size?: number; legend_columns?: number; legend_border?: boolean; legend_background?: string
+  grid_dash?: string; minor_grid_dash?: string; border_color?: string; border_width?: number; plot_border_color?: string; plot_border_width?: number
+  annotations?: Annotation[]
 }
 export interface Axis {
   color?: string                       // цвет правой шкалы под один ряд; пусто — по умолчанию

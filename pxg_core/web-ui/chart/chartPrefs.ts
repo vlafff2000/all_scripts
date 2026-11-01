@@ -1,8 +1,9 @@
-// Копия gas_atlas web/src/chartPrefs.ts @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartPrefs.ts @ 9c7fe1f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Общие настройки вида, запоминаются в браузере: подсказка графиков, события на оси, тема, свёрнутые панели.
 import { useSyncExternalStore } from 'react'
 import type { HoverMode } from './chartHover'
 import type { Look } from './chartStyle'
+import type { FormatStore } from './chartFormat'
 
 export interface Pref<T> { get: () => T; set: (next: T) => void; subscribe: (f: () => void) => () => void }
 
@@ -96,12 +97,20 @@ export const zoomSync = pref<boolean>('atlas.chart.zoomSync', true)
 export const savedRanges = pref<Record<string, Partial<Record<'y' | 'y2' | 'y3' | 'y4' | 'y5', [number, number] | null>>>>('atlas.chart.ranges', {})
 /** Основной интервал делений осей по графикам (ключ как у savedRanges): ось → шаг. */
 export const savedSteps = pref<Record<string, Partial<Record<'x' | 'y' | 'y2' | 'y3' | 'y4' | 'y5', { n: number; unit: 'num' | 'year' | 'month' | 'week' | 'day' }>>>>('atlas.chart.steps', {})
-/** Личный вид рядов («Настройка») — общий для всех графиков: ключ ряда (группа или имя и вид) → вид. Помнится между запусками.
- *  Раньше вид хранился по графикам (ключ — заголовок), поэтому смена набора скважин его теряла: при первом запуске переносится. */
-export const seriesLooks = pref<Record<string, Look>>('atlas.series.looks', legacyLooks())
-function legacyLooks(): Record<string, Look> {
+/** Вид рядов («Настройка») — общий для всех графиков проекта: ключ ряда (группа или имя и вид) → вид. Хранится в проекте
+ *  (тема оформления, ``settings.chart_formats.theme.series``): сюда его кладёт и отсюда сохраняет ``useProjectLooks``. */
+export const seriesLooks = pref<Record<string, Look>>('', {})
+/** Оформление открытого проекта (settings.chart_formats): тема и типы графиков. Вид рядов темы — в seriesLooks (правится вживую). */
+export const projectFormats = pref<FormatStore>('', {})
+/** Общий шрифт графиков проекта (settings.chart_font): times — по умолчанию, base — шрифт приложения, arial_narrow. */
+export const chartFont = pref<string>('', 'times')
+/** Уровень, на который панель «Формат» пишет оформление графика и осей: раздел или весь проект. */
+export const formatScope = pref<'type' | 'project'>('atlas.format.scope', 'type')
+/** Вид рядов, который раньше хранился в браузере (до хранения в проекте): переносится в проекты без своего оформления. */
+export function browserLooks(): Record<string, Look> {
   try {
-    if (localStorage.getItem('atlas.series.looks') !== null) return {}
+    const raw = localStorage.getItem('atlas.series.looks')
+    if (raw !== null) return JSON.parse(raw) as Record<string, Look>
     const old = JSON.parse(localStorage.getItem('atlas.chart.looks') ?? '{}') as Record<string, Record<string, Look>>
     return Object.assign({}, ...Object.values(old))
   } catch { return {} }
