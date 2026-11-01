@@ -77,7 +77,7 @@ function QcPanel({ report, moduleId }: { report: QcReport; moduleId: string }) {
             {l ? `${l} (${report.counts[l] ?? 0})` : 'все'}
           </button>
         ))}
-        <a className="quiet" href={checkUrl(report.id, 'xlsx')}>Excel</a>
+        <a className="quiet" href={checkUrl(report.id, 'xlsx')} download>Excel</a>
       </div>
       {report.checked.length > 0 && <p className="muted out-dir">Просмотрено: {report.checked.join('; ')}</p>}
       {wf.node}
@@ -244,7 +244,7 @@ export default function ModulePage({ module }: { module: ModuleInfo }) {
             <table className="data-grid">
               <thead><tr><th>Файл результата</th><th className="number">Размер</th></tr></thead>
               <tbody>{job.files.map(f => (
-                <tr key={f}><td><a href={fileUrl(job.id, f)}>{f}</a></td><td className="number">{size(job.sizes?.[f] ?? 0)}</td></tr>
+                <tr key={f}><td><a href={fileUrl(job.id, f)} download>{f}</a></td><td className="number">{size(job.sizes?.[f] ?? 0)}</td></tr>
               ))}</tbody>
             </table>
           )}

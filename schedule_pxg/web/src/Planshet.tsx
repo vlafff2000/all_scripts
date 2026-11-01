@@ -1,3 +1,4 @@
+import { saveBlobAs } from '../../../pxg_core/web-ui/desktopDownload'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MultiSelect } from '../../../pxg_core/web-ui/MultiSelect'
 import '../../../pxg_core/web-ui/multiselect.css'
@@ -181,7 +182,7 @@ function savePng(box: HTMLElement | null, name: string) {
     const img = new Image(); const px = x
     img.onload = () => {
       ctx.drawImage(img, px, 0, i.w, i.h)
-      if (--left === 0) canvas.toBlob(b => { if (!b) return; const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name + '.png'; a.click(); URL.revokeObjectURL(a.href) })
+      if (--left === 0) canvas.toBlob(b => { if (b) saveBlobAs(b, name + '.png').catch(() => undefined) })
     }
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(i.xml.includes('xmlns=') ? i.xml : i.xml.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"'))
     x += i.w + gap

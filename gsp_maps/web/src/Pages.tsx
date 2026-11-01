@@ -188,7 +188,7 @@ export function DataPage({ app, setApp, mode, setMode, gsp, onReload }: { app: A
       <section className="card">
         <h2>Выгрузка</h2>
         <div className="actions">
-          <button type="button" className="quiet" disabled={busy || !gsp} onClick={() => run(async () => { const r = await exportExcel(gsp, mode); setMsg({ ok: true, text: 'Сохранено: ' + r.path }) })}>Excel по {gsp || 'ГСП'}</button>
+          <button type="button" className="quiet" disabled={busy || !gsp} onClick={() => run(async () => { const r = await exportExcel(gsp, mode); setMsg({ ok: true, text: r.path ? 'Сохранено: ' + r.path : 'Сохранение отменено.' }) })}>Excel по {gsp || 'ГСП'}</button>
           <button type="button" className="quiet" onClick={() => run(async () => { await openFolder() })}>Открыть папку результатов</button>
         </div>
         <p className="muted">В Excel: итоги сезонов отбора и закачки по скважинам, тренды, вода, давление, положения и глубины. PNG карты сохраняется кнопкой на странице «Карта».</p>

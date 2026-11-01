@@ -1,4 +1,5 @@
 import { viewGsp, viewSeason, viewSummary, viewWork, mergeAll } from './wellView'
+import { saveUrlAs } from '../../../pxg_core/web-ui/desktopDownload'
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 import { colorOfGroup, groupColors } from '../../../pxg_core/web-ui/groupColors'
 import type { GisModelWells, GisVariants } from './allWells'
@@ -116,12 +117,15 @@ export const getSeason = async (gsp: string, kind: string, season: string): Prom
   if (isMulti(gsp)) return mergeSeason((await Promise.all(groupsOf(gsp).map(n => getSeason(n, kind, season)))).filter(d => d.wells.length))
   return viewSeason(await call<SeasonData>('/api/season?gsp=' + encodeURIComponent(gsp) + '&kind=' + encodeURIComponent(kind) + '&season=' + encodeURIComponent(season)), gsp)
 }
-export const exportExcel = (gsp: string, mode: string) => call<{ name: string; path: string }>('/api/export', post({ gsp, mode }))
+/** Excel собирается на сервере, дальше инженер сам выбирает место в проводнике «Сохранить как»; path пустой — отмена. */
+export const exportExcel = async (gsp: string, mode: string) => {
+  const made = await call<{ name: string; path: string }>('/api/export', post({ gsp, mode }))
+  const path = await saveUrlAs('/api/files/' + encodeURIComponent(made.name), made.name)
+  return { name: made.name, path: path ?? '' }
+}
 // Свой проводник вместо окна Tk; пустой путь — отмена, несколько файлов — по пути на строку.
 export const pickPath = async (kind: 'file' | 'folder' | 'files', start: string) => ({ path: (await openFilePicker({ start, mode: kind })) || '' })
 export const openFolder = () => call<{ ok: boolean }>('/api/open-folder', post({}))
-export const saveImage = (name: string, blob: Blob) =>
-  call<{ name: string; path: string }>('/api/image?name=' + encodeURIComponent(name), { method: 'POST', body: blob })
 
 export interface WorkSeason { kind: 'Отбор' | 'Закачка'; key: string; total: number[]; days: number[]; first: number[]; idle: number[]; start: number; end: number }
 export interface WorkData { wells: number[]; seasons: WorkSeason[]; months: number[]; monthFlow: number[][]; monthDays: number[][]; monthWater: number[][] }
