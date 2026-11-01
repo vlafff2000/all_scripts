@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from pxg_core import fs_browse, runlog, table_export, well_presets, workspace_api
+from pxg_core import fs_browse, resources, runlog, table_export, well_presets, workspace_api
 import subprocess
 import sys
 from pathlib import Path
@@ -238,6 +238,7 @@ def build_app() -> Starlette:
     runlog.setup("Работа с исходными данными")
     routes = [
         *runlog.routes(),
+        *resources.routes(),
         second_window_route(),
         Route("/api/modules", modules),
         Route("/api/jobs", start_job, methods=["POST"]),

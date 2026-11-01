@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import os
 
-from pxg_core import fs_browse, group_colors, runlog, table_export, well_presets
+from pxg_core import fs_browse, group_colors, resources, runlog, table_export, well_presets
 from tnav_results import catalog as tnav_catalog
 import subprocess
 import sys
@@ -439,6 +439,7 @@ def build_app() -> Starlette:
     runlog.setup("Карты")
     routes = [
         *runlog.routes(),
+        *resources.routes(),
         window.second_window_route(),
         Route("/api/state", state),
         Route("/api/config", config, methods=["POST"]),

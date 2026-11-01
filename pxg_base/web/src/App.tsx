@@ -1,4 +1,5 @@
 import { WorkspacePanel } from './WorkspacePanel'
+import { ResourceBadge } from '../../../pxg_core/web-ui/ResourceBadge'
 import { Icon } from '../../../pxg_core/web-ui/Icon'
 import { useEffect, useMemo, useState } from 'react'
 import { getModules, type ModuleInfo } from './api'
@@ -127,6 +128,7 @@ export default function App() {
             </button>
           ))}
         </div>
+        <ResourceBadge />
       </aside>
       <Search modules={modules} open={search} onClose={() => setSearch(false)} />
       <main className="workspace">

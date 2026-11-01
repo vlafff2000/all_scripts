@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ResourceBadge } from '../../../pxg_core/web-ui/ResourceBadge'
 import { Icon } from '../../../pxg_core/web-ui/Icon'
 import { GroupColorsButton } from '../../../pxg_core/web-ui/GroupColorsButton'
 import { refreshBackground } from './background'
@@ -478,6 +479,7 @@ export default function App() {
               <Icon name={t === 'light' ? 'sun' : t === 'dark' ? 'moon' : 'screen'} />
               <span className="side-label">{label}</span></button>))}
         </div>
+        <ResourceBadge />
       </aside>
       <main className={'workspace' + (page === 'map' || page === 'compare' ? ' wide' : '')}>
         {showBar && (
