@@ -16,6 +16,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from pxg_core import xlsx_cache
+
 OTBOR, ZAKACHKA = 0, 1
 KIND_NAMES = {OTBOR: "Отбор", ZAKACHKA: "Закачка"}
 KIND_BY_NAME = {"Отбор": OTBOR, "Закачка": ZAKACHKA}
@@ -43,10 +45,12 @@ def _cache_path(path: str) -> Path:
 
 
 def _read_sheet(path: str, sheet: str) -> pd.DataFrame:
-    try:
-        return pd.read_excel(path, sheet_name=sheet, engine="calamine")
-    except Exception:
-        return pd.read_excel(path, sheet_name=sheet)
+    def read(p: str, **kw) -> pd.DataFrame:
+        try:
+            return pd.read_excel(p, engine="calamine", **kw)
+        except Exception:
+            return pd.read_excel(p, **kw)
+    return xlsx_cache.read_cached(path, read, sheet_name=sheet)     # большая книга: копия в Parquet, главный файл — xlsx
 
 
 def _sheet_names(path: str) -> List[str]:

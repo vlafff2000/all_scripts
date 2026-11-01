@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
+from pxg_core import xlsx_cache
+
 
 def normalize_sheet_name(sheet_name):
     """
@@ -302,7 +304,7 @@ def _read_raw(file_path, engines, **kwargs):
     last = None
     for engine in engines:
         try:
-            return pd.read_excel(file_path, engine=engine, **kwargs)
+            return xlsx_cache.read_cached(file_path, lambda p, **kw: pd.read_excel(p, engine=engine, **kw), **kwargs)
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as e:  # noqa: B036  calamine паникует (PanicException) на некоторых .xls
