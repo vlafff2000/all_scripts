@@ -51,6 +51,9 @@ def compare(model: Dict[str, dict], file_values: Dict[str, float], field: str = 
     return out
 
 
+BIG_FILE = 30 * 1024 * 1024
+
+
 def inventory(path: str) -> dict:
     """Опись входных файлов модели: какие файлы подключены (.data и дерево INCLUDE/IMPORT) и какие ключевые слова в них встречаются.
 
@@ -76,6 +79,17 @@ def inventory(path: str) -> dict:
         files.append(entry)
         try:
             entry["size"] = os.path.getsize(ap)
+            if entry["size"] > BIG_FILE:      # сетка и кубы на сотни МБ: только строки из одного слова, без разбора записей
+                entry["big"] = True
+                with open(ap, "r", encoding="utf-8", errors="replace") as f:
+                    for ln, raw in enumerate(f, 1):
+                        w = raw.strip()
+                        if 3 <= len(w) <= 24 and P._WORD.match(w) and w.isupper():
+                            d = kws.setdefault(w, {"count": 0, "files": []})
+                            d["count"] += 1
+                            if entry["name"] not in d["files"]:
+                                d["files"].append(entry["name"])
+                return
             with open(ap, "r", encoding="utf-8", errors="replace") as f:
                 text = f.read()
         except OSError as e:
