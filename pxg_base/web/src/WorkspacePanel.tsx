@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
+import { UndoButtons, useUndo } from '../../../pxg_core/web-ui/useUndo'
 import { getWorkspace, setWorkspaceProject, addReadyFiles, type WorkspaceState } from './api'
 
 const STATUS_LABEL: Record<string, string> = { copied: 'скопирован', exists: 'уже есть, не заменён', missing: 'не найден', error: 'ошибка' }
@@ -10,6 +11,7 @@ export function WorkspacePanel() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const undo = useUndo({ onNotice: setMessage })
 
   useEffect(() => {
     getWorkspace().then(setState).catch(e => setError(String(e.message || e)))
@@ -26,7 +28,14 @@ export function WorkspacePanel() {
     let chosen: string | null = null
     try { chosen = await openFilePicker({ mode: 'folder', start: state?.project || undefined, title: 'Папка проекта' }) }
     catch (e) { setError(String((e as Error).message || e)); return }
-    if (chosen) await run(() => setWorkspaceProject(chosen!), 'Папка проекта выбрана.')
+    if (!chosen) return
+    const before = state?.project ?? ''
+    await run(() => setWorkspaceProject(chosen!), 'Папка проекта выбрана.')
+    if (before) undo.push({
+      label: 'смена папки проекта',
+      undo: async () => { setState(await setWorkspaceProject(before)) },
+      redo: async () => { setState(await setWorkspaceProject(chosen!)) },
+    })
   }
 
   const addFiles = async () => {
@@ -53,6 +62,7 @@ export function WorkspacePanel() {
       {state && <div className="folder-row">
         <span className="muted">{state.project || 'Проект не выбран'}</span>
         <button type="button" onClick={chooseProject} disabled={busy}>{state.project ? 'Сменить папку' : 'Выбрать папку проекта'}</button>
+        <UndoButtons undo={undo} />
         {state.project && <button type="button" className="quiet" onClick={addFiles} disabled={busy}>Добавить файлы в «готовые»…</button>}
       </div>}
       {error && <div className="note warning">{error}</div>}

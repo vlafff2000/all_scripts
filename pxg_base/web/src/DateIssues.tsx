@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { UndoButtons, useUndo, useUndoValue } from '../../../pxg_core/web-ui/useUndo'
 import { getDateIssues, saveDateFixes, type DateIssue } from './api'
 
 const key = (i: DateIssue) => `${i.Файл}|${i.Лист}|${i.Ячейка}`
@@ -11,6 +12,8 @@ export default function DateIssues({ jobId, onRerun }: { jobId: string; onRerun:
   const [open, setOpen] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const undo = useUndo()
+  useUndoValue(pick, setPick, undo, 'решение по датам', jobId)
 
   useEffect(() => { getDateIssues(jobId).then(setIssues).catch(e => setError(e.message)) }, [jobId])
 
@@ -34,7 +37,7 @@ export default function DateIssues({ jobId, onRerun }: { jobId: string; onRerun:
 
   return (
     <section className="card date-issues">
-      <h3>Подозрительные даты: {issues.length}</h3>
+      <h3>Подозрительные даты: {issues.length} <UndoButtons undo={undo} /></h3>
       <p className="muted">В заголовках листов найдены даты, которые не подходят по году или месяцу. Эти столбцы в базу не попали либо исправлены
         автоматически (если соседние даты шли подряд). Выберите, что сделать, и пересоберите базу.</p>
       {groups.map(([k, items]) => {
