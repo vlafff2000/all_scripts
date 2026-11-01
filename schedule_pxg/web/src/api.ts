@@ -1,3 +1,4 @@
+import { saveBlobAs } from '../../../pxg_core/web-ui/desktopDownload'
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 export interface Template {
   name: string; sheet: string | number | null; header_row: number
@@ -142,9 +143,7 @@ async function fetchFile(url: string, b: object): Promise<Response> {
 }
 async function download(url: string, b: object, fallback: string) {
   const r = await fetchFile(url, b)
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(await r.blob()); a.download = fallback; a.click()
-  URL.revokeObjectURL(a.href)
+  await saveBlobAs(await r.blob(), fallback)
 }
 export const downloadHistorySchedule = (b: HistoryBody) => download('/api/history/schedule', b, 'schedule_history.inc')
 export const downloadHistoryResidual = (b: HistoryBody) => download('/api/history/residual', b, 'residual_by_day.csv')
@@ -324,9 +323,7 @@ function reasonsOf(r: Response): AdaptExportError[] {
 }
 /** Скачивание файла из ответа и итоги: число графиков, число неудачных исследований, их причины. */
 async function saveResponse(r: Response, name: string) {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click()
-  URL.revokeObjectURL(a.href)
+  await saveBlobAs(await r.blob(), name)
   return { count: Number(r.headers.get('X-Charts-Count') || 0), errors: Number(r.headers.get('X-Charts-Errors') || 0), reasons: reasonsOf(r) }
 }
 /** Макет Word: плоский словарь Layout (pxg_core/word_export.py). Значения, пределы и умолчания приходят с сервера. */

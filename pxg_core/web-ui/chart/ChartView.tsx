@@ -1639,7 +1639,7 @@ export function ChartView({ chart: given, module, format, compact, excludeMode, 
           {onCopy && <CopyButton onCopy={() => onCopy(screenView())} />}
           {onDownload ? <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} screen={{ name: chart.title, file: screenFile }} /> : <button type="button" className="quiet small" title="Сохранить график как PNG"
             onClick={() => { const url = instance.current?.getDataURL({ pixelRatio: 2, backgroundColor: state.current.tokens?.surface }); if (!url) return
-              const a = document.createElement('a'); a.href = url; a.download = (chart.title || 'график') + '.png'; a.click() }}>PNG</button>}
+              fetch(url).then(r => r.blob()).then(b => saveFileWithPicker(b, (chart.title || 'график') + '.png')).catch(() => undefined) }}>PNG</button>}
         </span>
       </figcaption>
       {settings && createPortal(format ? (

@@ -1,3 +1,4 @@
+import { saveBlobAs } from '../../../pxg_core/web-ui/desktopDownload'
 import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
 import HistModel from './HistModel'
@@ -106,8 +107,7 @@ export default function Results() {
     setRpText(r.text); setRpName((rpPath.split(/[\\/]/).pop() || 'расчёт').replace(/\.[^.]*$/, '') + (kind === 'model' ? '_model.txt' : '_keywords.txt'))
   })
   const rpSave = () => {
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([rpText + '\n'], { type: 'text/plain;charset=utf-8' })); a.download = rpName; a.click(); URL.revokeObjectURL(a.href)
+    saveBlobAs(new Blob([rpText + '\n'], { type: 'text/plain;charset=utf-8' }), rpName).catch(() => undefined)
   }
 
   const shown = chosen.filter(n => ind[n])

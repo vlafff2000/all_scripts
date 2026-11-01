@@ -154,7 +154,7 @@ export default function Scenarios({ st, setSt }: { st: AppState; setSt: (s: AppS
           </div>
           <div className="row sc-actions">
             <button className="primary" disabled={busy || cal.length === 0 || calDirty} onClick={run}>Сшить сезоны и проверить</button>
-            {build && build.steps > 0 && <a href={scheduleUrl(sel)}><button>Скачать schedule.inc</button></a>}
+            {build && build.steps > 0 && <a href={scheduleUrl(sel)} download><button>Скачать schedule.inc</button></a>}
             <button className="danger sc-end" disabled={busy || view.children.length > 0} title={view.children.length ? 'Сначала удалите ветви' : ''} onClick={remove}>Удалить сценарий</button>
           </div>
           {build && <>

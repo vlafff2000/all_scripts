@@ -3,7 +3,7 @@ import { Icon } from '../../../pxg_core/web-ui/Icon'
 import { GroupColorsButton } from '../../../pxg_core/web-ui/GroupColorsButton'
 import { refreshBackground } from './background'
 import { refreshPolygons } from './polygons'
-import { exportExcel, getGsp, getGis, getObservers, type Observers, getGisModel, getGisModelWells, getGisModelWellsVariants, getRoof, reportIssue, type RoofGrid, getGisValues, type GisModel, getParam, getParams, getGdiCatalog, getGdiValues, type GdiCatalog, type GdiValues, type GisCatalog, type GisValues, getSeason, getState, setSeasonKind, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, saveImage, setAllGroups, groupColor, ALL_GSP, type AppState, type GspData } from './api'
+import { exportExcel, getGsp, getGis, getObservers, type Observers, getGisModel, getGisModelWells, getGisModelWellsVariants, getRoof, reportIssue, type RoofGrid, getGisValues, type GisModel, getParam, getParams, getGdiCatalog, getGdiValues, type GdiCatalog, type GdiValues, type GisCatalog, type GisValues, getSeason, getState, setSeasonKind, getModels, getModelKeywords, getModelValues, selectModels, setModelFolders, pickPath, type ModelKeyword, type ModelsView, type ModelValues, type ParamItem, type ParamValues, groupsOf, locateWell, isMulti, nameOf, setAllGroups, groupColor, ALL_GSP, type AppState, type GspData } from './api'
 import Compare from './Compare'
 import Inspector from './Inspector'
 import SideGrip from './SideGrip'
@@ -19,6 +19,8 @@ import Timeline from './Timeline'
 import { WellFilter, useWellFilter } from '../../../pxg_core/web-ui/WellFilter'
 import { setWellView } from './wellView'
 import { useShared } from '../../../pxg_core/web-ui/windows'
+import { saveBlobAs, saveBlobToFolder } from '../../../pxg_core/web-ui/desktopDownload'
+import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 import { WindowButtons } from '../../../pxg_core/web-ui/WindowButtons'
 
 const PAGES = [
@@ -381,18 +383,19 @@ export default function App() {
     try {
       const blob = await map.current!.toPng()
       const name = `Карта_${gsp.replace(/\s/g, '_')}_${kind}_${season}.png`
-      try { const r = await saveImage(name, blob); flash('Картинка сохранена: ' + r.path) } catch {
-        const u = URL.createObjectURL(blob), el = document.createElement('a'); el.href = u; el.download = name; el.click(); URL.revokeObjectURL(u)
-      }
+      const saved = await saveBlobAs(blob, name)
+      flash(saved ? 'Картинка сохранена: ' + saved : 'Сохранение отменено')
     } catch (e) { flash(String((e as Error).message || e)) }
   }
-  const savePng = async (name: string) => {
-    const blob = await map.current!.toPng()
-    try { await saveImage(name, blob) } catch {
-      const u = URL.createObjectURL(blob), el = document.createElement('a'); el.href = u; el.download = name; el.click(); URL.revokeObjectURL(u)
-    }
+  const [batchDir, setBatchDir] = useState('')
+  const savePng = async (name: string) => { await saveBlobToFolder(await map.current!.toPng(), batchDir, name) }
+  // папку для всех картинок инженер выбирает один раз в нашем проводнике
+  const pngAll = async () => {
+    if (!seasons.length) return
+    const dir = await openFilePicker({ mode: 'folder', title: 'Папка для картинок всех сезонов' })
+    if (!dir) return
+    setBatchDir(dir); setBatch({ keys: seasons.map(s => s.key), i: 0 })
   }
-  const pngAll = () => { if (seasons.length) setBatch({ keys: seasons.map(s => s.key), i: 0 }) }
   useEffect(() => {
     if (!batch) return
     const key = batch.keys[batch.i]
@@ -403,7 +406,7 @@ export default function App() {
       try { await savePng(`Карта_${gsp.replace(/\s/g, '_')}_${kind}_${key}.png`) } catch (e) { if (live) { flash(String((e as Error).message || e)); setBatch(null) } return }
       if (!live) return
       if (batch.i + 1 < batch.keys.length) setBatch({ keys: batch.keys, i: batch.i + 1 })
-      else { setBatch(null); flash(`Сохранено картинок: ${batch.keys.length} (папка результатов)`) }
+      else { setBatch(null); flash(`Сохранено картинок: ${batch.keys.length} (${batchDir})`) }
     }, 400)
     return () => { live = false; clearTimeout(t) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -412,7 +415,7 @@ export default function App() {
   const groupRef = useRef<HTMLDetailsElement>(null)
   const excel = async () => {
     if (wholeField) { flash('Excel считается по одному ГСП: выберите ГСП вверху'); return }
-    try { const r = await exportExcel(gsp, mode); flash('Excel сохранён: ' + r.path) } catch (e) { flash(String((e as Error).message || e)) } }
+    try { const r = await exportExcel(gsp, mode); flash(r.path ? 'Excel сохранён: ' + r.path : 'Сохранение отменено') } catch (e) { flash(String((e as Error).message || e)) } }
   const goFind = (v: string) => {
     setFind(v)
     const n = Number(v)
