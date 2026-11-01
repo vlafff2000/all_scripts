@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/RichField.tsx @ 37f2840. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/RichField.tsx @ 9c7fe1f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ClipboardEvent } from 'react'
 import { parseRich, richFromSegs, type RichSeg } from './richText'
 
