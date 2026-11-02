@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/projectLooks.ts @ 9abe624. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/projectLooks.ts @ 96bb4c4. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Оформление графиков хранится в проекте (settings.chart_formats = {theme, types}, atlas/chart_style.py): одинаково на всех
 // компьютерах, в копиях проекта и в выгрузке. Вид рядов — theme.series («Настройка» ряда), оформление графика и осей — theme
 // (весь проект) или types[модуль] (графики этого раздела). На экране правка видна сразу, в проект пишется с паузой.
