@@ -81,3 +81,17 @@ def test_not_docx_and_check(tmp_path):
     make(p)
     rep = checks.run("Конструкции_из_Word_для_Атласа", {"files": str(p)})
     assert not rep.errors if hasattr(rep, "errors") else True
+
+
+def test_artificial_bottom_is_separate_from_current():
+    """Искусственный забой (пробка) — отдельный элемент конструкции, а не отбитый забой; «Текущий забой» остаётся замером."""
+    from pxg_core import well_construction_word as w
+    snap = w.Snapshot("500", None, "тест")
+    w.parse_construction("Искусственный забой – 790 м\nЗабой – 796 м", snap, w.Result("тест"))
+    names = {e["Элемент"]: e["Низ"] for e in snap.elements}
+    assert names == {"Искусственный забой": 790.0, "Забой": 796.0}
+    note = "Текущий забой – 796,4м. Искусственный забой – 780 м"
+    snap2 = w.Snapshot("500", None, "тест")
+    w.parse_bottom(note, snap2)
+    w.parse_artificial(note, snap2)
+    assert (snap2.bottom, snap2.artificial) == (796.4, 780.0)
