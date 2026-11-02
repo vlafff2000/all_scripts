@@ -111,3 +111,10 @@ def test_artificial_bottom_is_separate_from_current():
     w.parse_bottom(note, snap2)
     w.parse_artificial(note, snap2)
     assert (snap2.bottom, snap2.artificial) == (796.4, 780.0)
+
+
+def test_two_digit_year():
+    """01.01.99 — 1999, 98 — 1998; 05 — 2005, 19 — 2019 (двузначный год больше текущего относится к 1900-м)."""
+    assert wcw.parse_date("01.01.99") == dt.date(1999, 1, 1) and wcw.parse_date("01.01.98 г.") == dt.date(1998, 1, 1)
+    assert wcw.parse_date("15.06.05") == dt.date(2005, 6, 15) and wcw.parse_date("12.04.19") == dt.date(2019, 4, 12)
+    assert wcw.parse_date("01.01.1999") == dt.date(1999, 1, 1) and wcw.parse_date("нет даты") is None
