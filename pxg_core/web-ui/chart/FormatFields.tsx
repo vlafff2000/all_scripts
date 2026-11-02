@@ -1,9 +1,10 @@
-// Копия gas_atlas web/src/FormatFields.tsx @ a869e5f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/FormatFields.tsx @ 44973a1. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Annotation, AxisStyle, ChartStyle } from './chartTypes'
 import { LINE_STYLES, type Look } from './chartStyle'
 import { HEX } from './ChartSettings'
 import { FONT_CHOICES } from './chartTheme'
+import { RichField } from './RichField'
 
 // Общие поля настройки оформления: используются панелью «Формат» на графике (FormatPane) и окнами конструктора.
 // Всё необязательно: пустое поле — авто, в документе оформления его нет.
@@ -157,7 +158,7 @@ export function ChartStyleFields({ value: st, set, title }: Setter<ChartStyle> &
       <fieldset>
         <legend>Заголовок</legend>
         {title}
-        <Text label="Подзаголовок" value={st.subtitle} placeholder="нет" onChange={v => set({ subtitle: v || undefined })} />
+        <RichField label="Подзаголовок" value={st.subtitle} placeholder="нет" onChange={v => set({ subtitle: v || undefined })} />
         <Choice label="Шрифт" value={st.title_font} options={FONT_OPTIONS} onChange={v => set({ title_font: v })} auto="как у графика" />
         <div className="cs-row">
           <Num label="Размер" value={st.title_size} min={6} max={48} onChange={v => set({ title_size: v })} />
@@ -335,7 +336,7 @@ export function SeriesExtraFields({ value: look, set, marker, labels, trend = fa
       </fieldset>}
       <fieldset>
         <legend>Легенда</legend>
-        <Text label="Имя в легенде" value={look.legend_name} placeholder="как у ряда" onChange={v => set({ legend_name: v || undefined })} />
+        <RichField label="Имя в легенде" value={look.legend_name} placeholder="как у ряда" onChange={v => set({ legend_name: v || undefined })} />
       </fieldset>
     </>
   )

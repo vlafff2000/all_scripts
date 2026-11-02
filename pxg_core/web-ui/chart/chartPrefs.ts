@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartPrefs.ts @ a869e5f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartPrefs.ts @ 44973a1. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Общие настройки вида, запоминаются в браузере: подсказка графиков, события на оси, тема, свёрнутые панели.
 import { useSyncExternalStore } from 'react'
 import type { HoverMode } from './chartHover'
