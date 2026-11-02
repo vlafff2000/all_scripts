@@ -60,7 +60,7 @@ def check_construction_word(values: Dict[str, str]) -> Report:
         if not qc.check_path(rep, p, "Перечень скважин", "file"):
             continue
         try:
-            res = wcw.read(p, max_perf=float(text) if text else wcw.DEFAULT_MAX_PERF_DEPTH)
+            res = wcw.read(p, max_perf=float(text) if text else wcw.DEFAULT_MAX_PERF_DEPTH, fix_years=values.get("fix_years", "1") in ("1", "true", "y", "да"))
         except (ValueError, OSError, KeyError) as err:
             rep.error("FILE", "Файл не прочитан: %s" % err, file=p)
             continue
@@ -72,7 +72,7 @@ def check_construction_word(values: Dict[str, str]) -> Report:
 
 
 qc.CODES.update({"LINE": "Строка конструкции не разобрана", "DATE": "Нет даты исследования", "EMPTY": "Нет элементов конструкции",
-                 "BOTTOM": "Нет текущего забоя", "DUP": "Повтор строки"})
+                 "BOTTOM": "Нет текущего забоя", "DUP": "Повтор строки", "YEAR": "Опечатка в годе"})
 
 
 def check_construction_merge(values: Dict[str, str]) -> Report:
