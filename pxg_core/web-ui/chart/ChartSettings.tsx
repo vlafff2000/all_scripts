@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/ChartSettings.tsx @ bbf45db. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/ChartSettings.tsx @ 96bb4c4. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Поля вида ряда (линия, маркеры, прозрачность): общие для панели «Формат» (FormatPane) и окон конструктора.
 import type { Series } from './chartTypes'
 import { LINE_STYLES, MARKER_SHAPES, type Look, type LineStyleName, type MarkerShape } from './chartStyle'
