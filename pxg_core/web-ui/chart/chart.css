@@ -1,4 +1,4 @@
-/* Копия gas_atlas web/src/chart.css @ bdcd034. Не править: tools/sync_charts_from_atlas.py обновляет копию. */
+/* Копия gas_atlas web/src/chart.css @ 86e016f. Не править: tools/sync_charts_from_atlas.py обновляет копию. */
 /* Графики: подсказка, переключатель вида, слой перекрестия. Роли цветов — переменные --chart-*. */
 :root {
   --chart-ink: #1b2a31;

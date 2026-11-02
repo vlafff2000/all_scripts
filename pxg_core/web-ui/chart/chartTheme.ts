@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartTheme.ts @ bdcd034. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartTheme.ts @ 86e016f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Оформление графиков Атласа 6: одна система для всех разделов.
 // Цвета — роли (чернила, сетка, поверхность) из CSS-переменных --chart-*, чтобы тёмная тема меняла их в одном месте.
 

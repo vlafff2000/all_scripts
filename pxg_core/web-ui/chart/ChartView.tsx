@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/ChartView.tsx @ bdcd034. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/ChartView.tsx @ 86e016f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
