@@ -58,7 +58,8 @@ class Snapshot:
     purpose: str = ""
     interval: Tuple[Optional[float], Optional[float]] = (None, None)
     note: str = ""
-    bottom: Optional[float] = None
+    bottom: Optional[float] = None         # текущий (отбитый) забой, м от стола
+    artificial: Optional[float] = None     # искусственный забой (пробка), м от стола; в конструкцию попадает элементом «Искусственный забой»
     raw_cons: str = ""
 
 
@@ -180,10 +181,11 @@ def parse_construction(text: str, snap: Snapshot, res: Result) -> None:
         if m:
             snap.elements.append(el(INTERVALS[m.group(1)], num(m.group(2)), num(m.group(3)), None, line))
             continue
-        m = re.match(r"^забой\s*%s\s*(%s)\s*м?$" % (DASH, NUM), low)
+        m = re.match(r"^(искусственный |текущий )?забой\s*%s\s*(%s)\s*м?$" % (DASH, NUM), low)
         if m:
-            d = num(m.group(1))
-            snap.elements.append(el("Забой", d, d, None, line))
+            d = num(m.group(2))
+            artificial = bool(m.group(1)) and m.group(1).startswith("искусств")
+            snap.elements.append(el("Искусственный забой" if artificial else "Забой", d, d, None, line))
             continue
         if re.match(r"^(расширка|фильтр)\s*%s?\s*$" % DASH, low):
             continue        # элемент назван без глубин
@@ -216,9 +218,16 @@ def parse_interval(text: str, snap: Snapshot) -> None:
 
 
 def parse_bottom(text: str, snap: Snapshot) -> None:
-    m = re.search(r"(?:текущий|искусственный)\s+забой\s*%s?\s*(%s)\s*м" % (DASH, NUM), (text or "").lower())
+    """«Текущий забой – N м» — отбитый забой; «Искусственный забой» — отдельная величина (см. parse_artificial)."""
+    m = re.search(r"текущий\s+забой\s*%s?\s*(%s)\s*м" % (DASH, NUM), (text or "").lower())
     if m:
         snap.bottom = num(m.group(1))
+
+
+def parse_artificial(text: str, snap: Snapshot) -> None:
+    m = re.search(r"искусственный\s+забой\s*%s?\s*(%s)\s*м" % (DASH, NUM), (text or "").lower())
+    if m:
+        snap.artificial = num(m.group(1))
 
 
 # ---------------------------------------------------------------- файл целиком
@@ -256,6 +265,9 @@ def read(path: str, max_perf: Optional[float] = DEFAULT_MAX_PERF_DEPTH) -> Resul
             if "note" in cols:
                 snap.note = cells[cols["note"]].strip()
                 parse_bottom(snap.note, snap)
+                parse_artificial(snap.note, snap)
+                if snap.artificial is not None and not any(e["Элемент"] == "Искусственный забой" for e in snap.elements):
+                    snap.elements.append(el("Искусственный забой", snap.artificial, snap.artificial, None, "из примечания: " + snap.note.strip()))
             if not snap.elements:
                 res.add("предупреждение", "EMPTY", "В строке не найдено ни одного элемента конструкции", well, source)
             keep = []
