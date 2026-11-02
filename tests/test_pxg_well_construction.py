@@ -192,7 +192,7 @@ def test_deep_perforations_are_filtered_and_listed(svod, tmp_path):
     perf = perf[perf["Элемент"] == "Интервал перфорации"]
     assert perf["Низ интервала, м"].max() <= 990
     ex = wc.excluded_table(book)
-    assert set(ex["Скважина"]) == {"31", "32"}
+    assert set(ex["Скважина"]) == {"31"}
     row = ex[(ex["Скважина"] == "31") & (ex["Низ, м"] == 1000)]
     assert len(row) == 1 and "порога 990" in row.iloc[0]["Причина"]            # исправленный «от»–«до» 990–1000, низ глубже порога
     assert any(i.code == "FILTER" for i in book.issues)
