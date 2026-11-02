@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/ChartView.tsx @ 9c7fe1f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/ChartView.tsx @ 9abe624. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
@@ -20,7 +20,7 @@ import { applyFormat, mergeFormats, type ChartFormat } from './chartFormat'
 import { FormatPane, type FormatElement } from './FormatPane'
 import { formatDoc, setFormatDoc, type FormatScope } from './projectLooks'
 import { nextSyncId, pinShared, publish, publishZoom, sharedPins, sharedZoom, subscribe, subscribeZoom, synced, unpinShared } from './chartSync'
-import { saveFileWithPicker } from './desktopDownload'
+import { saveFileWithPicker } from '../desktopDownload'
 import './chart.css'
 
 echarts.use([BarChart, BoxplotChart, LineChart, ScatterChart, GridComponent, LegendComponent, ToolboxComponent, TooltipComponent,
@@ -1956,13 +1956,15 @@ export function CopyButton({ onCopy }: { onCopy: () => Promise<Blob> }) {
   )
 }
 
-export function DownloadMenu({ onDownload, screen }: {
+export function DownloadMenu({ onDownload, screen, screenOnly }: {
   onDownload: (format: string, dpi: number) => Promise<void>
   /** Пилот: файл, который рисует сам экранный график (ECharts), без Matplotlib. */
   screen?: { name: string; file: (kind: 'png' | 'svg', dpi: number) => Promise<Blob> }
+  /** Только файлы, которые рисует экран (схема скважины, планшет): серверных форматов у такого рисунка нет. */
+  screenOnly?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const [format, setFormat] = useState('svg')
+  const [format, setFormat] = useState(screenOnly ? 'screen-png' : 'svg')
   const [dpi, setDpi] = useState(300)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState('')
@@ -1990,8 +1992,9 @@ export function DownloadMenu({ onDownload, screen }: {
         <div className="popover right">
           <label className="inline-field">Формат
             <select value={format} onChange={e => setFormat(e.target.value)}>
-              <option value="svg">SVG</option><option value="pdf">PDF</option><option value="png">PNG</option><option value="xlsx">XLSX (график и данные)</option>
-              {screen && <optgroup label="Как на экране (ECharts)"><option value="screen-svg">SVG как на экране</option><option value="screen-png">PNG как на экране</option></optgroup>}
+              {!screenOnly && <><option value="svg">SVG</option><option value="pdf">PDF</option><option value="png">PNG</option><option value="xlsx">XLSX (график и данные)</option></>}
+              {screen && screenOnly && <><option value="screen-png">PNG</option><option value="screen-svg">SVG</option></>}
+              {screen && !screenOnly && <optgroup label="Как на экране (ECharts)"><option value="screen-svg">SVG как на экране</option><option value="screen-png">PNG как на экране</option></optgroup>}
             </select>
           </label>
           {format !== 'xlsx' && format !== 'screen-svg' && <label className="inline-field">DPI

@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/format.ts @ 9c7fe1f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/format.ts @ 9abe624. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 const cache = new Map<string, Intl.NumberFormat>()
 function numberFormat(decimals: number | null) {
   const key = String(decimals)

@@ -15,7 +15,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 DEST = HERE / "pxg_core" / "web-ui" / "chart"
-FILES = ["ChartView.tsx", "ChartSettings.tsx", "chartStyle.ts", "chartHover.ts", "chartTheme.ts", "chartAxes.ts", "chartPrefs.ts", "chartSync.ts", "chart.css", "richText.ts", "RichField.tsx"]
+FILES = ["ChartView.tsx", "ChartSettings.tsx", "chartStyle.ts", "chartHover.ts", "chartTheme.ts", "chartAxes.ts", "chartPrefs.ts", "chartSync.ts", "chart.css", "richText.ts", "RichField.tsx",
+         "chartFormat.ts", "trend.ts", "FormatFields.tsx", "FormatPane.tsx", "BuilderDialogs.tsx", "builder.css", "projectLooks.ts"]
 
 # (файл, что заменить, на что): без серверного рендера кнопка «Скачать» заменяется сохранением PNG из ECharts
 PATCHES = [
@@ -24,6 +25,12 @@ PATCHES = [
     ("ChartSettings.tsx", "from './api'", "from './chartTypes'"),
     ("chartStyle.ts", "from './api'", "from './chartTypes'"),
     ("chartAxes.ts", "from './api'", "from './chartTypes'"),
+    ("chartFormat.ts", "from './api'", "from './chartTypes'"),
+    ("trend.ts", "from './api'", "from './chartTypes'"),
+    ("FormatFields.tsx", "from './api'", "from './chartTypes'"),
+    ("FormatPane.tsx", "from './api'", "from './chartTypes'"),
+    ("BuilderDialogs.tsx", "from './api'", "from './chartTypes'"),
+    ("ChartView.tsx", "from './desktopDownload'", "from '../desktopDownload'"),      # saveFileWithPicker лежит в общем ядре на уровень выше
     ("ChartView.tsx", "  onDownload: (format: string, dpi: number, view: ChartExportView) => Promise<void>\n",
      "  onDownload?: (format: string, dpi: number, view: ChartExportView) => Promise<void>\n"),
     ("ChartView.tsx", "          <DownloadMenu onDownload={(format, dpi) => onDownload(format, dpi, screenView())} screen={{ name: chart.title, file: screenFile }} />\n",
@@ -51,6 +58,19 @@ def gen_format(text: str) -> str:
     return text[:i].rstrip() + "\n" + text[j:]
 
 
+def gen_looks(text: str) -> str:
+    """projectLooks.ts без useProjectLooks: запись в проект (api.saveSettings) есть только в Атласе, Карты и ГДМ оформление не сохраняют."""
+    text = text.replace("import { useEffect } from 'react'\nimport { api, type Project } from './api'\n", "")
+    i = text.index("/** Подключает оформление открытого проекта")
+    text = text[:i].rstrip() + "\n"
+    text = re.sub(r"^const SAVE_DELAY = .*\n\n?", "", text, flags=re.M)
+    text = re.sub(r"^const saved = new Map.*\n\n?", "", text, flags=re.M)
+    a = text.index("/** Что записать в проект")
+    b = text.index("/** Документ оформления")
+    text = text[:a] + text[b:]
+    return text.replace("import { browserLooks, chartFont, projectFormats, seriesLooks } from './chartPrefs'", "import { projectFormats } from './chartPrefs'")
+
+
 def sha(src: Path) -> str:
     try:
         return subprocess.check_output(["git", "-C", str(src), "rev-parse", "--short", "HEAD"], text=True).strip()
@@ -73,6 +93,8 @@ def main() -> int:
             text = gen_types((src / "api.ts").read_text(encoding="utf-8"))
         elif name == "format.ts":
             text = gen_format((src / "format.ts").read_text(encoding="utf-8"))
+        elif name == "projectLooks.ts":
+            text = gen_looks((src / name).read_text(encoding="utf-8"))
         else:
             text = (src / name).read_text(encoding="utf-8")
         for f, a, b in PATCHES:
