@@ -67,10 +67,11 @@ def test_threshold_off_and_export(tmp_path):
     make(p)
     res = wcw.read(str(p), max_perf=0)
     assert not res.excluded
-    out = wcw.export(res, str(tmp_path))
-    sheets = pd.read_excel(out, sheet_name=None)
-    assert {"Конструкция", "Замеры забоя", "Методы исследований", "Скважины", "Ресурс", "Изменения", "Исключено", "Проверка"} <= set(sheets)
-    assert list(sheets["Замеры забоя"].columns)[:3] == ["Скважина", "Дата", "Текущий забой, м"]
+    atlas, report = wcw.export(res, str(tmp_path))
+    a_sheets = pd.read_excel(atlas, sheet_name=None)
+    assert set(a_sheets) == {"Конструкция", "Замеры забоя"} and "Ресурс" in a_sheets["Конструкция"].columns
+    assert {"Методы исследований", "Скважины", "Ресурс", "Изменения", "Исключено", "Проверка"} == set(pd.read_excel(report, sheet_name=None))
+    assert list(a_sheets["Замеры забоя"].columns)[:3] == ["Скважина", "Дата", "Текущий забой, м"]
 
 
 def test_not_docx_and_check(tmp_path):

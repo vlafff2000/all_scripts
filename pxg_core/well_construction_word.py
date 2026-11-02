@@ -19,10 +19,11 @@ import pandas as pd
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 DEFAULT_MAX_PERF_DEPTH = 950.0
-OUT_FILE = "Конструкции_из_Word_для_Атласа.xlsx"
+OUT_FILE = "Конструкции_из_Word_для_Атласа.xlsx"        # то, что загружается в Атлас: листы «Конструкция» и «Замеры забоя»
+REPORT_FILE = "Конструкции_из_Word_разбор.xlsx"          # разбор для инженера: методы, скважины, изменения, исключено, проверка (Атлас их не читает)
 
 CONS_COLUMNS = ["Скважина", "Дата конструкции", "Элемент", "Верх интервала, м", "Низ интервала, м", "Наружный диаметр, мм",
-                "Внутренний диаметр, мм", "Комментарий", "Комплект", "Ресурс", "Источник"]
+                "Внутренний диаметр, мм", "Комментарий", "Комплект", "Ресурс", "Строка перечня"]
 BOTTOM_COLUMNS = ["Скважина", "Дата", "Текущий забой, м", "Диаметр шаблона, мм", "Метод замера", "Комментарий"]
 METHOD_COLUMNS = ["Скважина", "Дата", "Методы", "Цель", "Интервал от, м", "Интервал до, м", "Примечание", "Источник"]
 
@@ -358,12 +359,7 @@ def excluded_table(res: Result) -> pd.DataFrame:
     return pd.DataFrame([[e[c] for c in cols] for e in res.excluded], columns=cols)
 
 
-def export(res: Result, out_dir: str) -> str:
-    import os
-    path = os.path.join(out_dir, OUT_FILE)
-    sheets = [("Конструкция", cons_table(res)), ("Замеры забоя", bottom_table(res)), ("Методы исследований", methods_table(res)),
-              ("Скважины", wells_table(res)), ("Ресурс", resource_table(res)), ("Изменения", changes_table(res)),
-              ("Исключено", excluded_table(res)), ("Проверка", issues_table(res))]
+def _write(path: str, sheets) -> None:
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         for name, df in sheets:
             df.to_excel(xw, sheet_name=name, index=False)
@@ -372,4 +368,14 @@ def export(res: Result, out_dir: str) -> str:
             for i, col in enumerate(df.columns, 1):
                 width = max([len(str(col))] + [len(str(v)) for v in df[col].head(200)]) + 2
                 ws.column_dimensions[ws.cell(1, i).column_letter].width = min(width, 60)
-    return path
+
+
+def export(res: Result, out_dir: str) -> List[str]:
+    """Два файла: для загрузки в Атлас («Конструкция», «Замеры забоя» с методами) и разбор для инженера (остальные листы)."""
+    import os
+    atlas = os.path.join(out_dir, OUT_FILE)
+    report = os.path.join(out_dir, REPORT_FILE)
+    _write(atlas, [("Конструкция", cons_table(res)), ("Замеры забоя", bottom_table(res))])
+    _write(report, [("Методы исследований", methods_table(res)), ("Скважины", wells_table(res)), ("Ресурс", resource_table(res)),
+                    ("Изменения", changes_table(res)), ("Исключено", excluded_table(res)), ("Проверка", issues_table(res))])
+    return [atlas, report]
