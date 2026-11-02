@@ -87,7 +87,8 @@ def parse_date(text) -> Optional[dt.date]:
     if not m:
         return None
     d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    y += 2000 if y < 100 else 0
+    if y < 100:             # 01.01.99 — 1999, а не 2099: год больше текущего (по двум цифрам) относится к 1900-м
+        y += 1900 if y > dt.date.today().year % 100 else 2000
     try:
         return dt.date(y, mo, d)
     except ValueError:
