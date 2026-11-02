@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartAxes.ts @ 96bb4c4. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartAxes.ts @ a869e5f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import type { Axis, Chart } from './chartTypes'
 // Ручная правка осей графика: зоны осей, масштаб колесом, сдвиг перетаскиванием, ввод границ.
 /** Шкалы Y по порядку: основная слева, затем правые от графика наружу. */
@@ -31,7 +31,7 @@ export const rightOffset = (index: number) => Math.max(0, index - 1) * Y_BAND
 export type Range = [number, number]
 export interface Rect { x: number; y: number; width: number; height: number }
 
-export const Y_BAND = 72      // ширина полосы подписей одной правой оси Y, пикселей
+export const Y_BAND = 78      // ширина полосы подписей одной правой оси Y, пикселей
 const BELT = 30      // высота полосы подписей оси X под сеткой, пикселей
 
 /** Какая ось под курсором: подписи слева — Y, справа — вторая шкала, под сеткой — X. */
