@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartStyle.ts @ 44973a1. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartStyle.ts @ 9497bc6. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Вид рядов графика (окно «Настройка»): цвет, линия, маркеры. Хранится в проекте (projectLooks.ts); данные и расчёт не меняются.
 import type { Chart, Series } from './chartTypes'
 
@@ -19,7 +19,7 @@ export interface Look {
   valueLabels?: boolean   // подписи значений над столбцами (целые, Times New Roman)
   // модель v2 (atlas/chart_style.py): граница маркера, полый маркер, подписи данных, имя в легенде
   marker_border?: string; marker_border_width?: number; hollow?: boolean
-  label_position?: 'top' | 'bottom' | 'left' | 'right' | 'inside' | 'center'; label_decimals?: number; label_size?: number
+  label_position?: 'top' | 'bottom' | 'left' | 'right' | 'inside' | 'center'; label_decimals?: number; label_size?: number; label_angle?: number; label_pick?: string[]
   legend_name?: string
   // линия тренда ряда (web/src/trend.ts, atlas/trend.py)
   trend?: 'linear' | 'poly' | 'log' | 'power' | 'exp' | 'moving'; trend_order?: number; trend_period?: number
