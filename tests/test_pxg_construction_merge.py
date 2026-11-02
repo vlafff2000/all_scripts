@@ -67,3 +67,23 @@ def test_module_two_steps(tmp_path, monkeypatch):
     assert mod.main(["--a", str(a), "--b", str(b), "--decisions", str(tmp_path / "решения.xlsx")]) == 0
     out = pd.read_excel(tmp_path / "Сведённая_конструкция.xlsx")
     assert list(out["Низ интервала, м"]) == [799]
+
+
+def test_dates_differ_latest_of_b_only(tmp_path):
+    """A (свод): дата ничего не значит. B (Word): сравнивается самая свежая конструкция, ранние остаются как есть."""
+    a, b = tmp_path / "a.xlsx", tmp_path / "b.xlsx"
+    book(a, [["500", dt.date(2000, 1, 1), "Фильтр", 785, 795, None], ["500", dt.date(2000, 1, 1), "Пакер", 760, 760, None]])
+    book(b, [["500", dt.date(2013, 5, 29), "Фильтр", 700, 710, None], ["500", dt.date(2016, 6, 10), "Фильтр", 785, 799, None],
+             ["500", dt.date(2016, 6, 10), "Пакер", 760, 760, None]])
+    ra, rb = cm.read_base(str(a)), cm.read_base(str(b))
+    d = cm.compare(ra, rb)
+    assert len(d) == 1 and d.iloc[0]["Расхождение"] == "глубины различаются"                  # 2013 не сравнивается, пакер совпал
+    assert d.iloc[0]["Дата B (самая свежая)"] == pd.Timestamp("2016-06-10")
+    assert d.iloc[0]["B: низ"] == 799 and d.iloc[0]["A: низ"] == 795
+    m, notes = cm.merge(ra, rb, d)
+    old = m[m["Дата конструкции"] == pd.Timestamp("2013-05-29")]
+    assert len(old) == 1 and old.iloc[0]["Верх интервала, м"] == 700 and any("ранние" in n for n in notes)
+    d["Решение"] = "A"
+    m2, _ = cm.merge(ra, rb, d)
+    new = m2[(m2["Дата конструкции"] == pd.Timestamp("2016-06-10")) & (m2["Элемент"] == "Фильтр")]
+    assert list(new["Низ интервала, м"]) == [795]                                          # решение инженера главнее
