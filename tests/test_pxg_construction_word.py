@@ -1,4 +1,5 @@
 """Конструкции из Word для Атласа: снимки по датам, методы, текущий забой, «Ресурс», порог глубины, изменения."""
+import datetime as dt
 import os
 import sys
 
@@ -34,6 +35,8 @@ def make(path):
         ("2", "500", cons("784,0м", "770,0м", "785 – 795м"), "10.06.2016", "ГК, НГК", "0-798,0", "Текущий забой – 798м"),
         ("3", "500", cons("790,0м", "775,0м", "785 – 1195м"), "01.09.2020", "ГК", "0-790", "без забоя"),
         ("4", "512", cons("900,0м", "880,0м", "905 – 915м", resource=False), "15.03.2018", "ГК", "0-910", "Текущий забой – 912м"),
+        ("5", "513", cons("900,0м", "880,0м", "905 – 915м", resource=False), "12.04.2019", "ГК", "0-910", "Текущий забой – 912м"),
+        ("6", "513", cons("900,0м", "880,0м", "905 – 915м", resource=False), "03.11.2091", "ГК", "0-910", "Текущий забой – 912м"),
     ]
     for r in rows:
         cells = t.add_row().cells
@@ -46,7 +49,7 @@ def test_read_and_tables(tmp_path):
     p = tmp_path / "в.docx"
     make(p)
     res = wcw.read(str(p))
-    assert [(s.well, s.date.year) for s in res.snapshots] == [("500", 2013), ("500", 2016), ("500", 2020), ("512", 2018)]
+    assert [(s.well, s.date.year) for s in res.snapshots if s.well != "513"] == [("500", 2013), ("500", 2016), ("500", 2020), ("512", 2018)]
     s0 = res.snapshots[0]
     assert s0.resource and s0.kit == "Ресурс-4" and s0.bottom == 796.4 and s0.methods == ["ГК", "ЛМ"] and "Уточнение" in s0.purpose
     assert not res.snapshots[3].resource
@@ -81,6 +84,19 @@ def test_not_docx_and_check(tmp_path):
     make(p)
     rep = checks.run("Конструкции_из_Word_для_Атласа", {"files": str(p)})
     assert not rep.errors if hasattr(rep, "errors") else True
+
+
+def test_year_typo_fixed_and_reported(tmp_path):
+    p = tmp_path / "в.docx"
+    make(p)
+    res = wcw.read(str(p))
+    fixed = [s for s in res.snapshots if s.well == "513"]
+    assert sorted(s.date for s in fixed) == [dt.date(2019, 4, 12), dt.date(2019, 11, 3)]          # 2091 → 2019
+    warn = [i for i in res.issues if i.code == "YEAR"]
+    assert len(warn) == 1 and "03.11.2091 → 03.11.2019" in warn[0].message and warn[0].well == "513"
+    off = wcw.read(str(p), fix_years=False)
+    assert dt.date(2091, 11, 3) in {s.date for s in off.snapshots} and not [i for i in off.issues if i.code == "YEAR"]
+    assert wcw.year_candidates(2091, 2026) == [2019] and wcw.year_candidates(1850, 2026) == []
 
 
 def test_artificial_bottom_is_separate_from_current():

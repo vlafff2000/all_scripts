@@ -237,7 +237,7 @@ def well_key(text: str) -> str:
     return (m.group(1) + m.group(2)) if m else ""
 
 
-def read(path: str, max_perf: Optional[float] = DEFAULT_MAX_PERF_DEPTH) -> Result:
+def read(path: str, max_perf: Optional[float] = DEFAULT_MAX_PERF_DEPTH, fix_years: bool = True) -> Result:
     res = Result(path, max_perf=max_perf if max_perf else None)
     cols: Optional[Dict[str, int]] = None
     seen = set()
@@ -287,8 +287,43 @@ def read(path: str, max_perf: Optional[float] = DEFAULT_MAX_PERF_DEPTH) -> Resul
             res.snapshots.append(snap)
     if not res.snapshots:
         raise ValueError("В файле не найдено таблицы с графами «№ скв», «Конструкция», «Дата»")
+    if fix_years:
+        fix_year_typos(res)
     res.snapshots.sort(key=lambda s: (_wk(s.well), s.date or dt.date.min))
     return res
+
+
+MIN_YEAR = 1990
+
+
+def year_candidates(year: int, max_year: int) -> List[int]:
+    """Годы из перестановки цифр опечатки, попадающие в [MIN_YEAR, max_year]: 2091 → 2019."""
+    from itertools import permutations
+    digits = str(year)
+    return sorted({int("".join(p)) for p in permutations(digits) if MIN_YEAR <= int("".join(p)) <= max_year} - {year})
+
+
+def fix_year_typos(res: Result, today: Optional[dt.date] = None) -> None:
+    """Даты с невозможным годом (2091 вместо 2019, раньше 1990 или позже текущего года) исправляются перестановкой цифр. Однозначный вариант применяется,
+    из нескольких берётся ближайший к годам других снимков той же скважины; каждое исправление — предупреждение в «Проверке» (подсказка: верна ли замена, решает инженер).
+    Не нашлось варианта — дата не меняется, остаётся предупреждение."""
+    max_year = (today or dt.date.today()).year
+    for s in res.snapshots:
+        if s.date is None or MIN_YEAR <= s.date.year <= max_year:
+            continue
+        near = [o.date.year for o in res.snapshots if o.well == s.well and o.date and MIN_YEAR <= o.date.year <= max_year]
+        cands = year_candidates(s.date.year, max_year)
+        if not cands:
+            res.add("предупреждение", "YEAR", "Год %d похож на опечатку, подходящей замены нет: дата оставлена как есть" % s.date.year, s.well, s.source)
+            continue
+        new = min(cands, key=lambda y: (min((abs(y - n) for n in near), default=0), y)) if len(cands) > 1 else cands[0]
+        try:
+            fixed = s.date.replace(year=new)
+        except ValueError:                      # 29 февраля
+            fixed = s.date.replace(year=new, day=28)
+        res.add("предупреждение", "YEAR", "Опечатка в годе: %s → %s (перестановка цифр%s). Проверьте" % (
+            s.date.strftime("%d.%m.%Y"), fixed.strftime("%d.%m.%Y"), "; вариантов несколько, взят ближайший к другим датам скважины" if len(cands) > 1 else ""), s.well, s.source)
+        s.date = fixed
 
 
 def _wk(well: str):

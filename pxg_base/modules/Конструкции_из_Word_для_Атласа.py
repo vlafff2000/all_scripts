@@ -34,7 +34,8 @@ def main(argv=None):
     args = параметры.parse(
         "Конструкции из Word для Атласа", argv,
         files="файлы .docx «Перечень ИС» (по одному в строке) или папки",
-        max_perf="перфорации и фильтры глубже этого порога, м, не берутся (по умолчанию 950; 0 — не отсеивать)")
+        max_perf="перфорации и фильтры глубже этого порога, м, не берутся (по умолчанию 950; 0 — не отсеивать)",
+        fix_years="исправлять опечатки в годе (2091 → 2019) перестановкой цифр: да/нет, по умолчанию да")
     files = paths(args.files or "")
     if not files:
         print("❌ Файлы не выбраны.")
@@ -42,7 +43,7 @@ def main(argv=None):
     merged = None
     for f in files:
         try:
-            res = wcw.read(f, max_perf=max_perf(args.max_perf))
+            res = wcw.read(f, max_perf=max_perf(args.max_perf), fix_years=параметры.yes(args.fix_years if args.fix_years is not None else "да"))
         except (ValueError, OSError, KeyError) as err:
             print("❌ %s: %s" % (os.path.basename(f), err))
             return 1
