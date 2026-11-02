@@ -8,11 +8,12 @@
   Конструкция_для_Атласа.xlsx — один лист «Конструкция» в формате «Шаблон_конструкции.xlsx» Атласа (одна строка = один
                                элемент: колонна, НКТ, пакер, фильтр, перфорация, интервал пласта);
   Свод_скважин_разбор.xlsx     — «Паспорт» (основные данные и наземная часть), «Работы» (проведённые работы с датами),
-                               «Конструкция а.о.» (те же элементы в абсолютных отметках), «Сверка альтитуд» (свод и Атлас),
+                               «Исключено» (отсеянные перфорации), «Конструкция а.о.» (те же элементы в абсолютных отметках), «Сверка альтитуд» (свод и Атлас),
                                «Соответствие столбцов» (что куда попало), «Проверка» (замечания к своду).
 Глубины свода — по стволу (MD) от стола ротора. Абсолютная отметка: а.о. = альтитуда + высота стола ротора − глубина
 (флажок `rotor`; без него а.о. = альтитуда − глубина, как в Атласе по умолчанию). Считается по альтитуде Атласа и по альтитуде
 свода рядом: какую взять, решает инженер. Нет высоты стола у скважины при включённом флажке — а.о. пуста и есть замечание.
+Перфорации глубже порога (`max_perf`, в модуле по умолчанию 950 м) в итог не идут, а перечислены на листе «Исключено» с причиной.
 Проверка только сообщает: спорные значения не правятся молча, а попадают в «Проверку» с причиной; решение за инженером.
 """
 from __future__ import annotations
@@ -56,6 +57,7 @@ DATE_RE = re.compile(r"(\d{1,2}\.\d{1,2}\.\d{4})\s*[-–—]\s*(\d{1,2}\.\d{1,2}
 HEADER_DATE_RE = re.compile(r"состоянию\s+на:?\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.I)
 WORKS_SUB = "проведенные на скважине работы"
 ALT_LABEL, TABLE_LABEL = "Альтитуда, м", "Высота стола ротора, м"
+DEFAULT_MAX_PERF_DEPTH = 950.0   # м: глубже этого перфорация в своде считается ошибочной (значение по умолчанию для модуля)
 ALT_TOLERANCE = 1.0      # м: как допуск сверки альтитуд в Атласе (`atlas/base_model.py: TOLERANCE`)
 
 
@@ -88,6 +90,8 @@ class Book:
     wells: List[Well] = field(default_factory=list)
     issues: List[Issue] = field(default_factory=list)
     mapping: List[dict] = field(default_factory=list)
+    max_perf: Optional[float] = None                         # порог глубины перфорации, м; None — фильтра нет
+    excluded: List[dict] = field(default_factory=list)       # отсеянные интервалы: показываются, вернуть можно вручную
 
     def add(self, level: str, code: str, message: str, well: str = "", row="", hint: str = "") -> None:
         self.issues.append(Issue(level, code, message, well, str(row or ""), hint))
@@ -168,13 +172,13 @@ def _pick(cols: List[Tuple[int, str, str]], group_key: str, *needles: str, nth: 
     return found[nth] if len(found) > nth else None
 
 
-def read(path: str, date: str = "", sheet: str = "") -> Book:
+def read(path: str, date: str = "", sheet: str = "", max_perf: Optional[float] = None) -> Book:
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb[sheet] if sheet else wb.active
     hr, wc = _find_header(ws)
     cols = _header(ws, hr)
     snap, from_header = _snapshot(ws, hr, date.strip())
-    book = Book(path, ws.title, snap, from_header)
+    book = Book(path, ws.title, snap, from_header, max_perf=max_perf if max_perf and max_perf > 0 else None)
     if date.strip() and snap is None:
         book.add("ошибка", "DATE", "Дата конструкции «%s» не распознана" % date, hint="Формат ДД.ММ.ГГГГ")
     if snap is None and not date.strip():
@@ -209,6 +213,10 @@ def read(path: str, date: str = "", sheet: str = "") -> Book:
         _fill_elements(book, ws, cols, w)
         _fill_works(book, ws, cols, w)
         _check_well(book, w)
+    if book.excluded:
+        book.add("заметка", "FILTER", "Перфораций глубже %g м отсеяно: %d (скважин: %d), список — лист «Исключено»" % (
+            book.max_perf, len(book.excluded), len({e["Скважина"] for e in book.excluded})),
+                 hint="Порог настраивается; интервалы можно вернуть, дописав их в таблицу вручную")
     book.mapping = _mapping(ws, cols)
     return book
 
@@ -292,6 +300,10 @@ def _fill_elements(book: Book, ws, cols, w: Well) -> None:
                     book.add("предупреждение", "SWAP", "%s: «от» %g больше «до» %g, границы поменяны местами" % (name, a, b),
                              w.number, r, "Проверьте глубины по первоисточнику")
                     a, b, note = b, a, "границы в своде перепутаны (%g–%g)" % (a, b)
+                if name == "Интервал перфорации" and book.max_perf is not None and max(a, b) > book.max_perf:
+                    book.excluded.append({"Скважина": w.number, "Элемент": name, "Верх, м": a, "Низ, м": b, "Строка свода": r,
+                                          "Причина": "глубже порога %g м: похоже на ошибку в своде" % book.max_perf})
+                    continue
                 _emit(w, name, a, b, d, note, r)
         else:
             c_z = _pick(cols, key, "глубина")
@@ -534,6 +546,11 @@ def works_table(book: Book) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["Скважина", "Начало", "Окончание", "Дней"])
 
 
+def excluded_table(book: Book) -> pd.DataFrame:
+    cols = ["Скважина", "Элемент", "Верх, м", "Низ, м", "Строка свода", "Причина"]
+    return pd.DataFrame(book.excluded, columns=cols)
+
+
 def issues_table(book: Book) -> pd.DataFrame:
     order = {lv: i for i, lv in enumerate(LEVELS)}
     rows = sorted(book.issues, key=lambda i: (order[i.level], i.code, i.well))
@@ -568,7 +585,7 @@ def export(book: Book, out_dir: str, atlas_alt: Optional[Dict[str, float]] = Non
     with pd.ExcelWriter(report, engine="openpyxl", date_format="DD.MM.YYYY") as xw:
         altitudes = compare_altitudes(book, atlas_alt, atlas_source)     # раньше «Проверки»: добавляет замечания о расхождении
         for name, table in (("Паспорт", passport_table(book)), ("Работы", works_table(book)),
-                            ("Конструкция а.о.", ao_table(book, atlas_alt, rotor)), ("Сверка альтитуд", altitudes),
+                            ("Конструкция а.о.", ao_table(book, atlas_alt, rotor)), ("Сверка альтитуд", altitudes), ("Исключено", excluded_table(book)),
                             ("Соответствие столбцов", pd.DataFrame(book.mapping)), ("Проверка", issues_table(book))):
             table.to_excel(xw, sheet_name=name, index=False)
             _style(xw.sheets[name])

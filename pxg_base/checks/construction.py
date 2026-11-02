@@ -9,7 +9,7 @@ from pxg_core.qc import Report
 LEVEL = {"ошибка": qc.ERROR, "предупреждение": qc.WARN, "заметка": qc.NOTE}
 LABELS = {"NOPROD": "Нет эксплуатационной колонны", "SWAP": "«От» больше «до»", "SKIP": "Элемент не выгружен",
           "NUM": "Текст в числе", "DEPTH": "Глубина выше/ниже башмака", "ORDER": "Порядок колонн", "EMPTY": "Нет конструкции",
-          "TEXT": "Текст в графе работ", "ALT": "Альтитуда: свод и Атлас"}
+          "TEXT": "Текст в графе работ", "ALT": "Альтитуда: свод и Атлас", "FILTER": "Перфорации отсеяны по глубине"}
 
 
 def check_construction(values: Dict[str, str]) -> Report:
@@ -20,7 +20,8 @@ def check_construction(values: Dict[str, str]) -> Report:
             rep.error("FILE", "Не указан свод скважин")
         return rep
     try:
-        book = wc.read(path, date=values.get("date") or "")
+        text = (values.get("max_perf") or "").strip().replace(",", ".")
+        book = wc.read(path, date=values.get("date") or "", max_perf=float(text) if text else wc.DEFAULT_MAX_PERF_DEPTH)
     except ValueError as err:
         rep.error("HEADER", str(err), file=path)
         return rep
