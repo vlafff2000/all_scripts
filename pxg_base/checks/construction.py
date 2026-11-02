@@ -44,3 +44,32 @@ def check_construction(values: Dict[str, str]) -> Report:
 
 
 qc.CODES.update(LABELS)
+
+
+def check_construction_word(values: Dict[str, str]) -> Report:
+    """Проверка исходников «Конструкции из Word для Атласа»: тот же разбор, что у запуска."""
+    from pxg_core import well_construction_word as wcw
+    rep = Report(title="Конструкции из Word для Атласа")
+    paths = [x.strip().strip('"') for x in (values.get("files") or "").splitlines() if x.strip()]
+    if not paths:
+        rep.error("FILE", "Не указаны файлы Word")
+        return rep
+    text = (values.get("max_perf") or "").strip().replace(",", ".")
+    total = 0
+    for p in paths:
+        if not qc.check_path(rep, p, "Перечень скважин", "file"):
+            continue
+        try:
+            res = wcw.read(p, max_perf=float(text) if text else wcw.DEFAULT_MAX_PERF_DEPTH)
+        except (ValueError, OSError, KeyError) as err:
+            rep.error("FILE", "Файл не прочитан: %s" % err, file=p)
+            continue
+        total += len(res.snapshots)
+        for i in res.issues:
+            rep.add(LEVEL[i.level], i.code, i.message, file=p, well=i.well, row=i.source)
+    rep.saw("%d снимков конструкции" % total)
+    return rep
+
+
+qc.CODES.update({"LINE": "Строка конструкции не разобрана", "DATE": "Нет даты исследования", "EMPTY": "Нет элементов конструкции",
+                 "BOTTOM": "Нет текущего забоя", "DUP": "Повтор строки"})
