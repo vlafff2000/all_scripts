@@ -247,3 +247,11 @@ def test_atlas_altitudes_from_project_storage(svod, tmp_path):
     assert any(i.code == "ALT" and i.well == "32" for i in rep.issues)
     files = wc.export(wc.read(str(svod), date="01.11.2025"), str(tmp_path / "o"), alt, source)
     assert {"Конструкция а.о.", "Сверка альтитуд"} <= set(pd.ExcelFile(files[1]).sheet_names)
+
+
+def test_artificial_bottom_is_a_svod_element():
+    """Искусственный забой (пробка) — элемент шаблона конструкции: попадает в лист Атласа как точка."""
+    from pxg_core import well_construction as wc
+    names = {name for _, name, _ in wc.ELEMENTS}
+    assert "Искусственный забой" in names
+    assert wc._target("(искусственный забой) глубина", "глубина")[0] == "«Искусственный забой»: верх и низ (точка)"
