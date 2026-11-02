@@ -158,7 +158,7 @@ def test_export_files(svod, tmp_path):
     assert atlas.sheetnames == ["Конструкция"]
     assert [c.value for c in atlas["Конструкция"][1]] == wc.ATLAS_COLUMNS
     report = pd.ExcelFile(files[1])
-    assert report.sheet_names == ["Паспорт", "Работы", "Конструкция а.о.", "Сверка альтитуд", "Соответствие столбцов", "Проверка"]
+    assert report.sheet_names == ["Паспорт", "Работы", "Конструкция а.о.", "Сверка альтитуд", "Исключено", "Соответствие столбцов", "Проверка"]
     passport = report.parse("Паспорт")
     assert "Фонтанная арматура" not in passport.columns and "ФА: Тип" in passport.columns
     mapping = report.parse("Соответствие столбцов")
@@ -182,6 +182,26 @@ def test_run_from_form_and_check(svod, tmp_path, monkeypatch):
     assert job["status"] == "done", job
     names = {os.path.basename(f["path"]) if isinstance(f, dict) else os.path.basename(f) for f in job.get("files", [])}
     assert {wc.ATLAS_FILE, wc.REPORT_FILE} <= names
+
+
+def test_deep_perforations_are_filtered_and_listed(svod, tmp_path):
+    off = wc.read(str(svod), date="01.11.2025")
+    assert not off.excluded                                                     # без порога ничего не отсеивается
+    book = wc.read(str(svod), date="01.11.2025", max_perf=990)
+    perf = wc.atlas_table(book)
+    perf = perf[perf["Элемент"] == "Интервал перфорации"]
+    assert perf["Низ интервала, м"].max() <= 990
+    ex = wc.excluded_table(book)
+    assert set(ex["Скважина"]) == {"31"}
+    row = ex[(ex["Скважина"] == "31") & (ex["Низ, м"] == 1000)]
+    assert len(row) == 1 and "порога 990" in row.iloc[0]["Причина"]            # исправленный «от»–«до» 990–1000, низ глубже порога
+    assert any(i.code == "FILTER" for i in book.issues)
+    other = wc.atlas_table(book)
+    assert (other[other["Элемент"] != "Интервал перфорации"]["Низ интервала, м"] > 990).any()   # прочие элементы порог не трогает
+    files = wc.export(book, str(tmp_path / "o"))
+    assert "Исключено" in pd.ExcelFile(files[1]).sheet_names
+    assert len(pd.read_excel(files[1], sheet_name="Исключено")) == len(ex)
+    assert wc.read(str(svod), date="01.11.2025", max_perf=0).excluded == []
 
 
 def test_altitude_comparison_and_ao(svod):

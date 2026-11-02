@@ -16,6 +16,12 @@ from pxg_core import well_construction as wc, параметры
 _ = sys
 
 
+def max_perf(text) -> float:
+    """Порог глубины перфорации: пусто — 950 м, 0 — фильтр выключен."""
+    value = (text or "").strip().replace(",", ".")
+    return wc.DEFAULT_MAX_PERF_DEPTH if not value else float(value)
+
+
 def load_altitudes(args):
     """Альтитуды Атласа: файл главнее проекта; нет ни того ни другого или не прочиталось — сверка пропускается с пояснением."""
     try:
@@ -35,6 +41,7 @@ def main(argv=None):
         date="дата конструкции ДД.ММ.ГГГГ (по умолчанию «По состоянию на» из шапки свода)",
         atlas_storage="папка хранилища Атласа (по умолчанию GAS_ATLAS_STORAGE)",
         atlas_project="id проекта Атласа (по умолчанию самый свежий с расходами)",
+        max_perf="перфорации глубже этого порога, м, не берутся (по умолчанию 950; 0 — не отсеивать)",
         rotor="учитывать высоту стола ротора в а.о. (да/нет, по умолчанию да)",
         alt_file="«Глубины_перфораций.xlsx» с альтитудами, если проекта Атласа нет")
     path = параметры.ask_path("Свод скважин (Excel)", args.file)
@@ -42,7 +49,7 @@ def main(argv=None):
         print("❌ Свод скважин не выбран.")
         return 1
     try:
-        book = wc.read(path, date=args.date or "")
+        book = wc.read(path, date=args.date or "", max_perf=max_perf(args.max_perf))
     except ValueError as err:
         print("❌ %s" % err)
         return 1
@@ -54,6 +61,8 @@ def main(argv=None):
         len(book.wells), len(table), book.snapshot.strftime("%d.%m.%Y"), " (из шапки свода)" if book.snapshot_from_header else ""))
     for name, n in table["Элемент"].value_counts().items():
         print("   %s: %d" % (name, n))
+    if book.excluded:
+        print("🚫 Перфораций глубже %g м отсеяно: %d (лист «Исключено»)" % (book.max_perf, len(book.excluded)))
     kinds = {}
     for i in book.issues:
         kinds[i.level] = kinds.get(i.level, 0) + 1
