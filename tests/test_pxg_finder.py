@@ -232,3 +232,16 @@ def test_set_mimeapps_only_default_section(tmp_path, monkeypatch):
     assert text.count("inode/directory=pxg.desktop;") == 1 and "old.desktop" not in text and "x.desktop" in text
     d._set_mimeapps(None)
     assert "pxg.desktop" not in (tmp_path / "mimeapps.list").read_text(encoding="utf-8")
+
+
+def test_search_date_to_partial_is_end_of_period():
+    import datetime as dt
+    from pxg_finder import search
+    day = 86400
+    assert search.parse_date("2020") == dt.datetime(2020, 1, 1).timestamp()
+    assert search.parse_date("2020", end=True) == dt.datetime(2020, 12, 31).timestamp()
+    assert search.parse_date("02.2024", end=True) == dt.datetime(2024, 2, 29).timestamp()
+    assert search.parse_date("2020-12", end=True) == dt.datetime(2020, 12, 31).timestamp()
+    f = search.build_filters({"dateTo": "2020"}) if hasattr(search, "build_filters") else None
+    if f is not None:
+        assert f.mt_to == dt.datetime(2020, 12, 31).timestamp() + day

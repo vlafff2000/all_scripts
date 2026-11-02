@@ -1,3 +1,4 @@
+import { PeriodDate } from '../../../pxg_core/web-ui/PeriodDate'
 import { useEffect, useMemo, useState } from 'react'
 import { useTabFilter } from './TabFilter'
 import { viewAdapt } from './wellView'
@@ -73,8 +74,8 @@ function PeriodSel({ value, onChange, anchor }: { value: Period; onChange: (p: P
     <label>Период<select value={value.per} onChange={e => { const per = e.target.value as Period['per']; onChange(per === 'custom' ? { per, from: lo, to: hi } : { ...value, per }) }}>
       <option value="3">последние 3 года</option><option value="5">последние 5 лет</option><option value="all">всё</option><option value="custom">свои даты</option></select></label>
     {value.per === 'custom' && <>
-      <label>с<input type="date" value={value.from} onChange={e => onChange({ ...value, from: e.target.value })} /></label>
-      <label>по<input type="date" value={value.to} onChange={e => onChange({ ...value, to: e.target.value })} /></label></>}
+      <label>с<PeriodDate value={value.from} end={false} onChange={v => onChange({ ...value, from: v ?? '' })} /></label>
+      <label>по<PeriodDate value={value.to} end onChange={v => onChange({ ...value, to: v ?? '' })} /></label></>}
   </>
 }
 

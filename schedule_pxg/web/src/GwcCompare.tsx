@@ -1,3 +1,4 @@
+import { PeriodDate } from '../../../pxg_core/web-ui/PeriodDate'
 import { useMemo, useState } from 'react'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
@@ -121,7 +122,7 @@ export default function GwcCompare({ models, criterion, alts }: { models: ModelE
             <td><input type="checkbox" disabled={r.delta === null} checked={r.delta !== null && !off.includes(r.key)} onChange={() => toggle(r.key)} aria-label="Учитывать в статистике" /></td>
             <td className="small">{r.series || '—'}</td>
             <td>{r.well}</td><td>{r.group || '—'}</td><td>{r.date}</td><td>{r.season || '—'}</td>
-            <td title={r.slice_why}><input type="date" style={{ width: 140 }} value={r.slice} disabled={busy} onChange={e => setSlice(r, e.target.value)} />
+            <td title={r.slice_why}><PeriodDate value={r.slice} end={false} disabled={busy} onChange={v => setSlice(r, v ?? '')} />
               {slices[r.well + '|' + r.date] && <button disabled={busy} title="Вернуть подбор" onClick={() => setSlice(r, '')}>↺</button>}<span className="muted small"> {r.slice_why}</span></td>
             <td>{r.pack}{r.label && r.label !== 'ГВК' ? ' (' + r.label + ')' : ''}</td><td className="num">{fmt(r.fact)}</td><td className="num">{fmt(r.model)}</td><td className="num">{fmt(r.delta)}</td><td className="small">{r.status}</td></tr>)}</tbody></table></div>
       </>}
