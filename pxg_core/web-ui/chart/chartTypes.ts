@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartTypes.ts @ 86e016f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartTypes.ts @ a869e5f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import type { Look } from './chartStyle'
 export type Cell = string | number | boolean | null
 /** Ручное оформление оси; пусто — авто (atlas/chart_style.py). */

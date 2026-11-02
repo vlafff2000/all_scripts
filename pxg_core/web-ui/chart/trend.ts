@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/trend.ts @ 86e016f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/trend.ts @ a869e5f. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Линии тренда ряда: та же математика, что в atlas/trend.py (контрольные значения сверяются в tests/atlas/test_trend.py
 // и web/scripts/trend-check.mjs). Виды как в Excel: линейная, полином 2–6, логарифмическая, степенная, экспоненциальная, скользящее.
 import type { Cell, Series } from './chartTypes'
