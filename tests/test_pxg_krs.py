@@ -91,6 +91,57 @@ def test_new_revisions_and_manual(tmp_path):
     assert ws.cell(5, 11).value == "х" and ws.cell(3, 11).value == "х"
 
 
+def test_updated_table_keeps_formulas_and_styles(tmp_path):
+    from openpyxl.formatting.rule import CellIsRule
+    from openpyxl.styles import Font
+    src = tmp_path / "t.xlsx"
+    make_table(src)
+    wb = openpyxl.load_workbook(src)
+    ws = wb.active
+    ws["V3"] = "=SUM(B3:C3)"
+    ws["C3"].font = Font(bold=True, color="FF0000")
+    ws.column_dimensions["C"].width = 33
+    ws.freeze_panes = "C2"
+    ws.auto_filter.ref = "A1:L5"
+    ws.conditional_formatting.add("A3:A5", CellIsRule(operator="greaterThan", formula=["11"], fill=PatternFill("solid", bgColor="FFC7CE")))
+    ws["K4"] = "ручное"          # чужое значение в ячейке нового сезона
+    wb.save(src)
+    data, grid = krs.parse(str(src))
+    new = pd.DataFrame({"Скважина": [11, 12, 13], "Песок": ["Да", "Да", "Да"], "Примечание": ["", "", ""]})
+    krs.add_revisions(data, new, "2025-2026")
+    prio = krs.final_priorities(data, krs.compute_priorities(data), {})
+    out = tmp_path / "upd.xlsx"
+    notes = krs.write_updated_table(grid, data.columns, data, prio, "2025-2026", str(out), src_path=str(src))
+    ws = openpyxl.load_workbook(out).active
+    assert ws["V3"].value == "=SUM(B3:C3)"                              # формула осталась формулой
+    assert ws["C3"].font.bold and ws.column_dimensions["C"].width == 33
+    assert ws.freeze_panes == "C2" and ws.conditional_formatting
+    assert ws["K3"].value == "х" and ws["K5"].value == "х"
+    assert ws["K4"].value == "ручное" and any("ручное" in n[1] for n in notes)   # не затёрто
+    assert ws["A1"].value == "№ скв" and ws.auto_filter.ref.startswith("A1:") and ws.auto_filter.ref != "A1:L5"
+    hdr = {c.value: c.column for c in ws[1] if c.value}
+    assert krs.PRIO_HEADER in hdr and krs.REASON_HEADER in hdr
+    assert ws.cell(5, hdr[krs.PRIO_HEADER]).value in (1, 2, 3)
+    # повторный запуск обновляет те же столбцы, не плодит новые
+    n_cols = ws.max_column
+    krs.write_updated_table(grid, data.columns, data, prio, "2025-2026", str(out), src_path=str(out))
+    assert openpyxl.load_workbook(out).active.max_column == n_cols
+
+
+def test_updated_table_adds_missing_season_column(tmp_path):
+    src = tmp_path / "t.xlsx"
+    make_table(src)
+    data, grid = krs.parse(str(src))
+    krs.add_revisions(data, pd.DataFrame({"Скважина": [11], "Песок": ["Да"], "Примечание": [""]}), "2026-2027")
+    prio = krs.final_priorities(data, krs.compute_priorities(data), {})
+    out = tmp_path / "upd.xlsx"
+    krs.write_updated_table(grid, data.columns, data, prio, "2026-2027", str(out), src_path=str(src))
+    ws = openpyxl.load_workbook(out).active
+    hdr = {c.value: c.column for c in ws[1] if c.value}
+    col = hdr["Ревизия КРУ после отбора 2026-2027"]
+    assert col > 12 and ws.cell(3, col).value == "х" and ws.cell(3, 11).value is None
+
+
 def test_module_runs(tmp_path, monkeypatch):
     src = tmp_path / "t.xlsx"
     make_table(src)
