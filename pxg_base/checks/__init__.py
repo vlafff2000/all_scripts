@@ -38,6 +38,7 @@ REGISTRY: Dict[str, str] = {
     "База_ГДИ_из_отчётов_PDF": "gdis:check_gdis",
     "Шаблон_конструкции_из_свода_скважин": "construction:check_construction",
     "Конструкции_из_Word_для_Атласа": "construction:check_construction_word",
+    "Сведение_баз_конструкций": "construction:check_construction_merge",
     "Анализ_технического_состояния_скважин_КРС": "krs:check_krs",
 }
 
