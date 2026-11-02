@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/ChartView.tsx @ 00eb3be. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/ChartView.tsx @ 44973a1. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
@@ -712,8 +712,8 @@ export function ChartView({ chart: given, module, format, compact, excludeMode, 
         [pos === 'left' ? 'left' : pos === 'right' ? 'right' : 'left']: pos === 'top' || pos === 'bottom' ? 'center' : 6,
         ...(pos === 'top' ? { top: 6 } : pos === 'bottom' ? { bottom: 6 } : { top: 'middle' }),
         selected: Object.fromEntries(items.map(i => [i.name, !hidden.has(i.name)])), selectedMode: false,
-        formatter: (n: string) => label.get(n) ?? n, itemWidth: 22, itemHeight: 10,
-        textStyle: { fontSize: size, color: st?.text_color ?? '#1f2933', ...((st?.legend_font ?? st?.font) ? { fontFamily: fontCss(st?.legend_font ?? st?.font) } : {}) } }
+        formatter: (n: string) => echartsRich(label.get(n) ?? n, size).text, itemWidth: 22, itemHeight: 10,
+        textStyle: { fontSize: size, color: st?.text_color ?? '#1f2933', rich: echartsRich('', size).rich, ...((st?.legend_font ?? st?.font) ? { fontFamily: fontCss(st?.legend_font ?? st?.font) } : {}) } }
     }
     const host = document.createElement('div')
     const ratio = kind === 'png' ? Math.max(1, dpi / 96) : 1
@@ -1674,7 +1674,7 @@ export function ChartView({ chart: given, module, format, compact, excludeMode, 
           onLooks={setLooks} onReplace={d => { setFormatDoc(module ? scope : 'project', module ?? '', d); setLooks(d.series ?? {}) }}
           onClose={() => setSettings(false)} />), document.body)}
       {thinned.length > 0 && <ThinNote chart={chart} thinned={thinned.map(([, i]) => i)} windowed={!!patch && patch.base === given} patch={patch} />}
-      {chart.style?.subtitle && <p className="chart-subtitle" style={chart.style.subtitle_size ? { fontSize: chart.style.subtitle_size } : undefined}>{chart.style.subtitle}</p>}
+      {chart.style?.subtitle && <p className="chart-subtitle" style={chart.style.subtitle_size ? { fontSize: chart.style.subtitle_size } : undefined}><RichText value={chart.style.subtitle} /></p>}
       {legendEl && chart.style?.legend === 'top' && legendEl}
       <div className={(chart.style?.legend === 'right' || chart.style?.legend === 'left') && legendEl ? 'chart-body legend-right' : 'chart-body'}>
       {legendEl && chart.style?.legend === 'left' && legendEl}
@@ -1880,7 +1880,7 @@ function ChartLegend({ model, hidden, facetOff, events, offEvents, onToggle, onF
                 onClick={e => onToggle(i.name, e.detail > 1)}
                 onMouseEnter={() => onHighlight(i.name)} onMouseLeave={() => onHighlight(null)}>
                 <Swatch color={i.color} dash={i.dash} line={i.line} symbol={i.symbol} hollow={i.hollow} />
-                <span>{i.label}</span>
+                <span><RichText value={i.label} /></span>
               </button>
             ))}
           </div>
