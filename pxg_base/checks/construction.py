@@ -73,3 +73,19 @@ def check_construction_word(values: Dict[str, str]) -> Report:
 
 qc.CODES.update({"LINE": "Строка конструкции не разобрана", "DATE": "Нет даты исследования", "EMPTY": "Нет элементов конструкции",
                  "BOTTOM": "Нет текущего забоя", "DUP": "Повтор строки"})
+
+
+def check_construction_merge(values: Dict[str, str]) -> Report:
+    from pxg_core import construction_merge as cm
+    rep = Report(title="Сведение баз конструкций")
+    for key, label in (("a", "База A"), ("b", "База B")):
+        path = (values.get(key) or "").strip()
+        if not qc.check_path(rep, path, label, "file"):
+            if not path:
+                rep.error("FILE", "Не указана %s" % label)
+            continue
+        try:
+            rep.saw("%s: %d строк конструкции" % (label, len(cm.read_base(path))))
+        except (ValueError, OSError) as err:
+            rep.error("FILE", str(err), file=path)
+    return rep
