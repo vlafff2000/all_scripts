@@ -545,8 +545,133 @@ def read_manual(path: str) -> Dict[int, int]:
     return out
 
 
-def write_updated_table(src_grid: Grid, cols: Columns, data: KrsData, prio: pd.DataFrame, season: str, dst: str) -> None:
-    """Копия исходной таблицы (значения и заливки) с вскрытиями КРУ нового сезона и приоритетом в двух столбцах справа."""
+PRIO_HEADER = "Приоритет КР (расчёт, подсказка)"
+REASON_HEADER = "Причина"
+
+
+def _plain(v) -> bool:
+    return v is None or (isinstance(v, str) and not v.strip())
+
+
+def _copy_style(src, dst, keep_fill: bool = True) -> None:
+    from copy import copy
+    from openpyxl.styles import PatternFill
+    if src is None or not src.has_style:
+        return
+    dst._style = copy(src._style)
+    if not keep_fill:
+        dst.fill = PatternFill(fill_type=None)
+
+
+def _find_header(ws, row: int, text: str) -> Optional[int]:
+    for c in range(1, ws.max_column + 1):
+        if re.sub(r"\s+", " ", _text(ws.cell(row, c).value)).lower() == text.lower():
+            return c
+    return None
+
+
+def _open_source_workbook(src_path: str):
+    """Исходная книга как есть (формулы, стили, ширины, условное форматирование, фильтры, закрепление). .xls → .xlsx через LibreOffice; без него → None."""
+    from openpyxl import load_workbook
+    low = src_path.lower()
+    if low.endswith((".xlsx", ".xlsm")):
+        return load_workbook(src_path, keep_vba=low.endswith(".xlsm"))
+    if low.endswith(".xls"):
+        import tempfile
+        from pxg_core import office_convert
+        soffice = office_convert.find_soffice()
+        if soffice:
+            tmp = tempfile.mkdtemp(prefix="krs_")
+            dst = os.path.join(tmp, "src.xlsx")
+            try:
+                office_convert.convert_file(src_path, "xlsx", dst, soffice)
+                if os.path.isfile(dst):
+                    return load_workbook(dst)
+            except Exception:
+                pass
+    return None
+
+
+def write_updated_table(src_grid: Grid, cols: Columns, data: KrsData, prio: pd.DataFrame, season: str, dst: str,
+                        src_path: Optional[str] = None) -> List[Tuple[str, str]]:
+    """Исходная таблица анализа, открытая заново (а не пересозданная): формулы, стили, ширины, условное форматирование, фильтр и закрепление
+    сохраняются. Добавляются только: «х» во вскрытиях КРУ нового сезона (в пустые ячейки; чужие значения не затираются) и два столбца
+    справа — приоритет и причина (при повторном запуске они обновляются на месте). Возвращает заметки."""
+    notes: List[Tuple[str, str]] = []
+    wb = _open_source_workbook(src_path) if src_path else None
+    if wb is None:
+        if src_path:
+            notes.append(("предупреждение", "Формат .xls нельзя открыть без потерь (нет LibreOffice): формулы и оформление исходной таблицы не сохранены, "
+                                            "сохраните её в .xlsx и запустите снова"))
+        return notes + _write_from_grid(src_grid, cols, data, prio, season, dst)
+    ws = wb[src_grid.sheet] if src_grid.sheet in wb.sheetnames else wb.worksheets[0]
+    hdr = cols.header_row + 1
+    rows = dict(zip(data.wells["Скважина"], data.wells["Строка"]))
+    last_col = max(ws.max_column, src_grid.ncols)
+    added = False
+    prev_rev = max(cols.rev.values()) + 1 if cols.rev else None
+
+    def new_column(title: str, tmpl_col: Optional[int], width: Optional[float] = None) -> int:
+        nonlocal last_col, added
+        last_col += 1 if added else 2          # первый новый столбец — через один пустой от таблицы и легенды
+        added = True
+        c = last_col
+        cell = ws.cell(hdr, c, title)
+        if tmpl_col:
+            _copy_style(ws.cell(hdr, tmpl_col), cell)
+            w = ws.column_dimensions[ws.cell(1, tmpl_col).column_letter].width
+        else:
+            w = None
+        ws.column_dimensions[cell.column_letter].width = width or w or 14
+        return c
+
+    rev_col = cols.rev[season] + 1 if season in cols.rev else None
+    if rev_col is None and season:
+        rev_col = new_column("Ревизия КРУ после отбора %s" % season, prev_rev)
+        notes.append(("заметка", "В таблице не было столбца «Ревизия КРУ после отбора %s»: добавлен справа (столбец %d), остальные столбцы не сдвигались" % (season, rev_col)))
+    if rev_col is not None:
+        new = data.revisions[(data.revisions["Сезон"] == season) & (data.revisions["Источник"] == "Ревизия КРУ")]
+        for _, r in new.iterrows():
+            row = rows.get(int(r["Скважина"]))
+            if not row:
+                continue
+            cell = ws.cell(row, rev_col)
+            mark = "х" if r["Песок"] == "Да" else None
+            if mark is None:
+                continue
+            if _plain(cell.value):
+                _copy_style(ws.cell(row, prev_rev) if prev_rev else None, cell, keep_fill=False)
+                cell.value = mark
+            elif not _is_mark(cell.value):
+                notes.append(("предупреждение", "Скв. %d: в ячейке вскрытия КРУ %s уже стоит «%s», а в Word-ревизии песок — не затёрто, решение за инженером"
+                              % (int(r["Скважина"]), season, _text(cell.value))))
+    pc = _find_header(ws, hdr, PRIO_HEADER)
+    if pc is None:
+        pc = new_column(PRIO_HEADER, prev_rev, 16)
+    rc = pc + 1 if _text(ws.cell(hdr, pc + 1).value) == REASON_HEADER else None     # наш столбец с прошлого запуска
+    if rc is None:
+        rc = new_column(REASON_HEADER, prev_rev, 60)
+    last_col = max(last_col, pc, rc)
+    for _, r in prio.iterrows():
+        row = rows.get(int(r["Скважина"]))
+        if not row:
+            continue
+        v = r["Приоритет итог"]
+        for col, val in ((pc, None if pd.isna(v) else int(v)), (rc, r["Причина"])):
+            cell = ws.cell(row, col)
+            _copy_style(ws.cell(row, prev_rev) if prev_rev else None, cell, keep_fill=False)
+            cell.value = val
+    ref = ws.auto_filter.ref
+    if ref:
+        from openpyxl.utils import get_column_letter, range_boundaries
+        c1, r1, c2, r2 = range_boundaries(ref)
+        ws.auto_filter.ref = "%s%d:%s%d" % (get_column_letter(c1), r1, get_column_letter(max(c2, last_col)), r2)
+    wb.save(dst)
+    return notes
+
+
+def _write_from_grid(src_grid: Grid, cols: Columns, data: KrsData, prio: pd.DataFrame, season: str, dst: str) -> List[Tuple[str, str]]:
+    """Запасной путь (исходник .xls без LibreOffice): копия значений и заливок."""
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill
     wb = Workbook()
@@ -566,11 +691,11 @@ def write_updated_table(src_grid: Grid, cols: Columns, data: KrsData, prio: pd.D
         new = data.revisions[(data.revisions["Сезон"] == season) & (data.revisions["Источник"] == "Ревизия КРУ")]
         for _, r in new.iterrows():
             row = rows.get(int(r["Скважина"]))
-            if row:
-                ws.cell(row=row, column=rev_col + 1, value="х" if r["Песок"] == "Да" else None)
+            if row and r["Песок"] == "Да" and _plain(ws.cell(row=row, column=rev_col + 1).value):
+                ws.cell(row=row, column=rev_col + 1, value="х")
     c0 = src_grid.ncols + 2
-    ws.cell(row=cols.header_row + 1, column=c0, value="Приоритет КР (расчёт, подсказка)")
-    ws.cell(row=cols.header_row + 1, column=c0 + 1, value="Причина")
+    ws.cell(row=cols.header_row + 1, column=c0, value=PRIO_HEADER)
+    ws.cell(row=cols.header_row + 1, column=c0 + 1, value=REASON_HEADER)
     for _, r in prio.iterrows():
         row = rows.get(int(r["Скважина"]))
         if row:
@@ -578,6 +703,7 @@ def write_updated_table(src_grid: Grid, cols: Columns, data: KrsData, prio: pd.D
             ws.cell(row=row, column=c0, value=None if pd.isna(v) else int(v))
             ws.cell(row=row, column=c0 + 1, value=r["Причина"])
     wb.save(dst)
+    return []
 
 
 def revision_notes(data: KrsData) -> pd.DataFrame:
