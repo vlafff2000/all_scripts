@@ -97,3 +97,17 @@ def test_year_typo_fixed_and_reported(tmp_path):
     off = wcw.read(str(p), fix_years=False)
     assert dt.date(2091, 11, 3) in {s.date for s in off.snapshots} and not [i for i in off.issues if i.code == "YEAR"]
     assert wcw.year_candidates(2091, 2026) == [2019] and wcw.year_candidates(1850, 2026) == []
+
+
+def test_artificial_bottom_is_separate_from_current():
+    """Искусственный забой (пробка) — отдельный элемент конструкции, а не отбитый забой; «Текущий забой» остаётся замером."""
+    from pxg_core import well_construction_word as w
+    snap = w.Snapshot("500", None, "тест")
+    w.parse_construction("Искусственный забой – 790 м\nЗабой – 796 м", snap, w.Result("тест"))
+    names = {e["Элемент"]: e["Низ"] for e in snap.elements}
+    assert names == {"Искусственный забой": 790.0, "Забой": 796.0}
+    note = "Текущий забой – 796,4м. Искусственный забой – 780 м"
+    snap2 = w.Snapshot("500", None, "тест")
+    w.parse_bottom(note, snap2)
+    w.parse_artificial(note, snap2)
+    assert (snap2.bottom, snap2.artificial) == (796.4, 780.0)
