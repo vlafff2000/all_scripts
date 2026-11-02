@@ -16,7 +16,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent.parent
 DEST = HERE / "pxg_core" / "web-ui" / "chart"
 FILES = ["ChartView.tsx", "ChartSettings.tsx", "chartStyle.ts", "chartHover.ts", "chartTheme.ts", "chartAxes.ts", "chartPrefs.ts", "chartSync.ts", "chart.css", "richText.ts", "RichField.tsx",
-         "chartFormat.ts", "trend.ts", "FormatFields.tsx", "FormatPane.tsx", "BuilderDialogs.tsx", "builder.css", "projectLooks.ts"]
+         "chartFormat.ts", "trend.ts", "FormatFields.tsx", "FormatPane.tsx", "BuilderDialogs.tsx", "builder.css", "projectLooks.ts", "labelPick.ts"]
 
 # (файл, что заменить, на что): без серверного рендера кнопка «Скачать» заменяется сохранением PNG из ECharts
 PATCHES = [
@@ -27,6 +27,7 @@ PATCHES = [
     ("chartAxes.ts", "from './api'", "from './chartTypes'"),
     ("chartFormat.ts", "from './api'", "from './chartTypes'"),
     ("trend.ts", "from './api'", "from './chartTypes'"),
+    ("labelPick.ts", "from './api'", "from './chartTypes'"),
     ("FormatFields.tsx", "from './api'", "from './chartTypes'"),
     ("FormatPane.tsx", "from './api'", "from './chartTypes'"),
     ("BuilderDialogs.tsx", "from './api'", "from './chartTypes'"),
