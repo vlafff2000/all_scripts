@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartTheme.ts @ a1fe6b7. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartTheme.ts @ bdcd034. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Оформление графиков Атласа 6: одна система для всех разделов.
 // Цвета — роли (чернила, сетка, поверхность) из CSS-переменных --chart-*, чтобы тёмная тема меняла их в одном месте.
 
@@ -45,6 +45,8 @@ export function chartTokens(el: Element): ChartTokens {
   }
 }
 
+/** Размеры подписей и чисел по умолчанию (px): одни на все графики; индивидуальные размеры в настройках графика сильнее. */
+export const SIZE = { tick: 15, title: 16, legend: 16, label: 15, small: 14, callout: 17, callDot: 11 }
 export const FONT = "'PT Sans', 'Segoe UI', system-ui, sans-serif"
 
 /** Шрифты, которые можно выбрать для графика (те же, что в выгрузке, atlas/engine/core/fonts.py): подпись и семейство CSS. */
