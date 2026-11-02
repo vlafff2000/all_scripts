@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartFormat.ts @ 9abe624. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartFormat.ts @ bbf45db. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Единая модель оформления графика (как в atlas/chart_style.py): документ {chart, axes, series}.
 // Уровни (тема проекта → тип графика → график) складываются mergeFormats: поле более позднего уровня главнее.
 import { errorSeries, trendSeries } from './trend'
