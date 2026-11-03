@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartTypes.ts @ 3042475. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartTypes.ts @ d943607. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import type { Look } from './chartStyle'
 export type Cell = string | number | boolean | null
 /** Ручное оформление оси; пусто — авто (atlas/chart_style.py). */
@@ -26,6 +26,7 @@ export interface ChartStyle {
   // модель v2: подзаголовок, легенда слева, колонки, рамка и фон легенды, штрих сетки, рамки рисунка и области построения
   subtitle?: string; subtitle_size?: number; legend_columns?: number; legend_border?: boolean; legend_background?: string
   grid_dash?: string; minor_grid_dash?: string; border_color?: string; border_width?: number; plot_border_color?: string; plot_border_width?: number
+  group_digits?: boolean      // false — в файлах числа без разрядов; по умолчанию разряды включены
   annotations?: Annotation[]
 }
 export interface Axis {
