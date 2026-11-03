@@ -101,3 +101,17 @@ def test_export_files_and_checks(dbs, tmp_path):
     back = gc.load_db(str(out))
     assert "db_source" in back["gis_packs"].columns and set(back["gis_observations"]["well"]) == {"21", "7"}
     assert [i for i in checks.run("Объединение_БД_ГИС", {"a": a, "b": b, "altitudes": alt}).issues if i.level == "ошибка"] == []
+
+
+def test_web_launch_arguments_are_accepted_by_the_module(dbs, tmp_path, monkeypatch):
+    # баг: окно передавало --keep_first=…, а модуль знает только --keep-first (error: unrecognised arguments)
+    import importlib
+    from pxg_base import webspec
+    a, b, alt = dbs
+    keep = tmp_path / "keep.csv"
+    keep.write_text("Скважина;Месяц\n21;2025-10\n", encoding="utf-8")
+    spec = webspec.get("Объединение_БД_ГИС")
+    argv = spec.argv({"a": a, "b": b, "altitudes": alt, "keep_first": str(keep)})
+    monkeypatch.chdir(tmp_path)
+    mod = importlib.import_module("pxg_base.modules.Объединение_БД_ГИС")
+    assert mod.main(argv) == 0 and os.path.exists(tmp_path / "Объединённая_БД_ГИС.xlsx")
