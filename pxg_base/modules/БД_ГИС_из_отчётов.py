@@ -1,4 +1,4 @@
-"""БД ГИС из отчётов: Word-отчёты по ГИС-контролю (.doc/.docx, в том числе внутри архивов ZIP/TAR/RAR) → «БД_ГИС_из_отчётов.xlsx» и таблицы.
+"""БД ГИС из отчётов: отчёты по ГИС-контролю (Word .doc/.docx и PDF с текстовым слоем, в том числе внутри архивов ZIP/TAR/RAR) → «БД_ГИС_из_отчётов.xlsx» и таблицы.
 
 Из каждого отчёта берутся: выполненный комплекс ГИС, доход шаблона / остановка прибора (отдельная БД шаблонировок), термобарические
 условия (давление и температура по глубинам, в таблице или в тексте), заполнение ствола, таблицы результатов интерпретации по пачкам
@@ -37,22 +37,25 @@ def read_all(files, mapping):
 def main(argv=None):
     args = параметры.parse(
         "БД ГИС из отчётов", argv,
-        files="отчёты ГИС (.doc/.docx), папки и архивы (ZIP, TAR, RAR), по одному пути в строке",
+        files="отчёты ГИС (.doc/.docx/.pdf), папки и архивы (ZIP, TAR, RAR), по одному пути в строке",
         mapping="файл сопоставления заголовков пачек (Excel/CSV, лист «Заголовки пачек» прежней выгрузки), необязательно",
         kg_min="порог Кг для hэф, доля единицы (0 — порог 25 %)")
     paths = _paths(args.files)
     if not paths:
         one = параметры.ask_path("Отчёты ГИС: файл, папка или архив", args.files if args.files is not None else None, "folder")
         paths = [one] if one else []
-    files, notes, tmp = archives.expand(paths)
+    files, notes, tmp = archives.expand(paths, (".doc", ".docx", ".pdf"))
     try:
         for n in notes:
             print("⚠️ %s" % n)
         if any(p.lower().endswith(".rar") for p in paths) or any(".rar" in n for n in notes):
             ok_rar, why = archives.rar_support()
             print(("ℹ️ RAR: " if ok_rar else "⚠️ RAR: ") + why)
+        files, same = gis_report.pick_report_files(files)
+        for n in same:
+            print("ℹ️ %s" % n)
         if not files:
-            print("⚠️ Файлов .doc/.docx не найдено.")
+            print("⚠️ Файлов .doc/.docx/.pdf не найдено.")
             return 0
         mapping = gis_report.load_mapping(параметры.clean_path(args.mapping or ""))
         kg_min = float((args.kg_min or "0").replace(",", ".") or 0)

@@ -279,3 +279,46 @@ def test_well_number_has_no_number_sign(text, want):
 def test_well_number_from_free_text():
     blocks = [wt.Para("Акт ГИС-контроля по скважине №21 Касимовского ПХГ")]
     assert gr.parse_blocks(blocks, "x.docx").well == "21"
+
+
+# ---- PDF с текстовым слоем и сканы (образцы — те же два отчёта, переведённые из Word в PDF; настоящих PDF в репозитории нет) ----
+PDF_A = os.path.join(DATA, "18_kasimov_201026.pdf")
+PDF_B = os.path.join(DATA, "18_kasimov_191120.pdf")
+
+
+def _rows(rep):
+    return [(r["Столбец-замер"], r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals]
+
+
+@pytest.mark.parametrize("pdf, word", [(PDF_A, A), (PDF_B, B)])
+def test_pdf_gives_same_tables_as_word(pdf, word):
+    p, w = gr.parse_file(pdf), gr.parse_file(word)
+    assert not p.error and (p.well, p.date, p.alt) == (w.well, w.date, w.alt)
+    assert _rows(p) == _rows(w)
+    for name in ("complex", "thermo", "packs", "bottoms"):
+        assert len(getattr(p, name)) == len(getattr(w, name)), name
+    gvk = lambda r: sorted((x["Столбец-замер"], x.get("ГВК MD, м")) for x in r.packs if x.get("_kind") == "gvk")
+    assert gvk(p) == gvk(w)
+
+
+def test_pdf_value_has_page_in_source():
+    rows = gr.parse_file(PDF_A).intervals
+    assert all("стр. " in r["Источник"] for r in rows)
+    assert {r["Источник"].split("стр. ")[1] for r in rows} == {"3", "4"}      # таблица продолжается на следующей странице
+
+
+def test_pdf_scan_is_not_guessed(tmp_path):
+    from PIL import Image
+    p = tmp_path / "скан.pdf"
+    Image.new("RGB", (600, 800), "white").save(str(p), "PDF")
+    rep = gr.parse_file(str(p))
+    assert "OCR" in rep.error and not rep.intervals and not rep.thermo and not rep.complex
+    assert any(i["Код"] == "pdf_scan" and "стр. 1" in i["Где"] for i in rep.issues)
+
+
+def test_pdf_next_to_word_is_not_read_twice(tmp_path):
+    import shutil
+    for src in (A, PDF_A):
+        shutil.copy(src, tmp_path / os.path.basename(src))
+    files = gr.pick_report_files(sorted(str(f) for f in tmp_path.iterdir()))
+    assert [os.path.basename(f) for f in files[0]] == ["18_kasimov_201026.doc"] and files[1]

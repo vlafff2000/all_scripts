@@ -50,6 +50,7 @@ class TRow:
 class Table:
     rows: List[TRow]
     index: int = 0             # номер таблицы в документе (с 0)
+    row_pages: List[int] = field(default_factory=list)   # PDF: страница каждой строки (для источника значения)
 
     @property
     def x0(self) -> float:

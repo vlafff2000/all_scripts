@@ -97,7 +97,8 @@ class Report:
 
 
 def _src(tbl: wt.Table, row: int) -> str:
-    return "таблица %d, строка %d" % (tbl.index + 1, row + 1)
+    page = ", стр. %d" % tbl.row_pages[row] if row < len(tbl.row_pages) else ""
+    return "таблица %d, строка %d%s" % (tbl.index + 1, row + 1, page)
 
 
 # ------------------------------------------------------------------------------------------------ шапка
@@ -1005,14 +1006,36 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
     return rep
 
 
+def pick_report_files(files: List[str]) -> Tuple[List[str], List[str]]:
+    """Один отчёт в Word и в PDF (одно имя в одной папке) читается один раз — Word надёжнее; PDF пропускается с пояснением."""
+    have = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith((".doc", ".docx"))}
+    keep, notes = [], []
+    for f in files:
+        if f.lower().endswith(".pdf") and os.path.splitext(f)[0].lower() in have:
+            notes.append("%s: рядом есть Word-версия отчёта, PDF не читается (чтобы замеры не задвоились)" % os.path.basename(f))
+        else:
+            keep.append(f)
+    return keep, notes
+
+
 def parse_file(path: str, mapping: Optional[Dict[str, str]] = None) -> Report:
+    scans: List[str] = []
     try:
-        blocks = wt.read_blocks(path)
+        if path.lower().endswith(".pdf"):
+            from . import pdf_tables
+            blocks, scans = pdf_tables.read_pdf(path)
+        else:
+            blocks = wt.read_blocks(path)
     except Exception as e:      # файл не пропадает из отчёта о разборе
         rep = Report(file=os.path.basename(path), path=path, error=str(e))
         rep.issue("error", "unreadable", "Файл не прочитан: %s" % e)
         return rep
-    return parse_blocks(blocks, path, mapping)
+    rep = parse_blocks(blocks, path, mapping)
+    for n in scans:             # скан не угадываем: значения не придумываются, страница названа
+        rep.issue("warn", "pdf_scan", n + " (не прочитано)", n.split(":")[0])
+    if scans and not blocks:
+        rep.error = "PDF без текстового слоя: нужен OCR, значения не извлечены"
+    return rep
 
 
 # ------------------------------------------------------------------------------------------------ проверки
