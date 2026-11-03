@@ -316,3 +316,13 @@ def test_date_below_first_interval_is_moved_to_its_block(tmp_path):
     res = gis.load_book(str(book))["7"]
     assert [len(b.rows) for b in res.blocks] == [2, 2]
     assert any(i.code == "date_shifted" for i in res.issues)
+
+
+def test_kg_with_sign_is_reported_in_percent(tmp_path):
+    # «<20%»: в сообщении проверки Кг в процентах (20 %), а не долей (0,2)
+    book = make_book(tmp_path / "g.xlsx", [("Март 2010г", None, 100, 102, 0.3, "<20%", None)])
+    res = gis.load_book(str(book))["7"]
+    row = res.blocks[0].rows[0]
+    assert row.kg == pytest.approx(0.2) and row.kg_text == "<20%"          # в БД доля единицы, как у всех значений Кг
+    msg = next(i.message for i in res.issues if i.code == "kg_bound")
+    assert "20 %" in msg and "0.2" not in msg and "«<20%»" in msg
