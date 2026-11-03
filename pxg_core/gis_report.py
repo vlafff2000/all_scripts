@@ -1305,6 +1305,20 @@ def _write_book(frames: Dict[str, pd.DataFrame], path: str, order=SHEET_ORDER) -
                 sheet.set_column(i, i, max(width, min(len(str(col)) + 2, 26)), pct if col in PERCENT else None)
 
 
+def with_methods(obs: pd.DataFrame, complex_: pd.DataFrame) -> pd.DataFrame:
+    """Столбец `methods` в `gis_observations`: методы выполненного комплекса ГИС замера (по скважине и дате; нет отчёта с комплексом — пусто).
+    Нужен таблице 5.3 «Авторского надзора» в Атласе; прежняя «База ГИС» этого столбца не имеет."""
+    obs = obs.copy()
+    if not len(complex_):
+        obs["methods"] = ""
+        return obs
+    c = complex_.copy()
+    c["_d"] = pd.to_datetime(c["Дата"], errors="coerce").dt.normalize()
+    by = {k: "; ".join(OrderedDict.fromkeys(x for v in g["Методы (сокращения)"] for x in str(v).split("; ") if x)) for k, g in c.groupby(["Скважина", "_d"])}
+    obs["methods"] = [by.get((w, pd.Timestamp(d).normalize()), "") if pd.notna(d) else "" for w, d in zip(obs["well"], obs["date"])]
+    return obs
+
+
 def export(reports: List[Report], out_dir: str, mapping: Optional[Dict[str, str]] = None, kg_min: float = 0.0, source: str = "") -> Tuple[List[str], Dict[str, pd.DataFrame]]:
     """Книга «БД_ГИС_из_отчётов.xlsx», таблицы gis_*.csv/parquet (как «База ГИС»), отдельная БД шаблонировок и метаданные."""
     import json
@@ -1319,6 +1333,7 @@ def export(reports: List[Report], out_dir: str, mapping: Optional[Dict[str, str]
     ds = frames["Доход шаблона"]
     if len(ds):
         bottom = ds[ds["Вид"].isin([KIND_TEMPLATE, KIND_STOP])].rename(columns={"Вид": "Вид"})[["Скважина", "Дата", "Глубина, м", "Вид"]]
+    atlas["gis_observations"] = with_methods(atlas["gis_observations"], frames["Комплекс ГИС"])
     files += gis_export.write_tables(atlas, out_dir, source, bottom)
     extra = {"gis_complex": frames["Комплекс ГИС"], "gis_thermobaric": frames["Термобарика"], "gis_filling": frames["Заполнение ствола"],
              "gis_gvk_history": frames["ГВК по датам"], "gis_templating": frames["_шаблонировки"]}
