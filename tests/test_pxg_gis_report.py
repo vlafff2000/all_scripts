@@ -322,3 +322,27 @@ def test_pdf_next_to_word_is_not_read_twice(tmp_path):
         shutil.copy(src, tmp_path / os.path.basename(src))
     files = gr.pick_report_files(sorted(str(f) for f in tmp_path.iterdir()))
     assert [os.path.basename(f) for f in files[0]] == ["18_kasimov_201026.doc"] and files[1]
+
+
+@pytest.mark.parametrize("text, kg, shown", [("<20%", 0.2, "<20%"), ("≤25", 0.25, "≤25"), ("~30 %", 0.3, "~30 %"), ("70", 0.7, ""),
+                                             ("20-30", 0.25, "20-30"), ("н/д", None, "н/д")])
+def test_kg_cell_keeps_number_for_math_and_text_for_tables(text, kg, shown):
+    # Кг «<20%»: число для расчётов, исходная запись — отдельно, для таблиц и отчётности
+    value, _lo, _hi, orig = gr._kg(text)
+    assert value == kg and orig == shown
+
+
+def test_kg_text_reaches_the_db_and_the_row():
+    from pxg_core import gis
+    assert gis.kg_cell("<20%") == (0.2, "<20%") and gis.kg_cell("≤0,25") == (0.25, "≤0,25") and gis.kg_cell(0.35) == (0.35, "")
+    assert gis.kg_cell("не ясно") == (None, "не ясно")
+
+
+def test_db_has_number_and_original_text(ra, tmp_path):
+    rep = gr.parse_file(A)
+    row = rep.intervals[0]
+    row["Кг (как в отчёте)"], row["Кг"], row["Кг мин"], row["Кг макс"] = "<20%", 0.2, 0.2, 0.2
+    gr.export([rep], str(tmp_path))
+    iv = pd.read_parquet(str(tmp_path / "gis_intervals.parquet"))
+    hit = iv[iv["kg_text"] == "<20%"]
+    assert len(hit) == 1 and hit.iloc[0]["kg"] == 0.2

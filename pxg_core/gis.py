@@ -118,6 +118,23 @@ def _num(v) -> Tuple[Optional[float], str]:
         return None, s
 
 
+KG_SIGN = r"(?:<=|>=|[<>≤≥~≈]|менее|более|свыше|до)"
+_KG_BOUND = re.compile(r"^\s*" + KG_SIGN + r"\s*(\d+(?:[.,]\d+)?)\s*(%?)\s*$", re.I)
+
+
+def kg_cell(v) -> Tuple[Optional[float], str]:
+    """(Кг в долях, исходный текст) для ячейки Кг. Число — как есть. «<20%», «≤25», «~30 %» — число из текста (20 % → 0,2), исходный текст остаётся:
+    для расчётов и графиков число, для таблиц и отчётности — как написано. Прочий текст («не ясно», «20-30») — (None, текст)."""
+    value, text = _num(v)
+    if value is not None or not isinstance(v, str):
+        return value, text
+    m = _KG_BOUND.match(v)
+    if not m:
+        return value, text
+    n = float(m.group(1).replace(",", "."))
+    return (n / 100.0 if m.group(2) or n > 1 else n), _str(v)
+
+
 def _str(v) -> str:
     return re.sub(r"\s+", " ", str(v)).strip() if v is not None else ""
 
@@ -447,7 +464,7 @@ def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[f
         row.frm, t1 = _num(cv)
         row.to, t2 = _num(dv)
         row.kp, _ = _num(wv.cell(r, 6).value)
-        row.kg, row.kg_text = _num(wv.cell(r, 7).value)
+        row.kg, row.kg_text = kg_cell(wv.cell(r, 7).value)
         if row.frm is None or row.to is None:
             row.status = _str(cv) if row.frm is None else _str(dv)
         if row.frm is not None and row.to is not None:
@@ -459,9 +476,12 @@ def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[f
             row.hi = row.to - row.frm
             if row.hi < 0:
                 issues.append(Issue("error", "interval_reversed", name, r, "«До» меньше «от»", f"{row.frm}–{row.to}"))
-            if row.kg_text:
+            if row.kg_text and row.kg is None:
                 issues.append(Issue("warn", "kg_text", name, r,
                                     f"Кг не число («{row.kg_text}»): интервал не входит в hэф", row.kg_text))
+            elif row.kg_text and _KG_BOUND.match(row.kg_text):
+                issues.append(Issue("warn", "kg_bound", name, r,
+                                    f"Кг с припиской («{row.kg_text}»): для расчётов взято число {row.kg:g}, текст сохранён; проверьте, считать ли интервал эффективным", row.kg_text))
             row.hef = row.hi if (row.kg is not None and row.kg > kg_min) else 0.0
             row.kg_hef = (row.kg or 0.0) * row.hef
             row.color = color_key(ws.cell(r, 3))

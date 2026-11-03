@@ -652,7 +652,7 @@ def horizon_of(title: str) -> str:
 # ------------------------------------------------------------------------------------------------ интервалы по пачкам
 
 def _kg(text: str) -> Tuple[Optional[float], Optional[float], Optional[float], str]:
-    """«50-55», «70», «~20», «-» → (среднее, мин, макс, текст) в долях единицы."""
+    """«50-55», «70», «<20%», «~20», «-» → (среднее, мин, макс, текст) в долях единицы. Текст — исходная запись, когда она не просто число."""
     s = text.translate(_MINUS).strip()
     if not s or s in ("-", "—", "н/д"):
         return None, None, None, s
@@ -660,10 +660,10 @@ def _kg(text: str) -> Tuple[Optional[float], Optional[float], Optional[float], s
     if rng:
         a, b = fnum(rng.group(1)) / 100.0, fnum(rng.group(2)) / 100.0
         return round((a + b) / 2, 4), min(a, b), max(a, b), s
-    one = re.fullmatch(r"~?\s*(\d+(?:[.,]\d+)?)\s*%?", s)
+    one = re.fullmatch(r"(" + gis.KG_SIGN + r")?\s*(\d+(?:[.,]\d+)?)\s*%?", s, re.I)
     if one:
-        v = fnum(one.group(1)) / 100.0
-        return v, v, v, ""
+        v = fnum(one.group(2)) / 100.0
+        return v, v, v, s if one.group(1) else ""      # приписка («<», «~»): число для расчётов, исходный текст — для таблиц
     return None, None, None, s
 
 
@@ -833,6 +833,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             conf, why = HIGH, ""
             if ktext and kmin is not None and kmin != kmax:
                 conf, why = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
+            elif ktext and kg is not None:
+                conf, why = MID, "Кг с припиской «%s»: для расчётов взято число %g %%, исходный текст сохранён" % (ktext, kg * 100)
             elif kg is None and not water:
                 conf, why = MID, "Кг не число («%s»)" % ktext
             rep.intervals.append(OrderedDict([
@@ -1149,7 +1151,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
                 hef = hi if (gas and r["Кг"] is not None and r["Кг"] > (kg_min or gis.KG_MIN) and not below) else 0.0
                 note = "; ".join(x for x in (r["Основание"], "ниже ГВК: hэф не считается" if below else "", "водонасыщен" if not gas else "") if x)
                 row = gis.Row(sheet=well, well=well, xl_row=0, block=n, label_raw=r["Заголовок пачки"], frm=r["От, м"], to=r["До, м"], kp=r["Кп"], kg=r["Кг"],
-                              kg_text=r["Кг (как в отчёте)"] if r["Кг"] is None or r["Кг мин"] != r["Кг макс"] else "",
+                              kg_text=r["Кг (как в отчёте)"] if r["Кг"] is None or r["Кг мин"] != r["Кг макс"] or _kg(r["Кг (как в отчёте)"])[3] else "",
                               pack=r["Пачка"], color="", hi=hi, hef=hef, kg_hef=hef * (r["Кг"] or 0.0), note=note, status=r["Насыщение"] if not gas else "")
                 b.rows.append(row)
                 res.rows.append(row)
