@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from . import qc
+
 TOL_DEPTH = 0.15      # м: границы интервалов и ГВК считаются совпавшими
 TOL_KG = 0.03         # доля единицы
 TABLES = ("gis_observations", "gis_packs", "gis_intervals")
@@ -29,7 +31,7 @@ def load_db(folder: str) -> Dict[str, pd.DataFrame]:
         else:
             df = pd.DataFrame()
         if len(df):
-            df["well"] = df["well"].astype(str).str.strip()
+            df["well"] = df["well"].map(qc.well_key)
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
             df["month"] = df["date"].dt.strftime("%Y-%m")
         out[name] = df

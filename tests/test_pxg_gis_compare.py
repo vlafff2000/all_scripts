@@ -68,3 +68,14 @@ def test_export_and_qc(dbs, tmp_path):
 def test_empty_folder_is_explained(tmp_path):
     with pytest.raises(ValueError, match="нет таблиц"):
         gc.load_db(str(tmp_path))
+
+
+def test_compare_ignores_number_sign_in_old_db(tmp_path):
+    # баг: «№21» в старой БД и «21» в новой считались разными скважинами
+    row = {"well": ["№21"], "date": ["2025-10-20"], "season": ["осень"], "status": ["ok"], "packs": [1]}
+    old = tmp_path / "old"; old.mkdir()
+    new = tmp_path / "new"; new.mkdir()
+    pd.DataFrame(row).to_csv(old / "gis_observations.csv", sep=";", index=False)
+    pd.DataFrame({**row, "well": ["21"]}).to_csv(new / "gis_observations.csv", sep=";", index=False)
+    a, b = gc.load_db(str(old)), gc.load_db(str(new))
+    assert list(a["gis_observations"]["well"]) == list(b["gis_observations"]["well"]) == ["21"]

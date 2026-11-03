@@ -266,3 +266,16 @@ def test_rar_without_external_tool(tmp_path):
     else:
         with pytest.raises(archives.ArchiveError, match="unrar"):
             archives.extract(Path(DATA) / "compressed.rar", comp)
+
+
+@pytest.mark.parametrize("text, want", [("Скважина: №21", "21"), ("Скважина: N 21", "21"), ("Скважина: Скв. №21", "21"),
+                                         ("Скважина: 21", "21"), ("Скважина: № 7А", "7А")])
+def test_well_number_has_no_number_sign(text, want):
+    # баг: в БД попадало «№21» вместо «21»
+    blocks = [wt.Para(text)]
+    assert gr.parse_blocks(blocks, "x.docx").well == want
+
+
+def test_well_number_from_free_text():
+    blocks = [wt.Para("Акт ГИС-контроля по скважине №21 Касимовского ПХГ")]
+    assert gr.parse_blocks(blocks, "x.docx").well == "21"
