@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/labelPick.ts @ 3042475. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/labelPick.ts @ d943607. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Ручной выбор подписей данных: у каких точек ряда подпись показана (Look.label_pick). Пусто (undefined) — у всех точек.
 // Один набор функций для экрана, панели «Формат» и файлов; ключ точки — значение X как его прислала программа (String).
 import { useSyncExternalStore } from 'react'

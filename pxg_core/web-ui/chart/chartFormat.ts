@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartFormat.ts @ 3042475. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartFormat.ts @ d943607. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Единая модель оформления графика (как в atlas/chart_style.py): документ {chart, axes, series}.
 // Уровни (тема проекта → тип графика → график) складываются mergeFormats: поле более позднего уровня главнее.
 import { errorSeries, trendSeries } from './trend'
@@ -7,7 +7,7 @@ import { applyLooks, type Look } from './chartStyle'
 
 export type AxisName = 'x' | 'y' | 'y2' | 'y3' | 'y4' | 'y5'
 /** Настройки оси: оформление (AxisStyle) + цвет, границы и деления текстом (проверяются на сервере). */
-export type AxisFormat = AxisStyle & {
+export type AxisFormat = Omit<AxisStyle, 'minor_step' | 'cross'> & {
   color?: string; min?: string; max?: string; step?: string; minor_step?: string; cross?: string
   break_from?: string; break_to?: string     // разрыв оси: от и до (число или дата дд.мм.гггг)
   log?: boolean; inverse?: boolean; from_zero?: boolean
