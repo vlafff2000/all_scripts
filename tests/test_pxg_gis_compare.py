@@ -79,3 +79,20 @@ def test_compare_ignores_number_sign_in_old_db(tmp_path):
     pd.DataFrame({**row, "well": ["21"]}).to_csv(new / "gis_observations.csv", sep=";", index=False)
     a, b = gc.load_db(str(old)), gc.load_db(str(new))
     assert list(a["gis_observations"]["well"]) == list(b["gis_observations"]["well"]) == ["21"]
+
+
+def test_compare_with_text_and_number_in_one_column(tmp_path):
+    # баг: «'<' not supported between instances of 'str' and 'float'» — номер скважины или пачка то текстом, то числом/пропуском
+    def db(folder, wells, packs):
+        os.makedirs(folder)
+        pd.DataFrame({"well": wells, "date": pd.to_datetime(["2025-10-01"] * len(wells))}).to_parquet(folder + "/gis_observations.parquet", index=False)
+        pd.DataFrame({"well": wells, "date": pd.to_datetime(["2025-10-01"] * len(wells)), "pack": packs, "gvk_depth_m": [800.0] * len(wells)}).to_parquet(folder + "/gis_packs.parquet", index=False)
+        pd.DataFrame({"well": wells, "date": pd.to_datetime(["2025-10-01"] * len(wells)), "pack": packs, "from_m": [790.0] * len(wells), "to_m": [800.0] * len(wells), "kg": [0.5] * len(wells)}).to_parquet(folder + "/gis_intervals.parquet", index=False)
+        return folder
+    a = db(str(tmp_path / "a"), ["7", "21", "5"], [None, "Верхняя пачка", "Нижняя пачка"])
+    b = db(str(tmp_path / "b"), ["7", "21", "5"], ["Верхняя пачка", None, "Нижняя пачка"])
+    o = pd.read_parquet(str(tmp_path / "a" / "gis_observations.parquet"))
+    o.loc[o["well"] == "5", "date"] = pd.NaT                    # замер без даты (дату не разобрали) — месяц пустой
+    o.to_parquet(str(tmp_path / "a" / "gis_observations.parquet"), index=False)
+    path, frames = gc.export(a, b, str(tmp_path / "out"))
+    assert os.path.exists(path) and len(frames["Пачки"]) >= 1

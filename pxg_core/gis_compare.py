@@ -16,6 +16,7 @@ from . import qc
 
 TOL_DEPTH = 0.15      # м: границы интервалов и ГВК считаются совпавшими
 TOL_KG = 0.03         # доля единицы
+NO_DATE = "без даты"
 TABLES = ("gis_observations", "gis_packs", "gis_intervals")
 
 
@@ -33,7 +34,7 @@ def load_db(folder: str) -> Dict[str, pd.DataFrame]:
         if len(df):
             df["well"] = df["well"].map(qc.well_key)
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
-            df["month"] = df["date"].dt.strftime("%Y-%m")
+            df["month"] = df["date"].dt.strftime("%Y-%m").fillna(NO_DATE)     # без даты — своя группа (иначе пропуск float ломает сортировку)
         out[name] = df
     if not any(len(v) for v in out.values()):
         raise ValueError("В папке «%s» нет таблиц gis_observations / gis_packs / gis_intervals" % folder)
