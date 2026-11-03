@@ -13,18 +13,10 @@ import zipfile
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
-from pxg_core import параметры
+from pxg_core import archives, параметры
 
-# Длинные окончания первыми: «.tar.gz» раньше «.gz»
-ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz", ".tar", ".zip", ".rar", ".7z")
-
-
-def archive_suffix(name: str) -> Optional[str]:
-    lower = name.lower()
-    for suffix in ARCHIVE_SUFFIXES:
-        if lower.endswith(suffix):
-            return suffix
-    return None
+ARCHIVE_SUFFIXES = archives.ARCHIVE_SUFFIXES
+archive_suffix = archives.archive_suffix
 
 
 def folder_name(name: str) -> str:
@@ -49,33 +41,8 @@ def find_archives(folder: Path, fragment: str = "", recursive: bool = False) -> 
 
 
 def extract(archive: Path, target: Path) -> None:
-    """Распаковывает архив в target. Бросает исключение с понятным текстом, если формат не поддерживается."""
-    suffix = archive_suffix(archive.name)
-    if suffix == ".zip":
-        with zipfile.ZipFile(archive) as zf:
-            zf.extractall(target)
-    elif suffix in (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz"):
-        with tarfile.open(archive, "r:*") as tf:
-            if hasattr(tarfile, "data_filter"):  # защита от путей вне папки и опасных прав (Python 3.12+)
-                tf.extractall(target, filter="data")
-            else:
-                tf.extractall(target)
-    elif suffix == ".rar":
-        try:
-            import rarfile
-        except ImportError:
-            raise RuntimeError("для RAR нужен пакет rarfile: pip install rarfile")
-        with rarfile.RarFile(str(archive)) as rf:
-            rf.extractall(str(target))
-    elif suffix == ".7z":
-        try:
-            import py7zr
-        except ImportError:
-            raise RuntimeError("для 7Z нужен пакет py7zr: pip install py7zr")
-        with py7zr.SevenZipFile(str(archive), "r") as sz:
-            sz.extractall(str(target))
-    else:
-        raise RuntimeError("неподдерживаемый формат архива: %s" % archive.name)
+    """Распаковывает архив в target. Бросает исключение с понятным текстом, если формат или утилита недоступны (`pxg_core.archives`)."""
+    archives.extract(archive, target)
 
 
 def unpack(archive: Path, delete: bool = False) -> Tuple[bool, str, Optional[Path]]:

@@ -13,3 +13,4 @@ starlette
 uvicorn
 pywebview; sys_platform == "win32"
 pypdf
+rarfile
