@@ -184,6 +184,8 @@ def test_export_atlas_tables_same_structure_as_gis_base(tmp_path, ra, rb):
             "gis_filling.csv", "gis_gvk_history.csv", "gis_templating.parquet", "gis_db_meta.json", "templating_db_meta.json", "gis_report_meta.json"} <= names
     obs = pd.read_parquet(str(tmp_path / "gis_observations.parquet"))
     assert sorted(str(d)[:10] for d in obs["date"]) == ["2019-10-11", "2020-11-19", "2025-10-22", "2026-04-02", "2026-10-20"]
+    by = dict(zip(obs["date"].astype(str).str[:10], obs["methods"]))
+    assert by["2026-10-20"] == "ТМ; БМ; ГК; ЛМ; 2НГК" and by["2020-11-19"] == "ТМ; МН; ГК; НГК; ЛМ" and by["2025-10-22"] == ""     # методы — только у замера со своим отчётом
     packs = pd.read_parquet(str(tmp_path / "gis_packs.parquet"))
     lower = packs[(packs["pack"] == "Нижняя пачка") & (packs["date"].astype(str).str[:10] == "2026-10-20")].iloc[0]
     assert (lower["gvk_depth_m"], lower["gvk_abs_m"], round(lower["h_eff_m"], 1)) == (803.5, -668.5, 15.5)
