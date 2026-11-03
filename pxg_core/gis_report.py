@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from . import gis, word_doc, word_tables as wt
+from . import gis, qc, word_doc, word_tables as wt
 
 NUM = r"-?\d+(?:[.,]\d+)?"
 HIGH, MID, LOW = "высокая", "средняя", "низкая"
@@ -187,10 +187,10 @@ def read_header(rep: Report, blocks: List[wt.Block]) -> None:
     kv = rep.kv
     hit = _find(kv, r"^скважина$")
     if hit:
-        rep.well = hit[1].strip()
+        rep.well = qc.well_key(hit[1])
     if not rep.well:
         m = re.search(r"скважин\w*\s*(?:№|N)?\s*([\w][\w\-/]*)", text, re.I)
-        rep.well = m.group(1) if m else ""
+        rep.well = qc.well_key(m.group(1)) if m else ""
     m = re.search(r"([А-ЯЁ][а-яё]+(?:ского|ское|ского|ский)?)\s+(?:УПХГ|ПХГ)", text)
     hit = _find(kv, r"^пхг$")
     rep.storage = (hit[1].strip() if hit else (m.group(0) if m else ""))
