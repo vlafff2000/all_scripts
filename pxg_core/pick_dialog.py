@@ -45,7 +45,7 @@ button:disabled{opacity:.5;cursor:default}
 </style></head>
 <body>
 <header id="title"></header>
-<div id="bar"><button id="up" title="Вверх">↑</button><input id="path" spellcheck="false"><button id="go">Перейти</button></div>
+<div id="bar"><button id="up" title="Вверх">↑</button><input id="path" spellcheck="false"><button id="go">Перейти</button><button id="mk" title="Создать папку в текущей папке">Новая папка</button></div>
 <div id="places"></div>
 <div id="err"></div>
 <div id="list"></div>
@@ -108,6 +108,12 @@ $('title').textContent = cfg.title;
 $('up').onclick = () => list.parent && load(list.parent);
 $('go').onclick = () => load($('path').value);
 $('path').onkeydown = e => { if (e.key === 'Enter') load($('path').value); };
+$('mk').onclick = async () => {
+  const name = prompt('Имя новой папки');
+  if (name === null) return;
+  const r = await api('/api/fs/mkdir', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-PXG': '1'}, body: JSON.stringify({path: cur, name})});
+  if (r.ok) load(r.path); else $('err').textContent = r.error || 'Не удалось создать папку';
+};
 $('cancel').onclick = () => choose([]);
 $('ok').onclick = () => {
   if (cfg.mode === 'folder') choose([marked || cur]);
