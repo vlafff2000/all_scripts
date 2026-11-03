@@ -50,3 +50,7 @@ def test_dialog_cancel(tmp_path, monkeypatch):
     c = TestClient(pick_dialog.make_dialog_app({"kind": "info", "title": "Т", "message": "м"}, result, done))
     c.post("/api/pick/done", json={"value": None})
     assert done.is_set() and result["value"] is None
+
+
+def test_page_has_new_folder_button():
+    assert 'id="mk"' in pick_dialog.PAGE and "/api/fs/mkdir" in pick_dialog.PAGE
