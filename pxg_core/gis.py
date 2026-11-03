@@ -481,7 +481,7 @@ def parse_sheet(ws, wv, legend: Optional[Dict[str, str]] = None, alt: Optional[f
                                     f"Кг не число («{row.kg_text}»): интервал не входит в hэф", row.kg_text))
             elif row.kg_text and _KG_BOUND.match(row.kg_text):
                 issues.append(Issue("warn", "kg_bound", name, r,
-                                    f"Кг с припиской («{row.kg_text}»): для расчётов взято число {row.kg:g}, текст сохранён; проверьте, считать ли интервал эффективным", row.kg_text))
+                                    f"Кг с припиской («{row.kg_text}»): для расчётов взято число {row.kg * 100:g} %, текст сохранён; проверьте, считать ли интервал эффективным", row.kg_text))
             row.hef = row.hi if (row.kg is not None and row.kg > kg_min) else 0.0
             row.kg_hef = (row.kg or 0.0) * row.hef
             row.color = color_key(ws.cell(r, 3))
