@@ -67,7 +67,7 @@ def _same_intervals(rep, word_rep, lost_max=1):
 
 
 def _key(r):
-    return (r["Столбец-замер"], r["Заголовок пачки"], r["От, м"], r["До, м"], r["Кг"], r["Кп"])
+    return (r["Столбец-замер"], r["Заголовок пачки"], r["От, м"], r["До, м"], r["Кг"], r["Пористость"])
 
 
 def test_json_roundtrip_gives_same_intervals(tmp_path, blocks, word_rep):

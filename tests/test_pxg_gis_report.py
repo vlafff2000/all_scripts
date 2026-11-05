@@ -125,7 +125,7 @@ def test_main_table_three_epochs_with_packs_and_gvk(ra):
     assert list(zip(last["От, м"], last["До, м"]))[-2:] == [(776.8, 778.7), (778.7, 782.0)]
     assert round(last["hi, м"].sum(), 1) == 13.7
     r = main[(main["От, м"] == 776.8) & (main["Столбец-замер"] == "РИГИС от 04.2026г")].iloc[0]
-    assert (r["До, м"], r["Кп"], r["Кг мин"], r["Кг макс"]) == (782.0, 0.32, 0.40, 0.65) and r["Уверенность"] == "средняя"
+    assert (r["До, м"], r["Пористость"], r["Кг мин"], r["Кг макс"]) == (782.0, 0.32, 0.40, 0.65) and r["Уверенность"] == "средняя"
     g = {(p["Столбец-замер"], p["Пачка"]): (p["ГВК MD, м"], p["ГВК а.о., м"]) for p in ra.packs if p.get("_kind") == "gvk"}
     assert g[("РИГИС от 10.2025г", "Нижняя пачка")] == (803.7, -668.7)
     assert g[("РИГИС от 04.2026г", "Нижняя пачка")] == (802.5, -667.5)
@@ -361,10 +361,10 @@ def test_porosity_after_interval_is_its_own_column_not_kg():
     tbl = _por_table()
     rep = gr.Report(file="x.doc", well="18", alt=135.0)
     gr.read_intervals(rep, tbl, gr.header_rows(tbl), None, "t", "s")
-    got = [(r["От, м"], r["До, м"], r["Пористость интервала"], r["Кг"]) for r in rep.intervals]
+    got = [(r["От, м"], r["До, м"], r["Пористость"], r["Кг"]) for r in rep.intervals]
     assert got == [(788.0, 797.2, 0.27, 0.70), (797.2, 804.6, 0.27, 0.68)]
     assert rep.intervals[1]["Пористость (как в отчёте)"] == "25-29"
-    assert rep.intervals[0]["Кп"] is None      # Кп коллектора (столбец «коллектор») не подменяется пористостью интервала
+    assert "Кп" not in rep.intervals[0]      # один столбец пористости
 
 
 def test_porosity_in_ocr_row_order():
@@ -390,7 +390,7 @@ def test_date_only_measurement_columns_with_net_thickness_and_fractions():
     tbl = _date_only_table()
     rep = gr.Report(file="x.doc", well="102", alt=100.0)
     gr.read_intervals(rep, tbl, gr.header_rows(tbl), None, "t", "s")
-    got = sorted((str(r["Дата замера"]), r["От, м"], r["До, м"], r["Нг по отчёту, м"], r["Кп"], r["Кг"]) for r in rep.intervals)
+    got = sorted((str(r["Дата замера"]), r["От, м"], r["До, м"], r["Нг по отчёту, м"], r["Пористость"], r["Кг"]) for r in rep.intervals)
     assert got == [("2022-10-01", 758.6, 761.2, 2.6, 0.18, 0.35), ("2022-10-01", 761.2, 778.4, 17.2, 0.265, 0.8),
                    ("2023-04-01", 758.6, 761.2, 2.6, 0.18, 0.35), ("2023-04-01", 761.2, 778.4, 17.2, 0.265, 0.75)]
 
