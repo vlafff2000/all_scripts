@@ -190,7 +190,7 @@ def read_header(rep: Report, blocks: List[wt.Block]) -> None:
     if hit:
         rep.well = qc.well_key(hit[1])
     if not rep.well:
-        m = re.search(r"скважин\w*\s*(?:№|N)?\s*([\w][\w\-/]*)", text, re.I)
+        m = re.search(r"скважин\w*\s*(?:№|N)\s*([\w][\w\-/]*)", text, re.I) or re.search(r"скважин\w*\s*([\w][\w\-/]*)", text, re.I)
         rep.well = qc.well_key(m.group(1)) if m else ""
     m = re.search(r"([А-ЯЁ][а-яё]+(?:ского|ское|ского|ский)?)\s+(?:УПХГ|ПХГ)", text)
     hit = _find(kv, r"^пхг$")
@@ -327,8 +327,12 @@ KIND_TEMPLATE, KIND_STOP, KIND_FIELD, KIND_ART, KIND_DRILLED = ("доход ша
 def read_bottoms(rep: Report, blocks: List[wt.Block]) -> None:
     for b in blocks:
         if isinstance(b, wt.Para):
-            for m in re.finditer(r"(?:максимальн\w*\s+)?доход\w*\s+(?:шаблон\w*|прибор\w*)\s+(?:составляет|равен|—|–|-|:)?\s*[-–—]?\s*(" + NUM + r")\s*м", b.text, re.I):
+            for m in re.finditer(r"(?:максимальн\w*\s+)?доход\w*\s+(?:шаблон\w*|прибор\w*)\s+(?:[^.\d]{0,50}?\s)?(?:составляет|равен|—|–|-|:)?\s*[-–—]?\s*(" + NUM + r")\s*м", b.text, re.I):
                 add_bottom(rep, KIND_TEMPLATE, fnum(m.group(1)), "текст", HIGH)
+            m = re.match(r"\s*текущ\w*\s+забой\s+(" + NUM + r")\s+(" + NUM + r")\s*\(\s*доход\s+прибор", b.text, re.I)     # строка таблицы, ставшая текстом
+            if m:
+                add_bottom(rep, KIND_FIELD, fnum(m.group(1)), "текст", MID, "строка таблицы прочитана как текст")
+                add_bottom(rep, KIND_TEMPLATE, fnum(m.group(2)), "текст", MID, "строка таблицы прочитана как текст")
             for m in re.finditer(r"остановк\w*\s+прибор\w*\s*([^\s]*(?:\s*№\s*\d+)?)[^.]{0,40}?(?:на глубине|глубин\w*)\s*(" + NUM + r")\s*м", b.text, re.I):
                 tool = re.search(r"(?:прибор\w*)\s+([\w\-]+\s*№\s*\d+)", b.text, re.I)
                 note = ""
@@ -490,6 +494,38 @@ def read_thermo_table(rep: Report, tbl: wt.Table) -> bool:
         add_thermo(rep, fnum(dv[-1]), lab, t, p, pu, _src(tbl, trow if trow is not None else prow))
         rowsn += 1
     return rowsn > 0
+
+
+_THERMO_HEAD = re.compile(r"глубина,?\s*м\s+температура[^\d]*давление", re.I)
+_THERMO_ROW = re.compile(r"^\s*(" + NUM + r")\s+(?:([^\d].*?)\s+)?(" + NUM + r")\s+(" + NUM + r")\s*$")
+
+
+def read_thermo_lines(rep: Report, blocks: List[wt.Block]) -> None:
+    """Таблица «глубина | температура | давление», прочитанная построчно как текст (без линий в PDF, абзацы OCR): «414.6 кровля пласта 18.9 30.0»."""
+    inside = False
+    have = [t["Глубина, м"] for t in rep.thermo]
+    p_unit = "кгс/см2"
+    for n, b in enumerate(blocks):
+        if not isinstance(b, wt.Para):
+            inside = False
+            continue
+        for line in b.text.split("\n"):       # заголовок и строки таблицы PDF/OCR часто в одном абзаце
+            if _THERMO_HEAD.search(line):
+                inside = True
+                unit = re.search(r"давление[^\n]*?(кгс\s*/\s*см\s*[2²]?|мпа|атм)", line, re.I)
+                p_unit = unit.group(1) if unit else "кгс/см2"
+                continue
+            if not inside:
+                continue
+            m = _THERMO_ROW.match(line)
+            if not m:
+                inside = False
+                continue
+            d = fnum(m.group(1))
+            if d is not None and not any(abs(d - h) < 0.05 for h in have):
+                add_thermo(rep, d, "%g м %s" % (d, m.group(2) or ""), fnum(m.group(3)), fnum(m.group(4)), p_unit, "абзац %d" % (n + 1), MID,
+                           "строка таблицы прочитана как текст: порядок столбцов глубина, температура, давление по заголовку")
+                have.append(d)
 
 
 def read_thermo_text(rep: Report, blocks: List[wt.Block]) -> None:
@@ -1000,6 +1036,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
             if read_intervals(rep, b, nh, mapping, title, section) == 0:
                 rep.issue("warn", "intervals_empty", "Таблица интервалов найдена, но строк с интервалами нет", "таблица %d" % (b.index + 1))
     read_bottoms(rep, blocks)
+    read_thermo_lines(rep, blocks)
     read_thermo_text(rep, blocks)
     read_pl_temp(rep, blocks)
     read_filling_text(rep, blocks)
