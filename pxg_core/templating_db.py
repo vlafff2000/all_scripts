@@ -127,7 +127,7 @@ def from_construction(path: str) -> List[dict]:
 
 
 # заголовок → поле; порядок важен: более конкретное раньше
-_SYN = [("well", r"скв|well"), ("date", r"дата|date"), ("diam", r"диаметр\s*шабл|шаблон.*мм|d\s*шабл"),
+_SYN = [("well", r"скв|well"), ("date", r"дата|date"), ("year", r"^\s*год|year"), ("diam", r"диаметр\s*шабл|шаблон.*мм|d\s*шабл"),
         ("tool", r"прибор|метод|тип шабл|инструмент"), ("note", r"примеч|коммент"),
         ("depth", r"доход|шаблон|отбит|текущ\w*\s*забо|забой|глубин|depth|bottom")]
 
@@ -153,6 +153,8 @@ def from_excel(path: str) -> Tuple[List[dict], List[str]]:
         sheets = pd.read_excel(path, sheet_name=None, dtype=object)
     for name, df in sheets.items():
         cols = _guess_columns(df.columns)
+        if "date" not in cols and "year" in cols:
+            cols["date"] = cols["year"]           # в файле только год: дата условная, 1 января, это видно в примечании
         if not {"well", "date", "depth"} <= cols.keys():
             if len(df):
                 notes.append("%s%s: пропущен, нет столбцов скважины, даты и глубины" % (os.path.basename(path), " / " + name if name else ""))
@@ -162,10 +164,14 @@ def from_excel(path: str) -> Tuple[List[dict], List[str]]:
         for i, r in df.iterrows():
             if _num(r[cols["depth"]]) is None:
                 continue
-            out.append(_row(r[cols["well"]], r[cols["date"]], kind, r[cols["depth"]], ORIGIN_EXCEL, **{
+            when, only_year = r[cols["date"]], cols["date"] == cols.get("year") and "date" not in _guess_columns([c for c in df.columns if c != cols["year"]])
+            if only_year:
+                y = _num(when)
+                when = None if y is None else "%d-01-01" % int(y)
+            out.append(_row(r[cols["well"]], when, kind, r[cols["depth"]], ORIGIN_EXCEL, **{
                 "Диаметр шаблона, мм": _num(r[cols["diam"]]) if "diam" in cols else None,
                 "Прибор / метод": r[cols["tool"]] if "tool" in cols else None,
-                "Примечание": r[cols["note"]] if "note" in cols else None,
+                "Примечание": ("только год в файле, дата условная 01.01" if only_year else r[cols["note"]] if "note" in cols else None),
                 "Файл": os.path.basename(path), "Источник": "%s, строка %d" % (name or "таблица", i + 2), "Уверенность": "средняя",
                 "Основание": "столбец «%s»" % cols["depth"]}))
     return out, notes

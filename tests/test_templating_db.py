@@ -81,3 +81,13 @@ def test_export_files_check_and_web_args(src, tmp_path, monkeypatch):
 def test_no_sources_is_an_error():
     with pytest.raises(ValueError):
         td.build()
+
+
+def test_excel_with_year_instead_of_date(tmp_path):
+    # реальный Excel Егора: три колонки — скважина, год, глубина (MD)
+    xl = tmp_path / "shab.xlsx"
+    pd.DataFrame({"Скважина": [21, 7], "Год": [2023, 2024], "Глубина MD, м": [951.5, 880]}).to_excel(xl, index=False)
+    frames, _ = td.build(excel=[str(xl)])
+    db = frames["БД шаблонирования"]
+    assert sorted(db["Скважина"]) == ["21", "7"] and set(db["Дата"].dt.year) == {2023, 2024}
+    assert db["Примечание"].str.contains("только год").all() and (db["Принято"] == "Да").all()
