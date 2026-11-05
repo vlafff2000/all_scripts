@@ -959,6 +959,9 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 if br["from"] - 0.05 <= ivn[0] and ivn[1] <= br["to"] + 0.05:
                     kp, kp_why = br["kp"], "Кп из интервала коллектора %g–%g (%s)" % (br["from"], br["to"], br["src"])
                     break
+            por_val = por if por is not None else kp
+            if por is None and kp is not None:
+                kp_why = kp_why + " (взята как пористость)"
             conf, why = HIGH, ""
             if ktext and kmin is not None and kmin != kmax:
                 conf, why = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
@@ -972,8 +975,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 ("Скважина", rep.well), ("Файл", rep.file), ("Таблица", tid), ("Источник", _src(tbl, i)), ("Столбец-замер", g.label), ("_g", gi),
                 ("Дата замера", g.date), ("Дата точная", g.exact), ("Раздел таблицы", title), ("Заголовок пачки", pack_title), ("Пачка", pack),
                 ("Горизонт", horizon_of(pack_title)), ("От, м", ivn[0]), ("До, м", ivn[1]), ("От а.о., м", ao(rep, ivn[0])), ("До а.о., м", ao(rep, ivn[1])),
-                ("hi, м", round(ivn[1] - ivn[0], 3)), ("Нобщ по отчёту, м", h), ("Нг по отчёту, м", hg), ("Кп", kp), ("Кг", kg), ("Кг мин", kmin), ("Кг макс", kmax),
-                ("Кг (как в отчёте)", rec["kg"]), ("Пористость интервала", por), ("Пористость (как в отчёте)", rec.get("kp", "")), ("Насыщение", sat), ("Литология", rec["lith"]), ("Водонасыщенный", water), ("Глубины", MD_BASIS),
+                ("hi, м", round(ivn[1] - ivn[0], 3)), ("Нобщ по отчёту, м", h), ("Нг по отчёту, м", hg), ("Кг", kg), ("Кг мин", kmin), ("Кг макс", kmax),
+                ("Кг (как в отчёте)", rec["kg"]), ("Пористость", por_val), ("Пористость (как в отчёте)", rec.get("kp", "")), ("Насыщение", sat), ("Литология", rec["lith"]), ("Водонасыщенный", water), ("Глубины", MD_BASIS),
                 ("Уверенность", conf), ("Основание", "; ".join(x for x in (why, kp_why) if x))]))
             n += 1
         row_recs = []
@@ -1353,7 +1356,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
                 below = gv is not None and r["От, м"] >= gv["ГВК MD, м"] - 0.05
                 hef = hi if (gas and r["Кг"] is not None and r["Кг"] > (kg_min or gis.KG_MIN) and not below) else 0.0
                 note = "; ".join(x for x in (r["Основание"], "ниже ГВК: hэф не считается" if below else "", "водонасыщен" if not gas else "") if x)
-                row = gis.Row(sheet=well, well=well, xl_row=0, block=n, label_raw=r["Заголовок пачки"], frm=r["От, м"], to=r["До, м"], kp=r["Кп"], kg=r["Кг"],
+                row = gis.Row(sheet=well, well=well, xl_row=0, block=n, label_raw=r["Заголовок пачки"], frm=r["От, м"], to=r["До, м"], kp=r["Пористость"], kg=r["Кг"],
                               kg_text=r["Кг (как в отчёте)"] if r["Кг"] is None or r["Кг мин"] != r["Кг макс"] or _kg(r["Кг (как в отчёте)"])[3] else "",
                               pack=r["Пачка"], color="", hi=hi, hef=hef, kg_hef=hef * (r["Кг"] or 0.0), note=note, status=r["Насыщение"] if not gas else "")
                 b.rows.append(row)
@@ -1514,7 +1517,7 @@ def _write_pair(table: pd.DataFrame, out_dir: str, name: str) -> List[str]:
 
 SHEET_ORDER = ("Свод", "Замеры", "Интервалы", "Комплекс ГИС", "Доход шаблона", "Термобарика", "Заполнение ствола", "ГВК", "Итоги пачек", "ГВК по датам",
                "Выводы (текст)", "Заголовки пачек", "Таблицы в отчётах", "Отчёты", "Проверка", "Строки БД")
-PERCENT = ("Кг", "Кп", "Пористость интервала", "Кг мин", "Кг макс", "Кг ср.взв", "Кг ср.взв (весь замер)")
+PERCENT = ("Кг", "Пористость", "Кг мин", "Кг макс", "Кг ср.взв", "Кг ср.взв (весь замер)")
 
 
 def _write_book(frames: Dict[str, pd.DataFrame], path: str, order=SHEET_ORDER) -> None:
