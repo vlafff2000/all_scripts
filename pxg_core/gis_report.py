@@ -1585,6 +1585,8 @@ EN = {
     "gis_filling": {"Скважина": "well", "Дата": "date", "Режим исследования": "regime", "От, м": "from_m", "До, м": "to_m", "Плотность от, г/см³": "density_min",
                     "Плотность до, г/см³": "density_max", "Заполнение (как в отчёте)": "fill_raw", "Заполнение": "fill", "Уровень жидкости, м": "level_m",
                     "Уровень (как в отчёте)": "level_raw", "Откуда": "origin", "Файл": "file", "Источник": "source", "Уверенность": "confidence", "Основание": "basis"},
+    "gis_pressure_rpl": {"Скважина": "well", "Дата отчёта": "report_date", "Дата замера": "date", "Давление (как в отчёте)": "pressure_raw", "Единица давления": "pressure_unit",
+                         "Давление, кгс/см²": "pressure_kgs", "Как в отчёте": "text", "Файл": "file", "Источник": "source", "Уверенность": "confidence", "Основание": "basis"},
     "gis_gvk_history": {"Скважина": "well", "Дата": "date", "Режим ПХГ": "pxg_mode", "Заголовок пачки": "pack_title", "Пачка": "pack", "ГВК MD, м": "gvk_md_m",
                         "ГВК а.о., м": "gvk_abs_m", "Полностью газонасыщена": "fully_gas", "Δh по стволу, м": "delta_h_m", "Уровень воды/жидкости, м": "level_m",
                         "Рпл, кгс/см²": "p_res_kgs", "ГВК (как в отчёте)": "gvk_raw", "Файл": "file", "Источник": "source", "Уверенность": "confidence", "Основание": "basis"},
@@ -1660,7 +1662,7 @@ def export(reports: List[Report], out_dir: str, mapping: Optional[Dict[str, str]
     atlas["gis_observations"] = with_methods(atlas["gis_observations"], frames["Комплекс ГИС"])
     files += gis_export.write_tables(atlas, out_dir, source, bottom)
     extra = {"gis_complex": frames["Комплекс ГИС"], "gis_thermobaric": frames["Термобарика"], "gis_filling": frames["Заполнение ствола"],
-             "gis_gvk_history": frames["ГВК по датам"], "gis_templating": frames["_шаблонировки"]}
+             "gis_pressure_rpl": frames["Пластовое давление"], "gis_gvk_history": frames["ГВК по датам"], "gis_templating": frames["_шаблонировки"]}
     meta_path = os.path.join(out_dir, "gis_report_meta.json")
     meta = {"format": FORMAT_NAME, "version": FORMAT_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"), "source": source,
             "reports": int(len(reports)), "wells": int(len({r.well for r in reports if r.well})), "tables": {}}

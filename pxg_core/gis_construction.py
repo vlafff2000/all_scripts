@@ -507,9 +507,26 @@ def build(reports) -> Dict[str, pd.DataFrame]:
     return frames
 
 
+ATLAS_COLUMNS = {"Скважина": "well", "Дата конструкции": "date", "Элемент": "element", "Верх интервала, м": "top_m", "Низ интервала, м": "bottom_m",
+                 "Наружный диаметр, мм": "diameter_mm", "Внутренний диаметр, мм": "inner_diameter_mm", "Комментарий": "comment"}
+
+
+def atlas_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Конструкция в виде модуля «construction» Газового Атласа (well, date, element, top_m, bottom_m, diameter_mm, inner_diameter_mm, comment)."""
+    out = frame[list(ATLAS_COLUMNS)].rename(columns=ATLAS_COLUMNS).copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out["source"] = frame["Источник глубины"].values
+    out["file"] = frame["Отчёт"].values
+    return out
+
+
 def write(frames: Dict[str, pd.DataFrame], out_dir: str) -> List[str]:
     os.makedirs(out_dir, exist_ok=True)
     paths = []
+    for variant, title in VARIANTS:                 # CSV для загрузки в Газовый Атлас (модуль «Конструкция скважин»)
+        csv = os.path.join(out_dir, "construction_atlas_%s.csv" % variant)
+        atlas_frame(frames[variant]).to_csv(csv, index=False, sep=";", encoding="utf-8-sig", decimal=",", date_format="%Y-%m-%d")
+        paths.append(csv)
     for variant, title in VARIANTS:
         path = os.path.join(out_dir, "Конструкции_из_ГИС_%s.xlsx" % title)
         with pd.ExcelWriter(path, engine="openpyxl") as xw:
