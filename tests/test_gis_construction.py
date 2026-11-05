@@ -95,3 +95,12 @@ def test_legacy_b_transposed_with_shifted_header_and_packer():
         wt.Para("Пакер – ПРО-Ш-204-90-400 – 765.57 м;")]
     got, _m = _els(blocks)
     assert set(got) == {("Направление", 23.0), ("Кондуктор", 103.56), ("Техническая колонна", 549.64), ("Эксплуатационная колонна", 785.4), ("НКТ", 764.17), ("Пакер", 765.57)}
+
+
+def test_atlas_csv_in_construction_module_format(tmp_path):
+    reports, _bad = gc.read_files([A])
+    frames = gc.build(reports)
+    got = gc.atlas_frame(frames["gis"])
+    assert {"well", "date", "element", "top_m", "bottom_m", "diameter_mm"} <= set(got.columns) and len(got) == len(frames["gis"])
+    paths = gc.write(frames, str(tmp_path))
+    assert any(p.endswith("construction_atlas_gis.csv") for p in paths) and any(p.endswith("construction_atlas_initial.csv") for p in paths)

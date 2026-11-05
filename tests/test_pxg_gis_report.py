@@ -475,3 +475,11 @@ def test_filling_indicators_only_liquid_has_interval():
     rep = gr.Report(file="x.doc", well="125")
     assert gr.read_filling_table(rep, tbl)
     assert [(f["От, м"], f["До, м"], f["Заполнение"], f["Плотность от, г/см³"]) for f in rep.filling] == [(500.0, 820.0, "жидкость", 1.14)]
+
+
+def test_rpl_table_has_english_export_mapping():
+    rep = gr.Report(file="x.doc", well="162")
+    gr.read_rpl(rep, [_tbl([["Давления, кгс/см2", "Рпл=80,3 (от 19.06.2026 г)"]])])
+    frame = gr._frame(rep.rpl)
+    out = gr._en(frame, gr.EN["gis_pressure_rpl"])
+    assert {"well", "date", "pressure_kgs"} <= set(out.columns) and out["pressure_kgs"].tolist() == [80.3]
