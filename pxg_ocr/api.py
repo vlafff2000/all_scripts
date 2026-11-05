@@ -20,7 +20,7 @@ from starlette.staticfiles import StaticFiles
 
 from pxg_core import fs_browse, runlog
 
-from . import engine, extract
+from . import engine, extract, route
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
 LAST_PING = 0.0
@@ -66,6 +66,14 @@ async def jobs_start(request: Request):
     except ValueError as e:
         return _err(str(e))
     return JSONResponse({"jobs": out})
+
+
+async def route_plan(request: Request):
+    """Какой путь выбран для каждого файла: {paths, overrides:{путь:"script"|"ocr"}} → список {route, auto, kind, reason, manual}."""
+    b = await _body(request)
+    paths = [str(p) for p in (b.get("paths") or []) if p]
+    ov = {str(k): str(v) for k, v in (b.get("overrides") or {}).items()}
+    return JSONResponse({"items": await run_in_threadpool(route.plan, paths, ov)})
 
 
 async def job_poll(request: Request):
@@ -172,6 +180,7 @@ def build_app() -> Starlette:
         Route("/api/ocr/info", info),
         Route("/api/ocr/ping", ping),
         Route("/api/ocr/start", jobs_start, methods=["POST"]),
+        Route("/api/ocr/route", route_plan, methods=["POST"]),
         Route("/api/ocr/job", job_poll),
         Route("/api/ocr/job/cancel", job_cancel, methods=["POST"]),
         Route("/api/ocr/history", history),

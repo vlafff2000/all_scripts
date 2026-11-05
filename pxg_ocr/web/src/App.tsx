@@ -12,10 +12,11 @@ interface Info {
   plans: Record<string, Plan>; tiers: Record<string, string>; ocr_modes: Record<string, string>; modes: Record<string, string>
 }
 interface Result { md: string; json: string; files: string[] }
+interface Route { path: string; name: string; route: string; auto: string; reason: string; manual: boolean }
 interface Item { id: string; src: string; name: string; state: string; error: string; log: string[]; plan: Plan | Record<string, never>; dir: string; elapsed: number; result?: Result }
 
 const STATES: Record<string, string> = { queued: 'в очереди', running: 'идёт', done: 'готово', error: 'ошибка', cancelled: 'отменено' }
-const FILTER = 'pdf png jpg jpeg tif tiff jp2 webp bmp docx pptx xlsx'
+const FILTER = 'pdf png jpg jpeg tif tiff jp2 webp bmp doc docx rtf odt pptx xlsx'
 const api = async <T,>(url: string, body?: unknown): Promise<T> => {
   const r = await fetch(url, body === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   return (await r.json()) as T
@@ -26,6 +27,8 @@ const fileUrl = (dir: string, name: string, download = false) => `/api/ocr/file?
 export default function App() {
   const [info, setInfo] = useState<Info | null>(null)
   const [paths, setPaths] = useState<string[]>([])
+  const [routes, setRoutes] = useState<Route[]>([])
+  const [over, setOver] = useState<Record<string, string>>({})
   const [tier, setTier] = useState('standard')
   const [mode, setMode] = useState('auto')
   const [ocrMode, setOcrMode] = useState('ocr')
@@ -81,11 +84,16 @@ export default function App() {
 
   const pick = async () => {
     const p = await openFilePicker({ mode: 'files', filter: FILTER, title: 'Выберите сканы и документы' })
-    if (p) setPaths(p.split('\n').filter(Boolean))
+    if (p) { setPaths(p.split('\n').filter(Boolean)); setOver({}) }
   }
+  useEffect(() => {
+    if (!paths.length) { setRoutes([]); return }
+    void api<{ items: Route[] }>('/api/ocr/route', { paths, overrides: over }).then((r) => setRoutes(r.items))
+  }, [paths, over])
+  const ocrPaths = routes.filter((r) => r.route === 'ocr').map((r) => r.path)
   const start = async () => {
     setErr('')
-    const r = await api<{ jobs?: string[]; error?: string }>('/api/ocr/start', { paths, tier, mode, ocr_mode: ocrMode, pages })
+    const r = await api<{ jobs?: string[]; error?: string }>('/api/ocr/start', { paths: ocrPaths, tier, mode, ocr_mode: ocrMode, pages })
     if (r.error || !r.jobs) { setErr(r.error || 'Не удалось начать'); return }
     for (const id of r.jobs) {
       running.current.add(id)
@@ -93,7 +101,7 @@ export default function App() {
       setItems((c) => [j, ...c])
       setSel(id)
     }
-    setPaths([])
+    setPaths([]); setOver({})
   }
   const stop = (id: string) => void api('/api/ocr/job/cancel', { id })
   const makeDb = async () => {
@@ -119,7 +127,16 @@ export default function App() {
         <h1>Распознавание</h1>
         {info && !info.engine && <p className="ocr-err">Движок распознавания не найден. Положите папку ocr рядом с программой.</p>}
         <button type="button" onClick={pick}>Выбрать файлы…</button>
-        {paths.length > 0 && <div className="ocr-files">{paths.map((p) => <div key={p}><span>{p.split(/[\\/]/).pop()}</span></div>)}</div>}
+        {routes.length > 0 && <div className="ocr-files">{routes.map((r) => (
+          <div key={r.path} title={r.reason}>
+            <span>{r.name}</span>
+            <select value={r.route} onChange={(e) => setOver((o) => ({ ...o, [r.path]: e.target.value }))} aria-label={`Путь для ${r.name}`}>
+              <option value="script">Скриптом{r.auto === 'script' ? ' (авто)' : ''}</option>
+              <option value="ocr">OCR{r.auto === 'ocr' ? ' (авто)' : ''}</option>
+            </select>
+          </div>))}
+          <small className="muted">Word и PDF с текстом читают сборщики БД напрямую, OCR для них не нужен. Путь можно сменить вручную.</small>
+        </div>}
         <label>Качество
           <select value={tier} onChange={(e) => setTier(e.target.value)}>{info && Object.entries(info.tiers).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
         </label>
@@ -136,7 +153,7 @@ export default function App() {
           <input type="text" value={pages} onChange={(e) => setPages(e.target.value)} placeholder="all, 1-5 или 1-5,8" />
         </label>
         {err && <p className="ocr-err">{err}</p>}
-        <button type="button" className="primary" disabled={!paths.length || !info?.engine} onClick={start}>Распознать{paths.length > 1 ? ` (${paths.length})` : ''}</button>
+        <button type="button" className="primary" disabled={!ocrPaths.length || !info?.engine} onClick={start}>Распознать{ocrPaths.length > 1 ? ` (${ocrPaths.length})` : ''}</button>
         <h2>Результаты</h2>
         <div className="ocr-hist">
           {items.length === 0 && <span className="muted">Пока ничего нет.</span>}
