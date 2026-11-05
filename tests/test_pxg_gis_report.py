@@ -462,7 +462,8 @@ def test_filling_indicators_skipped_dash_row_and_no_raw_duplicate():
     tbl = _tbl([["Показатели", "Интервал, м", "Плотность, г/см3"],
                 ["Заполнение ствола скважины \nгаз \nразгазированная жидкость \nжидкость \nуплотненный осадок", "500.0 – 786.0 \n786.0 – 813.3 \n813.3 – 817.4", "0.07 \n1.2 \n>1.4"]])
     rep = gr.Report(file="x.doc", well="114")
-    rep.kv = [(tbl.rows[1].cells[0].text, tbl.rows[1].cells[1].text, "таблица 6")]
+    rep.kv = [(k, v, "таблица 6") for k, v, _ in gr._kv_pairs(tbl)]       # так их видит разбор шапки: ячейка склеена в одну строку
     assert gr.read_filling_table(rep, tbl)
     gr.read_filling_text(rep, [tbl])
+    assert not any(f["Откуда"] == "промысловые данные" for f in rep.filling)
     assert [(f["От, м"], f["До, м"], f["Заполнение"], f["Плотность от, г/см³"]) for f in rep.filling] == [(500.0, 786.0, "газ", 0.07), (786.0, 813.3, "жидкость", 1.2), (813.3, 817.4, "осадок", 1.4)]
