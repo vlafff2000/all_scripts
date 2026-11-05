@@ -61,21 +61,49 @@ def _keys(frame: pd.DataFrame) -> Set[Tuple[str, str]]:
     return set(zip(frame["well"], frame["month"])) if len(frame) else set()
 
 
+def _shift(month: str, delta: int) -> str:
+    y, m = int(month[:4]), int(month[5:7]) - 1 + delta
+    return "%04d-%02d" % (y + m // 12, m % 12 + 1)
+
+
+def neighbour_pairs(ka: Set[Tuple[str, str]], kb: Set[Tuple[str, str]]) -> Dict[Tuple[str, str], Tuple[str, str]]:
+    """Замеры первой БД, совпавшие с замером второй при сдвиге месяца на ±1 (в Excel дата только месяц-год, в отчётах — день).
+    Соответствие один к одному: сначала точные совпадения, затем ближайший свободный сосед. Результат: ключ первой БД → ключ второй."""
+    free_a = {k for k in ka if k not in kb}
+    pairs: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    for w, m in sorted(k for k in kb if k not in ka):
+        for d in (-1, 1):
+            cand = (w, _shift(m, d))
+            if cand in free_a:
+                pairs[cand] = (w, m)
+                free_a.discard(cand)
+                break
+    return pairs
+
+
 def choose(first: Dict[str, pd.DataFrame], second: Dict[str, pd.DataFrame], keep_first: Set[Tuple[str, str]] = frozenset()) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame]:
     """(объединённые таблицы, решения по каждому замеру). Решение: откуда взят замер и почему."""
     a, b = _prep(first, FIRST), _prep(second, SECOND)
     ka, kb = _keys(a["gis_observations"]) | _keys(a["gis_packs"]), _keys(b["gis_observations"]) | _keys(b["gis_packs"])
-    take_first = {k for k in ka if k not in kb or k in keep_first}
+    near_pairs = neighbour_pairs(ka, kb)
+    take_first = {k for k in ka if (k not in kb and k not in near_pairs) or k in keep_first}
     take_second = {k for k in kb if k not in take_first}
     rows: List[dict] = []
     second_dates = {k: pd.to_datetime(d["date"]).min() for k, d in b["gis_observations"].groupby(["well", "month"])} if len(b["gis_observations"]) else {}
+    matched_second = {v: k for k, v in near_pairs.items()}
     for key in sorted(ka | kb):
         well, month = key
+        note = ""
         if key in take_first:
             src, why = FIRST, ("только в первой БД" if key not in kb else "по решению инженера (список «взять из первой»)")
+            if key in near_pairs:
+                why = "по решению инженера (список «взять из первой»)"
         else:
             src, why = SECOND, ("только во второй БД" if key not in ka else "есть в обеих БД: вторая главнее")
-        note = ""
+            if key in near_pairs and key not in kb:
+                continue                          # замер первой БД заменён замером второй (месяц ±1): отдельной строки нет
+            if key in matched_second and key not in ka:
+                why = "есть в обеих БД со сдвигом месяца на ±1 (в Excel %s): вторая главнее" % matched_second[key][1]
         if src == FIRST:                              # возможный дубль со сдвинутой датой
             d1 = pd.to_datetime(a["gis_observations"].loc[(a["gis_observations"]["well"] == well) & (a["gis_observations"]["month"] == month), "date"]).min()
             near = [(m, d) for (w, m), d in second_dates.items() if w == well and m != month and pd.notna(d1) and abs((d - d1).days) <= NEAR_DAYS]

@@ -398,7 +398,7 @@ SPECS: List[WebSpec] = [
             Param("decisions", "Файл расхождений с решениями", "file",
                   hint="Необязательно: «Расхождения_конструкций.xlsx» после того, как вы заполнили столбец «Решение» (A / B / вручную / исключить)"),
             Param("tolerance", "Допуск глубин, м", "text", default="0,5", hint="Глубины ближе допуска считаются совпадающими"),
-            Param("prefer", "Главнее в спорных случаях", "choice", default="A", options=(("A", "База A"), ("B", "База B")),
+            Param("prefer", "Главнее в спорных случаях", "choice", default="B", options=(("A", "База A"), ("B", "База B (Word, отчёты ГИС)")),
                   hint="Только для подсказки: окончательное решение за инженером"),
         ),
         args=(("a", "a"), ("b", "b"), ("decisions", "decisions"), ("tolerance", "tolerance"), ("prefer", "prefer")),

@@ -70,7 +70,7 @@ def prepare(a: pd.DataFrame, b: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
     return a, b_latest, b_older, notes
 
 
-def compare(a: pd.DataFrame, b: pd.DataFrame, tol: float = TOLERANCE, prefer: str = "A") -> pd.DataFrame:
+def compare(a: pd.DataFrame, b: pd.DataFrame, tol: float = TOLERANCE, prefer: str = "B") -> pd.DataFrame:
     """Таблица расхождений с подсказкой. Пустая — базы совпадают. Элементы одного вида в снимке (несколько фильтров) сопоставляются по порядку."""
     rows = []
     a, b, _older, _notes = prepare(a, b)
