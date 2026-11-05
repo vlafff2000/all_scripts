@@ -42,6 +42,31 @@ def check_copy_by_mask(v: Dict[str, str]) -> Report:
     return rep
 
 
+def check_compare_folders(v: Dict[str, str]) -> Report:
+    rep = Report("Сравнение папок")
+    cm = _module("Сравнение_папок")
+    a, b = clean_path(v.get("folder_a", "")), clean_path(v.get("folder_b", ""))
+    if not (check_path(rep, a, "Папка A", kind="folder") and check_path(rep, b, "Папка B", kind="folder")):
+        return rep
+    if os.path.realpath(a) == os.path.realpath(b):
+        rep.error("SAME", "Папки A и B совпадают: различий не будет")
+        return rep
+    dest = clean_path(v.get("dest", ""))
+    if dest and os.path.realpath(dest) in (os.path.realpath(a), os.path.realpath(b)):
+        rep.error("DEST", "Папка для копий не может совпадать с папкой A или B")
+    if v.get("mode", "both") not in cm.MODES:
+        rep.error("MODE", "Неизвестный режим различий: %s" % v.get("mode"))
+        return rep
+    result = cm.run(Path(a), Path(b), Path(dest) if dest else None, v.get("mode", "both") or "both",
+                    v.get("recursive", "1") in ("1", "true", "y"), cm.parse_masks(v.get("include", "")),
+                    cm.parse_masks(v.get("exclude", "")), v.get("case_sensitive", "") in ("1", "true", "y"), [], True)
+    if not result["copied"]:
+        rep.warn("EMPTY", "Различающихся файлов не найдено")
+    else:
+        rep.note("SUMMARY", "Файлов к копированию: %d (в A: %d, в B: %d)" % (len(result["copied"]), result["total_a"], result["total_b"]))
+    return rep
+
+
 def check_unpack(v: Dict[str, str]) -> Report:
     rep = Report("Распаковка архивов")
     um = _module("Распаковка_архивов")

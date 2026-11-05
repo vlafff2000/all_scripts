@@ -130,3 +130,85 @@ def test_pressure_templates_by_year():
     assert pressure_mod.get_template_by_year(2020) == 2
     assert pressure_mod.get_template_by_year(2025) == 3
     assert pressure_mod.get_template_by_year(2030) is None
+
+
+# ---- Сравнение папок ----
+cmp_mod = load("Сравнение_папок")
+
+
+def _two_folders(tmp_path):
+    a, b = tmp_path / "Папка А", tmp_path / "Папка Б"
+    make(a / "общий.txt"); make(b / "ОБЩИЙ.TXT")
+    make(a / "только_а.pdf"); make(a / "sub" / "отчёт_1.docx"); make(a / "~$лок.docx")
+    make(b / "только_б.xlsx"); make(b / "deep" / "x" / "акт.pdf")
+    return a, b
+
+
+def _names(res):
+    return sorted((s, p.name) for s, p, _ in res["copied"])
+
+
+def test_cmp_masks_parse_and_match():
+    assert cmp_mod.parse_masks("*.pdf, отчет*;\n~$*\n.docx") == ["*.pdf", "отчет*", "~$*", "*.docx"]
+    assert cmp_mod.name_matches("Отчёт.PDF", ["*.pdf"]) and not cmp_mod.name_matches("Отчёт.PDF", ["*.pdf"], True)
+
+
+def test_cmp_modes_and_case(tmp_path):
+    a, b = _two_folders(tmp_path)
+    both = cmp_mod.run(a, b, None, "both")
+    assert ("A", "только_а.pdf") in _names(both) and ("B", "только_б.xlsx") in _names(both)
+    assert all(n.lower() != "общий.txt" for _, n in _names(both))   # регистр не учитывается
+    only_a = cmp_mod.run(a, b, None, "a")
+    assert {s for s, _ in _names(only_a)} == {"A"}
+    only_b = cmp_mod.run(a, b, None, "b", recursive=False)
+    assert _names(only_b) == [("B", "только_б.xlsx")]   # вложенная папка не просматривается
+    strict = cmp_mod.run(a, b, None, "a", case_sensitive=True)
+    assert ("A", "общий.txt") in _names(strict)
+
+
+def test_cmp_include_exclude(tmp_path):
+    a, b = _two_folders(tmp_path)
+    res = cmp_mod.run(a, b, None, "both", include=cmp_mod.parse_masks("*.pdf, *.docx"), exclude=cmp_mod.parse_masks("~$*"))
+    assert _names(res) == [("A", "отчёт_1.docx"), ("A", "только_а.pdf"), ("B", "акт.pdf")]
+
+
+def test_cmp_copy_no_overwrite_and_collisions(tmp_path):
+    a, b, dest = tmp_path / "a", tmp_path / "b", tmp_path / "Итог"
+    make(a / "1" / "акт.pdf", "A1"); make(a / "2" / "акт.pdf", "A2"); make(b / "акт2.pdf", "B")
+    make(dest / "акт.pdf", "СТАРЫЙ")
+    res = cmp_mod.run(a, b, dest, "both", dry_run=False)
+    assert (dest / "акт.pdf").read_text(encoding="utf-8") == "СТАРЫЙ"          # не перезаписан
+    copied = sorted(p.name for p in dest.iterdir())
+    assert len(copied) == 4 and "акт2.pdf" in copied and "1_акт.pdf" in copied and "2_акт.pdf" in copied
+    assert (a / "1" / "акт.pdf").exists() and not res["errors"]                 # оригиналы на месте
+
+
+def test_cmp_dry_run_and_manual_exclusion(tmp_path):
+    a, b, dest = tmp_path / "a", tmp_path / "b", tmp_path / "out"
+    make(a / "x.pdf"); make(a / "y.pdf"); b.mkdir()
+    preview = cmp_mod.run(a, b, dest, "a", dry_run=True)
+    assert len(preview["copied"]) == 2 and not dest.exists()
+    res = cmp_mod.run(a, b, dest, "a", skip_lines=["X.PDF"], dry_run=False)
+    assert [p.name for p in dest.iterdir()] == ["y.pdf"] and res["skipped"][0][2] == "исключён вручную"
+    res = cmp_mod.run(a, b, tmp_path / "o2", "a", skip_lines=[str(a / "y.pdf")], dry_run=False)
+    assert [p.name for p in (tmp_path / "o2").iterdir()] == ["x.pdf"]
+
+
+def test_cmp_dest_inside_source_ignored_and_report(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    make(a / "x.pdf"); b.mkdir()
+    dest = a / "копии"
+    cmp_mod.run(a, b, dest, "a", dry_run=False)
+    again = cmp_mod.run(a, b, dest, "a", dry_run=True)
+    assert [p.name for _, p, _ in again["copied"]] == ["x.pdf"]
+    path = cmp_mod.write_report(again, a, b, dest, "a", True, tmp_path / "rep")
+    assert path and path.exists() and path.name == "сравнение_папок.xlsx"
+
+
+def test_cmp_main_cli(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    a, b, dest = tmp_path / "a", tmp_path / "b", tmp_path / "out"
+    make(a / "x.pdf"); make(a / "y.tmp"); b.mkdir()
+    base = ["--folder-a=%s" % a, "--folder-b=%s" % b, "--dest=%s" % dest, "--mode=a", "--exclude=*.tmp"]
+    assert cmp_mod.main(base + ["--dry-run=да"]) == 0 and not dest.exists()
+    assert cmp_mod.main(base + ["--dry-run=нет"]) == 0 and [p.name for p in dest.iterdir()] == ["x.pdf"]
