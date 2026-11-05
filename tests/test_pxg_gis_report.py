@@ -346,3 +346,30 @@ def test_db_has_number_and_original_text(ra, tmp_path):
     iv = pd.read_parquet(str(tmp_path / "gis_intervals.parquet"))
     hit = iv[iv["kg_text"] == "<20%"]
     assert len(hit) == 1 and hit.iloc[0]["kg"] == 0.2
+
+
+def _por_table():
+    hdr0 = wt.TRow([wt.Cell("РИГИС от 10.2025г", 0, 5000)])
+    hdr1 = wt.TRow([wt.Cell("Интервал, м", 0, 2000), wt.Cell("Пористость, %", 2000, 3000), wt.Cell("Кг, %", 3000, 4000), wt.Cell("Насыщение", 4000, 5000)])
+    rows = [wt.TRow([wt.Cell("Горизонт Щигровский, нижняя песчаная пачка (788.0-825.3м)", 0, 5000)]),
+            wt.TRow(_cells(["788.0", "797.2", "27", "70", "Газонасыщ."])),
+            wt.TRow(_cells(["797.2", "804.6", "25-29", "68", "Газонасыщ."]))]
+    return wt.Table([hdr0, hdr1] + rows, 0)
+
+
+def test_porosity_after_interval_is_its_own_column_not_kg():
+    tbl = _por_table()
+    rep = gr.Report(file="x.doc", well="18", alt=135.0)
+    gr.read_intervals(rep, tbl, gr.header_rows(tbl), None, "t", "s")
+    got = [(r["От, м"], r["До, м"], r["Пористость интервала"], r["Кг"]) for r in rep.intervals]
+    assert got == [(788.0, 797.2, 0.27, 0.70), (797.2, 804.6, 0.27, 0.68)]
+    assert rep.intervals[1]["Пористость (как в отчёте)"] == "25-29"
+    assert rep.intervals[0]["Кп"] is None      # Кп коллектора (столбец «коллектор») не подменяется пористостью интервала
+
+
+def test_porosity_in_ocr_row_order():
+    row = wt.TRow(_cells(["788.0", "797.2", "30", "788.0", "797.2", "27", "70"]))
+    seq = gr._seq_epochs(row, 1, [{"from": 788.0, "to": 797.2}], {0})
+    assert seq[0][1] == [788.0, 797.2] and (seq[0][2]["kp"], seq[0][2]["kg"]) == ("27", "70")
+    seq = gr._seq_epochs(row, 1, [{"from": 788.0, "to": 797.2}], set())
+    assert seq[0][2]["kg"] == "27"          # без столбца пористости в шапке порядок прежний

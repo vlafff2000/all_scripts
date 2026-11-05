@@ -767,7 +767,7 @@ def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
 
 def _leaf(tbl: wt.Table, nhdr: int, c: wt.Cell) -> str:
     lab = low(hdr_label(tbl, nhdr, c.xc))
-    for key, rx in (("sat", r"насыщен"), ("lith", r"литолог"), ("kp", r"\bкп\b"), ("kg", r"\bкг"), ("iv", r"интервал"), ("h", r"н\s*общ|мощност|толщин")):
+    for key, rx in (("sat", r"насыщен"), ("lith", r"литолог"), ("kp", r"пористост|\bк[пn]\b"), ("kg", r"\bкг"), ("iv", r"интервал"), ("h", r"н\s*общ|мощност|толщин")):
         if re.search(rx, lab):
             return key
     return ""
@@ -775,6 +775,15 @@ def _leaf(tbl: wt.Table, nhdr: int, c: wt.Cell) -> str:
 
 _KG_TOKEN = re.compile(r"^\s*[<>≤≥~≈]?\s*\d{1,3}(?:[.,]\d+)?\s*%?\s*$")
 _DEPTH_TOKEN = re.compile(r"^\s*\d{2,4}[.,]\d{1,2}\s*$")
+
+
+_POROSITY_HDR = re.compile(r"пористост|\bк[пn]\b", re.I)
+
+
+def _group_has_porosity(tbl: wt.Table, nhdr: int, g: Group) -> bool:
+    """В шапке замера есть столбец пористости («Кп, %», «Пористость»): она относится к интервалу исследования, а не к Нг и не к Кг."""
+    return any(not c.vcont and g.x0 - 3 <= c.xc <= g.x1 + 3 and _POROSITY_HDR.search(c.text) and not re.search(r"\bот\b", c.text, re.I)
+               for r in tbl.rows[:nhdr] for c in r.cells)
 
 
 def _in_base(v: float, base_rows: list) -> bool:
@@ -804,8 +813,9 @@ def _geometry_broken(row_recs: list, base_rows: list) -> bool:
     return False
 
 
-def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list):
-    """Строка данных по порядку ячеек: [от, до (коллектор), Кп] и для каждого замера [от, до, Кг]; Кг, потерянный OCR, остаётся пустым.
+def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list, por_groups: Optional[set] = None):
+    """Строка данных по порядку ячеек: [от, до (коллектор), Кп] и для каждого замера [от, до, (пористость,) Кг]; Кг, потерянный OCR, остаётся пустым.
+    Пористость идёт сразу после интервала замера, только если в шапке замера есть её столбец (por_groups).
     Возвращает [(номер замера, [от, до], {"kg": …})] или None, если порядок не угадывается."""
     toks = [c.text.strip() for c in row.cells if not c.vcont and c.text.strip()]
     if len(toks) < 4 or fnum(toks[0]) is None or fnum(toks[1]) is None:
@@ -821,10 +831,15 @@ def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list):
             pair = [fnum(toks[pos]), fnum(toks[pos + 1])]
             pos += 2
             kg = ""
+            por = ""
+            if gi in (por_groups or ()) and pos < len(toks) and not (pos + 1 < len(toks) and near(toks[pos]) and near(toks[pos + 1])) \
+                    and (_KG_TOKEN.match(toks[pos]) or toks[pos] == "-"):
+                por = toks[pos]
+                pos += 1
             if pos < len(toks) and not (pos + 1 < len(toks) and near(toks[pos]) and near(toks[pos + 1])) and (_KG_TOKEN.match(toks[pos]) or toks[pos] == "-"):
                 kg = toks[pos]
                 pos += 1
-            out.append((gi, pair, {"kg": kg, "h": "", "sat": "", "lith": ""}))
+            out.append((gi, pair, {"kg": kg, "h": "", "sat": "", "lith": "", "kp": por}))
     return out or None
 
 
@@ -832,6 +847,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
     groups = _groups(tbl, nhdr, rep)
     base = next((g for g in groups if g.base), None)
     sgroups = [g for g in groups if not g.base]
+    por_groups = {gi for gi, g in enumerate(sgroups) if _group_has_porosity(tbl, nhdr, g)}
     tid = tbl.index + 1
     rep.tables.append({"Файл": rep.file, "Таблица": tid, "Тип": "интервалы насыщения", "Заголовок перед таблицей": title, "Раздел": section,
                        "Столбцы-замеры": "; ".join("%s%s" % (g.label[:40], "" if g.exact else " (только месяц)") for g in sgroups),
@@ -910,6 +926,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             nonlocal n
             kg, kmin, kmax, ktext = _kg(rec["kg"])
             h = fnum(rec["h"])
+            por, _pmin, _pmax, _ptext = _kg(rec.get("kp", ""))
             sat = rec["sat"]
             water = bool(re.search(r"водонасыщ", sat, re.I))
             kp = None
@@ -932,7 +949,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 ("Дата замера", g.date), ("Дата точная", g.exact), ("Раздел таблицы", title), ("Заголовок пачки", pack_title), ("Пачка", pack),
                 ("Горизонт", horizon_of(pack_title)), ("От, м", ivn[0]), ("До, м", ivn[1]), ("От а.о., м", ao(rep, ivn[0])), ("До а.о., м", ao(rep, ivn[1])),
                 ("hi, м", round(ivn[1] - ivn[0], 3)), ("Нобщ по отчёту, м", h), ("Кп", kp), ("Кг", kg), ("Кг мин", kmin), ("Кг макс", kmax),
-                ("Кг (как в отчёте)", rec["kg"]), ("Насыщение", sat), ("Литология", rec["lith"]), ("Водонасыщенный", water), ("Глубины", MD_BASIS),
+                ("Кг (как в отчёте)", rec["kg"]), ("Пористость интервала", por), ("Пористость (как в отчёте)", rec.get("kp", "")), ("Насыщение", sat), ("Литология", rec["lith"]), ("Водонасыщенный", water), ("Глубины", MD_BASIS),
                 ("Уверенность", conf), ("Основание", "; ".join(x for x in (why, kp_why) if x))]))
             n += 1
         row_recs = []
@@ -940,7 +957,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             cells = [c for c in r.cells if inb(g, c) and c.text.strip()]
             if not cells:
                 continue
-            ivn, rec = [], {"kg": "", "h": "", "sat": "", "lith": ""}
+            ivn, rec = [], {"kg": "", "h": "", "sat": "", "lith": "", "kp": ""}
             for c in cells:
                 k = _leaf(tbl, nhdr, c)
                 if k in ("iv", "") and fnum(c.text) is not None and len(ivn) < 2:
@@ -951,7 +968,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 continue
             row_recs.append((gi, g, ivn, rec))
         rb = _row_base(r, base_rows)
-        seq = _seq_epochs(r, len(sgroups), rb) if (rb and not row_recs) or _geometry_broken(row_recs, rb) else None
+        seq = _seq_epochs(r, len(sgroups), rb, por_groups) if (rb and not row_recs) or _geometry_broken(row_recs, rb) else None
         if seq is not None:
             row_recs = [(gi, sgroups[gi], ivn, rec) for gi, ivn, rec in seq]
         for gi, g, ivn, rec in row_recs:
@@ -1471,7 +1488,7 @@ def _write_pair(table: pd.DataFrame, out_dir: str, name: str) -> List[str]:
 
 SHEET_ORDER = ("Свод", "Замеры", "Интервалы", "Комплекс ГИС", "Доход шаблона", "Термобарика", "Заполнение ствола", "ГВК", "Итоги пачек", "ГВК по датам",
                "Выводы (текст)", "Заголовки пачек", "Таблицы в отчётах", "Отчёты", "Проверка", "Строки БД")
-PERCENT = ("Кг", "Кп", "Кг мин", "Кг макс", "Кг ср.взв", "Кг ср.взв (весь замер)")
+PERCENT = ("Кг", "Кп", "Пористость интервала", "Кг мин", "Кг макс", "Кг ср.взв", "Кг ср.взв (весь замер)")
 
 
 def _write_book(frames: Dict[str, pd.DataFrame], path: str, order=SHEET_ORDER) -> None:
