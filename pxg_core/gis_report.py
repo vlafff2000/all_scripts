@@ -1009,23 +1009,64 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
 
 
 def pick_report_files(files: List[str]) -> Tuple[List[str], List[str]]:
-    """Один отчёт в Word и в PDF (одно имя в одной папке) читается один раз — Word надёжнее; PDF пропускается с пояснением."""
+    """Один отчёт в Word и в PDF (одно имя в одной папке) читается один раз — Word надёжнее; PDF пропускается с пояснением.
+
+    Вывод OCR (``*content_list.json``, ``*.ocr.md``) берётся как отдельный отчёт, если рядом нет Word/PDF с тем же именем (PDF сам найдёт свой вывод OCR)."""
+    from . import ocr_blocks
     have = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith((".doc", ".docx"))}
+    pdfs = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith(".pdf")}
     keep, notes = [], []
     for f in files:
-        if f.lower().endswith(".pdf") and os.path.splitext(f)[0].lower() in have:
+        low = f.lower()
+        if low.endswith((".json", ".md")):
+            if not ocr_blocks.is_ocr_file(f):
+                continue
+            stem = ocr_blocks.ocr_stem(f)
+            if stem in have or stem in pdfs:
+                notes.append("%s: вывод OCR относится к отчёту, который читается из своего файла (Word или PDF), отдельно не берётся" % os.path.basename(f))
+                continue
+            keep.append(f)
+        elif low.endswith(".pdf") and os.path.splitext(f)[0].lower() in have:
             notes.append("%s: рядом есть Word-версия отчёта, PDF не читается (чтобы замеры не задвоились)" % os.path.basename(f))
         else:
             keep.append(f)
     return keep, notes
 
 
+OCR_NOTE = "распознано OCR: значение — подсказка, сверить с оригиналом"
+_OCR_LISTS = ("complex", "bottoms", "thermo", "filling", "intervals", "packs", "gvk_history", "summary")
+
+
+def _mark_ocr(rep: Report, origin: str) -> None:
+    """Значения из OCR: уверенность не выше «средней», в основании — пометка (последнее слово за инженером)."""
+    for name in _OCR_LISTS:
+        for rec in getattr(rep, name):
+            if isinstance(rec, dict) and not str(rec.get("_kind", "")).startswith("_"):
+                if rec.get("Уверенность") == HIGH:
+                    rec["Уверенность"] = MID
+                rec["Основание"] = "; ".join(x for x in (rec.get("Основание", ""), OCR_NOTE) if x)
+    rep.issue("note", "ocr_source", "Отчёт прочитан из вывода OCR (%s): числа и таблицы могут быть распознаны с ошибками, значения помечены «средняя» уверенность" % origin)
+
+
 def parse_file(path: str, mapping: Optional[Dict[str, str]] = None) -> Report:
     scans: List[str] = []
+    ocr_origin = ""
     try:
-        if path.lower().endswith(".pdf"):
+        from . import ocr_blocks
+        low = path.lower()
+        if low.endswith((".json", ".md")):
+            blocks, scans = ocr_blocks.read_ocr(path)
+            ocr_origin = os.path.basename(path)
+            scans = [n for n in scans]
+        elif low.endswith(".pdf"):
             from . import pdf_tables
             blocks, scans = pdf_tables.read_pdf(path)
+            if scans:
+                alt = ocr_blocks.find_for_pdf(path)
+                if alt:     # у скана есть вывод OCR: читаем его целиком, страницы без текстового слоя перестают быть дырой
+                    blocks, ocr_notes = ocr_blocks.read_ocr(alt)
+                    ocr_origin = os.path.basename(alt)
+                    scans = ocr_notes
         else:
             blocks = wt.read_blocks(path)
     except Exception as e:      # файл не пропадает из отчёта о разборе
@@ -1033,10 +1074,17 @@ def parse_file(path: str, mapping: Optional[Dict[str, str]] = None) -> Report:
         rep.issue("error", "unreadable", "Файл не прочитан: %s" % e)
         return rep
     rep = parse_blocks(blocks, path, mapping)
+    if ocr_origin:
+        _mark_ocr(rep, ocr_origin)
+        for n in scans:
+            rep.issue("warn", "ocr_note", n, n.split(":")[0])
+        if not blocks:
+            rep.error = "Вывод OCR пуст: значения не извлечены"
+        return rep
     for n in scans:             # скан не угадываем: значения не придумываются, страница названа
         rep.issue("warn", "pdf_scan", n + " (не прочитано)", n.split(":")[0])
     if scans and not blocks:
-        rep.error = "PDF без текстового слоя: нужен OCR, значения не извлечены"
+        rep.error = "PDF без текстового слоя: нужен OCR (положите рядом вывод MinerU: <имя>_content_list.json или <имя>.ocr.md), значения не извлечены"
     return rep
 
 
