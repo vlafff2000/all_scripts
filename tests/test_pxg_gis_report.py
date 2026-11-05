@@ -467,3 +467,11 @@ def test_filling_indicators_skipped_dash_row_and_no_raw_duplicate():
     gr.read_filling_text(rep, [tbl])
     assert not any(f["Откуда"] == "промысловые данные" for f in rep.filling)
     assert [(f["От, м"], f["До, м"], f["Заполнение"], f["Плотность от, г/см³"]) for f in rep.filling] == [(500.0, 786.0, "газ", 0.07), (786.0, 813.3, "жидкость", 1.2), (813.3, 817.4, "осадок", 1.4)]
+
+
+def test_filling_indicators_only_liquid_has_interval():
+    tbl = _tbl([["Показатели", "Интервал, м", "Плотность, г/см3"],
+                ["Заполнение ствола скважины \nгаз \nразгазированная жидкость \nжидкость \nуплотненный осадок", "- \n500.0 – 820.0 \n-", "- \n1.14 \n-"]])
+    rep = gr.Report(file="x.doc", well="125")
+    assert gr.read_filling_table(rep, tbl)
+    assert [(f["От, м"], f["До, м"], f["Заполнение"], f["Плотность от, г/см³"]) for f in rep.filling] == [(500.0, 820.0, "жидкость", 1.14)]

@@ -616,8 +616,9 @@ def read_filling_indicators(rep: Report, tbl: wt.Table) -> bool:
             types = lines[1:]
             if len(iv_lines) != len(types):                # прочерком пропущена строка «разгазированная жидкость»: интервалы идут подряд без неё
                 types = [t for t in types if not low(t).startswith("разгаз")]
-                iv_lines = [x for x in iv_lines if len(nums(x)) >= 2]
-                d_lines = [x for x in d_lines if nums(x)]
+                if len(iv_lines) != len(types):
+                    iv_lines = [x for x in iv_lines if len(nums(x)) >= 2]
+                    d_lines = [x for x in d_lines if nums(x)]
             if len(iv_lines) == len(types):
                 for k, typ in enumerate(types):
                     n += _fill_rec(rep, tbl, i, typ, iv_lines[k], d_lines[k] if len(d_lines) == len(types) else "")
