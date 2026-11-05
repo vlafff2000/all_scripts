@@ -85,6 +85,7 @@ class Report:
     bottoms: List[dict] = field(default_factory=list)
     thermo: List[dict] = field(default_factory=list)
     filling: List[dict] = field(default_factory=list)
+    rpl: List[dict] = field(default_factory=list)              # пластовое давление одной величиной (без таблицы глубин): «Рпл=80,3 (от 19.06.2026 г)»
     intervals: List[dict] = field(default_factory=list)
     packs: List[dict] = field(default_factory=list)            # итоги по пачке и замеру (Нг, ГВК, «полностью газонасыщен»)
     gvk_history: List[dict] = field(default_factory=list)
@@ -216,6 +217,8 @@ def read_header(rep: Report, blocks: List[wt.Block]) -> None:
     if rep.alt is None:
         m = re.search(r"альтитуд\w*[^0-9]{0,40}(" + NUM + r")", text, re.I)
         rep.alt = fnum(m.group(1)) if m else None
+    if rep.alt is not None and not (0 < rep.alt < 400):
+        rep.issue("warn", "alt_suspect", "Альтитуда %g м выглядит неправдоподобно (ждём 0–400 м): глубины а.о. посчитаны от неё, проверить по отчёту" % rep.alt)
     hit = _find(kv, r"категори")
     rep.category = (hit[1].strip() if hit else "")
     hit = _find(kv, r"режим работы пхг|период эксплуатации")
@@ -485,7 +488,11 @@ def read_thermo_table(rep: Report, tbl: wt.Table) -> bool:
     rowsn = 0
     for c in tbl.rows[trow if trow is not None else prow].cells[1:]:
         lab = re.sub(r"^глубина\s*/\s*", "", hdr_label(tbl, first_row, c.xc))
+        lab = re.sub(r"(\d{2,4})[.,](\d)\.0(?=\s*м)", r"\1.\2", lab)      # опечатка «820,6.0м» = 820.6 м
         dv = [x for x in re.findall(r"(" + NUM + r")\s*м\b", lab)]
+        if not dv:                                            # «500.0 (верхняя граница…)» — число без «м», единица в шапке «Глубина, м»
+            m0 = re.search(r"(?<![\w.,])(" + NUM + r")\b(?!\s*[°%])", re.sub(r"^.*?глубина,?\s*м\s*/?", "", lab, flags=re.I | re.S) or lab)
+            dv = [m0.group(1)] if m0 and fnum(m0.group(1)) is not None and fnum(m0.group(1)) >= 1 else []
         if not dv:
             continue
         t = p = None
@@ -570,7 +577,7 @@ def read_pl_temp(rep: Report, blocks: List[wt.Block]) -> None:
 
 # ------------------------------------------------------------------------------------------------ заполнение ствола
 
-FILL_WORDS = (("газ", r"\bгаз(?!он)"), ("вода", r"\bвод"), ("нефть", r"нефт"), ("жидкость", r"жидк"), ("газ+жидкость", r"гжс|газожидк"))
+FILL_WORDS = (("газ", r"\bгаз(?!он)"), ("вода", r"\bвод"), ("нефть", r"нефт"), ("жидкость", r"жидк"), ("осадок", r"осад|шлам"), ("газ+жидкость", r"гжс|газожидк"))
 
 
 def fill_kind(text: str) -> str:
@@ -583,9 +590,41 @@ def fill_kind(text: str) -> str:
     return ""
 
 
+def _fill_rec(rep: Report, tbl: wt.Table, i: int, typ: str, interval: str, dens_text: str) -> bool:
+    iv, dens = nums(interval), nums(dens_text)
+    if len(iv) < 2:
+        return False                                  # «-»: такого заполнения в стволе нет
+    rep.filling.append(OrderedDict([
+        ("Скважина", rep.well), ("Дата", rep.date), ("Режим исследования", ""), ("От, м", iv[0]), ("До, м", iv[1]),
+        ("Плотность от, г/см³", min(dens) if dens else None), ("Плотность до, г/см³", max(dens) if dens else None),
+        ("Заполнение (как в отчёте)", typ), ("Заполнение", fill_kind(typ)), ("Уровень жидкости, м", None), ("Уровень (как в отчёте)", ""),
+        ("Откуда", "таблица заполнения ствола (показатели)"), ("Файл", rep.file), ("Источник", _src(tbl, i)), ("Уверенность", HIGH), ("Основание", "")]))
+    return True
+
+
+def read_filling_indicators(rep: Report, tbl: wt.Table) -> bool:
+    """«Показатели | Интервал, м | Плотность, г/см3»: типы заполнения списком в одной ячейке (Word) или по строке на тип «- газ» (OCR)."""
+    n = 0
+    for i, r in enumerate(tbl.rows):
+        cells = r.cells
+        if len(cells) < 3 or low(cells[0].text).startswith("показател"):
+            continue
+        lines = [clean_line for clean_line in (x.strip(" -–—\t") for x in cells[0].text.split("\n")) if clean_line]
+        iv_lines = [x.strip() for x in cells[1].text.split("\n") if x.strip()]
+        d_lines = [x.strip() for x in cells[2].text.split("\n") if x.strip()]
+        if len(lines) > 1 and low(lines[0]).startswith("заполнение") and len(iv_lines) == len(lines) - 1:
+            for k, typ in enumerate(lines[1:]):
+                n += _fill_rec(rep, tbl, i, typ, iv_lines[k], d_lines[k] if k < len(d_lines) else "")
+        elif len(lines) == 1 and fill_kind(lines[0]) and not low(lines[0]).startswith("заполнение"):
+            n += _fill_rec(rep, tbl, i, lines[0], cells[1].text, cells[2].text)
+    return n > 0
+
+
 def read_filling_table(rep: Report, tbl: wt.Table) -> bool:
     nh = header_rows(tbl)
     n = 0
+    if tbl.rows and tbl.rows[0].cells and low(tbl.rows[0].cells[0].text).startswith("показател") and not re.search(r"тип|режим", low(" ".join(c.text for c in tbl.rows[0].cells))):
+        return read_filling_indicators(rep, tbl)
     for i in range(nh, len(tbl.rows)):
         r = tbl.rows[i]
         by: Dict[str, str] = {}
@@ -608,6 +647,44 @@ def read_filling_table(rep: Report, tbl: wt.Table) -> bool:
             ("Файл", rep.file), ("Источник", _src(tbl, i)), ("Уверенность", HIGH), ("Основание", "")]))
         n += 1
     return n > 0
+
+
+_RPL_EQ = re.compile(r"р\s*пл\s*[=:]\s*(" + NUM + r")\s*(мпа|кгс\s*/\s*см\S*|атм|ат(?![а-я]))?(?:\s*\(([^)]*)\))?", re.I)
+_RPL_WORDS = re.compile(r"пластовое\s+давление[^\d\n]{0,40}?(" + NUM + r")\s*(мпа|кгс\s*/\s*см\S*|атм|ат(?![а-я]))", re.I)
+
+
+def _add_rpl(rep: Report, p: float, unit: str, date_text: str, raw: str, source: str, conf: str = HIGH, extra: str = "") -> None:
+    unit = re.sub(r"\s+", "", unit or "")
+    pk, why = _p_to_kgs(p, unit)
+    dm = pdate(date_text or "")
+    if any(abs((x["Давление (как в отчёте)"] or 0) - p) < 1e-9 and x["Дата замера"] == dm for x in rep.rpl):
+        return                                   # то же значение из условий и из промысловых данных
+    rep.rpl.append(OrderedDict([("Скважина", rep.well), ("Дата отчёта", rep.date), ("Дата замера", dm), ("Давление (как в отчёте)", p), ("Единица давления", unit_name(unit)),
+                                ("Давление, кгс/см²", pk), ("Как в отчёте", raw[:120]), ("Файл", rep.file), ("Источник", source), ("Уверенность", conf),
+                                ("Основание", "; ".join(x for x in ("глубина приведения не указана: давление нужно привести к расчётной глубине", why, extra) if x))]))
+
+
+def read_rpl(rep: Report, blocks: List[wt.Block]) -> None:
+    """Пластовое давление одной величиной: «Рпл=80,3 (от 19.06.2026 г)» в условиях исследований и «Пластовое давление | 91.48 атм» в промысловых данных."""
+    for b in blocks:
+        if isinstance(b, wt.Table):
+            for i, r in enumerate(b.rows):
+                text = " ".join(c.text for c in r.cells)
+                m = _RPL_EQ.search(text)
+                if m:
+                    unit = m.group(2) or ("кгс/см²" if "кгс" in low(text) else ("ат" if re.search(r"(?<![а-я])ат(?![а-я])", low(text)) else ""))
+                    tail = text[m.start():m.start() + 160]
+                    dm = re.search(r"\((?:[^)]*?)(" + _DATE.pattern + r")", tail)
+                    _add_rpl(rep, fnum(m.group(1)), unit, dm.group(1) if dm else "", text.replace("\n", " "), _src(b, i))
+                    continue
+                if len(r.cells) >= 2 and re.match(r"пластовое давление", low(r.cells[0].text)):
+                    mv = re.search(r"(" + NUM + r")\s*(мпа|кгс\s*/\s*см\S*|атм|ат(?![а-я]))?", r.cells[1].text, re.I)
+                    if mv:
+                        _add_rpl(rep, fnum(mv.group(1)), mv.group(2) or "", "", r.cells[0].text + ": " + r.cells[1].text, _src(b, i))
+        elif isinstance(b, wt.Para):
+            m = _RPL_WORDS.search(b.text)
+            if m:
+                _add_rpl(rep, fnum(m.group(1)), m.group(2), "", b.text.replace("\n", " "), "абзац", MID, "значение из текста отчёта")
 
 
 def read_filling_text(rep: Report, blocks: List[wt.Block]) -> None:
@@ -1161,6 +1238,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
     read_thermo_text(rep, blocks)
     read_pl_temp(rep, blocks)
     read_filling_text(rep, blocks)
+    read_rpl(rep, blocks)
     read_summaries(rep, blocks)
     check_report(rep)
     return rep
@@ -1192,7 +1270,7 @@ def pick_report_files(files: List[str]) -> Tuple[List[str], List[str]]:
 
 
 OCR_NOTE = "распознано OCR: значение — подсказка, сверить с оригиналом"
-_OCR_LISTS = ("complex", "bottoms", "thermo", "filling", "intervals", "packs", "gvk_history", "summary")
+_OCR_LISTS = ("complex", "bottoms", "thermo", "filling", "rpl", "intervals", "packs", "gvk_history", "summary")
 
 
 def _mark_ocr(rep: Report, origin: str) -> None:
@@ -1462,6 +1540,7 @@ def build(reports: List[Report], mapping: Optional[Dict[str, str]] = None, kg_mi
         "Доход шаблона": _frame([x for rep in good for x in rep.bottoms]),
         "Термобарика": _frame([x for rep in good for x in rep.thermo]),
         "Заполнение ствола": _frame([x for rep in good for x in rep.filling]),
+        "Пластовое давление": _frame([x for rep in good for x in rep.rpl]),
         "Интервалы": all_iv,
         "ГВК": _frame(gvk_rows),
         "Итоги пачек": _frame(summ_rows),

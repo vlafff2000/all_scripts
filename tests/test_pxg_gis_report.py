@@ -398,3 +398,52 @@ def test_date_only_measurement_columns_with_net_thickness_and_fractions():
 def test_kg_fraction_unit_is_not_divided():
     assert gr._kg("0.35", True)[0] == 0.35 and gr._kg("0.35")[0] == pytest.approx(0.0035)
     assert gr._is_frac("Кг, д. е.") and gr._is_frac("Кп, д.ед.") and not gr._is_frac("Кг, %")
+
+
+def _tbl(rows):
+    return wt.Table(rows=[wt.TRow([wt.Cell(t, i * 1000, (i + 1) * 1000) for i, t in enumerate(r)]) for r in rows])
+
+
+def test_thermo_depth_in_second_header_row_without_unit():
+    tbl = _tbl([["Показатели", "Глубина, м", "", ""],
+                ["", "500.0 \n(верхняя граница интервала \nисследования)", "775.0 \n(кровля верхней \nпесчаной пачки)", "820.0 \n(нижняя граница \nинтервала исследования)"],
+                ["Температура, °С", "14.0", "21.8", "22.7"], ["Давление, ат", "42.7", "73.0", "78.5"]])
+    rep = gr.Report(file="x.doc", well="110", alt=135.0)
+    assert gr.read_thermo_table(rep, tbl)
+    assert [(t["Глубина, м"], t["Температура, °C"], t["Давление, кгс/см²"]) for t in rep.thermo] == [(500.0, 14.0, 42.7), (775.0, 21.8, 73.0), (820.0, 22.7, 78.5)]
+    assert rep.thermo[1]["Пометка к глубине"] == "кровля коллектора" or rep.thermo[1]["Пометка к глубине"] == ""
+
+
+@pytest.mark.parametrize("cells,want", [
+    (["Начальная глубина замера \n500.0м", "на кровлю пласта \n758.6м", "забой \n795.6м"], [500.0, 758.6, 795.6]),
+    (["начальная глубина замера \n500.0м", "на кровлю пласта \n774.0м", "Забой(стоянка прибора) \n820,6.0м"], [500.0, 774.0, 820.6]),
+])
+def test_thermo_horizontal_method_depth_table(cells, want):
+    tbl = _tbl([["метод", "глубина", "", ""], [""] + cells, ["температура", "14.90С", "22.10С", "22.60С"]])
+    rep = gr.Report(file="x.doc", well="102", alt=135.0)
+    assert gr.read_thermo_table(rep, tbl)
+    assert [t["Глубина, м"] for t in rep.thermo] == want and [t["Температура, °C"] for t in rep.thermo] == [14.9, 22.1, 22.6]
+
+
+def test_filling_indicators_word_list_in_one_cell():
+    tbl = _tbl([["Показатели", "Интервал, м", "Плотность, г/см3"],
+                ["Заполнение ствола скважины \nгаз \nразгазированная жидкость \nжидкость \nуплотненный осадок", "- \n- \n500.0 – 842.2 \n-", "- \n- \n1.12 \n-"]])
+    rep = gr.Report(file="x.doc", well="18")
+    assert gr.read_filling_table(rep, tbl)
+    assert [(f["От, м"], f["До, м"], f["Заполнение"], f["Плотность от, г/см³"]) for f in rep.filling] == [(500.0, 842.2, "жидкость", 1.12)]
+
+
+def test_filling_indicators_ocr_row_per_type():
+    tbl = _tbl([["Показатели", "Интервал, м", "Плотность, г/см3"], ["Заполнение ствола скважины", "", ""], ["- газ", "-", "-"], ["- разгазированная жидкость", "-", "-"],
+                ["- жидкость", "500.0 - 811.6", "1.03"], ["- уплотненный осадок", "811.6 - 812.9", ">1.4"]])
+    rep = gr.Report(file="x.ocr.md", well="113")
+    assert gr.read_filling_table(rep, tbl)
+    assert [(f["От, м"], f["До, м"], f["Плотность от, г/см³"]) for f in rep.filling] == [(500.0, 811.6, 1.03), (811.6, 812.9, 1.4)]
+
+
+def test_rpl_single_value_from_conditions_and_text():
+    tbl = _tbl([["Давления, кгс/см2", "Рпл=80,3 (от 19.06.2026 г); Рбуф/Рзатр=15,6; Рмк=0 (от 19.06.2026 г)"], ["Пластовое давление", "91.48 атм"]])
+    rep = gr.Report(file="x.doc", well="162", alt=130.5)
+    gr.read_rpl(rep, [tbl, wt.Para("Пластовое давление (по ПХГ) - 9.68 МПа.")])
+    got = [(str(x["Дата замера"]), x["Давление (как в отчёте)"], x["Единица давления"], x["Давление, кгс/см²"]) for x in rep.rpl]
+    assert got[0] == ("2026-06-19", 80.3, "кгс/см²", 80.3) and got[1][1:3] == (91.48, "атм") and got[2][3] == pytest.approx(98.7, abs=0.1)
