@@ -19,7 +19,7 @@ from starlette.staticfiles import StaticFiles
 
 from pxg_core import fs_browse, runlog
 
-from . import engine
+from . import engine, extract
 
 DIST = Path(__file__).resolve().parent / "web" / "dist"
 LAST_PING = 0.0
@@ -126,6 +126,30 @@ async def source_page(request: Request):
     return Response(data, media_type="image/png")
 
 
+async def make_db(request: Request):
+    """«Собрать БД»: из markdown результата — листы КРС / ГИС / ГДИ и файл db.xlsx в папке результата."""
+    b = await _body(request)
+    d = str(b.get("dir") or "")
+    base = Path(d).resolve()
+    if engine.out_root().resolve() not in base.parents:
+        return _err("Папка результата не найдена.", 404)
+    meta = engine.collect(base) if base.is_dir() else {}
+    md = engine.resolve_file(d, meta.get("md") or "")
+    if md is None:
+        return _err("В результате нет markdown.", 404)
+
+    def build():
+        kind, sheets = extract.extract(md.read_text(encoding="utf-8"), base.name, str(b.get("kind") or ""))
+        extract.write_xlsx(sheets, str(base / "db.xlsx"))
+        return kind, sheets
+
+    try:
+        kind, sheets = await run_in_threadpool(build)
+    except ValueError as e:
+        return _err(str(e))
+    return JSONResponse({"kind": kind, "xlsx": "db.xlsx", "sheets": [{"name": n, "columns": c, "rows": r} for n, (c, r) in sheets.items()]})
+
+
 async def delete_result(request: Request):
     ok = await run_in_threadpool(engine.delete_result, str((await _body(request)).get("dir") or ""))
     return JSONResponse({"ok": ok})
@@ -148,6 +172,7 @@ def build_app() -> Starlette:
         Route("/api/ocr/history", history),
         Route("/api/ocr/file", result_file),
         Route("/api/ocr/page", source_page),
+        Route("/api/ocr/db", make_db, methods=["POST"]),
         Route("/api/ocr/delete", delete_result, methods=["POST"]),
         Route("/api/client-log", client_log, methods=["POST"]),
         *fs_browse.routes(),
