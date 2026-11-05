@@ -115,3 +115,26 @@ def test_web_launch_arguments_are_accepted_by_the_module(dbs, tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)
     mod = importlib.import_module("pxg_base.modules.Объединение_БД_ГИС")
     assert mod.main(argv) == 0 and os.path.exists(tmp_path / "Объединённая_БД_ГИС.xlsx")
+
+
+def test_neighbour_month_is_the_same_study_and_ocr_wins(tmp_path):
+    # Excel: скв. 5 за 2025-09 (ОСР в отчёте — 2025-10), скв. 5 за 2024-03 (нет в отчётах); скв. 6: 2025-09 и 2025-10 в Excel, в отчёте только 2025-10
+    a = _db(tmp_path / "a",
+            [{"well": w, "date": pd.Timestamp(d)} for w, d in (("5", "2025-09-01"), ("5", "2024-03-01"), ("6", "2025-09-01"), ("6", "2025-10-01"))],
+            [_pack(w, d, 800.0, 135.0) for w, d in (("5", "2025-09-01"), ("5", "2024-03-01"), ("6", "2025-09-01"), ("6", "2025-10-01"))], [])
+    b = _db(tmp_path / "b",
+            [{"well": "5", "date": pd.Timestamp("2025-10-14")}, {"well": "6", "date": pd.Timestamp("2025-10-14")}],
+            [_pack("5", "2025-10-14", 803.0, 135.0), _pack("6", "2025-10-14", 803.0, 135.0)], [])
+    r = gm.merge(gc.load_db(a), gc.load_db(b))
+    d = r["Решения"].set_index(["Скважина", "Месяц"])
+    assert ("5", "2025-09") not in d.index                       # заменён замером отчёта
+    assert d.loc[("5", "2025-10"), "Источник"] == gm.SECOND and "±1" in d.loc[("5", "2025-10"), "Почему"]
+    assert d.loc[("5", "2024-03"), "Источник"] == gm.FIRST
+    assert d.loc[("6", "2025-10"), "Источник"] == gm.SECOND      # точное совпадение, 2025-09 остаётся (отдельный замер)
+    assert d.loc[("6", "2025-09"), "Источник"] == gm.FIRST
+    p = r["gis_packs"]
+    assert len(p[p["well"] == "5"]) == 2
+
+
+def test_neighbour_month_across_year_boundary():
+    assert gm._shift("2025-12", 1) == "2026-01" and gm._shift("2026-01", -1) == "2025-12"
