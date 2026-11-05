@@ -33,3 +33,5 @@
 .ocr-log { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--head-bg); border: 1px solid var(--line); padding: 8px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
 .ocr-err { color: var(--bad); }
 @media (max-width: 1000px) { .ocr { grid-template-columns: 1fr; } .ocr-split { grid-template-columns: 1fr; } }
+.ocr-db { overflow-x: auto; max-width: 100%; }
+.ocr-db table th { white-space: normal; word-break: normal; overflow-wrap: normal; min-width: 7ch; }

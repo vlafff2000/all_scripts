@@ -163,7 +163,7 @@ export default function App() {
           </div>
           {cur.error && <p className="ocr-err">{cur.error}</p>}
           {dbErr && <p className="ocr-err">{dbErr}</p>}
-          {db && <Tables scope="ocr-db" tables={db.sheets.map((sh, i) => tableOf('db' + i, sh.name, sh.columns, sh.rows, 'Собрано программой из распознанного текста. Столбец «Проверка» говорит, чему можно доверять; решает инженер.'))} />}
+          {db && <div className="ocr-db"><Tables scope="ocr-db" tables={db.sheets.map((sh, i) => tableOf('db' + i, sh.name, sh.columns, sh.rows, 'Собрано программой из распознанного текста. Столбец «Проверка» говорит, чему можно доверять; решает инженер.'))} /></div>}
           {cur.state !== 'done' && <div className="ocr-log">{cur.log.join('\n') || 'Ожидание…'}</div>}
           {cur.state === 'done' && <>
             <div className="ocr-tabs" role="tablist">
