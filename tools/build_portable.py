@@ -47,7 +47,7 @@ RUNTIMES = {
 
 # Tracked application files that go into the folder (tests, interface sources and dev scripts stay out).
 # Значки ярлыков (tools/icons) кладутся в папку icons/ рядом с запускалками.
-INCLUDE = ['pxg_base', 'gsp_maps', 'pxg_finder', 'pxg_core', 'schedule_pxg', 'tnav_results', 'README.md', 'requirements.txt']
+INCLUDE = ['pxg_base', 'gsp_maps', 'pxg_finder', 'pxg_ocr', 'pxg_core', 'schedule_pxg', 'tnav_results', 'README.md', 'requirements.txt']
 SDIST_ONLY = {'proxy-tools', 'odfpy'}  # чистый Python, опубликован только исходниками
 SKIP_TOOLS = set()
 
@@ -73,6 +73,8 @@ WINDOWS_LAUNCHERS = {
     'Diagnostika_seti.bat': 'rem Диагностика медленных сетевых папок: спросит путь, замерит чтение и сохранит отчёт Diagnostika_seti_<дата>.txt рядом.\r\n'
                             '"%~dp0python\\python.exe" -s -X utf8 -m pxg_core.diagnostika_seti %*\r\n'
                             'echo.\r\necho Отчёт лежит в этой папке. Нажмите любую клавишу, чтобы закрыть окно.\r\npause >nul\r\nexit /b 0',
+    'Raspoznavanie.bat': 'rem Распознавание сканов и документов (OCR, MinerU): окно приложения или браузер. Движок лежит в папке ocr.\r\n'
+                         '"%~dp0python\\python.exe" -s -X utf8 -m pxg_ocr %*',
     'Poiskovik.bat': 'rem Поисковик: файловый менеджер (окно приложения или браузер, если окно недоступно).\r\n'
                      '"%~dp0python\\python.exe" -s -X utf8 -m pxg_finder %*',
     'Poiskovik_papki_vkl.bat': 'rem Добавляет в меню правой кнопки на папке пункт «Открыть в Поисковике».\r\n'
@@ -118,6 +120,7 @@ LINUX_LAUNCHERS = {
     'diagnostika_seti.sh': '# Диагностика медленных сетевых папок: bash diagnostika_seti.sh (спросит путь, отчёт Diagnostika_seti_<дата>.txt ляжет рядом).\n'
                            '"$PY" -s -X utf8 -m pxg_core.diagnostika_seti "$@"\n'
                            'echo; read -r -p "Нажмите Enter, чтобы закрыть окно..." _ || true',
+    'raspoznavanie.sh': '# Распознавание сканов и документов (OCR) в браузере. Движок лежит в папке ocr.\nexec "$PY" -s -X utf8 -m pxg_ocr --browser "$@"',
     'poiskovik.sh': '# Поисковик в браузере.\nexec "$PY" -s -X utf8 -m pxg_finder --browser "$@"',
     'poiskovik_papki_vkl.sh': '# Назначает Поисковик программой по умолчанию для папок (bash poiskovik_papki_vkl.sh).\n'
                               'pxg_report "Поисковик" "$PY" -s -X utf8 -m pxg_finder.default_folder enable',
