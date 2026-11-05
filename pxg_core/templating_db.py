@@ -369,6 +369,14 @@ def compare(old_path: str, new_path: str, tol: float = 1.0, marks: str = "") -> 
     """Сопоставление по скважине и году: на ключ берётся самая глубокая отбивка. Ничего не меняется; решение инженера — столбец, который переносится из прежней выгрузки (marks)."""
     old, _lo = load_for_compare(old_path)
     new, _ln = load_for_compare(new_path)
+    return compare_frames(old, new, tol, marks)
+
+
+def compare_frames(old: pd.DataFrame, new: pd.DataFrame, tol: float = 1.0, marks: str = "") -> Dict[str, pd.DataFrame]:
+    """То же сравнение по готовым таблицам (столбцы «Скважина», «Год», «Глубина, м», «Вид», «Источник данных», «Файл»); общий код для сравнения БД ГИС."""
+    for c in ("Вид", "Источник данных", "Файл"):
+        if c not in new.columns:
+            new = new.assign(**{c: None})
     o = old.groupby(["Скважина", "Год"])["Глубина, м"].max().rename("Глубина старая, м")
     nn = new.sort_values("Глубина, м", ascending=False).drop_duplicates(["Скважина", "Год"]).set_index(["Скважина", "Год"])
     n = nn["Глубина, м"].rename("Глубина новая, м")

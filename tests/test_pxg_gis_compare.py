@@ -96,3 +96,38 @@ def test_compare_with_text_and_number_in_one_column(tmp_path):
     o.to_parquet(str(tmp_path / "a" / "gis_observations.parquet"), index=False)
     path, frames = gc.export(a, b, str(tmp_path / "out"))
     assert os.path.exists(path) and len(frames["Пачки"]) >= 1
+
+
+def test_tolerance_decisions_and_extra_sheets(dbs, tmp_path):
+    a, b = dbs
+    # допуск по глубине 1 м скрывает расхождение ГВК на 0,8 м, по умолчанию оно есть
+    assert (gc.compare(gc.load_db(a), gc.load_db(b))["Пачки"]["Показатель"] == "ГВК MD, м").any()
+    loose = gc.compare(gc.load_db(a), gc.load_db(b), tol_depth=1.0)
+    assert not (loose["Пачки"]["Показатель"] == "ГВК MD, м").any()
+    # «Доход шаблона»: в А доход меняем на 5 м, в Б строка остаётся
+    ta = pd.read_parquet(os.path.join(b, "gis_templating.parquet"))
+    if len(ta):
+        ta["depth_m"] = ta["depth_m"] + 5.0
+        ta.to_parquet(os.path.join(a, "gis_templating.parquet"), index=False)
+    path, fr = gc.export(a, b, str(tmp_path / "o"))
+    assert "Решение инженера" in fr["Пачки"].columns and "Решений инженера отмечено" in set(fr["Сводка"]["Показатель"])
+    if len(ta):
+        assert "Доход шаблона" in fr and set(fr["Доход шаблона"]["Вид"]) == {"расхождение"}
+    # решение инженера переносится в новую выгрузку
+    book = pd.read_excel(path, sheet_name=None)
+    book["Пачки"]["Решение инженера"] = book["Пачки"]["Решение инженера"].astype(object)
+    book["Пачки"].loc[0, "Решение инженера"] = "верна новая"
+    marked = tmp_path / "marked.xlsx"
+    with pd.ExcelWriter(marked) as xw:
+        book["Пачки"].to_excel(xw, sheet_name="Пачки", index=False)
+    again = gc.compare(gc.load_db(a), gc.load_db(b), marks=str(marked))
+    assert again["Пачки"].iloc[0]["Решение инженера"] == "верна новая"
+
+
+def test_web_launch_arguments_are_accepted_by_the_module(dbs, tmp_path, monkeypatch):
+    import importlib
+    from pxg_base import webspec
+    a, b = dbs
+    argv = webspec.get("Сравнение_БД_ГИС").argv({"a": a, "b": b, "tol_depth": "1", "tol_kg": "0,05", "marks": ""})
+    monkeypatch.chdir(tmp_path)
+    assert importlib.import_module("pxg_base.modules.Сравнение_БД_ГИС").main(argv) == 0 and os.path.exists(tmp_path / "Сравнение_БД_ГИС.xlsx")
