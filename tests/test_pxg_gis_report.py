@@ -456,3 +456,13 @@ def test_table_kind_temperature_only_and_filling_indicators():
     assert gr.table_kind(fill)[0] == "filling"
     rep = gr.Report(file="x.doc", well="102")
     assert gr.read_thermo_table(rep, t_only) and len(rep.thermo) == 3 and rep.thermo[0]["Температура, °C"] == 14.9
+
+
+def test_filling_indicators_skipped_dash_row_and_no_raw_duplicate():
+    tbl = _tbl([["Показатели", "Интервал, м", "Плотность, г/см3"],
+                ["Заполнение ствола скважины \nгаз \nразгазированная жидкость \nжидкость \nуплотненный осадок", "500.0 – 786.0 \n786.0 – 813.3 \n813.3 – 817.4", "0.07 \n1.2 \n>1.4"]])
+    rep = gr.Report(file="x.doc", well="114")
+    rep.kv = [(tbl.rows[1].cells[0].text, tbl.rows[1].cells[1].text, "таблица 6")]
+    assert gr.read_filling_table(rep, tbl)
+    gr.read_filling_text(rep, [tbl])
+    assert [(f["От, м"], f["До, м"], f["Заполнение"], f["Плотность от, г/см³"]) for f in rep.filling] == [(500.0, 786.0, "газ", 0.07), (786.0, 813.3, "жидкость", 1.2), (813.3, 817.4, "осадок", 1.4)]
