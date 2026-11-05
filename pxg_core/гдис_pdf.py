@@ -93,6 +93,7 @@ class Scan:
     headings: List[str] = field(default_factory=list)
     items: List[Item] = field(default_factory=list)
     error: str = ""
+    ocr: str = ""             # файл OCR, из которого прочитан отчёт («» — обычный текстовый слой)
 
     @property
     def fingerprint(self) -> str:
@@ -110,7 +111,10 @@ def layout_pages(path: str) -> List[List[str]]:
     logging.getLogger("pypdf").setLevel(logging.ERROR)
     pages = []
     for page in PdfReader(path).pages:
-        text = page.extract_text(extraction_mode="layout")
+        try:
+            text = page.extract_text(extraction_mode="layout")
+        except Exception:         # страница без содержимого (чистый скан-образ): как пустая
+            text = ""
         lines = [ln.replace("\t", " ").rstrip() for ln in text.split("\n")]
         pages.append([ln for ln in lines if ln.strip()])
     return pages
@@ -125,15 +129,24 @@ def is_pdf(path: str) -> bool:
 
 
 def find_reports(folder: str) -> List[str]:
-    """PDF в папке и подпапках: по содержимому (%PDF), расширение не важно — отчёты бывают без него."""
-    found = []
+    """PDF в папке и подпапках: по содержимому (%PDF), расширение не важно — отчёты бывают без него; плюс готовый вывод OCR MinerU."""
+    found: List[str] = []
+    ocr_files: List[str] = []
     for root, _dirs, files in os.walk(folder):
         for name in sorted(files):
             full = os.path.join(root, name)
-            if name.startswith(("~", ".")) or name.lower().endswith((".xlsx", ".xls", ".zip", ".docx", ".txt", ".json")):
+            if name.startswith(("~", ".")):
+                continue
+            if name.lower().endswith("_content_list.json"):
+                ocr_files.append(full)
+                continue
+            if name.lower().endswith((".xlsx", ".xls", ".zip", ".docx", ".txt", ".json")):
                 continue
             if is_pdf(full):
                 found.append(full)
+    from . import ocr_mineru
+    paired = {ocr_mineru.sidecar(f) for f in found}
+    found += [f for f in ocr_files if f not in paired]       # OCR без PDF рядом читается сам по себе (markdown — только рядом с PDF)
     return sorted(found)
 
 
@@ -487,12 +500,26 @@ def scan_pages(pages: List[List[str]], name: str = "") -> Scan:
 
 
 def scan_report(path: str) -> Scan:
-    """Один PDF → Scan. Ошибка чтения не бросается, а записывается в `Scan.error`."""
+    """Один PDF (или готовый вывод OCR MinerU) → Scan. Ошибка чтения не бросается, а записывается в `Scan.error`."""
+    from . import ocr_mineru
+    ocr = ""
     try:
-        pages = layout_pages(path)
+        if not is_pdf(path) and ocr_mineru.is_ocr_output(path):
+            ocr = path
+        else:
+            pages = layout_pages(path)
+            if not any(ln.strip() for p in pages for ln in p):      # скан без текстового слоя: ищем готовый результат OCR
+                ocr = ocr_mineru.sidecar(path) or ""
+                if not ocr:
+                    return Scan(file=os.path.basename(path),
+                                error="в PDF нет текстового слоя (скан): распознайте его OCR MinerU, результат положите рядом "
+                                      "(имя_content_list.json или имя.md)")
+        if ocr:
+            pages = ocr_mineru.read_ocr_pages(ocr)
     except Exception as exc:      # битый или защищённый PDF
-        return Scan(file=os.path.basename(path), error="PDF не читается: %s" % exc)
+        return Scan(file=os.path.basename(path), error="Файл не читается: %s" % exc)
     scan = scan_pages(pages, os.path.basename(path))
+    scan.ocr = ocr
     if not any("гидродинамическом" in ln.lower() for p in pages for ln in p):
         scan.error = "это не отчёт о гидродинамическом исследовании (нет заголовка «Отчёт о гидродинамическом исследовании»)"
     return scan
