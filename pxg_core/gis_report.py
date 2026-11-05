@@ -1196,6 +1196,10 @@ def table_kind(tbl: wt.Table) -> Tuple[str, int]:
         return "thermo", nh
     if any(re.match(r"температур", f) for f in first) and any(re.match(r"давлен", f) for f in first):
         return "thermo", nh
+    if "глубин" in hdr and any(re.match(r"температур", f) for f in first[1:]):       # только температура по глубинам (отчёты 2019: «метод | глубина»)
+        return "thermo", nh
+    if "показател" in hdr and "интервал" in hdr and "плотност" in hdr and "температур" not in hdr:
+        return "filling", nh
     if "тип заполнения" in hdr or ("плотност" in hdr and "интервал" in hdr and "режим" in hdr):
         return "filling", nh
     if re.search(r"\bкг", hdr) and "интервал" in hdr:
@@ -1594,7 +1598,7 @@ def _write_pair(table: pd.DataFrame, out_dir: str, name: str) -> List[str]:
     return [pq, csv]
 
 
-SHEET_ORDER = ("Свод", "Замеры", "Интервалы", "Комплекс ГИС", "Доход шаблона", "Термобарика", "Заполнение ствола", "ГВК", "Итоги пачек", "ГВК по датам",
+SHEET_ORDER = ("Свод", "Замеры", "Интервалы", "Комплекс ГИС", "Доход шаблона", "Термобарика", "Пластовое давление", "Заполнение ствола", "ГВК", "Итоги пачек", "ГВК по датам",
                "Выводы (текст)", "Заголовки пачек", "Таблицы в отчётах", "Отчёты", "Проверка", "Строки БД")
 PERCENT = ("Кг", "Пористость", "Кг мин", "Кг макс", "Кг ср.взв", "Кг ср.взв (весь замер)")
 

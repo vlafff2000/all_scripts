@@ -447,3 +447,12 @@ def test_rpl_single_value_from_conditions_and_text():
     gr.read_rpl(rep, [tbl, wt.Para("Пластовое давление (по ПХГ) - 9.68 МПа.")])
     got = [(str(x["Дата замера"]), x["Давление (как в отчёте)"], x["Единица давления"], x["Давление, кгс/см²"]) for x in rep.rpl]
     assert got[0] == ("2026-06-19", 80.3, "кгс/см²", 80.3) and got[1][1:3] == (91.48, "атм") and got[2][3] == pytest.approx(98.7, abs=0.1)
+
+
+def test_table_kind_temperature_only_and_filling_indicators():
+    t_only = _tbl([["метод", "глубина", "", ""], [""] + ["Начальная глубина замера \n500.0м", "на кровлю пласта \n758.6м", "забой \n795.6м"], ["температура", "14.90С", "22.10С", "22.60С"]])
+    assert gr.table_kind(t_only)[0] == "thermo"
+    fill = _tbl([["Показатели", "Интервал, м", "Плотность, г/см3"], ["Заполнение ствола скважины \nгаз \nжидкость", "- \n500.0 – 793.0", "- \n1.2"]])
+    assert gr.table_kind(fill)[0] == "filling"
+    rep = gr.Report(file="x.doc", well="102")
+    assert gr.read_thermo_table(rep, t_only) and len(rep.thermo) == 3 and rep.thermo[0]["Температура, °C"] == 14.9
