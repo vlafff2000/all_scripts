@@ -612,9 +612,15 @@ def read_filling_indicators(rep: Report, tbl: wt.Table) -> bool:
         lines = [clean_line for clean_line in (x.strip(" -–—\t") for x in cells[0].text.split("\n")) if clean_line]
         iv_lines = [x.strip() for x in cells[1].text.split("\n") if x.strip()]
         d_lines = [x.strip() for x in cells[2].text.split("\n") if x.strip()]
-        if len(lines) > 1 and low(lines[0]).startswith("заполнение") and len(iv_lines) == len(lines) - 1:
-            for k, typ in enumerate(lines[1:]):
-                n += _fill_rec(rep, tbl, i, typ, iv_lines[k], d_lines[k] if k < len(d_lines) else "")
+        if len(lines) > 1 and low(lines[0]).startswith("заполнение"):
+            types = lines[1:]
+            if len(iv_lines) != len(types):                # прочерком пропущена строка «разгазированная жидкость»: интервалы идут подряд без неё
+                types = [t for t in types if not low(t).startswith("разгаз")]
+                iv_lines = [x for x in iv_lines if len(nums(x)) >= 2]
+                d_lines = [x for x in d_lines if nums(x)]
+            if len(iv_lines) == len(types):
+                for k, typ in enumerate(types):
+                    n += _fill_rec(rep, tbl, i, typ, iv_lines[k], d_lines[k] if len(d_lines) == len(types) else "")
         elif len(lines) == 1 and fill_kind(lines[0]) and not low(lines[0]).startswith("заполнение"):
             n += _fill_rec(rep, tbl, i, lines[0], cells[1].text, cells[2].text)
     return n > 0
@@ -691,6 +697,8 @@ def read_filling_text(rep: Report, blocks: List[wt.Block]) -> None:
     """Заполнение из промысловых данных (ячейки «Заполнение скважины / Ствол заполнен») и из текста («Скважина заполнена жидкостью»)."""
     have_table = any(f["Откуда"].startswith("таблица") for f in rep.filling)
     for k, v, s in rep.kv:
+        if "\n" in k.strip() and len(k.strip().split("\n")) > 2:
+            continue                                          # ячейка со списком типов заполнения: это таблица «Показатели», она разобрана отдельно
         if re.search(r"заполнени\w*\s+(скважин|ствол)|ствол\w*\s+скважин\w*\s+заполнен|заполнен\w*\s+ствол", low(k)) and v.strip(" -/|"):
             rep.filling.append(OrderedDict([
                 ("Скважина", rep.well), ("Дата", rep.date), ("Режим исследования", ""), ("От, м", rep.study_from), ("До, м", rep.study_to),
