@@ -28,6 +28,18 @@ export function renderMarkdown(md: string, fileUrl: (rel: string) => string): st
       out.push(cleanTable(buf))
       continue
     }
+    if (/^\s*\|.*\|\s*$/.test(ln)) {  // таблица markdown: строки с | и разделитель |---|
+      flush()
+      const rows: string[][] = []
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        const cells = lines[i].trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim())
+        if (!cells.every((c) => /^:?-{2,}:?$/.test(c))) rows.push(cells)
+        i++
+      }
+      i--
+      out.push('<table>' + rows.map((r, k) => '<tr>' + r.map((c) => `<${k ? 'td' : 'th'}>${inline(c)}</${k ? 'td' : 'th'}>`).join('') + '</tr>').join('') + '</table>')
+      continue
+    }
     const h = /^(#{1,6})\s+(.*)$/.exec(ln)
     if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue }
     if (/^\s*!\[/.test(ln)) { flush(); out.push('<p>' + inline(ln.trim()) + '</p>'); continue }

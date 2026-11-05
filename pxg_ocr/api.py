@@ -119,8 +119,10 @@ async def source_page(request: Request):
         return FileResponse(path, media_type=mimetypes.guess_type(path)[0] or "application/octet-stream")
     try:
         data = await run_in_threadpool(render_page, path, int(request.query_params.get("n") or 0))
-    except (ImportError, IndexError, ValueError, OSError) as e:
-        return _err("Страница не показана: %s" % e, 404)
+    except IndexError:
+        return _err("Такой страницы нет.", 404)
+    except Exception as e:  # noqa: BLE001 - ошибка pdfium показывается в окне, а не пустым местом
+        return _err("Страница не показана: %s: %s" % (type(e).__name__, e), 500)
     return Response(data, media_type="image/png")
 
 

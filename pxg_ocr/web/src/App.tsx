@@ -34,6 +34,7 @@ export default function App() {
   const [page, setPage] = useState(0)
   const [err, setErr] = useState('')
   const [askDel, setAskDel] = useState(false)
+  const [pageErr, setPageErr] = useState('')
   const running = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
@@ -66,7 +67,7 @@ export default function App() {
   const cur = useMemo(() => items.find((i) => (i.id || i.dir) === sel), [items, sel])
 
   useEffect(() => {
-    setText({ md: '', json: '' }); setPage(0); setAskDel(false)
+    setText({ md: '', json: '' }); setPage(0); setAskDel(false); setPageErr('')
     const r = cur?.result
     if (!cur || cur.state !== 'done' || !r) return
     if (r.md) void fetch(fileUrl(cur.dir, r.md)).then((x) => x.text()).then((md) => setText((t) => ({ ...t, md })))
@@ -155,11 +156,13 @@ export default function App() {
             <div className="ocr-split" style={tab === 'view' && isPdf || tab !== 'view' ? undefined : { gridTemplateColumns: '1fr' }}>
               <div className="ocr-page">
                 <div className="ocr-bar">
-                  <button type="button" disabled={page <= 0} onClick={() => setPage(page - 1)}>←</button>
+                  <button type="button" disabled={page <= 0} onClick={() => { setPageErr(''); setPage(page - 1) }}>←</button>
                   <span>Страница {page + 1}</span>
-                  <button type="button" onClick={() => setPage(page + 1)}>→</button>
+                  <button type="button" onClick={() => { setPageErr(''); setPage(page + 1) }}>→</button>
                 </div>
-                <img src={`/api/ocr/page?path=${encodeURIComponent(cur.src)}&n=${page}`} alt="Исходная страница" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} onLoad={(e) => { (e.target as HTMLImageElement).style.display = '' }} />
+                {pageErr ? <p className="ocr-err">{pageErr}</p> : <img src={`/api/ocr/page?path=${encodeURIComponent(cur.src)}&n=${page}`} alt="Исходная страница" onError={() => {
+                  void fetch(`/api/ocr/page?path=${encodeURIComponent(cur.src)}&n=${page}`).then((r) => r.json()).then((j: { error?: string }) => setPageErr(j.error || 'Страница не показана')).catch(() => setPageErr('Страница не показана'))
+                }} />}
               </div>
               <div className="ocr-view">
                 {tab === 'view' && <div dangerouslySetInnerHTML={{ __html: html }} />}
