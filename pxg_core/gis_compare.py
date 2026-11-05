@@ -59,10 +59,7 @@ def compare_observations(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:
     for key in sorted(set(ka) | set(kb)):
         ra, rb = ka.get(key), kb.get(key)
         if ra is not None and rb is not None:
-            if str(ra.date)[:10] != str(rb.date)[:10]:
-                rows.append({"Скважина": key[0], "Месяц": key[1], "Вид": "дата различается", "Дата А": ra.date, "Дата Б": rb.date,
-                             "Подсказка": "тот же месяц, разные числа: в прежней базе дата может быть первым числом сезона"})
-            continue
+            continue            # замер в одном месяце совпал: в БД из Excel дата ММ.ГГГГ, в отчётах точная ДД.ММ.ГГГГ, точной считается дата из отчётов
         rows.append({"Скважина": key[0], "Месяц": key[1], "Вид": "только в А" if rb is None else "только в Б", "Дата А": getattr(ra, "date", None),
                      "Дата Б": getattr(rb, "date", None),
                      "Подсказка": "замера нет в новой базе: проверьте, есть ли отчёт за эту дату" if rb is None else "замера нет в прежней базе: новый отчёт или пропуск в Excel"})
