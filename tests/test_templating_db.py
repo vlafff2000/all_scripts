@@ -91,3 +91,31 @@ def test_excel_with_year_instead_of_date(tmp_path):
     db = frames["БД шаблонирования"]
     assert sorted(db["Скважина"]) == ["21", "7"] and set(db["Дата"].dt.year) == {2023, 2024}
     assert db["Примечание"].str.contains("только год").all() and (db["Принято"] == "Да").all()
+
+
+def test_compare_old_and_new(tmp_path, monkeypatch):
+    import importlib
+    old = tmp_path / "old.xlsx"
+    pd.DataFrame({"Скважина": [1, 2, 3], "Год": [2023, 2023, 2023], "Глубина MD, м": [900.0, 800.0, 700.0]}).to_excel(old, index=False)
+    new = tmp_path / "new.xlsx"
+    pd.DataFrame({"Скважина": [1, 2, 4], "Дата": ["2023-05-01"] * 3, "Глубина, м": [900.4, 830.0, 600.0]}).to_excel(new, index=False)
+    r = td.compare(str(old), str(new), tol=1.0)
+    st = {k: set(v["Скважина"]) for k, v in r.items() if k != "Сводка"}
+    assert st == {"Совпало": {"1"}, "Расхождения": {"2"}, "Только в старой": {"3"}, "Только в новой": {"4"}}
+    assert r["Расхождения"].iloc[0]["Разница, м"] == 30.0
+    assert r["Сводка"].set_index("Показатель").loc["совпало, %", "Значение"] == 25.0
+    # решение инженера переносится
+    path, fr = td.export_compare(str(old), str(new), str(tmp_path / "o1"))
+    book = pd.read_excel(path, sheet_name=None)
+    book["Расхождения"]["Решение инженера"] = book["Расхождения"]["Решение инженера"].astype(object)
+    book["Расхождения"].loc[0, "Решение инженера"] = "верна новая"
+    with pd.ExcelWriter(tmp_path / "marked.xlsx") as xw:
+        book["Расхождения"].to_excel(xw, sheet_name="Расхождения", index=False)
+    again = td.compare(str(old), str(new), 1.0, str(tmp_path / "marked.xlsx"))
+    assert again["Расхождения"].iloc[0]["Решение инженера"] == "верна новая"
+    # через окно
+    from pxg_base import webspec
+    argv = webspec.get("Сравнение_БД_шаблонирования").argv({"old": str(old), "new": str(new), "tol": "1", "marks": ""})
+    monkeypatch.chdir(tmp_path)
+    assert importlib.import_module("pxg_base.modules.Сравнение_БД_шаблонирования").main(argv) == 0
+    assert checks.run("Сравнение_БД_шаблонирования", {"old": str(old), "new": str(new)}).issues == []
