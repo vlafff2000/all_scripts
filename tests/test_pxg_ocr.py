@@ -49,12 +49,19 @@ def _wait(job_id, timeout=15):
     raise AssertionError("не дождались")
 
 
-def test_plan_gpu_limits_vram():
+def test_plan_gpu_limits_vram(monkeypatch):
+    monkeypatch.setattr(engine, "GPU_SUPPORTED", True)
     hw = {"cores": 16, "gpu": {"name": "RTX 4060 Ti", "total_gb": 8.0, "free_gb": 7.0}}
     p = engine.plan("auto", hw)
     assert p["mode"] == "gpu" and p["vram_gb"] == 5.0 and p["threads"] == 8
     env = engine.build_env(__import__("pathlib").Path("C:/OCR"), p)
     assert env["MINERU_VIRTUAL_VRAM_SIZE"] == "5" and "MINERU_DEVICE_MODE" not in env
+
+
+def test_plan_linux_never_uses_gpu(monkeypatch):
+    monkeypatch.setattr(engine, "GPU_SUPPORTED", False)
+    p = engine.plan("gpu", {"cores": 16, "gpu": {"name": "RTX 4060 Ti", "total_gb": 8.0, "free_gb": 7.0}})
+    assert p["mode"] == "cpu" and "процессоре" in p["why"]
 
 
 def test_plan_weak_gpu_goes_to_cpu():

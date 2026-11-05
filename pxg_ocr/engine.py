@@ -68,15 +68,19 @@ def hardware() -> Dict[str, Any]:
     return info
 
 
+# Видеокарта используется только в Windows: на Linux (РЕД ОС) ускорение llama.cpp через Vulkan не проверялось, считаем на процессоре
+GPU_SUPPORTED = os.name == "nt" or bool(os.environ.get("PXG_OCR_GPU"))
+
+
 def plan(mode: str, hw: Dict[str, Any]) -> Dict[str, Any]:
     """Что реально будет использовано: режим, лимит видеопамяти (ГБ), число потоков и причина выбора."""
-    gpu = hw.get("gpu")
+    gpu = hw.get("gpu") if GPU_SUPPORTED else None
     threads = max(2, (hw.get("cores") or 2) // 2)
     cpu = {"mode": "cpu", "vram_gb": 0.0, "threads": threads}
     if mode == "cpu":
         return {**cpu, "why": "выбран режим «Только процессор»"}
     if not gpu:
-        return {**cpu, "why": "видеокарта NVIDIA не найдена"}
+        return {**cpu, "why": "видеокарта NVIDIA не найдена" if hw.get("gpu") is None else "на этой системе считаем на процессоре (ускорение видеокартой только в Windows)"}
     usable = min(VRAM_MAX_GB, round(gpu["free_gb"] - VRAM_RESERVE_GB, 1))
     if usable < VRAM_MIN_GB:
         if mode == "gpu":
