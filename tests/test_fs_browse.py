@@ -373,3 +373,20 @@ def test_make_dir(home, monkeypatch):
     monkeypatch.setattr(os, "mkdir", lambda p: (_ for _ in ()).throw(PermissionError(13, "Permission denied")))
     r = c.post("/api/fs/mkdir", json={"path": str(home), "name": "w"}, headers=h)
     assert r.status_code == 400 and "доступ" in r.json()["error"].lower()
+
+
+def test_places_linux_roots_survive_slow_probes(home, monkeypatch):
+    """На Linux корень и домашняя папка есть в местах, даже если проверка папок не успевает (нагрузка, autofs)."""
+    monkeypatch.setattr(fs_browse.os, "name", "posix")
+    monkeypatch.setattr(fs_browse, "_probe", lambda *a, **k: False)
+    monkeypatch.setattr(fs_browse, "net_mounts", lambda: [])
+    pl = fs_browse.places()
+    assert any(p["path"] == "/" and p["kind"] == "drive" for p in pl)
+    assert any(p["kind"] == "home" for p in pl)
+    assert fs_browse.places_problems() == []
+
+
+def test_places_endpoint_returns_problems_key(home):
+    from starlette.applications import Starlette
+    c = TestClient(Starlette(routes=fs_browse.routes()))
+    assert "problems" in c.get("/api/fs/places").json()
