@@ -336,3 +336,86 @@ def export(out_dir: str, **sources) -> Tuple[List[str], Dict[str, pd.DataFrame]]
         json.dump({"format": FORMAT_NAME, "version": FORMAT_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"),
                    "rows": int(len(t)), "wells": int(t["well"].nunique()), "columns": list(t.columns)}, f, ensure_ascii=False, indent=2)
     return [book, pq, csv, meta], frames
+
+
+# ----------------------------------------------------------------------------------------------------- сравнение двух БД
+def load_for_compare(path: str) -> Tuple[pd.DataFrame, str]:
+    """Любая БД шаблонирования: книга «БД_шаблонирования.xlsx» (берутся принятые отбивки), templating_db.parquet/csv, папка с ними или свой Excel (скважина, год/дата, глубина)."""
+    if os.path.isdir(path):
+        for n in ("templating_db.parquet", "templating_db.csv", "БД_шаблонирования.xlsx"):
+            if os.path.exists(os.path.join(path, n)):
+                return load_for_compare(os.path.join(path, n))
+        raise ValueError("В папке нет templating_db.parquet/csv и «БД_шаблонирования.xlsx»: %s" % path)
+    if path.lower().endswith((".xlsx", ".xlsm", ".xls")) and "БД шаблонирования" in pd.ExcelFile(path).sheet_names:
+        df = pd.read_excel(path, sheet_name="БД шаблонирования")
+    elif path.lower().endswith((".csv", ".parquet")) and "templating_db" in os.path.basename(path):
+        df = pd.read_parquet(path) if path.endswith(".parquet") else pd.read_csv(path, sep=";", decimal=",", encoding="utf-8-sig")
+        ru = {v: k for k, v in EN.items()}
+        df = df.rename(columns={c: ru.get(c, c) for c in df.columns})
+    else:
+        rows, _n = from_excel(path)
+        df = pd.DataFrame(rows, columns=COLUMNS)
+        df["Принято"] = "Да"
+    if "Принято" in df.columns and (df["Принято"] == "Да").any():
+        df = df[df["Принято"] == "Да"]
+    df = df.copy()
+    df["Скважина"] = df["Скважина"].map(qc.well_key)
+    df["Год"] = pd.to_datetime(df["Дата"], errors="coerce").dt.year
+    df["Глубина, м"] = pd.to_numeric(df["Глубина, м"], errors="coerce")
+    return df.dropna(subset=["Год", "Глубина, м"]), os.path.basename(path)
+
+
+def compare(old_path: str, new_path: str, tol: float = 1.0, marks: str = "") -> Dict[str, pd.DataFrame]:
+    """Сопоставление по скважине и году: на ключ берётся самая глубокая отбивка. Ничего не меняется; решение инженера — столбец, который переносится из прежней выгрузки (marks)."""
+    old, _lo = load_for_compare(old_path)
+    new, _ln = load_for_compare(new_path)
+    o = old.groupby(["Скважина", "Год"])["Глубина, м"].max().rename("Глубина старая, м")
+    nn = new.sort_values("Глубина, м", ascending=False).drop_duplicates(["Скважина", "Год"]).set_index(["Скважина", "Год"])
+    n = nn["Глубина, м"].rename("Глубина новая, м")
+    src = (nn["Вид"].fillna("") + "; " + nn["Источник данных"].fillna("") + "; " + nn["Файл"].fillna("").astype(str)).rename("Источник новой")
+    j = pd.concat([o, n, src], axis=1).reset_index()
+    j["Разница, м"] = (j["Глубина новая, м"] - j["Глубина старая, м"]).round(2)
+    both = j["Глубина старая, м"].notna() & j["Глубина новая, м"].notna()
+    j["Статус"] = "совпало"
+    j.loc[both & (j["Разница, м"].abs() > tol), "Статус"] = "расхождение"
+    j.loc[j["Глубина новая, м"].isna(), "Статус"] = "только в старой"
+    j.loc[j["Глубина старая, м"].isna(), "Статус"] = "только в новой"
+    j["Решение инженера"], j["Комментарий"] = "", ""
+    if marks:
+        prev = pd.read_excel(marks, sheet_name=None, dtype=object)
+        for df in prev.values():
+            if {"Скважина", "Год", "Решение инженера"} <= set(df.columns):
+                for _i, r in df.dropna(subset=["Решение инженера"]).iterrows():
+                    hit = (j["Скважина"] == qc.well_key(r["Скважина"])) & (j["Год"] == _num(r["Год"]))
+                    j.loc[hit, "Решение инженера"] = r["Решение инженера"]
+                    if "Комментарий" in df.columns and pd.notna(r["Комментарий"]):
+                        j.loc[hit, "Комментарий"] = r["Комментарий"]
+    j["Год"] = j["Год"].astype(int)
+    j = j.sort_values(["Статус", "Скважина", "Год"], key=lambda s: s.map({"расхождение": 0}) if s.name == "Статус" else s).reset_index(drop=True)
+    cols = ["Скважина", "Год", "Глубина старая, м", "Глубина новая, м", "Разница, м", "Источник новой", "Решение инженера", "Комментарий"]
+    total = len(j)
+    pct = lambda k: round(100.0 * k / total, 1) if total else 0.0       # noqa: E731
+    cnt = j["Статус"].value_counts()
+    summ = pd.DataFrame([("Допуск по глубине, м", tol), ("Пар «скважина + год» всего", total)] + [
+        (s + ", шт.", int(cnt.get(s, 0))) for s in ("совпало", "расхождение", "только в старой", "только в новой")] + [
+        (s + ", %", pct(int(cnt.get(s, 0)))) for s in ("совпало", "расхождение", "только в старой", "только в новой")] + [
+        ("Скважин в старой", old["Скважина"].nunique()), ("Скважин в новой", new["Скважина"].nunique()),
+        ("Решений инженера отмечено", int((j["Решение инженера"] != "").sum()))], columns=["Показатель", "Значение"])
+    out = {"Сводка": summ}
+    for sheet, st in (("Совпало", "совпало"), ("Расхождения", "расхождение"), ("Только в старой", "только в старой"), ("Только в новой", "только в новой")):
+        out[sheet] = j[j["Статус"] == st][cols].reset_index(drop=True)
+    return out
+
+
+def export_compare(old_path: str, new_path: str, out_dir: str, tol: float = 1.0, marks: str = "") -> Tuple[str, Dict[str, pd.DataFrame]]:
+    frames = compare(old_path, new_path, tol, marks)
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, "Сравнение_БД_шаблонирования.xlsx")
+    with pd.ExcelWriter(path, engine="xlsxwriter") as xw:
+        for name, fr in frames.items():
+            fr.to_excel(xw, sheet_name=name, index=False)
+            ws = xw.sheets[name]
+            ws.freeze_panes(1, 0)
+            for i, col in enumerate(fr.columns):
+                ws.set_column(i, i, 45 if col in ("Источник новой", "Показатель", "Комментарий") else 18)
+    return path, frames

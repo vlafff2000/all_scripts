@@ -39,6 +39,7 @@ REGISTRY: Dict[str, str] = {
     "Сравнение_БД_ГИС": "gis_compare:check_gis_compare",
     "Объединение_БД_ГИС": "gis_merge:check_gis_merge",
     "БД_шаблонирования": "templating:check_templating",
+    "Сравнение_БД_шаблонирования": "templating_compare:check_templating_compare",
     "База_ГДИ_из_отчётов_PDF": "gdis:check_gdis",
     "Шаблон_конструкции_из_свода_скважин": "construction:check_construction",
     "Конструкции_из_Word_для_Атласа": "construction:check_construction_word",
