@@ -29,6 +29,7 @@ REGISTRY: Dict[str, str] = {
     "База_шахматка_Лена": "shakhmatka:check_shakhmatka",
     "Копирование_файлов_по_маске": "reports:check_copy_by_mask",
     "Распаковка_архивов": "reports:check_unpack",
+    "Сравнение_папок": "reports:check_compare_folders",
     "Копирование_замеров_давлений_по_шаблонам": "reports:check_pressure_copy",
     "Сбор_БД_замеров_воды": "water:check_water",
     "Импорт_данных_ЭЛПРО": "elpro:check_elpro",
