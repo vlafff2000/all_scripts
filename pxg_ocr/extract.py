@@ -80,11 +80,22 @@ def plain_text(md: str) -> str:
     return re.sub(r"[ \t]+", " ", re.sub(r"[#*\\]", "", t))
 
 
+def unlatex(t: str) -> str:
+    """Остатки LaTeX из рукописи ($P_{уд} = 85 - 90 \\text{ кгс/м}^{2}$) -> читаемый текст."""
+    def fix(m):
+        x = re.sub(r"\\(?:text|mathrm)\s*", "", m.group(1))
+        x = re.sub(r"\\[,;! ]", " ", x)
+        return re.sub(r"[{}]", "", x).replace("_", "").replace("^", "").strip()
+    t = re.sub(r"\$([^$]*)\$", fix, t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def flat(md: str) -> str:
     """Весь текст (включая таблицы) одной строкой."""
     t = re.sub(r"<[^>]+>", " ", html.unescape(md) if "&lt;table" in md else md)
     t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", t)
-    return re.sub(r"\s+", " ", re.sub(r"[#*\\|]", " ", t)).strip()
+    t = re.sub(r"\\([_*#])", " ", t)  # экранирование markdown (\_\_\_ — пустая строка рукописного акта)
+    return re.sub(r"\s+", " ", re.sub(r"[#*|]", " ", t)).strip()
 
 
 def num(s: str) -> Optional[float]:
@@ -142,8 +153,8 @@ def extract_krs(md: str, source: str = "") -> Sheets:
         check = "печатный текст: проверить выборочно" if acid else "рукописный акт: числа и слова обязательно сверить со сканом"
         rows.append([source, well, inv.group(1).strip() if inv else "", uphg.group(1) if uphg else "",
                      "Кислотная обработка ПЗП" if acid else "Капитальный ремонт", d_act, d_from, d_to,
-                     (works.group(1).strip() if works else "")[:900], (result.group(1).strip() if result else "")[:500],
-                     (state.group(1).strip() if state else "")[:500], depth.group(1).replace(",", ".") if depth else "", "; ".join(names), check])
+                     unlatex(works.group(1) if works else "")[:900], unlatex(result.group(1) if result else "")[:500],
+                     unlatex(state.group(1) if state else "")[:500], depth.group(1).replace(",", ".") if depth else "", "; ".join(names), check])
         if acid:
             for m in re.finditer(r"«?(\d{1,2})»?\s*([а-я]+)\s*(20\d\d)\s*г\.?\s*[–-]\s*([\d,]+)\s*м³?\s*([А-ЯA-Z]{2,}[А-Яа-яA-Za-z\-]*)\s*(?:марка\s*([А-ЯA-Z]))?", t):
                 inj.append([source, well, ru_date("%s %s %s" % m.group(1, 2, 3)), num(m.group(4)), m.group(5), m.group(6) or "", "печатный текст"])
@@ -165,7 +176,7 @@ def extract_gis(md: str, source: str = "") -> Sheets:
     ng = re.search(r"Нг\s*=\s*([\d.,]+)", t)
     kg = re.search(r"Кг\s*=\s*(<?\s*\d+)\s*%", t)
     gas = re.search(r"газонасыщен\w* в интервале\s*([\d.,]+)\s*[–-]\s*([\d.,]+)", t)
-    mode = re.search(r"Режим ПХГ\s+(.{3,40}?)(?:\s+Конструкция|\s+Глубина|$)", t)
+    mode = re.search(r"Режим (?:работы )?ПХГ\s+(.{3,40}?)(?:\s+Конструкция|\s+Глубина|$)", t)
     interpreter = re.search(r"Интерпретатор\s+(?:[^А-ЯЁ]*)([А-ЯЁ]\.\s?[А-ЯЁ]\.\s?[А-ЯЁ][а-яё]+)", t)
     last_krs = re.search(r"Последний КРС\s+(.{3,120}?)\s+Режим", t)
     status = re.search(r"СОСТОЯНИЕ СКВАЖИНЫ.{0,300}?(статика|[а-я]+)", t)
@@ -199,12 +210,16 @@ def extract_gis(md: str, source: str = "") -> Sheets:
             continue
         for r in tb[2:]:
             c = [x for x in r]
-            if len(c) < 6 or num(c[0]) is None or num(c[1]) is None or any("глинизирован" in x for x in c):
+            if len(c) >= 3 and num(c[0]) is not None and num(c[1]) is not None and any("глинизирован" in x for x in c):
+                kgrows.append([source, well_v, "все сроки", num(c[0]), num(c[1]), None, None, "заглинизирован", check])
+                continue
+            if len(c) < 6 or num(c[0]) is None or num(c[1]) is None:
                 continue
             for i, d in enumerate(dates):
                 top, bot, kg_ = (c[3 + 3 * i: 6 + 3 * i] + ["", "", ""])[:3]
                 if num(top) is not None:
-                    kgrows.append([source, well_v, d.strip("."), num(c[0]), num(c[1]), num(top), num(bot), kg_.replace("&lt;", "<"), check])
+                    kgrows.append([source, well_v, d.strip("."), num(c[0]), num(c[1]), num(top), num(bot), kg_.replace("&lt;", "<"),
+                                   check if kg_.strip() else "Кг не распознан (колонка пропала при чтении таблицы): взять из скана"])
     sheets["ГИС_Кг_по_интервалам"] = (["Файл", "Скважина", "РИГИС от", "Интервал пласта от, м", "до, м", "Интервал Нг от, м", "до, м", "Кг, %", "Проверка"], kgrows)
     kit = []
     for tb in tabs:
@@ -273,7 +288,7 @@ def extract_gdi(md: str, source: str = "") -> Sheets:
                 res[r[0]] = num(r[2])
     key = lambda s: next((v for k, v in res.items() if re.search(s, k)), None)  # noqa: E731
     mth = re.search(r"Метод\s*(\d+)\s*[-–]\s*(.{3,40}?)\s+Результаты метода", t)
-    verdict = re.search(r"Общая оценка качества\s*\S*\s*(Не определено|\w+)", t)
+    verdict = re.search(r"Общая оценка качества\s+(?:[%\-]+\s+)?(Не определено|Хорошее|Удовлетворительное|Плохое|\w+)", t)
     sheets["ГДИ_результаты"] = (["Файл", "Скважина", "Метод обработки", "Рпл на ИП, кгс/см2", "a", "b", "Абс. своб. дебит, тыс.м3/сут", "Своб. дебит, тыс.м3/сут", "Оценка качества", "Проверка"],
                                 [[source, well, ("Метод %s %s" % mth.group(1, 2)) if mth else "", key("Пластовое"), key(r"сопротивления a"), key(r"сопротивления b"), key("Абсолютно"), key(r"^Свободный"),
                                   verdict.group(1) if verdict else "", check]])

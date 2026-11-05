@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import mimetypes
 import os
 import sys
@@ -139,7 +140,11 @@ async def make_db(request: Request):
         return _err("В результате нет markdown.", 404)
 
     def build():
-        kind, sheets = extract.extract(md.read_text(encoding="utf-8"), base.name, str(b.get("kind") or ""))
+        try:
+            name = json.loads((base / "meta.json").read_text(encoding="utf-8")).get("name") or base.name
+        except (OSError, ValueError):
+            name = base.name
+        kind, sheets = extract.extract(md.read_text(encoding="utf-8"), name, str(b.get("kind") or ""))
         extract.write_xlsx(sheets, str(base / "db.xlsx"))
         return kind, sheets
 
