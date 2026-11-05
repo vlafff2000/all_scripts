@@ -696,9 +696,10 @@ def read_rpl(rep: Report, blocks: List[wt.Block]) -> None:
 def read_filling_text(rep: Report, blocks: List[wt.Block]) -> None:
     """Заполнение из промысловых данных (ячейки «Заполнение скважины / Ствол заполнен») и из текста («Скважина заполнена жидкостью»)."""
     have_table = any(f["Откуда"].startswith("таблица") for f in rep.filling)
+    has_ind = any(f["Откуда"].startswith("таблица заполнения ствола (показатели)") for f in rep.filling)
     for k, v, s in rep.kv:
-        if "\n" in k.strip() and len(k.strip().split("\n")) > 2:
-            continue                                          # ячейка со списком типов заполнения: это таблица «Показатели», она разобрана отдельно
+        if has_ind and low(k).startswith("заполнение ствола"):
+            continue                                          # то же самое из таблицы «Показатели» уже разобрано по интервалам и плотностям
         if re.search(r"заполнени\w*\s+(скважин|ствол)|ствол\w*\s+скважин\w*\s+заполнен|заполнен\w*\s+ствол", low(k)) and v.strip(" -/|"):
             rep.filling.append(OrderedDict([
                 ("Скважина", rep.well), ("Дата", rep.date), ("Режим исследования", ""), ("От, м", rep.study_from), ("До, м", rep.study_to),
