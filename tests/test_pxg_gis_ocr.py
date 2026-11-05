@@ -160,3 +160,38 @@ def test_pick_files_ocr_rules():
     files = ["/a/x_content_list.json", "/a/x.pdf", "/a/y_content_list.json", "/a/other.json", "/a/notes.md", "/a/z.docx", "/a/z.ocr.md"]
     keep, notes = gr.pick_report_files(files)
     assert keep == ["/a/x.pdf", "/a/y_content_list.json", "/a/z.docx"] and len(notes) == 2
+
+
+# ---- настоящие выводы MinerU (markdown с HTML-таблицами) по отчётам Гатчинского ПХГ
+
+def _real(name):
+    return gr.parse_file(os.path.join(DATA, name))
+
+
+def _iv(rep):
+    return {(r["Столбец-замер"][-11:], r["От, м"], r["До, м"], r["Кг (как в отчёте)"]) for r in rep.intervals}
+
+
+def test_real_118_header_with_cells_glued_together():
+    r = _real("ocr_118_gatchina.md")
+    assert r.well == "118" and r.storage == "Гатчинское ПХГ" and r.alt == 109.31 and str(r.date) == "2026-04-27"
+
+
+def test_real_118_three_epochs_when_date_is_glued_to_word():
+    """«РИГИС от31.10.2025г» — OCR склеил «от» с датой: замер не должен пропасть."""
+    r = _real("ocr_118_gatchina.md")
+    labels = {i["Столбец-замер"][-11:] for i in r.intervals}
+    assert {"21.05.2025г", "31.10.2025г", "27.04.2026г"} <= labels
+    assert ("27.04.2026г", 404.4, 404.8, "40") in _iv(r) and ("31.10.2025г", 405.3, 405.9, "55") in _iv(r)
+
+
+def test_real_64_kg_is_not_taken_from_depth_column():
+    """В 64 OCR потерял Кг последнего замера и шапку: глубина 423.5 не может стать Кг, Кг замеров читается по порядку ячеек."""
+    r = _real("ocr_64_gatchina.md")
+    assert r.well == "64" and r.storage == "Гатчинское ПХГ"
+    got = {(i["Столбец-замер"][-8:], i["От, м"], i["До, м"], i["Кг (как в отчёте)"]) for i in r.intervals}
+    assert ("05.2025г", 422.8, 423.5, "30") in got and ("10.2025г", 423.5, 423.8, "<20") in got
+    assert not any(i["Кг"] is not None and i["Кг"] > 1 for i in r.intervals)
+    last = [i for i in r.intervals if i["Столбец-замер"].endswith("04.2026г")]
+    assert last and all(i["Уверенность"] != gr.HIGH and "по порядку" in i["Основание"] for i in last)
+    assert not any(i["Код"] == "kg_range" for i in r.issues)

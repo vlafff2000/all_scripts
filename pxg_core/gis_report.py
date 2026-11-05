@@ -189,10 +189,15 @@ def read_header(rep: Report, blocks: List[wt.Block]) -> None:
     hit = _find(kv, r"^скважина$")
     if hit:
         rep.well = qc.well_key(hit[1])
+    cells_text = "\n".join(c.text for b in blocks[:6] if isinstance(b, wt.Table) for r in b.rows for c in r.cells)   # шапка в таблице: подписи и значения могут быть склеены (OCR)
     if not rep.well:
-        m = re.search(r"скважин\w*\s*(?:№|N)\s*([\w][\w\-/]*)", text, re.I) or re.search(r"скважин\w*\s*([\w][\w\-/]*)", text, re.I)
+        sign = r"скважин\w*\s*(?:№|N|No)\s*([\w][\w\-/]*)"
+        m = (re.search(sign, text, re.I) or re.search(r"(?:№|(?<![A-Za-z])No|(?<![A-Za-z])N)\s*(\d+(?:-\d+)?(?:[а-яa-z](?![а-яa-z]))?)", cells_text)
+             or re.search(r"скважин\w*\s*([\w][\w\-/]*)", text, re.I))
         rep.well = qc.well_key(m.group(1)) if m else ""
-    m = re.search(r"([А-ЯЁ][а-яё]+(?:ского|ское|ского|ский)?)\s+(?:УПХГ|ПХГ)", text)
+    sto = r"([А-ЯЁ][а-яё]+(?:ского|ское|ский|ое))\s+"
+    m = (re.search(sto + r"ПХГ", text) or re.search(sto + r"ПХГ", cells_text) or re.search(sto + r"(?:УПХГ|ПХГ)", text)
+         or re.search(r"([А-ЯЁ][а-яё]+(?:ского|ское|ского|ский)?)\s+(?:УПХГ|ПХГ)", text))
     hit = _find(kv, r"^пхг$")
     rep.storage = (hit[1].strip() if hit else (m.group(0) if m else ""))
     hit = _find(kv, r"дата исследован")
@@ -202,7 +207,10 @@ def read_header(rep: Report, blocks: List[wt.Block]) -> None:
         d = pdate(m.group(1)) if m else None
     rep.date = d
     hit = _find(kv, r"альтитуд")
-    if hit:
+    if hit and len(hit[0]) > 60 and re.search(r"дата исследован", low(hit[0])):      # подписи и значения склеены в одну ячейку (OCR): берём число перед « м» после слова
+        g = re.search(r"[а-яё](" + NUM + r")\s*м", hit[1])
+        rep.alt = fnum(g.group(1)) if g else None
+    elif hit:
         v = nums(hit[1].split("/")[0] if "/" in hit[1] and len(hit[0].split("/")) == 1 else hit[1])
         rep.alt = v[0] if v else None
     if rep.alt is None:
@@ -732,7 +740,7 @@ def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
             if c.vcont or not c.text:
                 continue
             t = c.text
-            if not re.search(r"\bот\b", t, re.I):
+            if not re.search(r"\bот(?![а-яё])", t, re.I):        # «от31.10.2025г»: OCR склеил слово с датой
                 continue
             d = pdate(t)
             if d is not None:
@@ -763,6 +771,61 @@ def _leaf(tbl: wt.Table, nhdr: int, c: wt.Cell) -> str:
         if re.search(rx, lab):
             return key
     return ""
+
+
+_KG_TOKEN = re.compile(r"^\s*[<>≤≥~≈]?\s*\d{1,3}(?:[.,]\d+)?\s*%?\s*$")
+_DEPTH_TOKEN = re.compile(r"^\s*\d{2,4}[.,]\d{1,2}\s*$")
+
+
+def _in_base(v: float, base_rows: list) -> bool:
+    return any(br["from"] - 0.05 <= v <= br["to"] + 0.05 for br in base_rows)
+
+
+def _row_base(row: wt.TRow, base_rows: list) -> list:
+    """Интервал коллектора строки: из столбцов коллектора, а если шапка их не отделила (OCR) — две первые ячейки-глубины строки."""
+    if base_rows:
+        return base_rows
+    toks = [c.text.strip() for c in row.cells if not c.vcont and c.text.strip()]
+    if len(toks) >= 4 and _DEPTH_TOKEN.match(toks[0]) and _DEPTH_TOKEN.match(toks[1]) and fnum(toks[0]) < fnum(toks[1]):
+        return [{"from": fnum(toks[0]), "to": fnum(toks[1])}]
+    return []
+
+
+def _geometry_broken(row_recs: list, base_rows: list) -> bool:
+    """Столбцы шапки не сошлись с ячейками строки: «Кг» похож на глубину или интервал замера вне интервала коллектора."""
+    if not base_rows:
+        return False
+    for _gi, _g, ivn, rec in row_recs:
+        kg = (rec.get("kg") or "").strip()
+        if _DEPTH_TOKEN.match(kg) and fnum(kg) is not None and fnum(kg) > 100:
+            return True
+        if not (_in_base(ivn[0], base_rows) and _in_base(ivn[1], base_rows)):
+            return True
+    return False
+
+
+def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list):
+    """Строка данных по порядку ячеек: [от, до (коллектор), Кп] и для каждого замера [от, до, Кг]; Кг, потерянный OCR, остаётся пустым.
+    Возвращает [(номер замера, [от, до], {"kg": …})] или None, если порядок не угадывается."""
+    toks = [c.text.strip() for c in row.cells if not c.vcont and c.text.strip()]
+    if len(toks) < 4 or fnum(toks[0]) is None or fnum(toks[1]) is None:
+        return None
+    lo, hi = fnum(toks[0]), fnum(toks[1])
+    near = lambda t: fnum(t) is not None and _DEPTH_TOKEN.match(t) is not None and lo - 0.05 <= fnum(t) <= hi + 0.05
+    pos = 2
+    if pos < len(toks) and not near(toks[pos]):
+        pos += 1                                       # Кп (или «-»)
+    out = []
+    for gi in range(n_groups):
+        if pos + 1 < len(toks) and near(toks[pos]) and near(toks[pos + 1]):
+            pair = [fnum(toks[pos]), fnum(toks[pos + 1])]
+            pos += 2
+            kg = ""
+            if pos < len(toks) and not (pos + 1 < len(toks) and near(toks[pos]) and near(toks[pos + 1])) and (_KG_TOKEN.match(toks[pos]) or toks[pos] == "-"):
+                kg = toks[pos]
+                pos += 1
+            out.append((gi, pair, {"kg": kg, "h": "", "sat": "", "lith": ""}))
+    return out or None
 
 
 def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict[str, str]], title: str, section: str) -> int:
@@ -843,19 +906,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             if len(ivn) >= 2:
                 kp = fnum(kpc[0].text) if kpc else None
                 base_rows.append({"from": ivn[0], "to": ivn[1], "kp": None if kp is None else kp / 100.0, "src": _src(tbl, i)})
-        for gi, g in enumerate(sgroups):
-            cells = [c for c in r.cells if inb(g, c) and c.text.strip()]
-            if not cells:
-                continue
-            ivn, rec = [], {"kg": "", "h": "", "sat": "", "lith": ""}
-            for c in cells:
-                k = _leaf(tbl, nhdr, c)
-                if k in ("iv", "") and fnum(c.text) is not None and len(ivn) < 2:
-                    ivn.append(fnum(c.text))
-                elif k in rec:
-                    rec[k] = c.text
-            if len(ivn) < 2:
-                continue
+        def emit(gi, g, ivn, rec, extra_why="", cap_conf=False):
+            nonlocal n
             kg, kmin, kmax, ktext = _kg(rec["kg"])
             h = fnum(rec["h"])
             sat = rec["sat"]
@@ -873,6 +925,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 conf, why = MID, "Кг с припиской «%s»: для расчётов взято число %g %%, исходный текст сохранён" % (ktext, kg * 100)
             elif kg is None and not water:
                 conf, why = MID, "Кг не число («%s»)" % ktext
+            if extra_why:
+                conf, why = MID, "; ".join(x for x in (extra_why, why) if x)
             rep.intervals.append(OrderedDict([
                 ("Скважина", rep.well), ("Файл", rep.file), ("Таблица", tid), ("Источник", _src(tbl, i)), ("Столбец-замер", g.label), ("_g", gi),
                 ("Дата замера", g.date), ("Дата точная", g.exact), ("Раздел таблицы", title), ("Заголовок пачки", pack_title), ("Пачка", pack),
@@ -881,6 +935,27 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 ("Кг (как в отчёте)", rec["kg"]), ("Насыщение", sat), ("Литология", rec["lith"]), ("Водонасыщенный", water), ("Глубины", MD_BASIS),
                 ("Уверенность", conf), ("Основание", "; ".join(x for x in (why, kp_why) if x))]))
             n += 1
+        row_recs = []
+        for gi, g in enumerate(sgroups):
+            cells = [c for c in r.cells if inb(g, c) and c.text.strip()]
+            if not cells:
+                continue
+            ivn, rec = [], {"kg": "", "h": "", "sat": "", "lith": ""}
+            for c in cells:
+                k = _leaf(tbl, nhdr, c)
+                if k in ("iv", "") and fnum(c.text) is not None and len(ivn) < 2:
+                    ivn.append(fnum(c.text))
+                elif k in rec:
+                    rec[k] = c.text
+            if len(ivn) < 2:
+                continue
+            row_recs.append((gi, g, ivn, rec))
+        rb = _row_base(r, base_rows)
+        seq = _seq_epochs(r, len(sgroups), rb) if (rb and not row_recs) or _geometry_broken(row_recs, rb) else None
+        if seq is not None:
+            row_recs = [(gi, sgroups[gi], ivn, rec) for gi, ivn, rec in seq]
+        for gi, g, ivn, rec in row_recs:
+            emit(gi, g, ivn, rec, "ячейки строки прочитаны по порядку (столбцы шапки не сошлись с данными: OCR) — сверить с оригиналом" if seq is not None else "")
     _boundary_gvk(rep, sgroups, tid)
     return n
 
