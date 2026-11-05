@@ -695,18 +695,28 @@ def horizon_of(title: str) -> str:
 
 # ------------------------------------------------------------------------------------------------ интервалы по пачкам
 
-def _kg(text: str) -> Tuple[Optional[float], Optional[float], Optional[float], str]:
-    """«50-55», «70», «<20%», «~20», «-» → (среднее, мин, макс, текст) в долях единицы. Текст — исходная запись, когда она не просто число."""
+_FRAC_UNIT = re.compile(r"д\.?\s*е(?:д)?\b|доли\s+ед", re.I)
+
+
+def _is_frac(label: str) -> bool:
+    """Заголовок столбца с единицей «д.е.» / «д.ед.»: значения уже в долях единицы, на 100 не делить."""
+    return bool(_FRAC_UNIT.search(label or ""))
+
+
+def _kg(text: str, frac: bool = False) -> Tuple[Optional[float], Optional[float], Optional[float], str]:
+    """«50-55», «70», «<20%», «~20», «-» → (среднее, мин, макс, текст) в долях единицы. Текст — исходная запись, когда она не просто число.
+    frac=True: столбец в долях единицы («д.е.»), числа берутся как есть."""
     s = text.translate(_MINUS).strip()
+    k = 1.0 if frac else 100.0
     if not s or s in ("-", "—", "н/д"):
         return None, None, None, s
     rng = re.fullmatch(r"~?\s*(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)\s*%?", s)
     if rng:
-        a, b = fnum(rng.group(1)) / 100.0, fnum(rng.group(2)) / 100.0
+        a, b = fnum(rng.group(1)) / k, fnum(rng.group(2)) / k
         return round((a + b) / 2, 4), min(a, b), max(a, b), s
     one = re.fullmatch(r"(" + gis.KG_SIGN + r")?\s*(\d+(?:[.,]\d+)?)\s*%?", s, re.I)
     if one:
-        v = fnum(one.group(2)) / 100.0
+        v = fnum(one.group(2)) / k
         return v, v, v, s if one.group(1) else ""      # приписка («<», «~»): число для расчётов, исходный текст — для таблиц
     return None, None, None, s
 
@@ -732,6 +742,9 @@ class Group:
     text: str = ""
 
 
+_DATE_ONLY = re.compile(r"\s*(?:\d{1,2}[./])?\d{1,2}[./]\d{4}\s*г?\.?\s*", re.I)
+
+
 def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
     """Столбцы-замеры: ячейки шапки с датой («РИГИС от 10.2026г», «ГИС-контроль от 19.11.2020 г.»). Слева от них — столбцы коллектора (Кп)."""
     found: List[Group] = []
@@ -740,8 +753,8 @@ def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
             if c.vcont or not c.text:
                 continue
             t = c.text
-            if not re.search(r"\bот(?![а-яё])", t, re.I):        # «от31.10.2025г»: OCR склеил слово с датой
-                continue
+            if not re.search(r"\bот(?![а-яё])", t, re.I) and not _DATE_ONLY.fullmatch(t.translate(_MINUS)):   # «от31.10.2025г»: OCR склеил слово с датой
+                continue                                          # «10.2022г» без «от»: ячейка только с датой — тоже столбец-замер
             d = pdate(t)
             if d is not None:
                 found.append(Group(t, c.x0, c.x1, d, True, text=t))
@@ -767,7 +780,7 @@ def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
 
 def _leaf(tbl: wt.Table, nhdr: int, c: wt.Cell) -> str:
     lab = low(hdr_label(tbl, nhdr, c.xc))
-    for key, rx in (("sat", r"насыщен"), ("lith", r"литолог"), ("kp", r"пористост|\bк[пn]\b"), ("kg", r"\bкг"), ("iv", r"интервал"), ("h", r"н\s*общ|мощност|толщин")):
+    for key, rx in (("sat", r"насыщен"), ("lith", r"литолог"), ("kp", r"пористост|\bк[пn]\b"), ("kg", r"\bкг"), ("iv", r"интервал"), ("h", r"н\s*общ|мощност|толщин"), ("hg", r"\bнг\b")):
         if re.search(rx, lab):
             return key
     return ""
@@ -784,6 +797,11 @@ def _group_has_porosity(tbl: wt.Table, nhdr: int, g: Group) -> bool:
     """В шапке замера есть столбец пористости («Кп, %», «Пористость»): она относится к интервалу исследования, а не к Нг и не к Кг."""
     return any(not c.vcont and g.x0 - 3 <= c.xc <= g.x1 + 3 and _POROSITY_HDR.search(c.text) and not re.search(r"\bот\b", c.text, re.I)
                for r in tbl.rows[:nhdr] for c in r.cells)
+
+
+def _span_frac(tbl: wt.Table, nhdr: int, x0: float, x1: float) -> bool:
+    """В шапке над столбцами x0..x1 есть единица «д.е.»: Кп и Кг этих столбцов даны в долях единицы."""
+    return any(not c.vcont and _is_frac(c.text) and x0 - 3 <= c.xc <= x1 + 3 for r in tbl.rows[:nhdr] for c in r.cells)
 
 
 def _in_base(v: float, base_rows: list) -> bool:
@@ -839,7 +857,7 @@ def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list, por_groups: Option
             if pos < len(toks) and not (pos + 1 < len(toks) and near(toks[pos]) and near(toks[pos + 1])) and (_KG_TOKEN.match(toks[pos]) or toks[pos] == "-"):
                 kg = toks[pos]
                 pos += 1
-            out.append((gi, pair, {"kg": kg, "h": "", "sat": "", "lith": "", "kp": por}))
+            out.append((gi, pair, {"kg": kg, "h": "", "sat": "", "lith": "", "kp": por, "hg": ""}))
     return out or None
 
 
@@ -848,6 +866,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
     base = next((g for g in groups if g.base), None)
     sgroups = [g for g in groups if not g.base]
     por_groups = {gi for gi, g in enumerate(sgroups) if _group_has_porosity(tbl, nhdr, g)}
+    frac_groups = {gi for gi, g in enumerate(sgroups) if _span_frac(tbl, nhdr, g.x0, g.x1)}
+    base_frac = base is not None and _span_frac(tbl, nhdr, base.x0, base.x1)
     tid = tbl.index + 1
     rep.tables.append({"Файл": rep.file, "Таблица": tid, "Тип": "интервалы насыщения", "Заголовок перед таблицей": title, "Раздел": section,
                        "Столбцы-замеры": "; ".join("%s%s" % (g.label[:40], "" if g.exact else " (только месяц)") for g in sgroups),
@@ -872,6 +892,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
         texts = [c for c in r.cells if c.text.strip()]
         if not texts:
             continue
+        if len(texts) >= 3 and [c.text.strip() for c in texts] == [str(k) for k in range(1, len(texts) + 1)]:
+            continue                                                  # строка номеров столбцов «1 2 3 4 …»
         if len(texts) == 1 and r.width >= 0.8 * (tbl.x1 - tbl.x0):
             t = texts[0].text
             if re.match(r"\s*(ГВК|водо)", t, re.I) and re.search(r"ГВК", t, re.I):
@@ -918,15 +940,17 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             vals = [c for c in r.cells if inb(base, c) and c.text.strip()]
             iv = [c for c in vals if _leaf(tbl, nhdr, c) in ("iv", "")]
             kpc = [c for c in vals if _leaf(tbl, nhdr, c) == "kp"]
-            ivn = [fnum(c.text) for c in iv if fnum(c.text) is not None]
+            ivn = [v for c in iv for v in nums(c.text)]            # «775.0-777.1» в одной ячейке или две ячейки
             if len(ivn) >= 2:
-                kp = fnum(kpc[0].text) if kpc else None
-                base_rows.append({"from": ivn[0], "to": ivn[1], "kp": None if kp is None else kp / 100.0, "src": _src(tbl, i)})
+                kp = _kg(kpc[0].text, base_frac)[0] if kpc else None
+                base_rows.append({"from": ivn[0], "to": ivn[1], "kp": kp, "src": _src(tbl, i)})
         def emit(gi, g, ivn, rec, extra_why="", cap_conf=False):
             nonlocal n
-            kg, kmin, kmax, ktext = _kg(rec["kg"])
+            frac = gi in frac_groups
+            kg, kmin, kmax, ktext = _kg(rec["kg"], frac)
             h = fnum(rec["h"])
-            por, _pmin, _pmax, _ptext = _kg(rec.get("kp", ""))
+            hg = fnum(rec.get("hg", ""))
+            por, _pmin, _pmax, _ptext = _kg(rec.get("kp", ""), frac)
             sat = rec["sat"]
             water = bool(re.search(r"водонасыщ", sat, re.I))
             kp = None
@@ -948,7 +972,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 ("Скважина", rep.well), ("Файл", rep.file), ("Таблица", tid), ("Источник", _src(tbl, i)), ("Столбец-замер", g.label), ("_g", gi),
                 ("Дата замера", g.date), ("Дата точная", g.exact), ("Раздел таблицы", title), ("Заголовок пачки", pack_title), ("Пачка", pack),
                 ("Горизонт", horizon_of(pack_title)), ("От, м", ivn[0]), ("До, м", ivn[1]), ("От а.о., м", ao(rep, ivn[0])), ("До а.о., м", ao(rep, ivn[1])),
-                ("hi, м", round(ivn[1] - ivn[0], 3)), ("Нобщ по отчёту, м", h), ("Кп", kp), ("Кг", kg), ("Кг мин", kmin), ("Кг макс", kmax),
+                ("hi, м", round(ivn[1] - ivn[0], 3)), ("Нобщ по отчёту, м", h), ("Нг по отчёту, м", hg), ("Кп", kp), ("Кг", kg), ("Кг мин", kmin), ("Кг макс", kmax),
                 ("Кг (как в отчёте)", rec["kg"]), ("Пористость интервала", por), ("Пористость (как в отчёте)", rec.get("kp", "")), ("Насыщение", sat), ("Литология", rec["lith"]), ("Водонасыщенный", water), ("Глубины", MD_BASIS),
                 ("Уверенность", conf), ("Основание", "; ".join(x for x in (why, kp_why) if x))]))
             n += 1
@@ -957,13 +981,15 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             cells = [c for c in r.cells if inb(g, c) and c.text.strip()]
             if not cells:
                 continue
-            ivn, rec = [], {"kg": "", "h": "", "sat": "", "lith": "", "kp": ""}
+            ivn, rec = [], {"kg": "", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}
             for c in cells:
                 k = _leaf(tbl, nhdr, c)
                 if k in ("iv", "") and fnum(c.text) is not None and len(ivn) < 2:
                     ivn.append(fnum(c.text))
                 elif k in rec:
                     rec[k] = c.text
+            if len(ivn) < 2 and base_rows and (rec["kg"] or rec["hg"]) and base_rows[-1]["src"] == _src(tbl, i):
+                ivn = [base_rows[-1]["from"], base_rows[-1]["to"]]   # в замере только Нг и Кг: интервал — из столбца «Интервал» этой строки
             if len(ivn) < 2:
                 continue
             row_recs.append((gi, g, ivn, rec))

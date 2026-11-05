@@ -373,3 +373,28 @@ def test_porosity_in_ocr_row_order():
     assert seq[0][1] == [788.0, 797.2] and (seq[0][2]["kp"], seq[0][2]["kg"]) == ("27", "70")
     seq = gr._seq_epochs(row, 1, [{"from": 788.0, "to": 797.2}], set())
     assert seq[0][2]["kg"] == "27"          # без столбца пористости в шапке порядок прежний
+
+
+def _date_only_table():
+    """Шапка замеров «10.2022г» без слова «от»; слева столбцы коллектора «Интервал, м» (диапазон в одной ячейке) и «Кп, д.е.»; в замере Нг и Кг в долях единицы."""
+    hdr0 = wt.TRow([wt.Cell("Интервал, м", 0, 1000), wt.Cell("Кп, д.е.", 1000, 2000), wt.Cell("10.2022г", 2000, 4000), wt.Cell("04.2023г", 4000, 6000)])
+    hdr1 = wt.TRow([wt.Cell("Нг, м", 2000, 3000), wt.Cell("Кг, д.е.", 3000, 4000), wt.Cell("Нг, м", 4000, 5000), wt.Cell("Кг, д.е.", 5000, 6000)])
+    rows = [wt.TRow([wt.Cell("Верхняя песчаная пачка пласта-коллектора", 0, 6000)]),
+            wt.TRow(_cells(["1", "2", "3", "4", "5", "6"], w=1000.0)),
+            wt.TRow(_cells(["758.6 - 761.2", "0.18", "2.6", "0.35", "2.6", "0.35"], w=1000.0)),
+            wt.TRow(_cells(["761.2-778.4", "0.23-0.30", "17.2", "0.75-0.85", "17.2", "0.75"], w=1000.0))]
+    return wt.Table([hdr0, hdr1] + rows, 0)
+
+
+def test_date_only_measurement_columns_with_net_thickness_and_fractions():
+    tbl = _date_only_table()
+    rep = gr.Report(file="x.doc", well="102", alt=100.0)
+    gr.read_intervals(rep, tbl, gr.header_rows(tbl), None, "t", "s")
+    got = sorted((str(r["Дата замера"]), r["От, м"], r["До, м"], r["Нг по отчёту, м"], r["Кп"], r["Кг"]) for r in rep.intervals)
+    assert got == [("2022-10-01", 758.6, 761.2, 2.6, 0.18, 0.35), ("2022-10-01", 761.2, 778.4, 17.2, 0.265, 0.8),
+                   ("2023-04-01", 758.6, 761.2, 2.6, 0.18, 0.35), ("2023-04-01", 761.2, 778.4, 17.2, 0.265, 0.75)]
+
+
+def test_kg_fraction_unit_is_not_divided():
+    assert gr._kg("0.35", True)[0] == 0.35 and gr._kg("0.35")[0] == pytest.approx(0.0035)
+    assert gr._is_frac("Кг, д. е.") and gr._is_frac("Кп, д.ед.") and not gr._is_frac("Кг, %")
