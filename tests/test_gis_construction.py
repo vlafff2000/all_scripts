@@ -43,3 +43,13 @@ def test_cell_statuses():
     assert gc.parse_cell("исследованиями не охвачен")[3] == "not_covered"
     assert gc.parse_cell("-")[3] == "empty"
     assert gc.parse_cell("770.7-778.8")[:2] == (770.7, 778.8)
+
+
+@pytest.mark.parametrize("a,b,c", [
+    ("Конструкция\nскважины", "Глубина, м –\nпо промысловым данным", "Глубина, м –\nпо данным ГИС"),   # Word: перенос внутри слов
+    ("Конструкцияскважины", "Глубина, м –по промысловым данным", "Глубина, м –по данным ГИС"),        # OCR: слова склеены
+])
+def test_header_found_with_broken_words(a, b, c):
+    tbl = wt.Table(rows=[wt.TRow([wt.Cell("Сведения по скважине", 0, 3000)]), wt.TRow([wt.Cell(a, 0, 1000), wt.Cell(b, 1000, 2000), wt.Cell(c, 2000, 3000)])])
+    assert gc.header_index(tbl) == 1
+    assert gc.columns(tbl) == (1, 2)

@@ -45,15 +45,20 @@ def clean(t: str) -> str:
     return re.sub(r"[ \t\xa0]+", " ", t).strip()
 
 
+def _flat(text: str) -> str:
+    """Текст без пробелов и переносов, строчными: в Word слова шапки разорваны переносом («Конструкция\\nскважины»), в OCR — склеены."""
+    return re.sub(r"\s+", "", (text or "").lower())
+
+
 def header_index(tbl) -> Optional[int]:
     """Номер строки шапки таблицы конструкции (графы «по промысловым данным» / «по данным ГИС»): перед ней или в ней есть подпись «Конструкция скважины».
     Таблица может быть отдельной или частью большой таблицы сведений по скважине (тогда шапка не в первых строках)."""
     seen_title = False
     for i, r in enumerate(tbl.rows):
-        text = " ".join(c.text for c in r.cells).lower()
-        if "конструкция скважины" in text:
+        text = _flat(" ".join(c.text for c in r.cells))
+        if "конструкцияскважины" in text:
             seen_title = True
-        if seen_title and ("промысловым" in text or "по данным гис" in text):
+        if seen_title and ("промысловым" in text or "поданнымгис" in text):
             return i
     return None
 
@@ -71,10 +76,10 @@ def columns(tbl):
     h = header_index(tbl) or 0
     for r in tbl.rows[h:h + 2]:
         for i, c in enumerate(r.cells):
-            t = c.text.lower()
+            t = _flat(c.text)
             if "промысловым" in t and ip is None:
                 ip = i
-            if "по данным гис" in t and ig is None:
+            if "поданнымгис" in t and ig is None:
                 ig = i
     return (ip if ip is not None else 1), (ig if ig is not None else 2)
 
@@ -89,7 +94,7 @@ GENERIC = [(r"^интервал расширения|^расширка|^расш
            (r"^клапан кольцевой", "Клапан кольцевой"), (r"^надфильтровые трубы|^трубы затворные", "Надфильтровые трубы"),
            (r"^патрубок подгоночный", "Патрубок подгоночный"), (r"^зумпфовая труба|^зумфовая труба", "Зумпфовая труба"),
            (r"^цементный мост", "Цементный мост"), (r"^открытый ствол", "Открытый ствол")]
-SKIP_ROWS = re.compile(r"^(конструкция скважины|условия исследований|объект хранения|стратиграфия|скважина заполнена|тип$|плотность)", re.I)
+SKIP_ROWS = re.compile(r"^(конструкция\s*скважины|условия исследований|объект хранения|стратиграфия|скважина заполнена|тип$|плотность)", re.I)
 NOT_EQUIP = re.compile(r"(песчаная пачка|пласт-?\s*кол|горизонт|кровля|подошва|стратигр)", re.I)
 STATUS_RU = {"not_identified": "не идентифицируется", "not_covered": "исследованиями не охвачен", "empty": "нет значения", "ok": "значение не распознано"}
 
