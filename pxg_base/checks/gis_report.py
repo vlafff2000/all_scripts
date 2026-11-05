@@ -39,4 +39,30 @@ def check_gis_report(values: Dict[str, str]) -> Report:
     return rep
 
 
+def check_gis_construction(values: Dict[str, str]) -> Report:
+    """Проверка исходников «БД конструкций из отчётов ГИС»: сколько отчётов и в скольких есть таблица конструкции."""
+    from pxg_core import gis_construction
+    rep = Report(title="БД конструкций из отчётов ГИС")
+    paths = [x.strip().strip('"') for x in (values.get("files") or "").splitlines() if x.strip()]
+    if not paths:
+        rep.error("FILE", "Не указаны отчёты ГИС")
+        return rep
+    files, notes, tmp = archives.expand(paths, (".doc", ".docx", ".md"))
+    try:
+        for n in notes:
+            rep.warn("archive", n)
+        files = [f for f in files if not f.lower().endswith(".md") or f.lower().endswith(".ocr.md")]
+        if not files:
+            rep.note("FILE", "Файлов .doc/.docx и вывода OCR (*.ocr.md) не найдено")
+            return rep
+        reports, bad = gis_construction.read_files(files)
+        for b in bad:
+            rep.warn("FILE", b)
+        with_table = sum(1 for _r, t, _p in reports if t is not None)
+        rep.saw("%d отчётов, с таблицей конструкции %d" % (len(reports), with_table))
+    finally:
+        tmp.cleanup()
+    return rep
+
+
 qc.CODES.update(LABELS)
