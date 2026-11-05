@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 import { saveUrlAs } from '../../../pxg_core/web-ui/desktopDownload'
 import { renderMarkdown } from './markdown'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
+import type { Cell } from '../../../pxg_core/web-ui/table/tableTypes'
 
 interface Plan { mode: string; vram_gb: number; threads: number; why: string }
 interface Info {
@@ -35,6 +38,8 @@ export default function App() {
   const [err, setErr] = useState('')
   const [askDel, setAskDel] = useState(false)
   const [pageErr, setPageErr] = useState('')
+  const [db, setDb] = useState<{ kind: string; sheets: { name: string; columns: string[]; rows: Cell[][] }[] } | null>(null)
+  const [dbErr, setDbErr] = useState('')
   const running = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
@@ -67,7 +72,7 @@ export default function App() {
   const cur = useMemo(() => items.find((i) => (i.id || i.dir) === sel), [items, sel])
 
   useEffect(() => {
-    setText({ md: '', json: '' }); setPage(0); setAskDel(false); setPageErr('')
+    setText({ md: '', json: '' }); setPage(0); setAskDel(false); setPageErr(''); setDb(null); setDbErr('')
     const r = cur?.result
     if (!cur || cur.state !== 'done' || !r) return
     if (r.md) void fetch(fileUrl(cur.dir, r.md)).then((x) => x.text()).then((md) => setText((t) => ({ ...t, md })))
@@ -91,6 +96,13 @@ export default function App() {
     setPaths([])
   }
   const stop = (id: string) => void api('/api/ocr/job/cancel', { id })
+  const makeDb = async () => {
+    if (!cur) return
+    setDbErr('')
+    const r = await api<{ kind?: string; sheets?: { name: string; columns: string[]; rows: Cell[][] }[]; error?: string }>('/api/ocr/db', { dir: cur.dir })
+    if (r.error || !r.sheets) { setDbErr(r.error || 'Не удалось собрать БД'); return }
+    setDb({ kind: r.kind || '', sheets: r.sheets })
+  }
   const del = async () => {
     if (!cur) return
     await api('/api/ocr/delete', { dir: cur.dir }); setSel(''); void refresh()
@@ -144,10 +156,14 @@ export default function App() {
             {cur.state === 'done' && result && <>
               {result.md && <button type="button" onClick={() => void saveUrlAs(fileUrl(cur.dir, result.md, true), cur.name.replace(/\.[^.]+$/, '') + '.md')}>Скачать markdown</button>}
               {result.json && <button type="button" onClick={() => void saveUrlAs(fileUrl(cur.dir, result.json, true), cur.name.replace(/\.[^.]+$/, '') + '.json')}>Скачать JSON</button>}
+              <button type="button" onClick={makeDb}>Собрать БД</button>
+              {db && <button type="button" onClick={() => void saveUrlAs(fileUrl(cur.dir, 'db.xlsx', true), cur.name.replace(/\.[^.]+$/, '') + '_БД.xlsx')}>Скачать БД (xlsx)</button>}
               {askDel ? <button type="button" onClick={del}>Точно удалить результат?</button> : <button type="button" onClick={() => setAskDel(true)}>Удалить</button>}
             </>}
           </div>
           {cur.error && <p className="ocr-err">{cur.error}</p>}
+          {dbErr && <p className="ocr-err">{dbErr}</p>}
+          {db && <Tables scope="ocr-db" tables={db.sheets.map((sh, i) => tableOf('db' + i, sh.name, sh.columns, sh.rows, 'Собрано программой из распознанного текста. Столбец «Проверка» говорит, чему можно доверять; решает инженер.'))} />}
           {cur.state !== 'done' && <div className="ocr-log">{cur.log.join('\n') || 'Ожидание…'}</div>}
           {cur.state === 'done' && <>
             <div className="ocr-tabs" role="tablist">

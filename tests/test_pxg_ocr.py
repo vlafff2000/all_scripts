@@ -110,3 +110,14 @@ def test_zip_slip_blocked(tmp_path):
         zf.writestr("../evil.txt", "x")
     with pytest.raises(ValueError):
         engine._safe_extract(z, tmp_path / "d")
+
+
+def test_make_db(env, monkeypatch):
+    monkeypatch.setattr(engine, "build_cmd", _fake_cmd(FAKE.replace("# Заголовок\\n\\nТекст", "## Отчёт о гидродинамическом исследовании\\n\\n<table><tr><td>Скважина</td><td>533</td></tr></table>")))
+    src = env / "a.pdf"
+    src.write_bytes(b"%PDF")
+    c = TestClient(api.build_app())
+    job = _wait(c.post("/api/ocr/start", json={"path": str(src)}).json()["jobs"][0])
+    r = c.post("/api/ocr/db", json={"dir": str(job.dir)}).json()
+    assert r["kind"] == "gdi" and (job.dir / "db.xlsx").is_file()
+    assert c.post("/api/ocr/db", json={"dir": str(env)}).status_code == 404
