@@ -1,4 +1,5 @@
 """БД ГИС из отчётов: структура Word-таблиц (.doc без Word), разбор двух разных форм отчёта по скважине 18 Касимовского ПХГ, выгрузка, архивы."""
+import datetime as dt
 import os
 import zipfile
 
@@ -521,3 +522,37 @@ def test_known_wells_file_one_column(tmp_path):
         f = tmp_path / name
         f.write_text(body, encoding="utf-8")
         assert gr.load_known_wells(str(f)) == ["115/200", "21", "7А"], name
+
+
+# ---- дубли и подозрительные интервалы ----
+def _iv(frm, to, kg=0.5, src="таблица 1, строка 3", **kw):
+    d = {"Скважина": "21", "Файл": "x", "Таблица": 1, "Источник": src, "Столбец-замер": "от 19.11.2020", "Дата замера": dt.date(2020, 11, 19), "Пачка": "Верхняя пачка",
+         "Заголовок пачки": "Верхняя пачка", "От, м": frm, "До, м": to, "Кг": kg, "Основание": ""}
+    d.update(kw)
+    return d
+
+
+def test_exact_duplicate_interval_is_removed_and_reported():
+    rep = gr.Report(file="x.docx", well="21")
+    rep.intervals = [_iv(100.0, 105.0), _iv(100.0, 105.0, src="таблица 2, строка 9"), _iv(110.0, 112.0)]
+    gr.check_intervals(rep)
+    assert [(r["От, м"], r["До, м"]) for r in rep.intervals] == [(100.0, 105.0), (110.0, 112.0)]
+    assert any(i["Код"] == "interval_dup_removed" for i in rep.issues)
+
+
+def test_duplicate_with_different_values_is_kept_and_flagged():
+    rep = gr.Report(file="x.docx", well="21")
+    rep.intervals = [_iv(100.0, 105.0, kg=0.5), _iv(100.0, 105.0, kg=0.6, src="таблица 2, строка 9")]
+    gr.check_intervals(rep)
+    assert len(rep.intervals) == 2
+    bad = [i for i in rep.issues if i["Код"] == "interval_dup_diff"]
+    assert bad and "Кг" in bad[0]["Сообщение"]
+
+
+def test_overlap_and_thick_interval_flagged():
+    rep = gr.Report(file="x.docx", well="21")
+    rep.intervals = [_iv(100.0, 105.0), _iv(104.0, 108.0), _iv(200.0, 303.3)]
+    gr.check_intervals(rep)
+    codes = {i["Код"] for i in rep.issues}
+    assert {"interval_overlap", "interval_thick"} <= codes
+    assert len(rep.intervals) == 3
