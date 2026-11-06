@@ -136,7 +136,7 @@ def read_acts(paths: Iterable[str]) -> Tuple[pd.DataFrame, List[Tuple[str, str]]
     return pd.DataFrame(rows, columns=ACT_COLUMNS), notes
 
 
-def add_acts(data: "krs.KrsData", acts: pd.DataFrame) -> List[Tuple[str, str]]:
+def add_acts(data: "krs.KrsData", acts: pd.DataFrame, label: str = "Акт") -> List[Tuple[str, str]]:
     """Дополнить БД «Ремонты» актами. Запись таблицы (или введённая вручную) главнее акта: тот же скважина+год не затирается."""
     notes: List[Tuple[str, str]] = []
     works = data.works.copy()
@@ -153,7 +153,7 @@ def add_acts(data: "krs.KrsData", acts: pd.DataFrame) -> List[Tuple[str, str]]:
         w, y = int(w), int(y)
         same = works[(works["Скважина"] == w) & (works["Год"] == y)]
         if not same.empty:
-            if (same["Источник"].astype(str).str.startswith("Акт")).any() and (same["Описание работ"] == a["Описание работ"]).any():
+            if (same["Источник"].astype(str) != "таблица").any() and (same["Описание работ"] == a["Описание работ"]).any():
                 continue       # повторный запуск с теми же актами
             notes.append(("предупреждение", "Скв. %d, %d год: в таблице уже есть ремонт, акт «%s» не записан (решает инженер): %s"
                           % (w, y, a["Файл"], a["Проверить"])))
@@ -163,7 +163,7 @@ def add_acts(data: "krs.KrsData", acts: pd.DataFrame) -> List[Tuple[str, str]]:
         text = a["Описание работ"]
         items = krs.split_works(text)
         new.append({"Скважина": w, "ГСП": gsp.get(w, ""), "Год": y, "Тип ремонта": a["Тип ремонта"], "Тип определён по": a["Тип определён по"],
-                    "Коды работ": a["Коды работ"], "Описание работ": text, "Работ": len(items) or 1, "Источник": "Акт: " + str(a["Файл"])})
+                    "Коды работ": a["Коды работ"], "Описание работ": text, "Работ": len(items) or 1, "Источник": "%s: %s" % (label, a["Файл"])})
         if a["Проверить"]:
             notes.append(("заметка", "Скв. %d, %d год (акт %s): проверить — %s" % (w, y, a["Файл"], a["Проверить"])))
     if new:
