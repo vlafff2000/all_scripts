@@ -1438,6 +1438,15 @@ def check_intervals(rep: Report) -> None:
             elif b["От, м"] < a["До, м"] - 0.05:
                 rep.issue("warn", "interval_overlap", "Интервалы %g–%g и %g–%g (%s, %s) перекрываются на %.2g м" % (
                     a["От, м"], a["До, м"], b["От, м"], b["До, м"], a["Пачка"], a["Столбец-замер"], a["До, м"] - b["От, м"]), b["Источник"])
+    by_col: Dict[str, List[dict]] = defaultdict(list)
+    for r in kept:
+        if r.get("Кг") is not None:
+            by_col[r["Столбец-замер"]].append(r)
+    for col, rows in by_col.items():       # все Кг замера меньше 1 % и записаны как «0.55»: вероятно, доли единицы в столбце без «д.е.»
+        raws = [str(r.get("Кг (как в отчёте)", "")).strip() for r in rows]
+        if all(re.fullmatch(r"[<>~≈]?\s*[01][.,]\d+", s) and fnum(s.lstrip("<>~≈ ")) <= 1.0 for s in raws) and all(r["Кг"] <= 0.011 for r in rows):
+            rep.issue("warn", "kg_scale_suspect", "Кг замера «%s»: все %d значений меньше 1 %% (записаны как 0.55): похоже на доли единицы, а не проценты. Значения не менялись — сверить с отчётом" % (
+                col, len(rows)), rows[0]["Источник"])
     for r in kept:
         if r["До, м"] - r["От, м"] > 60:
             rep.issue("warn", "interval_thick", "Интервал %g–%g толщиной %.1f м (больше 60 м): не итог ли это по всей пачке?" % (
