@@ -501,7 +501,7 @@ def test_bad_well_keeps_raw_text_in_issue():
     assert bad and "o42" in bad[0]["Сообщение"]
 
 
-@pytest.mark.parametrize("text, want", [("Скважина: 21", "21"), ("Скважина: 7А", "7А"), ("Скважина: 12-2", "12-2"), ("по скважине №305 ПХГ", "305")])
+@pytest.mark.parametrize("text, want", [("Скважина: 21", "21"), ("Скважина: 7А", "7А"), ("Скважина: 12-2", "12-2"), ("Скважина: 115/200", "115/200"), ("по скважине №115/200 ПХГ", "115/200"),("по скважине №305 ПХГ", "305")])
 def test_valid_well_shapes(text, want):
     assert gr.parse_blocks([wt.Para(text)], "x.docx").well == want
 

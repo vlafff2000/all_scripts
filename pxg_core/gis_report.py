@@ -177,7 +177,7 @@ def _find(kv: List[Tuple[str, str, str]], rx: str) -> Optional[Tuple[str, str, s
 
 
 # строгий номер скважины: 1–4 цифры, не более одной буквы, необязательный «-номер ствола» (21, 7А, 12-2)
-_WELL_SHAPE = re.compile(r"\d{1,4}[A-Za-zА-Яа-яЁё]?(?:-\d{1,3})?")
+_WELL_SHAPE = re.compile(r"\d{1,4}[A-Za-zА-Яа-яЁё]?(?:-\d{1,3}|/\d{1,4}[A-Za-zА-Яа-яЁё]?)?")
 _KNOWN_WELLS: set = set()
 
 
