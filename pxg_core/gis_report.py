@@ -78,6 +78,7 @@ class Report:
     category: str = ""
     pxg_mode: str = ""
     executor: str = ""
+    kind: str = ""                      # «ГИС при ЭПБ»: отчёт без таблиц интервалов насыщения и ГВК (комплекс, термобарика, заполнение есть)
     interpreter: str = ""
     study_from: Optional[float] = None
     study_to: Optional[float] = None
@@ -1257,6 +1258,7 @@ def read_summaries(rep: Report, blocks: List[wt.Block]) -> None:
 
 # ------------------------------------------------------------------------------------------------ разбор файла
 
+KIND_EPB = "ГИС при ЭПБ"
 KIND_NAMES = {"complex": "комплекс ГИС", "gvk_history": "ГВК по датам", "thermo": "термобарика", "filling": "заполнение ствола",
               "intervals": "интервалы насыщения"}
 
@@ -1450,7 +1452,11 @@ def check_report(rep: Report) -> None:
         rep.issue("warn", "no_thermo", "Температура и давление по глубинам не найдены (ни в таблице, ни в тексте)")
     if not rep.filling:
         rep.issue("note", "no_filling", "Заполнение ствола не найдено")
-    if not rep.intervals:
+    types = {t.get("Тип") for t in rep.tables}
+    if not rep.intervals and not types & {"интервалы насыщения", "ГВК по датам"} and (rep.complex or rep.thermo or rep.filling or rep.bottoms):
+        rep.kind = KIND_EPB
+        rep.issue("note", "report_kind_epb", "Вид отчёта «ГИС при ЭПБ»: таблиц интервалов насыщения и ГВК нет, комплекс ГИС, термобарика и заполнение разобраны")
+    elif not rep.intervals:
         rep.issue("warn", "no_intervals", "Таблица результатов интерпретации (интервалы по пачкам) не найдена")
     heads = {p["Заголовок в документе"] for p in rep.packs if p.get("_kind") == "heading" and not p.get("Пачка")}
     for h in sorted(heads):
@@ -1608,7 +1614,7 @@ def templating_frame(reports: List[Report]) -> pd.DataFrame:
 def reports_frame(reports: List[Report]) -> pd.DataFrame:
     return pd.DataFrame([{
         "Файл": r.file, "Скважина": r.well, "ПХГ": r.storage, "Дата": r.date, "Дата (примечание)": r.date_note, "Альтитуда, м": r.alt, "Категория": r.category,
-        "Режим ПХГ": r.pxg_mode, "Исполнитель": r.executor, "Интерпретатор": r.interpreter, "Исследовано от, м": r.study_from, "Исследовано до, м": r.study_to,
+        "Вид отчёта": r.kind, "Режим ПХГ": r.pxg_mode, "Исполнитель": r.executor, "Интерпретатор": r.interpreter, "Исследовано от, м": r.study_from, "Исследовано до, м": r.study_to,
         "Комплекс ГИС, строк": len(r.complex), "Забой/доход, записей": len(r.bottoms), "Термобарика, точек": len(r.thermo), "Заполнение, записей": len(r.filling),
         "Интервалов": len(r.intervals), "ГВК по датам, строк": len(r.gvk_history), "Ошибка чтения": r.error} for r in reports])
 
