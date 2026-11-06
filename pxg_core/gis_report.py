@@ -222,8 +222,7 @@ def _pick_well(rep: "Report", kv, text: str, cells_text: str) -> None:
         m = re.search(rx, src, re.I)
         if m:
             cands.append((m.group(1), True))
-    m = re.search(r"скважин(?:а|ы|е|у|ой)?\b[ \t:]*([^\s,;:()]+)", text, re.I)
-    if m:
+    for m in re.finditer(r"скважин(?:а|ы|е|у|ой)?\b[ \t:]*(?:\n[ \t:]*)?([^\s,;:()]+)", text, re.I):     # значение может стоять в следующем абзаце (OCR)
         cands.append((m.group(1), False))
     bad = []
     for raw, solid in cands:
@@ -233,6 +232,13 @@ def _pick_well(rep: "Report", kv, text: str, cells_text: str) -> None:
             break
         if raw.strip() and (solid or any(ch.isdigit() for ch in raw)):
             bad.append(raw.strip())
+    if not rep.well and _KNOWN_WELLS:
+        m = re.match(r"\s*(\d{1,4}(?:[-/]\d{1,4})?(?:[A-Za-zА-Яа-яЁё](?![A-Za-zА-Яа-яЁё]))?)(?!\d)", os.path.basename(rep.file))
+        key = qc.well_key(m.group(1)) if m else ""
+        if valid_well(key) and well_norm(key) in _KNOWN_WELLS:
+            rep.well = key
+            rep.issue("warn", "well_from_name", "Номер скважины в шапке не найден: взят из имени файла (%s) и подтверждён списком известных скважин — сверить" % key, "имя файла")
+            return
     if rep.well:
         if _KNOWN_WELLS and well_norm(rep.well) not in _KNOWN_WELLS:
             rep.issue("warn", "unknown_well", "Номера «%s» нет в списке известных скважин: проверить, не ошибка ли распознавания" % rep.well, "шапка")
