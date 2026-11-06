@@ -1535,8 +1535,13 @@ def pick_report_files(files: List[str]) -> Tuple[List[str], List[str]]:
     have = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith((".doc", ".docx"))}
     pdfs = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith(".pdf")}
     keep, notes = [], []
+    # вывод OCR из отдельной папки с тем же именем, что у PDF: читается он, а PDF (часто без таблиц в текстовом слое) — нет
+    ocr_names = {os.path.basename(ocr_blocks.ocr_stem(f)) for f in files if f.lower().endswith((".json", ".md")) and ocr_blocks.is_ocr_file(f)}
     for f in files:
         low = f.lower()
+        if low.endswith(".pdf") and os.path.basename(os.path.splitext(f)[0]).lower() in ocr_names and os.path.splitext(f)[0].lower() not in have:
+            notes.append("%s: есть вывод OCR с тем же именем — читается он, PDF пропускается" % os.path.basename(f))
+            continue
         if low.endswith((".json", ".md")):
             if not ocr_blocks.is_ocr_file(f):
                 continue

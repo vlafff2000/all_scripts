@@ -921,3 +921,12 @@ def test_wall_thickness_in_complex_table_does_not_make_epb():
                          wt.TRow([wt.Cell("Определение толщины стенок труб", 0, 1000), wt.Cell("МИД", 1000, 2000)])])
     rep = gr.parse_blocks([wt.Para("Скважина: 21"), wt.Para("РЕШАЕМЫЕ ЗАДАЧИ: Определение характера насыщения пласта-коллектора (Кг), положения ГВК"), tbl], "x.docx")
     assert rep.kind == ""
+
+
+def test_ocr_output_in_other_folder_replaces_same_name_pdf():
+    # баг: PDF и его вывод OCR из отдельной папки читались оба: PDF без таблиц давал ложные «нет интервалов/нет таблиц»
+    files = [os.path.join("src", "1Касимов_080526(переувязано).pdf"), os.path.join("ocr", "1Касимов_080526(переувязано).ocr.md"),
+             os.path.join("src", "2Касимов_010120.pdf")]
+    keep, notes = gr.pick_report_files(files)
+    assert keep == [os.path.join("ocr", "1Касимов_080526(переувязано).ocr.md"), os.path.join("src", "2Касимов_010120.pdf")]
+    assert any("вывод OCR" in n for n in notes)
