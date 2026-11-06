@@ -403,6 +403,23 @@ def find_time_table_intelligent(file_path, sheet_name, gas_start_row, gas_start_
         return None
 
 
+def blank_cells(raw):
+    """Маска пустых ячеек исходной таблицы (NaN или только пробелы) — до замены пустого нулём."""
+    return raw.isna() | raw.astype(str).apply(lambda col: col.str.strip().eq(""))
+
+
+def drop_group_off_days(df):
+    """Даты, когда у всей группы (листа ГСП) не заполнена ни матрица часов работы, ни матрица часовых расходов, — группа не в работе
+    (ещё не пущена в начале сезона или намеренно остановлена в конце), а не простой скважин: такие строки в базу не попадают.
+    Ноль, проставленный в исходнике, остаётся нулём: простой скважины — это строка с нулём, пустота всей даты — нет записи.
+    Ожидает столбцы «Пусто_газ» и «Пусто_время» (признак пустой исходной ячейки), убирает их."""
+    if df is None or len(df) == 0 or "Пусто_газ" not in df.columns:
+        return df
+    blank = df["Пусто_газ"].astype(bool) & df["Пусто_время"].astype(bool)
+    off = blank.groupby(df["Дата"]).transform("all")
+    return df[~off].drop(columns=["Пусто_газ", "Пусто_время"]).reset_index(drop=True)
+
+
 def trim_unfilled_days(df, end_date=None):
     """Убирает хвост незаполненных суток: заготовленные в исходнике шаблоны на ещё не наступившие даты.
 
