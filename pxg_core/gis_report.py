@@ -125,7 +125,7 @@ def _is_header_row(row: wt.TRow) -> bool:
 def _is_wide_heading(tbl: wt.Table, r: wt.TRow) -> bool:
     """Одна непустая ячейка на (почти) всю ширину таблицы — название пачки, а не шапка."""
     texts = [c for c in r.cells if c.text.strip()]
-    return len(texts) == 1 and r.width >= 0.8 * (tbl.x1 - tbl.x0) and len(tbl.rows) > 2
+    return len(texts) == 1 and r.width >= 0.8 * (tbl.x1 - tbl.x0) and len(tbl.rows) > 2 and not any(c.vcont for c in r.cells)
 
 
 def header_rows(tbl: wt.Table) -> int:
@@ -1016,6 +1016,22 @@ def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list, por_groups: Option
     return out or None
 
 
+def _vspan(tbl: wt.Table, i: int, g: "Group", base: Optional["Group"], nhdr: int) -> Tuple[int, Optional[float]]:
+    """Ячейка Кг/Нг строки i объединена по вертикали с ячейками ниже: число строк и подошва последней из них (из её столбца «Интервал»)."""
+    if base is None:
+        return 0, None
+    key = next((c for c in tbl.rows[i].cells if g.x0 - 3 <= c.xc <= g.x1 + 3 and c.text.strip() and _leaf(tbl, nhdr, c) in ("kg", "hg")), None)
+    if key is None:
+        return 0, None
+    j = i + 1
+    while j < len(tbl.rows) and any(c.vcont and abs(c.x0 - key.x0) < 5 and abs(c.x1 - key.x1) < 5 for c in tbl.rows[j].cells):
+        j += 1
+    if j == i + 1:
+        return 0, None
+    vals = [v for c in tbl.rows[j - 1].cells if base.x0 - 3 <= c.xc <= base.x1 + 3 and not c.vcont and _leaf(tbl, nhdr, c) in ("iv", "") for v in nums(c.text)]
+    return j - i, (vals[1] if len(vals) >= 2 else None)
+
+
 def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict[str, str]], title: str, section: str) -> int:
     groups = _groups(tbl, nhdr, rep)
     base = next((g for g in groups if g.base), None)
@@ -1049,7 +1065,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             continue
         if len(texts) >= 3 and [c.text.strip() for c in texts] == [str(k) for k in range(1, len(texts) + 1)]:
             continue                                                  # строка номеров столбцов «1 2 3 4 …»
-        if len(texts) == 1 and r.width >= 0.8 * (tbl.x1 - tbl.x0):
+        if len(texts) == 1 and r.width >= 0.8 * (tbl.x1 - tbl.x0) and not any(c.vcont for c in r.cells):    # остальные ячейки — продолжение объединённых сверху: строка данных, не заголовок
             t = texts[0].text
             if re.match(r"\s*(ГВК|водо)", t, re.I) and re.search(r"ГВК", t, re.I):
                 md, ab = _gvk_from(t)
@@ -1148,6 +1164,10 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                     rec[k] = c.text
             if len(ivn) < 2 and base_rows and (rec["kg"] or rec["hg"]) and base_rows[-1]["src"] == _src(tbl, i):
                 ivn = [base_rows[-1]["from"], base_rows[-1]["to"]]   # в замере только Нг и Кг: интервал — из столбца «Интервал» этой строки
+                span_rows, span_end = _vspan(tbl, i, g, base, nhdr)
+                if span_end is not None and span_end > ivn[1]:       # ячейка Нг/Кг объединена по вертикали: она относится ко всем строкам-интервалам под ней
+                    ivn[1] = span_end
+                    rec["_span"] = span_rows
             if len(ivn) < 2:
                 continue
             row_recs.append((gi, g, ivn, rec))
@@ -1156,7 +1176,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
         if seq is not None:
             row_recs = [(gi, sgroups[gi], ivn, rec) for gi, ivn, rec in seq]
         for gi, g, ivn, rec in row_recs:
-            emit(gi, g, ivn, rec, "ячейки строки прочитаны по порядку (столбцы шапки не сошлись с данными: OCR) — сверить с оригиналом" if seq is not None else "")
+            emit(gi, g, ivn, rec, "ячейки строки прочитаны по порядку (столбцы шапки не сошлись с данными: OCR) — сверить с оригиналом" if seq is not None else (
+                "ячейка Нг/Кг объединена по вертикали на %d строк: интервал взят от кровли первой до подошвы последней строки" % rec["_span"] if rec.get("_span") else ""))
     _boundary_gvk(rep, sgroups, tid)
     return n
 
