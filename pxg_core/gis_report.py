@@ -1401,7 +1401,43 @@ def parse_file(path: str, mapping: Optional[Dict[str, str]] = None) -> Report:
 
 # ------------------------------------------------------------------------------------------------ проверки
 
+_IV_SRC_KEYS = ("Таблица", "Источник")
+
+
+def check_intervals(rep: Report) -> None:
+    """Точные дубли интервалов (совпало всё, кроме номера таблицы и строки) убираются; различия, наложения и слишком толстые интервалы — в «Проверку»."""
+    seen: Dict[tuple, dict] = {}
+    kept: List[dict] = []
+    for r in rep.intervals:
+        full = tuple((k, str(v)) for k, v in r.items() if k not in _IV_SRC_KEYS)
+        if full in seen:
+            rep.issue("note", "interval_dup_removed", "Интервал %g–%g (%s, %s) записан дважды (%s и %s): повтор убран" % (
+                r["От, м"], r["До, м"], r["Пачка"], r["Столбец-замер"], seen[full]["Источник"], r["Источник"]), r["Источник"])
+            continue
+        seen[full] = r
+        kept.append(r)
+    rep.intervals = kept
+    groups: Dict[tuple, List[dict]] = defaultdict(list)
+    for r in kept:
+        groups[(r["Столбец-замер"], r["Пачка"])].append(r)
+    for rows in groups.values():
+        rows = sorted(rows, key=lambda r: (r["От, м"], r["До, м"]))
+        for a, b in zip(rows, rows[1:]):
+            if (a["От, м"], a["До, м"]) == (b["От, м"], b["До, м"]):
+                diff = [k for k in a if k not in _IV_SRC_KEYS and str(a[k]) != str(b.get(k))]
+                rep.issue("warn", "interval_dup_diff", "Интервал %g–%g (%s, %s) встречается дважды с разными значениями: %s (%s и %s)" % (
+                    a["От, м"], a["До, м"], a["Пачка"], a["Столбец-замер"], ", ".join(diff), a["Источник"], b["Источник"]), b["Источник"])
+            elif b["От, м"] < a["До, м"] - 0.05:
+                rep.issue("warn", "interval_overlap", "Интервалы %g–%g и %g–%g (%s, %s) перекрываются на %.2g м" % (
+                    a["От, м"], a["До, м"], b["От, м"], b["До, м"], a["Пачка"], a["Столбец-замер"], a["До, м"] - b["От, м"]), b["Источник"])
+    for r in kept:
+        if r["До, м"] - r["От, м"] > 60:
+            rep.issue("warn", "interval_thick", "Интервал %g–%g толщиной %.1f м (больше 60 м): не итог ли это по всей пачке?" % (
+                r["От, м"], r["До, м"], r["До, м"] - r["От, м"]), r["Источник"])
+
+
 def check_report(rep: Report) -> None:
+    check_intervals(rep)
     if not rep.complex:
         rep.issue("note", "no_complex", "Таблица выполненного комплекса ГИС не найдена")
     if not rep.thermo:
