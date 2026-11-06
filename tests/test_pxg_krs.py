@@ -271,3 +271,77 @@ def test_acts_written_to_summary_with_fill(tmp_path):
     assert ws.cell(3, col).value.startswith("КР 1.094-ПА") and ws.cell(3, col).fill.fgColor.rgb.endswith(FILTER)
     assert ws.cell(4, col).fill.fgColor.rgb.endswith(CTS)
     assert ws.cell(3, 4).value.startswith("КР 2.022")                    # прежние ячейки на месте
+
+
+def make_sprav(path):
+    docx = pytest.importorskip("docx")
+    from docx.enum.text import WD_COLOR_INDEX as HL
+    d = docx.Document()
+    d.add_paragraph("Справка по выполнению Плана капитального ремонта скважин на Касимовском ПХГ в 2026г.")
+    t = d.add_table(rows=4, cols=8)
+    for i, v in enumerate(["Шифр", "По плану", "По плану", "Выполнено", "Выполнено", "Примечания", "", ""]):
+        t.rows[0].cells[i].text = v
+    t.rows[1].cells[0].text = "шифр"
+    rows = [
+        ("КР 1.094-ПА Замена фильтра. КР 4.033-ЗР Кислотная обработка", "3", [("11(Э)", HL.BRIGHT_GREEN), ("12(Э)", HL.YELLOW), ("13(Э)", HL.RED)], "1", [("11(Э)", HL.BRIGHT_GREEN)],
+         "2 квартал / Cкв№11 / Начата ремонтом / 06.07.26г / Дата окончания / 01.09.2026г / Cкв№12 / Начата ремонтом / 14.01.26г / Дата окончания / 31.08.2026г",
+         "Скв13 статус / В план КР"),
+        ("КР 2.022 ГТ Ликвидация пробки", "1", [("14(Н)", None)], "", [], "3 квартал", "Скв14статус / Утвержден"),
+    ]
+    for r, (code, n, plan, nd, done, note, st) in zip(t.rows[2:], rows):
+        r.cells[0].text, r.cells[1].text, r.cells[3].text, r.cells[5].text, r.cells[6].text = code, n, nd, note, st
+        for cell, items in ((r.cells[2], plan), (r.cells[4], done)):
+            first = True
+            for txt, hl in items:
+                p = cell.paragraphs[0] if first else cell.add_paragraph()
+                first = False
+                run = p.add_run(txt)
+                if hl is not None:
+                    run.font.highlight_color = hl
+    d.save(path)
+
+
+def test_sprav_plan_db(tmp_path):
+    from pxg_core import krs_plan
+    f = tmp_path / "s.docx"
+    make_sprav(str(f))
+    plan, notes = krs_plan.parse_sprav(str(f))
+    p = plan.set_index("Скважина")
+    assert set(p.index) == {11, 12, 13, 14} and (plan["Год"] == 2026).all()
+    assert p.loc[11, "Состояние"] == krs_plan.STATE_DONE and p.loc[11, "Дата начала"] == "06.07.2026" and p.loc[11, "Дата окончания"] == "01.09.2026"
+    assert p.loc[11, "Коды работ"] == "КР 1.094; КР 4.033" and p.loc[11, "Тип скважины"] == "эксплуатационная"
+    assert p.loc[12, "Состояние"] == krs_plan.STATE_DONE and "жёлтый" in p.loc[12, "Проверить"]     # есть дата окончания при жёлтом цвете: подсказка
+    assert p.loc[13, "Состояние"] == krs_plan.STATE_CANCEL and p.loc[13, "Ремонт будет"] == "Нет" and p.loc[13, "В таблицу 7.1"] == "Нет"
+    assert p.loc[14, "Ремонт будет"] == "Да" and p.loc[14, "Тип скважины"] == "наблюдательная"        # «Утвержден» — ремонт ещё будет
+    prev = plan.copy()
+    prev.loc[prev["Скважина"] == 13, "Ремонт будет"] = "Да"                                           # ручное значение главнее
+    merged = krs_plan.merge_manual(plan, prev)
+    assert merged.set_index("Скважина").loc[13, "Ремонт будет"] == "Да"
+
+
+def test_sprav_tr_dates_pair_with_wells():
+    from pxg_core import krs_plan
+    q, d, _ = krs_plan.parse_notes("Скв 7-25.05.2026-28.05.2026г / Скв 139-22.05.2026-25.05.2026г")
+    assert d[7] == {"start": "25.05.2026", "end": "28.05.2026"} and d[139]["start"] == "22.05.2026"
+    q, d, _ = krs_plan.parse_notes("510-10.08.2026г-12.08.2026г / 511-11.08.26г-13.08.26г")
+    assert d[510]["end"] == "12.08.2026" and d[511]["start"] == "11.08.2026"
+    assert krs_plan.parse_status("Скв42 в ожидании ремонта") == {}
+    assert krs_plan.parse_status("Скв №83 исключена по корректировке") == {83: "Исключена по корректировке"}
+
+
+def test_sprav_done_goes_to_works_and_summary(tmp_path):
+    from pxg_core import krs_acts, krs_plan
+    f = tmp_path / "s.docx"
+    make_sprav(str(f))
+    plan, _ = krs_plan.parse_sprav(str(f))
+    src = tmp_path / "t.xlsx"
+    make_table(src)
+    data, grid = krs.parse(str(src))
+    krs_acts.add_acts(data, krs_plan.works_from_plan(plan), label="Справка")
+    assert set(data.works[data.works["Источник"].str.startswith("Справка")]["Скважина"]) == {11, 12}
+    prio = krs.final_priorities(data, krs.compute_priorities(data), {})
+    out = tmp_path / "u.xlsx"
+    krs.write_updated_table(grid, data.columns, data, prio, "2025-2026", str(out), src_path=str(src))
+    ws = openpyxl.load_workbook(out).active
+    col = next(c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value == "Выполнение КР 2026")
+    assert ws.cell(3, col).value.startswith("КР 1.094") and ws.cell(3, col).fill.fgColor.rgb.endswith(FILTER)
