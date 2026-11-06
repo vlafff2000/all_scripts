@@ -128,3 +128,20 @@ def test_make_db(env, monkeypatch):
     r = c.post("/api/ocr/db", json={"dir": str(job.dir)}).json()
     assert r["kind"] == "gdi" and (job.dir / "db.xlsx").is_file()
     assert c.post("/api/ocr/db", json={"dir": str(env)}).status_code == 404
+
+
+def test_export_docx_tables_and_collect(env, monkeypatch):
+    tbl = "<table><tr><td>Глубина, м</td><td>Температура</td><td>Давление</td></tr><tr><td>800</td><td>30</td><td>80</td></tr></table>"
+    md = "# Отчёт\\n\\nСкважина: 12\\n\\nДата исследования: 01.03.2025\\n\\n" + tbl
+    monkeypatch.setattr(engine, "build_cmd", _fake_cmd(FAKE.replace("# Заголовок\\n\\nТекст", md)))
+    src = env / "a.pdf"
+    src.write_bytes(b"%PDF")
+    c = TestClient(api.build_app())
+    job = _wait(c.post("/api/ocr/start", json={"path": str(src)}).json()["jobs"][0])
+    r = c.post("/api/ocr/docx", json={"dir": str(job.dir)}).json()
+    assert r["file"] == "a.docx" and r["tables"] == 1 and (job.dir / "a.docx").is_file()
+    r = c.post("/api/ocr/tables", json={"dir": str(job.dir)}).json()
+    assert r["file"] == "tables.xlsx" and r["sheets"][0]["name"] == "Термобарика" and (job.dir / "tables.xlsx").is_file()
+    r = c.post("/api/ocr/collect", json={"scope": "all"}).json()
+    assert r["files"] == 1 and (engine.out_root() / "Сводные" / r["file"]).is_file()
+    assert c.post("/api/ocr/docx", json={"dir": str(env)}).status_code == 404

@@ -43,6 +43,7 @@ export default function App() {
   const [pageErr, setPageErr] = useState('')
   const [db, setDb] = useState<{ kind: string; sheets: { name: string; columns: string[]; rows: Cell[][] }[] } | null>(null)
   const [dbErr, setDbErr] = useState('')
+  const [svod, setSvod] = useState('')
   const running = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
@@ -111,6 +112,26 @@ export default function App() {
     if (r.error || !r.sheets) { setDbErr(r.error || 'Не удалось собрать БД'); return }
     setDb({ kind: r.kind || '', sheets: r.sheets })
   }
+  const exportFile = async (kind: 'docx' | 'tables') => {
+    if (!cur) return
+    setDbErr('')
+    const r = await api<{ file?: string; error?: string }>(`/api/ocr/${kind}`, { dir: cur.dir })
+    if (r.error || !r.file) { setDbErr(r.error || 'Не удалось выгрузить'); return }
+    await saveUrlAs(fileUrl(cur.dir, r.file, true), kind === 'docx' ? r.file : cur.name.replace(/\.[^.]+$/, '') + '_таблицы.xlsx')
+  }
+  const collect = async (folder: boolean) => {
+    setErr(''); setSvod('')
+    let folders: string[] = []
+    if (folder) {
+      const p = await openFilePicker({ mode: 'folder', title: 'Папка с файлами OCR (*.ocr.md)' })
+      if (!p) return
+      folders = p.split('\n').filter(Boolean)
+    }
+    const r = await api<{ dir?: string; file?: string; files?: number; sheets?: { name: string; tables: number; rows: number }[]; error?: string }>('/api/ocr/collect', folder ? { folders } : { scope: 'all' })
+    if (r.error || !r.file || !r.dir) { setErr(r.error || 'Сводка не собрана'); return }
+    setSvod(`Файлов: ${r.files}. Листов: ${r.sheets?.length}: ` + (r.sheets || []).map((x) => `${x.name} (${x.rows})`).join(', '))
+    await saveUrlAs(fileUrl(r.dir, r.file, true), r.file)
+  }
   const del = async () => {
     if (!cur) return
     await api('/api/ocr/delete', { dir: cur.dir }); setSel(''); void refresh()
@@ -154,6 +175,10 @@ export default function App() {
         </label>
         {err && <p className="ocr-err">{err}</p>}
         <button type="button" className="primary" disabled={!ocrPaths.length || !info?.engine} onClick={start}>Распознать{ocrPaths.length > 1 ? ` (${ocrPaths.length})` : ''}</button>
+        <h2>Сводка таблиц</h2>
+        <button type="button" disabled={!items.some((i) => i.state === 'done')} onClick={() => void collect(false)}>Из всех результатов (xlsx)</button>
+        <button type="button" onClick={() => void collect(true)}>Из папки с OCR…</button>
+        {svod && <small className="muted">{svod}. Один тип таблицы — один лист, в каждой строке скважина и дата.</small>}
         <h2>Результаты</h2>
         <div className="ocr-hist">
           {items.length === 0 && <span className="muted">Пока ничего нет.</span>}
@@ -173,6 +198,8 @@ export default function App() {
             {cur.state === 'done' && result && <>
               {result.md && <button type="button" onClick={() => void saveUrlAs(fileUrl(cur.dir, result.md, true), cur.name.replace(/\.[^.]+$/, '') + '.md')}>Скачать markdown</button>}
               {result.json && <button type="button" onClick={() => void saveUrlAs(fileUrl(cur.dir, result.json, true), cur.name.replace(/\.[^.]+$/, '') + '.json')}>Скачать JSON</button>}
+              <button type="button" onClick={() => void exportFile('docx')}>Скачать Word</button>
+              <button type="button" onClick={() => void exportFile('tables')}>Таблицы в xlsx</button>
               <button type="button" onClick={makeDb}>Собрать БД</button>
               {db && <button type="button" onClick={() => void saveUrlAs(fileUrl(cur.dir, 'db.xlsx', true), cur.name.replace(/\.[^.]+$/, '') + '_БД.xlsx')}>Скачать БД (xlsx)</button>}
               {askDel ? <button type="button" onClick={del}>Точно удалить результат?</button> : <button type="button" onClick={() => setAskDel(true)}>Удалить</button>}

@@ -18,7 +18,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from pxg_core import fs_browse, runlog
+from pxg_core import fs_browse, ocr_export, runlog
 
 from . import engine, extract, route
 
@@ -163,6 +163,59 @@ async def make_db(request: Request):
     return JSONResponse({"kind": kind, "xlsx": "db.xlsx", "sheets": [{"name": n, "columns": c, "rows": r} for n, (c, r) in sheets.items()]})
 
 
+def _result_md(d: str):
+    """(папка результата, markdown, имя исходного файла) или (None, None, ошибка)."""
+    base = Path(d).resolve()
+    if engine.out_root().resolve() not in base.parents or not base.is_dir():
+        return None, None, "Папка результата не найдена."
+    md = engine.resolve_file(d, (engine.collect(base) or {}).get("md") or "")
+    if md is None:
+        return None, None, "В результате нет markdown."
+    try:
+        name = json.loads((base / "meta.json").read_text(encoding="utf-8")).get("name") or base.name
+    except (OSError, ValueError):
+        name = base.name
+    return base, md, name
+
+
+async def export_docx(request: Request):
+    """«Скачать Word»: markdown результата → <имя>.docx в папке результата (абзацы, заголовки, таблицы, картинки)."""
+    base, md, name = _result_md(str((await _body(request)).get("dir") or ""))
+    if base is None:
+        return _err(name, 404)
+    fname = Path(name).stem + ".docx"
+    stats = await run_in_threadpool(ocr_export.markdown_to_docx, md.read_text(encoding="utf-8"), str(base / fname), str(md.parent))
+    return JSONResponse({"file": fname, **stats})
+
+
+async def export_tables(request: Request):
+    """«Таблицы в xlsx»: таблицы одного результата → tables.xlsx (лист на тип таблицы, столбцы «Скважина» и «Дата»)."""
+    base, md, name = _result_md(str((await _body(request)).get("dir") or ""))
+    if base is None:
+        return _err(name, 404)
+    stats = await run_in_threadpool(ocr_export.write_tables_xlsx, [str(md)], str(base / "tables.xlsx"))
+    return JSONResponse({"file": "tables.xlsx", **stats})
+
+
+async def export_collect(request: Request):
+    """«Сводка таблиц»: все готовые результаты (scope=all) и/или выбранные папки с файлами OCR → один xlsx; тип таблицы = лист."""
+    import datetime
+    b = await _body(request)
+    paths = [str(p) for p in (b.get("folders") or []) if p]
+    if b.get("scope") == "all" or not paths:
+        for i in await run_in_threadpool(engine.history):
+            if i.get("state") == "done" and i.get("dir"):
+                md = (engine.collect(Path(i["dir"])) or {}).get("md")
+                if md:
+                    paths.append(str(Path(i["dir"]) / md))
+    if not paths:
+        return _err("Нет распознанных файлов для сводки.")
+    out_dir = engine.out_root() / "Сводные"
+    fname = "Сводка_таблиц_%s.xlsx" % datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    stats = await run_in_threadpool(ocr_export.write_tables_xlsx, paths, str(out_dir / fname))
+    return JSONResponse({"dir": str(out_dir), "file": fname, **stats})
+
+
 async def delete_result(request: Request):
     ok = await run_in_threadpool(engine.delete_result, str((await _body(request)).get("dir") or ""))
     return JSONResponse({"ok": ok})
@@ -187,6 +240,9 @@ def build_app() -> Starlette:
         Route("/api/ocr/file", result_file),
         Route("/api/ocr/page", source_page),
         Route("/api/ocr/db", make_db, methods=["POST"]),
+        Route("/api/ocr/docx", export_docx, methods=["POST"]),
+        Route("/api/ocr/tables", export_tables, methods=["POST"]),
+        Route("/api/ocr/collect", export_collect, methods=["POST"]),
         Route("/api/ocr/delete", delete_result, methods=["POST"]),
         Route("/api/client-log", client_log, methods=["POST"]),
         *fs_browse.routes(),
