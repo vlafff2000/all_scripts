@@ -23,12 +23,18 @@ def _paths(value: str) -> list:
     return [x.strip().strip('"') for x in (value or "").splitlines() if x.strip()]
 
 
+# список всех скважин объекта (один номер в строке); если файл есть, подключается сам
+DEFAULT_KNOWN = r"C:\OCR\БАЗЫ ДАННЫХ\список_скважин.txt"
+
+
 def _read_job(job):
+    gis_report.set_known_wells(job[2])      # рабочие процессы не видят настроек главного: список передаётся с каждым заданием
     return gis_report.parse_file(job[0], job[1])
 
 
-def read_all(files, mapping):
-    jobs = [(f, mapping) for f in files]
+def read_all(files, mapping, known=()):
+    known = list(known)
+    jobs = [(f, mapping, known) for f in files]
     if len(jobs) > 8:
         return list(map_jobs(_read_job, jobs, 120.0))
     return [_read_job(j) for j in jobs]
@@ -58,12 +64,15 @@ def main(argv=None):
         if not files:
             print("⚠️ Файлов .doc/.docx/.pdf и вывода OCR не найдено.")
             return 0
-        if args.known:
-            gis_report.set_known_wells(gis_report.load_known_wells(параметры.clean_path(args.known)))
+        known_path = параметры.clean_path(args.known or "") or (DEFAULT_KNOWN if os.path.isfile(DEFAULT_KNOWN) else "")
+        known = gis_report.load_known_wells(known_path) if known_path else []
+        gis_report.set_known_wells(known)
+        if known:
+            print("ℹ️ Известных скважин в списке: %d (%s)" % (len(known), os.path.basename(known_path)))
         mapping = gis_report.load_mapping(параметры.clean_path(args.mapping or ""))
         kg_min = float((args.kg_min or "0").replace(",", ".") or 0)
         print("📚 Отчётов: %d" % len(files))
-        reports = read_all(files, mapping)
+        reports = read_all(files, mapping, known)
         for r in reports:
             if r.error:
                 print("❌ %s: %s" % (r.file, r.error))

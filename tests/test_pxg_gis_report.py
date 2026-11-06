@@ -556,3 +556,23 @@ def test_overlap_and_thick_interval_flagged():
     codes = {i["Код"] for i in rep.issues}
     assert {"interval_overlap", "interval_thick"} <= codes
     assert len(rep.intervals) == 3
+
+
+# ---- номер скважины на следующей строке и из имени файла ----
+def test_well_value_on_next_line_after_label():
+    # распознанный (OCR) текст: подпись и значение в разных абзацах
+    assert gr.parse_blocks([wt.Para("Скважина"), wt.Para("21"), wt.Para("Альтитуда")], "x.docx").well == "21"
+    assert gr.parse_blocks([wt.Para("Скважина"), wt.Para("Альтитуда"), wt.Para("120")], "x.docx").well == ""
+
+
+def test_well_from_file_name_only_if_in_known_list():
+    gr.set_known_wells(["141", "8"])
+    try:
+        rep = gr.parse_blocks([wt.Para("Акт ГИС")], "141Касимов_280524.ocr.md")
+        assert rep.well == "141" and any(i["Код"] == "well_from_name" for i in rep.issues)
+        assert gr.parse_blocks([wt.Para("Акт ГИС")], "008Кас_130422.docx").well == "8"
+        assert gr.parse_blocks([wt.Para("Акт ГИС")], "999Касимов_280524.docx").well == ""
+        assert gr.parse_blocks([wt.Para("Акт ГИС")], "270323_акт.docx").well == ""
+    finally:
+        gr.set_known_wells([])
+    assert gr.parse_blocks([wt.Para("Акт ГИС")], "141Касимов_280524.docx").well == ""
