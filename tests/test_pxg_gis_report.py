@@ -695,6 +695,35 @@ def test_kg_with_footnote_mark_or_comment_is_a_number():
     assert gr._kg("(заглинизирован)")[0] is None and gr._kg("-")[0] is None and gr._kg("водонасыщен")[0] is None
 
 
+# ---- ГВК, записанный предложением в тексте отчёта ----
+def _rep_with_intervals():
+    rep = gr.Report(file="x.docx", well="10", alt=135.2, date=dt.date(2022, 10, 1))
+    rep.intervals = [_iv(784.8, 788.4, **{"Столбец-замер": "10.2022 г", "Дата замера": dt.date(2022, 10, 1), "Заголовок пачки": "Верхняя песчаная пачка"}),
+                     _iv(790.6, 796.0, **{"Столбец-замер": "10.2022 г", "Дата замера": dt.date(2022, 10, 1), "Заголовок пачки": "Верхняя песчаная пачка"})]
+    return rep
+
+
+@pytest.mark.parametrize("text", ["ГВК в верхней песчаной пачке отмечается на глубине – 796.0 м (абс.отметка – -660.8 м).",
+                                  "ГВК по верхней песчаной пачке фиксируется на глубине 796.0 м. (абс. отм. – -660.8 м). (Приложение 2)"])
+def test_gvk_sentence_in_text_is_read(text):
+    # баг: ГВК, записанный предложением вне таблицы, в БД не попадал (в Excel-базе он есть)
+    rep = _rep_with_intervals()
+    gr.read_gvk_text(rep, [wt.Para(text)])
+    g = [p for p in rep.packs if p.get("_kind") == "gvk"]
+    assert len(g) == 1 and g[0]["ГВК MD, м"] == 796.0 and g[0]["Пачка"] == "Верхняя пачка"
+    assert g[0]["Столбец-замер"] == "10.2022 г" and g[0]["Заголовок в документе"] == "Верхняя песчаная пачка"
+
+
+def test_gvk_not_noted_and_table_gvk_not_duplicated():
+    rep = _rep_with_intervals()
+    gr.read_gvk_text(rep, [wt.Para("ГВК в интервале исследования не отмечается.")])
+    assert not [p for p in rep.packs if p.get("_kind") == "gvk"]
+    g = gr.Group("10.2022 г", 0, 1, dt.date(2022, 10, 1), True)
+    gr._add_gvk(rep, g, "Верхняя пачка", "Верхняя песчаная пачка", 796.0, None, "ГВК 796", "таблица 4", gr.HIGH, "")
+    gr.read_gvk_text(rep, [wt.Para("ГВК в верхней песчаной пачке отмечается на глубине 796.0 м.")])
+    assert len([p for p in rep.packs if p.get("_kind") == "gvk"]) == 1
+
+
 def test_docx_saved_with_doc_extension_is_read(tmp_path):
     # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
     p = tmp_path / "21Касимов_010120.doc"

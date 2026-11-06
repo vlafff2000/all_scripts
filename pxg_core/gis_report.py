@@ -1218,6 +1218,41 @@ def _add_gvk(rep: Report, g: Group, pack: str, title: str, md: Optional[float], 
                       "Источник": source, "Основание": notes, "Уверенность": conf, "ГВК MD, м": md, "ГВК а.о., м": abs_val, "ГВК (как в отчёте)": text, "_kind": "gvk"})
 
 
+_GVK_SENT = re.compile(r"ГВК[^.]{0,60}?(?:отмечается|фиксируется)\s+на\s+глубине\s*[–—-]?\s*(" + NUM + r")\s*м", re.I)
+_GVK_ABS = re.compile(r"абс[^()]{0,12}?[–—-]\s*[–—-]?\s*(" + NUM + r")\s*м", re.I)
+
+
+def read_gvk_text(rep: Report, blocks: List[wt.Block]) -> int:
+    """ГВК, записанный предложением вне таблицы («ГВК по верхней песчаной пачке отмечается на глубине 803.7 м (абс.отметка – -668.7 м)»).
+    Относится к замеру этого отчёта (по дате, иначе к последнему столбцу); если ГВК этой пачки в этом замере уже взят из таблицы, не дублируется."""
+    n = 0
+    cols = [(r["Дата замера"], r["Столбец-замер"]) for r in rep.intervals]
+    for b in blocks:
+        if not isinstance(b, wt.Para):
+            continue
+        for sent in re.split(r"(?<=[м)])\.\s+", b.text):
+            m = _GVK_SENT.search(sent)
+            if not m:
+                continue
+            pack = classify_pack(sent)[0]
+            if not pack:
+                continue                                  # пачка в предложении не названа — отнести ГВК некуда
+            md = fnum(m.group(1))
+            a = _GVK_ABS.search(sent.translate(_MINUS))
+            ab = fnum(a.group(1)) if a else None
+            same = [x for x in cols if rep.date is not None and x[0] == rep.date] or [x for x in cols if rep.date is not None and x[0] and (x[0].year, x[0].month) == (rep.date.year, rep.date.month)] or cols[-1:]
+            if not same or md is None:
+                continue
+            date, label = same[0]
+            title = next((r["Заголовок пачки"] for r in rep.intervals if r["Пачка"] == pack and r["Столбец-замер"] == label), "")
+            if any(p.get("_kind") == "gvk" and (p["Пачка"] == pack or abs((p.get("ГВК MD, м") or -1e9) - md) < 0.2) for p in rep.packs):      # ГВК этой пачки уже взят из таблицы отчёта — текст его только повторяет
+                continue
+            _add_gvk(rep, Group(label, 0, 0, date, True), pack, title, md, ab, sent.strip(), "текст", MID,
+                     "ГВК записан предложением вне таблицы: отнесён к замеру этого отчёта — сверить")
+            n += 1
+    return n
+
+
 def _pack_summary(rep: Report, g: Group, pack: str, title: str, what: str, value, source: str, tid: int) -> None:
     rep.packs.append({"Файл": rep.file, "Скважина": rep.well, "Столбец-замер": g.label, "Дата замера": g.date, "Заголовок в документе": title, "Пачка": pack,
                       "Источник": source, "Таблица": tid, "Показатель": what, "Значение": value, "_kind": "summary"})
@@ -1349,6 +1384,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
     read_filling_text(rep, blocks)
     read_rpl(rep, blocks)
     read_summaries(rep, blocks)
+    read_gvk_text(rep, blocks)
     check_report(rep)
     return rep
 
