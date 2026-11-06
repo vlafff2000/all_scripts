@@ -1251,6 +1251,60 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
     return n
 
 
+_SENT_SPLIT = re.compile(r"(?<=[а-яёa-z)%м])\.\s+(?=[А-ЯЁA-Z\-•\\])")
+_RANGE = re.compile(r"(" + NUM + r")\s*[–—-]\s*(" + NUM + r")\s*м")
+
+
+def read_interval_text(rep: Report, blocks: List[wt.Block]) -> int:
+    """Интервалы пачки из предложений вида «Пласт-коллектор в верхней песчаной пачке … газонасыщен в интервале 784.8-796.0 м, Нг=11.2 м, Кг=45-85%» —
+    для шаблонов, где таблицы интервалов нет. Только если таблицы дали ноль интервалов и отчёт не «ГИС при ЭПБ». Строка — вся пачка целиком (без разбивки по
+    прослоям), уверенность средняя, основание «из текста»."""
+    if rep.intervals or rep.kind or rep.date is None:
+        return 0
+    n = 0
+    label = "замер отчёта"
+    prev = ""
+    for b in blocks:
+        if not isinstance(b, wt.Para):
+            continue
+        ctx_gas = bool(re.search(r"скоплени\w+ газа|газонасыщ", prev, re.I)) and len(prev) < 200       # «Скопления газа отмечаются:» и список пачек ниже
+        prev = b.text
+        for sent in _SENT_SPLIT.split(b.text.replace("\n", " ")):
+            low_s = low(sent)
+            if "пачк" not in low_s or not re.search(r"верхн|нижн", low_s):
+                continue
+            m = re.search(r"интервал\w*\s+((?:" + NUM + r"\s*[–—-]\s*" + NUM + r"\s*м\s*(?:и|,)?\s*)+)", sent)
+            if not m:
+                continue
+            ranges = [(fnum(a), fnum(c2)) for a, c2 in _RANGE.findall(m.group(1))]
+            water = "водонасыщ" in low_s and "газонасыщ" not in low_s
+            gas = "газонасыщ" in low_s or bool(re.search(r"скопления газа[^.]{0,60}отмечаются", low_s)) or (ctx_gas and not water and re.match(r"\s*[•\-\\–]", sent) is not None)
+            if not ranges or not (water or gas):
+                continue
+            pack = "Верхняя пачка" if re.search(r"верхн", low_s) else "Нижняя пачка"
+            hg = re.search(r"Нг\s*=\s*(" + NUM + r")", sent)
+            kg_m = re.search(r"Кг\s*=\s*(" + NUM + r")(?:\s*[–—-]\s*(" + NUM + r"))?\s*%", sent)
+            kg = kmin = kmax = None
+            if kg_m:
+                a1 = fnum(kg_m.group(1)) / 100
+                a2 = fnum(kg_m.group(2)) / 100 if kg_m.group(2) else a1
+                kmin, kmax = min(a1, a2), max(a1, a2)
+                kg = round((a1 + a2) / 2, 4)
+            for lo, hi in ranges:
+                if lo is None or hi is None or hi < lo:
+                    continue
+                rep.intervals.append(OrderedDict([
+                    ("Скважина", rep.well), ("Файл", rep.file), ("Таблица", 0), ("Источник", "текст"), ("Столбец-замер", label), ("_g", 0),
+                    ("Дата замера", rep.date), ("Дата точная", True), ("Раздел таблицы", "текст отчёта"), ("Заголовок пачки", sent.strip()[:120]), ("Пачка", pack),
+                    ("Горизонт", horizon_of(sent)), ("От, м", lo), ("До, м", hi), ("От а.о., м", ao(rep, lo)), ("До а.о., м", ao(rep, hi)), ("hi, м", round(hi - lo, 3)),
+                    ("Нобщ по отчёту, м", None), ("Нг по отчёту, м", fnum(hg.group(1)) if hg else None), ("Кг", None if water else kg), ("Кг мин", None if water else kmin),
+                    ("Кг макс", None if water else kmax), ("Кг (как в отчёте)", kg_m.group(0) if kg_m and not water else ""), ("Пористость", None), ("Пористость (как в отчёте)", ""),
+                    ("Насыщение", "водонасыщена" if water else "газонасыщена"), ("Литология", ""), ("Водонасыщенный", water), ("Глубины", MD_BASIS), ("Уверенность", MID),
+                    ("Основание", "из текста отчёта: интервал пачки целиком, без разбивки по прослоям — сверить с таблицей или оригиналом")]))
+                n += 1
+    return n
+
+
 def _boundary_gvk(rep: Report, sgroups: List[Group], tid: int) -> None:
     """Замеру без записанного ГВК: ГВК = кровля первого водонасыщенного интервала под газовыми (подсказка, уверенность средняя)."""
     mine = [r for r in rep.intervals if r["Таблица"] == tid]
@@ -1413,7 +1467,8 @@ def table_kind(tbl: wt.Table) -> Tuple[str, int]:
     return "", nh
 
 
-_EPB_RX = re.compile(r"(?:диагностик\w*|определени\w*|оценк\w*|контрол\w*|обследовани\w*)\s+(?:\w+\s+){0,2}?техническ\w+\s+состояни\w*|техническ\w+\s+состояни\w*\s+(?:скважин|колонн|обсадн)|диагностик\w*\s+скважин|толщин\w+\s+(?:стен|труб)", re.I)
+_EPB_RX = re.compile(r"(?:диагностик\w*|определени\w*|оценк\w*|контрол\w*|обследовани\w*)\s+(?:\w+\s+){0,2}?техническ\w+\s+состояни\w*|техническ\w+\s+состояни\w*\s+(?:скважин|колонн|обсадн)|диагностик\w*\s+скважин", re.I)
+_EPB_TASKS_RX = re.compile(r"толщин\w+\s+(?:стен|труб)", re.I)
 
 
 def report_kind(blocks: List[wt.Block]) -> str:
@@ -1421,7 +1476,8 @@ def report_kind(blocks: List[wt.Block]) -> str:
     ГИС-контроль этих слов в шапке не содержит."""
     head = " ".join(b.text for b in blocks[:30] if isinstance(b, wt.Para))[:6000]
     head += " " + " ".join(c.text for b in blocks[:8] if isinstance(b, wt.Table) for r in b.rows for c in r.cells)[:3000]
-    return KIND_EPB if _EPB_RX.search(head) else ""
+    tasks = " ".join(b.text for b in blocks[:40] if isinstance(b, wt.Para) and re.match(r"\s*РЕШАЕМЫЕ ЗАДАЧИ", b.text, re.I))       # метод «толщины стенок» есть и в комплексе ГИС-контроля: смотрим только задачи
+    return KIND_EPB if _EPB_RX.search(head) or _EPB_TASKS_RX.search(tasks) else ""
 
 
 def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, str]] = None) -> Report:
@@ -1466,6 +1522,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
     read_rpl(rep, blocks)
     read_summaries(rep, blocks)
     read_gvk_text(rep, blocks)
+    read_interval_text(rep, blocks)
     check_report(rep)
     return rep
 
