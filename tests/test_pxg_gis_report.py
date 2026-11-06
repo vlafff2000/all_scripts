@@ -1,4 +1,4 @@
-"""БД ГИС из отчётов: структура Word-таблиц (.doc без Word), разбор двух разных форм отчёта по скважине 18 Касимовского ПХГ, выгрузка, архивы."""
+﻿"""БД ГИС из отчётов: структура Word-таблиц (.doc без Word), разбор двух разных форм отчёта по скважине 18 Касимовского ПХГ, выгрузка, архивы."""
 import datetime as dt
 import os
 import zipfile
@@ -618,21 +618,21 @@ def test_reports_sheet_has_report_kind():
     assert gr.reports_frame([rep]).loc[0, "Вид отчёта"] == "ГИС при ЭПБ"
 
 
-def test_kg_all_below_one_percent_is_flagged_not_changed():
+def test_kg_all_below_one_percent_is_taken_as_fractions():
     # «0.55» в столбце «Кг, %» читается как 0,55 % (так задано тестом выше), но если ВСЕ значения замера меньше 1 с десятичной точкой,
-    # скорее всего это доли единицы (в БД получается 0,0055): число не меняется, в «Проверку» идёт kg_scale_suspect
+    # скорее всего это доли единицы (в БД получается 0,0055): значения умножаются на 100, в «Проверку» идёт kg_scale_fixed
     rep = gr.Report(file="x.docx", well="21")
     rep.intervals = [_iv(100.0, 105.0, kg=0.0055, **{"Кг (как в отчёте)": "0.55"}), _iv(110.0, 112.0, kg=0.0070, **{"Кг (как в отчёте)": "0.70"})]
     gr.check_intervals(rep)
-    assert [r["Кг"] for r in rep.intervals] == [0.0055, 0.0070]
-    assert any(i["Код"] == "kg_scale_suspect" for i in rep.issues)
+    assert [r["Кг"] for r in rep.intervals] == [0.55, 0.7]
+    assert any(i["Код"] == "kg_scale_fixed" for i in rep.issues)
 
 
 def test_kg_in_percent_is_not_flagged():
     rep = gr.Report(file="x.docx", well="21")
     rep.intervals = [_iv(100.0, 105.0, kg=0.55, **{"Кг (как в отчёте)": "55"}), _iv(110.0, 112.0, kg=0.7, **{"Кг (как в отчёте)": "0.70"})]
     gr.check_intervals(rep)
-    assert not any(i["Код"] == "kg_scale_suspect" for i in rep.issues)
+    assert not any(i["Код"] == "kg_scale_fixed" for i in rep.issues)
 
 
 def _row(first, *cells):
