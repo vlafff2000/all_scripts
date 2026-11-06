@@ -1793,9 +1793,10 @@ def resolve_gvk(reports: List[Report]) -> None:
                      "ГВК по датам (%s)" % h.get("Файл", ""), MID, "ГВК в самом отчёте не указан: взят из таблицы «ГВК по датам» за тот же месяц — сверить")
 
 
-def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[str, str]]:
-    """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером, иначе самый свежий. Остальные — дубли."""
-    best: Dict[Tuple[str, dt.date], Tuple[int, str, str]] = {}
+def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], str]:
+    """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером, иначе самый свежий. Остальные — дубли.
+    Из выбранного отчёта в БД идут все его таблицы этого замера (основная и, например, таблица покрышки)."""
+    best: Dict[Tuple[str, dt.date], Tuple[int, str]] = {}
     for rep in reports:
         seen = {(r["Дата замера"], r["Столбец-замер"]) for r in rep.intervals if r["Дата замера"] is not None}
         for d, label in seen:
@@ -1803,8 +1804,8 @@ def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[
             key = (rep.well, d)
             score = (own, rep.date or dt.date.min)
             if key not in best or score > best[key][0]:
-                best[key] = (score, rep.path or rep.file, label)
-    return {k: (v[1], v[2]) for k, v in best.items()}
+                best[key] = (score, rep.path or rep.file)
+    return {k: v[1] for k, v in best.items()}
 
 
 def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gis.SheetResult], pd.DataFrame]:
@@ -1818,7 +1819,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
     for rep in reports:
         for r in rep.intervals:
             d = r["Дата замера"]
-            ok = d is not None and chosen.get((rep.well, d)) == (rep.path or rep.file, r["Столбец-замер"])
+            ok = d is not None and chosen.get((rep.well, d)) == (rep.path or rep.file)
             allrows.append({**{k: v for k, v in r.items() if not k.startswith("_")}, "В БД": "да" if ok else ("нет: дубль замера из другого отчёта" if d is not None else "нет: дата замера не определена")})
             if ok:
                 by_well[rep.well][d].append((rep, r))

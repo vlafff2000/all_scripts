@@ -930,3 +930,17 @@ def test_ocr_output_in_other_folder_replaces_same_name_pdf():
     keep, notes = gr.pick_report_files(files)
     assert keep == [os.path.join("ocr", "1Касимов_080526(переувязано).ocr.md"), os.path.join("src", "2Касимов_010120.pdf")]
     assert any("вывод OCR" in n for n in notes)
+
+
+def test_all_columns_of_chosen_report_for_same_date_go_to_db():
+    # баг: в отчёте две таблицы одного замера (основная «10.2023 г» и таблица покрышки «Интервал | Мощность | Газонасыщенность»);
+    # в БД шла только одна из них, причём какая — как повезёт (8 интервалов превращались в 1)
+    rep = gr.Report(file="a.docx", well="127", date=dt.date(2023, 10, 24))
+    d = dt.date(2023, 10, 24)
+    rep.intervals = [_iv(784.8 + i, 785.8 + i, **{"Столбец-замер": "10.2023 г", "Дата замера": d, "Дата точная": True}) for i in range(8)]
+    rep.intervals.append(_iv(700.0, 701.0, **{"Столбец-замер": "замер отчёта", "Дата замера": d, "Дата точная": True, "Пачка": "Покрышка"}))
+    for x in rep.intervals:
+        x.update({"Водонасыщенный": False, "hi, м": 1.0, "Заголовок пачки": x["Пачка"], "Кг мин": x["Кг"], "Кг макс": x["Кг"], "Кг (как в отчёте)": "50",
+                  "Пористость": None, "Насыщение": ""})
+    _res, allrows = gr.to_results([rep])
+    assert (allrows["В БД"] == "да").sum() == 9
