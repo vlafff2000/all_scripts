@@ -616,3 +616,11 @@ def test_empty_report_is_not_epb():
 def test_reports_sheet_has_report_kind():
     rep = gr.Report(file="x.docx", well="21", kind="ГИС при ЭПБ")
     assert gr.reports_frame([rep]).loc[0, "Вид отчёта"] == "ГИС при ЭПБ"
+
+
+def test_docx_saved_with_doc_extension_is_read(tmp_path):
+    # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
+    p = tmp_path / "21Касимов_010120.doc"
+    _docx(str(p), "<w:p><w:r><w:t>Скважина: 21</w:t></w:r></w:p>")
+    rep = gr.parse_file(str(p))
+    assert not rep.error and rep.well == "21"

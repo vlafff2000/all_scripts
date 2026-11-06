@@ -384,6 +384,8 @@ def read_blocks(path: str) -> List[Block]:
         return read_docx_blocks(path)
     with open(path, "rb") as f:
         data = f.read()
+    if data[:4] == b"PK\x03\x04":       # docx, сохранённый с расширением .doc
+        return read_docx_blocks(path)
     err: Optional[Exception] = None
     try:
         blocks = _doc_blocks(data)

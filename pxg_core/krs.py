@@ -614,7 +614,7 @@ def _write_act_works(ws, hdr: int, rows: Dict[int, int], cols: Columns, data: Kr
     notes: List[Tuple[str, str]] = []
     if "Источник" not in data.works.columns:
         return notes
-    acts = data.works[data.works["Источник"].astype(str).str.startswith("Акт")]
+    acts = data.works[data.works["Источник"].astype(str) != "таблица"]
     if acts.empty:
         return notes
     fills = kind_fills(data)
