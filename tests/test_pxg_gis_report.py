@@ -864,3 +864,11 @@ def test_simple_interval_table_is_read_with_pack_from_title():
     assert all(r["Дата замера"] == dt.date(2022, 10, 1) and r["Дата точная"] for r in rep.intervals)
     assert round(sum(r["hi, м"] for r in rep.intervals if r["Кг"] is not None), 1) == 11.2
     assert not any(i["Код"] == "hg_mismatch" for i in rep.issues)
+
+
+def test_report_with_no_recognized_tables_is_not_epb():
+    # баг: «переувязано».pdf (таблицы без разлиновки не найдены, есть только строки «доход шаблона» из текста) считался «ГИС при ЭПБ»,
+    # и замер мая 2026 терялся без предупреждения
+    rep = gr.Report(file="x.pdf", well="1", bottoms=[{"x": 1}, {"x": 2}], thermo=[{"x": 1}])
+    gr.check_report(rep)
+    assert rep.kind == "" and "no_intervals" in _codes(rep) and "no_tables" in _codes(rep) and "report_kind_epb" not in _codes(rep)
