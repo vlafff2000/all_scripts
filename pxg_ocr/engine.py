@@ -68,13 +68,15 @@ def hardware() -> Dict[str, Any]:
     return info
 
 
-# Видеокарта используется только в Windows: на Linux (РЕД ОС) ускорение llama.cpp через Vulkan не проверялось, считаем на процессоре
+# «Авто» берёт видеокарту только в Windows: на Linux (РЕД ОС) ускорение llama.cpp через Vulkan не проверено, «Авто» считает на процессоре
+# (PXG_OCR_GPU=1 включает и «Авто»). Режим «Видеокарта», выбранный вручную, работает и на Linux: решение инженера главнее.
 GPU_SUPPORTED = os.name == "nt" or bool(os.environ.get("PXG_OCR_GPU"))
+MANUAL_RESERVE_GB = 0.5  # запас видеопамяти при ручном выборе «Видеокарта» на слабой карте (4 ГБ)
 
 
 def plan(mode: str, hw: Dict[str, Any]) -> Dict[str, Any]:
     """Что реально будет использовано: режим, лимит видеопамяти (ГБ), число потоков и причина выбора."""
-    gpu = hw.get("gpu") if GPU_SUPPORTED else None
+    gpu = hw.get("gpu") if (GPU_SUPPORTED or mode == "gpu") else None
     threads = max(2, (hw.get("cores") or 2) // 2)
     cpu = {"mode": "cpu", "vram_gb": 0.0, "threads": threads}
     if mode == "cpu":
@@ -84,9 +86,61 @@ def plan(mode: str, hw: Dict[str, Any]) -> Dict[str, Any]:
     usable = min(VRAM_MAX_GB, round(gpu["free_gb"] - VRAM_RESERVE_GB, 1))
     if usable < VRAM_MIN_GB:
         if mode == "gpu":
-            return {"mode": "gpu", "vram_gb": max(usable, 1.0), "threads": threads, "why": "видеопамяти мало, возможны ошибки: надёжнее режим «Только процессор»"}
+            manual = round(min(VRAM_MAX_GB, gpu["free_gb"] - MANUAL_RESERVE_GB), 1)
+            return {"mode": "gpu", "vram_gb": max(manual, 1.0), "threads": threads, "why": "видеопамяти мало (%s ГБ свободно), возможны ошибки: надёжнее режим «Только процессор»" % gpu["free_gb"]}
         return {**cpu, "why": "видеопамяти мало (%s ГБ свободно): считаем на процессоре, ошибок памяти не будет" % gpu["free_gb"]}
     return {"mode": "gpu", "vram_gb": usable, "threads": threads, "why": "%s, лимит видеопамяти %s ГБ" % (gpu["name"], usable)}
+
+
+def vram_used_mib() -> Optional[int]:
+    """Занятая видеопамять первой карты NVIDIA, МиБ; None — nvidia-smi недоступен."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return int(float(out.stdout.strip().splitlines()[0])) if out.returncode == 0 and out.stdout.strip() else None
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
+def _run_text(cmd: List[str], timeout: int = 20) -> str:
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return ((out.stdout or "") + (out.stderr or "")).strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return "не выполнено: %s" % type(e).__name__
+
+
+def gpu_diag() -> List[str]:
+    """Что нужно видеокарте для распознавания: драйвер, Vulkan, провайдеры onnxruntime движка и выбранный режим. Только чтение, без содержимого документов."""
+    import platform
+    import shutil
+    lines = ["Система: %s %s, ядер %s" % (platform.system(), platform.release(), os.cpu_count()), "PXG_OCR_GPU=%r" % os.environ.get("PXG_OCR_GPU", "")]
+    smi = _run_text(["nvidia-smi", "--query-gpu=name,driver_version,memory.total,memory.free", "--format=csv,noheader"]) if shutil.which("nvidia-smi") else "nvidia-smi не найден (драйвер NVIDIA не виден программе)"
+    lines.append("nvidia-smi: " + smi)
+    if os.name != "nt":
+        icds = [str(p) for d in ("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d", "/usr/local/share/vulkan/icd.d") if os.path.isdir(d) for p in sorted(Path(d).glob("*.json"))]
+        lines.append("Vulkan ICD: " + (", ".join(icds) if icds else "нет файлов *.json в /usr/share/vulkan/icd.d, /etc/vulkan/icd.d"))
+        ld = _run_text(["ldconfig", "-p"]) if shutil.which("ldconfig") else ""
+        found = sorted({l.split()[0] for l in ld.splitlines() if "libvulkan" in l or "libcuda.so" in l or "libnvidia-glcore" in l})
+        lines.append("Библиотеки: " + (", ".join(found) if found else "libvulkan / libcuda не найдены (ldconfig)"))
+        if shutil.which("vulkaninfo"):
+            lines += ["vulkaninfo --summary:"] + ["  " + l for l in _run_text(["vulkaninfo", "--summary"], 30).splitlines()[:25]]
+        else:
+            lines.append("vulkaninfo: не установлен (не страшно, это только диагностика)")
+    h = home()
+    py = python_exe(h) if h else None
+    if py:
+        code = "import onnxruntime as o;print('onnxruntime',o.__version__,o.get_available_providers())"
+        lines.append("Движок: " + _run_text([str(py), "-s", "-X", "utf8", "-c", code], 60))
+        frozen = _run_text([str(py), "-s", "-X", "utf8", "-m", "pip", "list", "--format=freeze"], 60).splitlines()
+        lines.append("Пакеты движка: " + (", ".join(l for l in frozen if l.lower().startswith(("mineru", "onnxruntime", "torch"))) or "не определены"))
+    else:
+        lines.append("Движок распознавания не найден (папка ocr)")
+    hw = hardware()
+    for m in MODES:
+        pl = plan(m, hw)
+        lines.append("Режим %s: %s, лимит видеопамяти %s ГБ — %s" % (m, pl["mode"], pl["vram_gb"], pl["why"]))
+    return lines
 
 
 def build_env(h: Path, p: Dict[str, Any]) -> Dict[str, str]:
@@ -203,11 +257,25 @@ def _run(job: Job) -> None:
             job.proc = subprocess.Popen(cmd, env=build_env(h, job.plan), cwd=str(job.dir), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                         text=True, encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             assert job.proc.stdout is not None
+            peak = {"v": vram_used_mib() or 0, "base": vram_used_mib()}
+            stop = threading.Event()
+
+            def sample() -> None:
+                while not stop.wait(2.0):
+                    v = vram_used_mib()
+                    if v and v > peak["v"]:
+                        peak["v"] = v
+            sampler = threading.Thread(target=sample, daemon=True)
+            if job.plan["mode"] == "gpu":
+                sampler.start()
             for line in job.proc.stdout:
                 line = line.rstrip()
                 if line:
                     job.log.append(line[:300])
             code = job.proc.wait()
+            stop.set()
+            if job.plan["mode"] == "gpu" and peak["base"] is not None:
+                job.log.append("Видеопамять: на старте %d МиБ, пик %d МиБ; код возврата %s" % (peak["base"], peak["v"], code))
             if job.cancel.is_set():
                 job.state = "cancelled"
             elif code != 0 or not zip_path.is_file():
