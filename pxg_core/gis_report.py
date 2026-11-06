@@ -1608,6 +1608,30 @@ def resolve_dates(reports: List[Report]) -> None:
                 r["Основание"] = "; ".join(x for x in (r["Основание"], "точная дата замера взята из другого отчёта по этой скважине (в месяце ровно одна дата)") if x)
 
 
+def resolve_packs(reports: List[Report]) -> None:
+    """Интервалу без пачки («Горизонт Щигровский (784-810 м)» не называет пачку) пачка выбирается по глубине: диапазоны пачек берутся из других интервалов
+    этой же скважины, где пачка названа. Если интервал попадает ровно в один диапазон — пачка ставится (подсказка, уверенность средняя); иначе остаётся пустой."""
+    ranges: Dict[str, Dict[str, List[float]]] = defaultdict(dict)
+    for rep in reports:
+        for r in rep.intervals:
+            if r["Пачка"]:
+                lo_hi = ranges[rep.well].setdefault(r["Пачка"], [r["От, м"], r["До, м"]])
+                lo_hi[0], lo_hi[1] = min(lo_hi[0], r["От, м"]), max(lo_hi[1], r["До, м"])
+    for rep in reports:
+        n = 0
+        for r in rep.intervals:
+            if r["Пачка"]:
+                continue
+            hits = [p for p, (lo, hi) in ranges.get(rep.well, {}).items() if lo - 0.15 <= r["От, м"] and r["До, м"] <= hi + 0.15]
+            if len(hits) == 1:
+                r["Пачка"] = hits[0]
+                r["Уверенность"] = MID
+                r["Основание"] = "; ".join(x for x in (r["Основание"], "пачка определена по глубине: интервал лежит в диапазоне пачки %s по другим замерам этой скважины (заголовок «%s» пачку не называет)" % (hits[0], str(r["Заголовок пачки"])[:50])) if x)
+                n += 1
+        if n:
+            rep.issue("note", "pack_by_depth", "Пачка определена по глубине для %d интервалов (заголовок пачку не называет): сверить" % n)
+
+
 def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[str, str]]:
     """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером, иначе самый свежий. Остальные — дубли."""
     best: Dict[Tuple[str, dt.date], Tuple[int, str, str]] = {}
@@ -1625,6 +1649,7 @@ def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[
 def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gis.SheetResult], pd.DataFrame]:
     """Отчёты → `gis.SheetResult` по скважине (замер = дата) и таблица «Интервалы (все)» с отметкой, какой замер вошёл в БД."""
     resolve_dates(reports)
+    resolve_packs(reports)
     chosen = pick_measurements(reports)
     by_well: Dict[str, Dict[dt.date, List[Tuple[Report, dict]]]] = defaultdict(lambda: defaultdict(list))
     allrows = []

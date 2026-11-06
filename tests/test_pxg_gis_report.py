@@ -771,3 +771,32 @@ def test_docx_saved_with_doc_extension_is_read(tmp_path):
     _docx(str(p), "<w:p><w:r><w:t>Скважина: 21</w:t></w:r></w:p>")
     rep = gr.parse_file(str(p))
     assert not rep.error and rep.well == "21"
+
+
+# ---- пачка по глубине из других замеров скважины ----
+def _pack_rep(file, rows):
+    rep = gr.Report(file=file, well="10")
+    rep.intervals = [_iv(a, b, **{"Пачка": p, "Заголовок пачки": t}) for a, b, p, t in rows]
+    return rep
+
+
+def test_interval_without_pack_gets_pack_by_depth_from_other_reports():
+    # баг: «Горизонт Щигровский (784-800 м)» не называет пачку, интервалы терялись из gis_intervals (500 строк в сборке)
+    named = _pack_rep("a.docx", [(784.8, 796.0, "Верхняя пачка", "Верхняя песчаная пачка"), (800.0, 810.0, "Нижняя пачка", "Нижняя пачка")])
+    bare = _pack_rep("b.docx", [(790.6, 793.3, "", "Горизонт Щигровский (784-810 м)"), (805.0, 807.0, "", "Горизонт Щигровский (784-810 м)"),
+                                (797.0, 799.0, "", "Горизонт Щигровский (784-810 м)")])
+    gr.resolve_packs([named, bare])
+    assert [r["Пачка"] for r in bare.intervals] == ["Верхняя пачка", "Нижняя пачка", ""]
+    assert "по глубине" in bare.intervals[0]["Основание"] and bare.intervals[0]["Уверенность"] == gr.MID
+    assert any(i["Код"] == "pack_by_depth" for i in bare.issues)
+
+
+def test_pack_by_depth_not_applied_when_ranges_overlap_or_other_well():
+    a = _pack_rep("a.docx", [(784.8, 796.0, "Верхняя пачка", "x"), (790.0, 800.0, "Покрышка", "y")])
+    b = _pack_rep("b.docx", [(791.0, 792.0, "", "Горизонт Щигровский")])
+    gr.resolve_packs([a, b])
+    assert b.intervals[0]["Пачка"] == ""
+    c = _pack_rep("c.docx", [(791.0, 792.0, "", "Горизонт Щигровский")])
+    c.well = "99"
+    gr.resolve_packs([_pack_rep("a2.docx", [(784.8, 796.0, "Верхняя пачка", "x")]), c])
+    assert c.intervals[0]["Пачка"] == ""
