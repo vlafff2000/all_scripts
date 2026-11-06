@@ -323,3 +323,33 @@ def test_interannular_collection_same_with_parallel_files(tmp_path, monkeypatch)
         outs[label] = run_module("Сбор_данных_по_межколонным_давлениям", {"root": str(tmp_path / "src")}, tmp_path / label)
     assert outs["one"]["files"] and outs["one"]["files"] == outs["many"]["files"]
     _same_books(tmp_path / "one", tmp_path / "many", outs["one"]["files"])
+
+
+def test_dates_empty_for_whole_group_are_not_idle_days(tmp_path):
+    """Пустая за дату матрица часов и расходов у всей группы — группа не в работе: строк за эти даты в базе нет (не простой).
+    Ноль в исходнике (простой) и пустая ячейка отдельной скважины остаются строками с нулём."""
+    import openpyxl
+    tree = make_flow_tree(tmp_path / "data", plant_per_sheet=0)
+    book = next(p for p in tree.files if "Отбор" in p.name)
+    wb = openpyxl.load_workbook(book)
+    ws = wb[wb.sheetnames[1]]
+    n = len(tree.wells)
+    header, gas0, hrs0 = 3, 4, 4 + n + 3 + 1          # шапка дат, первая строка газа, первая строка часов
+    first = ws.cell(header, 3).value
+    off_cols = (3 + 4, 3 + 5)                           # две даты внутри месяца: вся группа пуста
+    for col in off_cols:
+        for i in range(n):
+            ws.cell(gas0 + i, col).value = None
+            ws.cell(hrs0 + i, col).value = None
+    ws.cell(gas0, 3 + 8).value = None                   # у одной скважины пусто только расход и часы одной даты
+    ws.cell(hrs0, 3 + 8).value = None
+    off_dates = {ws.cell(header, c).value for c in off_cols}
+    one_date = ws.cell(header, 3 + 8).value
+    wb.save(book)
+    run_module("Создание_базы_данных_расходов", {"root": str(tree.root), "periods": str(tree.periods_file)}, tmp_path / "db")
+    db = pd.read_excel(tmp_path / "db" / "Сводка_закачка_отбор_обновленный_скрипт.xlsx", sheet_name="Отборы")
+    db["Дата"] = pd.to_datetime(db["Дата"])
+    got = set(db["Дата"])
+    assert not (off_dates & got) and first in got                               # группа стояла: дат нет
+    one = db[(db["Дата"] == one_date) & (db["Скважина"].astype(str) == tree.wells[0])]
+    assert len(one) == 1 and one["Время работы"].iloc[0] == 0                   # пустая ячейка одной скважины — нулевые сутки

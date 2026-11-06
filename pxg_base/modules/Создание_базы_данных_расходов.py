@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 import xlsxwriter
 from pxg_core.parallel import map_module_function
-from pxg_core.расходы_файлы import split_combined_wells, validate_header_dates, write_date_issues, reset_date_issues, trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent
+from pxg_core.расходы_файлы import split_combined_wells, validate_header_dates, write_date_issues, reset_date_issues, trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent, blank_cells, drop_group_off_days
 
 
 def find_matching_sheets(file_path, expected_sheets):
@@ -50,11 +50,13 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
         if df is None:
             return None, None
 
+        blank = blank_cells(df)          # пустая ячейка исходника: нужна, чтобы отличить «нет записи» от нуля
         df = df.fillna(0)
 
         # Берем нужные столбцы
         max_columns = min(32, len(df.columns) - start_col)
         df = df.iloc[:, start_col:start_col + max_columns]
+        blank = blank.iloc[:, start_col:start_col + max_columns]
 
         # Если это таблица газа, получаем даты из первой строки
         if table_type == "gas":
@@ -93,13 +95,16 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
 
         columns = ['Скважины'] + [f'col_{i}' for i in range(len(df.columns) - 1)]
         df.columns = columns
+        blank.columns = columns
 
         if table_type == "gas":
             df = df.iloc[1:]
+            blank = blank.iloc[1:]
 
         df['Скважины'] = df['Скважины'].astype(str).str.strip()
         # строки итогов под таблицей («Итого», «Всего») не скважины
         df = df[~df['Скважины'].str.lower().str.startswith(('итого', 'всего', 'total'))]
+        blank = blank.loc[df.index]
 
         # Преобразуем в длинный формат
         df_long = df.melt(id_vars=['Скважины'],
@@ -108,6 +113,7 @@ def extract_table_data(file_path, sheet_name, start_row, start_col, wells_count,
                           value_name='Значение')
 
         # Восстанавливаем даты
+        df_long['Пусто'] = blank[[c for c in df.columns if c != 'Скважины']].melt()['value'].to_numpy()
         df_long['Дата'] = df_long['Дата_кол'].map(date_mapping)
         df_long = df_long.drop('Дата_кол', axis=1)
         df_long = df_long[df_long['Дата'].notna()]
@@ -320,8 +326,10 @@ def process_excel_file_intelligent(file_path, year=None, season=None, data_type=
                 df_gas,
                 df_time,
                 on=['Скважина', 'Дата', 'Месяц', 'Источник'],
-                how='inner'
+                how='inner',
+                suffixes=('_газ', '_время')
             )
+            df_combined = drop_group_off_days(df_combined)
 
             if len(df_combined) > 0:
                 # Вычисляем суточный расход газа
