@@ -483,3 +483,41 @@ def test_rpl_table_has_english_export_mapping():
     frame = gr._frame(rep.rpl)
     out = gr._en(frame, gr.EN["gis_pressure_rpl"])
     assert {"well", "date", "pressure_kgs"} <= set(out.columns) and out["pressure_kgs"].tolist() == [80.3]
+
+
+# ---- строгий номер скважины: посторонние слова не попадают в БД, сомнительное — в лист «Проверка» ----
+@pytest.mark.parametrize("text", ["Акт ГИС по скважине, альтитуда 120 м", "Скважина\nАльтитуда: 120 м", "Скважины ПХГ\nНедропользователь: ООО",
+                                  "Скважина: Альтитуда", "Скважина: ГИС", "Скважина: 503-", "Скважина: o42", "Скважина: Таблица 1"])
+def test_garbage_is_not_well_number(text):
+    # баг: в поле «скважина» попадали «ы», «а», «е», «Альтитуда», «ГИС», «Недропользователь»
+    rep = gr.parse_blocks([wt.Para(text)], "x.docx")
+    assert rep.well == ""
+    assert any(i["Код"] in ("no_well", "bad_well") for i in rep.issues)
+
+
+def test_bad_well_keeps_raw_text_in_issue():
+    rep = gr.parse_blocks([wt.Para("Скважина: o42")], "x.docx")
+    bad = [i for i in rep.issues if i["Код"] == "bad_well"]
+    assert bad and "o42" in bad[0]["Сообщение"]
+
+
+@pytest.mark.parametrize("text, want", [("Скважина: 21", "21"), ("Скважина: 7А", "7А"), ("Скважина: 12-2", "12-2"), ("Скважина: 115/200", "115/200"), ("по скважине №115/200 ПХГ", "115/200"),("по скважине №305 ПХГ", "305")])
+def test_valid_well_shapes(text, want):
+    assert gr.parse_blocks([wt.Para(text)], "x.docx").well == want
+
+
+def test_unknown_well_is_kept_but_flagged():
+    gr.set_known_wells(["21", "22"])
+    try:
+        rep = gr.parse_blocks([wt.Para("Скважина: 99")], "x.docx")
+        assert rep.well == "99"
+        assert any(i["Код"] == "unknown_well" for i in rep.issues)
+        assert not any(i["Код"] == "unknown_well" for i in gr.parse_blocks([wt.Para("Скважина: 21")], "x.docx").issues)
+    finally:
+        gr.set_known_wells([])
+
+def test_known_wells_file_one_column(tmp_path):
+    for name, body in (("a.txt", "Скважина\n21\n115/200\n7А\n"), ("b.csv", "21\n115/200\n7А\n"), ("c.csv", "well;x\n21;1\n115/200;2\n7А;3\n")):
+        f = tmp_path / name
+        f.write_text(body, encoding="utf-8")
+        assert gr.load_known_wells(str(f)) == ["115/200", "21", "7А"], name

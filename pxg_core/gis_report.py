@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
 import os
 import re
 from collections import OrderedDict, defaultdict
@@ -176,6 +177,73 @@ def _find(kv: List[Tuple[str, str, str]], rx: str) -> Optional[Tuple[str, str, s
     return None
 
 
+# строгий номер скважины: 1–4 цифры, не более одной буквы, необязательный «-номер ствола» (21, 7А, 12-2)
+_WELL_SHAPE = re.compile(r"\d{1,4}[A-Za-zА-Яа-яЁё]?(?:-\d{1,3}|/\d{1,4}[A-Za-zА-Яа-яЁё]?)?")
+_KNOWN_WELLS: set = set()
+
+
+def set_known_wells(wells) -> None:
+    """Известные скважины (например, из БД конструкций): номер вне списка не отбрасывается, а попадает в лист «Проверка». Пустой список — проверка отключена."""
+    global _KNOWN_WELLS
+    _KNOWN_WELLS = {well_norm(w) for w in wells if str(w).strip()}
+
+
+def load_known_wells(path: str) -> List[str]:
+    """Номера скважин объекта: файл в один столбец (txt/csv/xlsx, заголовок необязателен) или любая таблица со столбцом `well` / «Скважина»."""
+    p = str(path)
+    if p.lower().endswith((".xlsx", ".xls")):
+        df = pd.read_excel(p, dtype=str, header=None)
+    else:
+        raw = open(p, encoding="utf-8-sig").read()
+        df = pd.read_csv(io.StringIO(raw), sep=";" if ";" in raw else "\t" if "\t" in raw else ",", dtype=str, header=None, engine="python")
+    head = [str(x).strip().lower() for x in df.iloc[0]] if len(df) else []
+    col = next((i for i, h in enumerate(head) if h in ("well", "скважина", "скв", "скв.", "номер скважины")), 0)
+    vals = [str(x).strip() for x in df.iloc[:, col].dropna()] if len(df.columns) else []
+    return sorted({qc.well_key(v) for v in vals if valid_well(qc.well_key(v))})
+
+
+def well_norm(w) -> str:
+    return qc.well_key(w).upper().replace("A", "А")
+
+
+def valid_well(key: str) -> bool:
+    return bool(_WELL_SHAPE.fullmatch(key or ""))
+
+
+def _pick_well(rep: "Report", kv, text: str, cells_text: str) -> None:
+    """Номер скважины из шапки. Берётся только значение формы «21», «7А», «12-2»; всё остальное («Альтитуда», «ы», «503-», «o42») не попадает в БД,
+    а записывается в «Проверку» с исходным текстом — решает инженер."""
+    cands = []      # (сырой текст, надёжный ли источник)
+    hit = _find(kv, r"^скважина$")
+    if hit:
+        cands.append((hit[1], True))
+    sign = r"скважин\w*[ \t]*(?:№|N|No)[ \t]*([\w][\w\-/]*)"
+    for rx, src in ((sign, text), (r"(?:№|(?<![A-Za-z])No|(?<![A-Za-z])N)\s*(\d+(?:-\d+)?(?:[а-яa-z](?![а-яa-z]))?)", cells_text)):
+        m = re.search(rx, src, re.I)
+        if m:
+            cands.append((m.group(1), True))
+    m = re.search(r"скважин(?:а|ы|е|у|ой)?\b[ \t:]*([^\s,;:()]+)", text, re.I)
+    if m:
+        cands.append((m.group(1), False))
+    bad = []
+    for raw, solid in cands:
+        key = qc.well_key(raw.strip().strip(".,;:"))
+        if valid_well(key):
+            rep.well = key
+            break
+        if raw.strip() and (solid or any(ch.isdigit() for ch in raw)):
+            bad.append(raw.strip())
+    if rep.well:
+        if _KNOWN_WELLS and well_norm(rep.well) not in _KNOWN_WELLS:
+            rep.issue("warn", "unknown_well", "Номера «%s» нет в списке известных скважин: проверить, не ошибка ли распознавания" % rep.well, "шапка")
+        return
+    for raw in dict.fromkeys(bad):
+        hint = ""
+        fix = qc.well_key(re.sub(r"(?<![A-Za-zА-Яа-я])[OoОо](?=\d)", "0", raw))
+        if fix != raw and valid_well(fix) and (not _KNOWN_WELLS or well_norm(fix) in _KNOWN_WELLS):
+            hint = "; возможно, «%s»" % fix
+        rep.issue("error", "bad_well", "В поле номера скважины «%s» — это не номер (ждём вида 21, 7А, 12-2); скважина не определена%s" % (raw[:60], hint), "шапка")
+
 def read_header(rep: Report, blocks: List[wt.Block]) -> None:
     for b in blocks:
         if isinstance(b, wt.Table):
@@ -187,15 +255,8 @@ def read_header(rep: Report, blocks: List[wt.Block]) -> None:
                 rep.kv.append((m.group(1).strip(), m.group(2).strip(), "абзац"))
     text = "\n".join(b.text for b in blocks if isinstance(b, wt.Para))
     kv = rep.kv
-    hit = _find(kv, r"^скважина$")
-    if hit:
-        rep.well = qc.well_key(hit[1])
     cells_text = "\n".join(c.text for b in blocks[:6] if isinstance(b, wt.Table) for r in b.rows for c in r.cells)   # шапка в таблице: подписи и значения могут быть склеены (OCR)
-    if not rep.well:
-        sign = r"скважин\w*\s*(?:№|N|No)\s*([\w][\w\-/]*)"
-        m = (re.search(sign, text, re.I) or re.search(r"(?:№|(?<![A-Za-z])No|(?<![A-Za-z])N)\s*(\d+(?:-\d+)?(?:[а-яa-z](?![а-яa-z]))?)", cells_text)
-             or re.search(r"скважин\w*\s*([\w][\w\-/]*)", text, re.I))
-        rep.well = qc.well_key(m.group(1)) if m else ""
+    _pick_well(rep, kv, text, cells_text)
     sto = r"([А-ЯЁ][а-яё]+(?:ского|ское|ский|ое))\s+"
     m = (re.search(sto + r"ПХГ", text) or re.search(sto + r"ПХГ", cells_text) or re.search(sto + r"(?:УПХГ|ПХГ)", text)
          or re.search(r"([А-ЯЁ][а-яё]+(?:ского|ское|ского|ский)?)\s+(?:УПХГ|ПХГ)", text))
