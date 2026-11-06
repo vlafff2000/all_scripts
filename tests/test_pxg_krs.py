@@ -274,31 +274,32 @@ def test_acts_written_to_summary_with_fill(tmp_path):
 
 
 def make_sprav(path):
-    docx = pytest.importorskip("docx")
-    from docx.enum.text import WD_COLOR_INDEX as HL
-    d = docx.Document()
-    d.add_paragraph("Справка по выполнению Плана капитального ремонта скважин на Касимовском ПХГ в 2026г.")
-    t = d.add_table(rows=4, cols=8)
-    for i, v in enumerate(["Шифр", "По плану", "По плану", "Выполнено", "Выполнено", "Примечания", "", ""]):
-        t.rows[0].cells[i].text = v
-    t.rows[1].cells[0].text = "шифр"
-    rows = [
-        ("КР 1.094-ПА Замена фильтра. КР 4.033-ЗР Кислотная обработка", "3", [("11(Э)", HL.BRIGHT_GREEN), ("12(Э)", HL.YELLOW), ("13(Э)", HL.RED)], "1", [("11(Э)", HL.BRIGHT_GREEN)],
-         "2 квартал / Cкв№11 / Начата ремонтом / 06.07.26г / Дата окончания / 01.09.2026г / Cкв№12 / Начата ремонтом / 14.01.26г / Дата окончания / 31.08.2026г",
-         "Скв13 статус / В план КР"),
-        ("КР 2.022 ГТ Ликвидация пробки", "1", [("14(Н)", None)], "", [], "3 квартал", "Скв14статус / Утвержден"),
-    ]
-    for r, (code, n, plan, nd, done, note, st) in zip(t.rows[2:], rows):
-        r.cells[0].text, r.cells[1].text, r.cells[3].text, r.cells[5].text, r.cells[6].text = code, n, nd, note, st
-        for cell, items in ((r.cells[2], plan), (r.cells[4], done)):
-            first = True
-            for txt, hl in items:
-                p = cell.paragraphs[0] if first else cell.add_paragraph()
-                first = False
-                run = p.add_run(txt)
-                if hl is not None:
-                    run.font.highlight_color = hl
-    d.save(path)
+    """Минимальный .docx без python-docx: заголовок и таблица (выделение текста — w:highlight)."""
+    import zipfile
+    from xml.sax.saxutils import escape
+
+    def run(txt, hl=None):
+        pr = '<w:rPr><w:highlight w:val="%s"/></w:rPr>' % hl if hl else ""
+        return "<w:r>%s<w:t>%s</w:t></w:r>" % (pr, escape(txt))
+
+    def cell(items):          # items: [(текст, выделение)], каждый — свой абзац
+        return "<w:tc>%s</w:tc>" % "".join("<w:p>%s</w:p>" % run(t, h) for t, h in items)
+
+    def row(*cells):
+        return "<w:tr>%s</w:tr>" % "".join(cell(c if isinstance(c, list) else [(c, None)]) for c in cells)
+
+    head = row("Шифр", "По плану", "По плану", "Выполнено", "Выполнено", "Примечания", "", "")
+    r1 = row("КР 1.094-ПА Замена фильтра. КР 4.033-ЗР Кислотная обработка", "3", [("11(Э)", "green"), ("12(Э)", "yellow"), ("13(Э)", "red")], "1",
+             [("11(Э)", "green")],
+             "2 квартал / Cкв№11 / Начата ремонтом / 06.07.26г / Дата окончания / 01.09.2026г / Cкв№12 / Начата ремонтом / 14.01.26г / Дата окончания / 31.08.2026г",
+             "Скв13 статус / В план КР", "")
+    r2 = row("КР 2.022 ГТ Ликвидация пробки", "1", [("14(Н)", None)], "", "", "3 квартал", "Скв14статус / Утвержден", "")
+    body = ('<w:p>%s</w:p><w:tbl>%s%s%s</w:tbl>' % (
+        run("Справка по выполнению Плана капитального ремонта скважин на Касимовском ПХГ в 2026г."), head, r1, r2))
+    xml = ('<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+           '<w:body>%s</w:body></w:document>' % body)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("word/document.xml", xml)
 
 
 def test_sprav_plan_db(tmp_path):

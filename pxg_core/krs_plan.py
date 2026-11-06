@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import re
+import zipfile
+import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -19,8 +21,8 @@ from pxg_core import krs
 PLAN_COLUMNS = ["Год", "Скважина", "Тип скважины", "Вид", "Шифры работ", "Коды работ", "Квартал", "Цвет в справке", "Состояние",
                 "Дата начала", "Дата окончания", "Статус справки", "Ремонт будет", "В таблицу 7.1", "Проверить", "Файл"]
 STATE_DONE, STATE_PROGRESS, STATE_CANCEL, STATE_PLAN = "Выполнено", "В процессе", "Не делают", "Не начато"
-COLOR_STATE = {"BRIGHT_GREEN": STATE_DONE, "GREEN": STATE_DONE, "YELLOW": STATE_PROGRESS, "RED": STATE_CANCEL}
-COLOR_NAME = {"BRIGHT_GREEN": "зелёный", "GREEN": "зелёный", "YELLOW": "жёлтый", "RED": "красный"}
+COLOR_STATE = {"green": STATE_DONE, "yellow": STATE_PROGRESS, "red": STATE_CANCEL}      # значения w:highlight в Word
+COLOR_NAME = {"green": "зелёный", "yellow": "жёлтый", "red": "красный"}
 APPROVED = "Утвержден"
 WELL_TYPES = {"Э": "эксплуатационная", "Н": "наблюдательная", "П": "поглощающая"}
 
@@ -37,13 +39,60 @@ def _date(d: str, m: str, y: str) -> str:
     return "%02d.%02d.%d" % (int(d), int(m), y + 2000 if y < 100 else y)
 
 
-def _cells(row):
-    seen, out = [], []
-    for c in row.cells:
-        if c._tc not in seen:
-            seen.append(c._tc)
-            out.append(c)
-    return out
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+class Cell:
+    """Ячейка Word: абзацы как списки (текст, выделение)."""
+    def __init__(self, paragraphs: List[List[Tuple[str, Optional[str]]]]):
+        self.paragraphs = paragraphs
+
+    @property
+    def text(self) -> str:
+        return "\n".join("".join(t for t, _ in p) for p in self.paragraphs)
+
+
+def _run_text(r) -> str:
+    out = []
+    for el in r:
+        if el.tag == W + "t":
+            out.append(el.text or "")
+        elif el.tag == W + "tab":
+            out.append("\t")
+        elif el.tag == W + "br":
+            out.append("\n")
+    return "".join(out)
+
+
+def _cell(tc) -> Cell:
+    paras = []
+    for p in tc.findall(W + "p"):
+        runs = []
+        for r in p.iter(W + "r"):
+            h = r.find(W + "rPr/" + W + "highlight")
+            runs.append((_run_text(r), h.get(W + "val") if h is not None else None))
+        paras.append(runs)
+    return Cell(paras)
+
+
+def read_docx_tables(path: str) -> Tuple[List[str], List[List[List[Cell]]]]:
+    """Абзацы вне таблиц и таблицы (строки → ячейки), стандартной библиотекой: python-docx (lxml) на РЕД ОС 7.3 не нужен."""
+    with zipfile.ZipFile(path) as z:
+        root = ET.fromstring(z.read("word/document.xml"))
+    body = root.find(W + "body")
+    paras = ["".join(_run_text(r) for r in p.iter(W + "r")) for p in body.findall(W + "p")]
+    tables = []
+    for tbl in body.findall(W + "tbl"):
+        rows = []
+        for tr in tbl.findall(W + "tr"):
+            cells = []
+            for tc in tr.findall(W + "tc"):
+                v = tc.find(W + "tcPr/" + W + "vMerge")
+                cont = v is not None and v.get(W + "val") != "restart"
+                cells.append(Cell([[]]) if cont else _cell(tc))
+            rows.append(cells)
+        tables.append(rows)
+    return paras, tables
 
 
 def split_codes(text: str) -> Tuple[List[str], str]:
@@ -60,10 +109,8 @@ def wells_with_colors(cell) -> List[Tuple[int, str, Optional[str]]]:
     out = []
     for p in cell.paragraphs:
         chars = []
-        for run in p.runs:
-            hl = run.font.highlight_color
-            name = str(hl).split(" ")[0] if hl is not None else None
-            chars += [(ch, name) for ch in run.text]
+        for txt, name in p:
+            chars += [(ch, name) for ch in txt]
         text = "".join(ch for ch, _ in chars)
         for m in WELL_TOKEN.finditer(text):
             out.append((int(m.group(1)), m.group(2) or "", chars[m.start()][1]))
@@ -105,26 +152,24 @@ def parse_status(text: str) -> Dict[int, str]:
     return out
 
 
-def _year(doc) -> Optional[int]:
-    for p in doc.paragraphs:
-        m = re.search(r"плана[^.]*?\bв\s+(20\d\d)\s*г", p.text, re.I)
+def _year(paras: List[str]) -> Optional[int]:
+    for p in paras:
+        m = re.search(r"плана[^.]*?\bв\s+(20\d\d)\s*г", p, re.I)
         if m:
             return int(m.group(1))
     return None
 
 
 def parse_sprav(path: str) -> Tuple[pd.DataFrame, List[Tuple[str, str]]]:
-    import docx
-    doc = docx.Document(path)
-    year = _year(doc)
+    paras, tables = read_docx_tables(path)
+    year = _year(paras)
     notes: List[Tuple[str, str]] = []
     if year is None:
         notes.append(("предупреждение", "В справке не найден год плана (заголовок «… в 2026г»): год возьмите из дат, проверьте"))
     rows: List[dict] = []
     fname = path.replace("\\", "/").rsplit("/", 1)[-1]
-    for table in doc.tables:
-        for row in table.rows:
-            cells = _cells(row)
+    for table in tables:
+        for cells in table:
             if len(cells) < 6 or not re.fullmatch(r"\d+", cells[1].text.strip() or "x"):
                 continue                      # шапка и чужие строки
             codes, names = split_codes(cells[0].text)
