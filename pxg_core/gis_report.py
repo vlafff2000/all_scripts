@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
 import os
 import re
 from collections import OrderedDict, defaultdict
@@ -188,11 +189,17 @@ def set_known_wells(wells) -> None:
 
 
 def load_known_wells(path: str) -> List[str]:
-    """Столбец `well` из csv/xlsx (БД конструкций из отчётов ГИС)."""
+    """Номера скважин объекта: файл в один столбец (txt/csv/xlsx, заголовок необязателен) или любая таблица со столбцом `well` / «Скважина»."""
     p = str(path)
-    df = pd.read_excel(p, dtype=str) if p.lower().endswith((".xlsx", ".xls")) else pd.read_csv(p, sep=None, engine="python", dtype=str, encoding="utf-8-sig")
-    col = next((c for c in df.columns if str(c).strip().lower() in ("well", "скважина")), None)
-    return sorted({qc.well_key(x) for x in df[col].dropna()}) if col else []
+    if p.lower().endswith((".xlsx", ".xls")):
+        df = pd.read_excel(p, dtype=str, header=None)
+    else:
+        raw = open(p, encoding="utf-8-sig").read()
+        df = pd.read_csv(io.StringIO(raw), sep=";" if ";" in raw else "\t" if "\t" in raw else ",", dtype=str, header=None, engine="python")
+    head = [str(x).strip().lower() for x in df.iloc[0]] if len(df) else []
+    col = next((i for i, h in enumerate(head) if h in ("well", "скважина", "скв", "скв.", "номер скважины")), 0)
+    vals = [str(x).strip() for x in df.iloc[:, col].dropna()] if len(df.columns) else []
+    return sorted({qc.well_key(v) for v in vals if valid_well(qc.well_key(v))})
 
 
 def well_norm(w) -> str:

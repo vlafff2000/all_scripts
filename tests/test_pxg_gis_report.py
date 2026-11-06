@@ -515,3 +515,9 @@ def test_unknown_well_is_kept_but_flagged():
         assert not any(i["Код"] == "unknown_well" for i in gr.parse_blocks([wt.Para("Скважина: 21")], "x.docx").issues)
     finally:
         gr.set_known_wells([])
+
+def test_known_wells_file_one_column(tmp_path):
+    for name, body in (("a.txt", "Скважина\n21\n115/200\n7А\n"), ("b.csv", "21\n115/200\n7А\n"), ("c.csv", "well;x\n21;1\n115/200;2\n7А;3\n")):
+        f = tmp_path / name
+        f.write_text(body, encoding="utf-8")
+        assert gr.load_known_wells(str(f)) == ["115/200", "21", "7А"], name
