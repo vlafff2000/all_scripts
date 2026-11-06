@@ -576,3 +576,14 @@ def test_well_from_file_name_only_if_in_known_list():
     finally:
         gr.set_known_wells([])
     assert gr.parse_blocks([wt.Para("Акт ГИС")], "141Касимов_280524.docx").well == ""
+
+
+def test_same_file_name_in_two_folders_is_not_doubled(ra):
+    # баг: одноимённые отчёты из разных папок оба попадали в БД, и каждый интервал был записан дважды
+    import copy
+    twin = copy.deepcopy(ra)
+    twin.path = os.path.join("other_folder", os.path.basename(ra.path or ra.file))
+    once, _ = gr.build([ra])
+    twice, _ = gr.build([ra, twin])
+    assert len(twice["Строки БД"]) == len(once["Строки БД"])
+    assert (twice["Интервалы"]["В БД"] == "да").sum() == (once["Интервалы"]["В БД"] == "да").sum()
