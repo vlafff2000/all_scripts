@@ -673,17 +673,19 @@ def test_row_with_only_vertical_continuations_is_not_a_pack_heading():
 
 def test_merged_gas_cell_covers_all_rows_it_spans():
     # баг: Нг и Кг в ячейке, объединённой по вертикали на несколько строк-интервалов, относились только к первой строке:
-    # hi получался 2,7 вместо 5,4, а сумма Нг по замеру не сходилась с отчётом (11,2)
+    # сумма Нг по замеру не сходилась с отчётом (8,5 вместо 11,2). Теперь значение повторяется на каждой строке-интервале
+    # (так же устроена Excel-база: границы строк сохраняются, ГВК режет по границе строки)
     rep = gr.Report(file="x.docx", well="10")
     gr.read_intervals(rep, _nz_table(), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     rows = {(r["Столбец-замер"][:7], r["От, м"], r["До, м"]): r for r in rep.intervals}
-    r = rows[("10.2022", 790.6, 796.0)]
-    assert r["hi, м"] == 5.4 and r["Нг по отчёту, м"] == 5.4 and r["Кг"] == 0.65
-    assert ("10.2022", 790.6, 793.3) not in rows
+    for key in (("10.2022", 790.6, 793.3), ("10.2022", 793.3, 794.6), ("10.2022", 794.6, 795.3), ("10.2022", 795.3, 796.0)):
+        assert rows[key]["Кг"] == 0.65 and rows[key]["Нг по отчёту, м"] == 5.4
     gas = [x for x in rep.intervals if x["Столбец-замер"].startswith("10.2022") and x["Кг"] is not None]
     assert round(sum(x["hi, м"] for x in gas), 1) == 11.2
-    water = rows[("04.2023", 793.3, 800.0)]
-    assert water["Кг"] is None and water["Нг по отчёту, м"] == 6.7
+    water = [x for x in rep.intervals if x["Столбец-замер"].startswith("04.2023") and x["Кг"] is None]
+    assert [(x["От, м"], x["До, м"]) for x in water] == [(793.3, 794.6), (794.6, 795.3), (795.3, 796.0), (796.0, 800.0)]
+    assert "объединённой по вертикали" in rows[("10.2022", 793.3, 794.6)]["Основание"]
+
 
 
 def test_kg_with_footnote_mark_or_comment_is_a_number():
