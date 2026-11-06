@@ -1413,9 +1413,21 @@ def table_kind(tbl: wt.Table) -> Tuple[str, int]:
     return "", nh
 
 
+_EPB_RX = re.compile(r"(?:диагностик\w*|определени\w*|оценк\w*|контрол\w*|обследовани\w*)\s+(?:\w+\s+){0,2}?техническ\w+\s+состояни\w*|техническ\w+\s+состояни\w*\s+(?:скважин|колонн|обсадн)|диагностик\w*\s+скважин", re.I)
+
+
+def report_kind(blocks: List[wt.Block]) -> str:
+    """«ГИС при ЭПБ» — по тексту шапки отчёта (решаемые задачи, заголовок): диагностика / оценка / определение технического состояния скважины.
+    ГИС-контроль этих слов в шапке не содержит."""
+    head = " ".join(b.text for b in blocks[:30] if isinstance(b, wt.Para))[:6000]
+    head += " " + " ".join(c.text for b in blocks[:8] if isinstance(b, wt.Table) for r in b.rows for c in r.cells)[:3000]
+    return KIND_EPB if _EPB_RX.search(head) else ""
+
+
 def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, str]] = None) -> Report:
     rep = Report(file=os.path.basename(file), path=file)
     read_header(rep, blocks)
+    rep.kind = report_kind(blocks)
     last_title, section = "", ""
     sec_rx = re.compile(r"^(отбивка|определение|оценка|поиск|результаты|выводы|таблица)", re.I)
     for b in blocks:
@@ -1598,13 +1610,11 @@ def check_report(rep: Report) -> None:
         rep.issue("warn", "no_thermo", "Температура и давление по глубинам не найдены (ни в таблице, ни в тексте)")
     if not rep.filling:
         rep.issue("note", "no_filling", "Заполнение ствола не найдено")
-    types = {t.get("Тип") for t in rep.tables}
-    if not rep.tables:
-        rep.issue("warn", "no_tables", "Ни одной таблицы нужного вида не найдено (таблицы без разлиновки в PDF или не распознанные OCR): отчёт не считается «ГИС при ЭПБ», значения могли потеряться")
-    if not rep.intervals and not types & {"интервалы насыщения", "ГВК по датам"} and types & {"комплекс ГИС", "термобарика", "заполнение ствола"}:
-        rep.kind = KIND_EPB
-        rep.issue("note", "report_kind_epb", "Вид отчёта «ГИС при ЭПБ»: таблиц интервалов насыщения и ГВК нет, комплекс ГИС, термобарика и заполнение разобраны")
+    if rep.kind:
+        rep.issue("note", "report_kind_epb", "Вид отчёта «ГИС при ЭПБ» (по тексту шапки): диагностика технического состояния скважины, таблиц интервалов насыщения может не быть")
     elif not rep.intervals:
+        if not rep.tables:
+            rep.issue("warn", "no_tables", "Ни одной таблицы нужного вида не найдено (таблицы без разлиновки в PDF или не распознанные OCR): значения могли потеряться")
         rep.issue("warn", "no_intervals", "Таблица результатов интерпретации (интервалы по пачкам) не найдена")
     heads = {p["Заголовок в документе"] for p in rep.packs if p.get("_kind") == "heading" and not p.get("Пачка")}
     for h in sorted(heads):

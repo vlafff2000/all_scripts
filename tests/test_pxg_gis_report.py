@@ -594,13 +594,6 @@ def _codes(rep):
     return {i["Код"] for i in rep.issues}
 
 
-def test_report_without_interval_tables_is_epb_not_no_intervals():
-    rep = gr.Report(file="x.docx", well="21", complex=[{"x": 1}], tables=[{"Тип": "комплекс ГИС"}, {"Тип": "термобарика"}])
-    gr.check_report(rep)
-    assert rep.kind == "ГИС при ЭПБ"
-    assert "report_kind_epb" in _codes(rep) and "no_intervals" not in _codes(rep)
-
-
 def test_interval_table_without_rows_is_still_a_warning():
     rep = gr.Report(file="x.docx", well="21", complex=[{"x": 1}], tables=[{"Тип": "интервалы насыщения"}])
     gr.check_report(rep)
@@ -872,3 +865,23 @@ def test_report_with_no_recognized_tables_is_not_epb():
     rep = gr.Report(file="x.pdf", well="1", bottoms=[{"x": 1}, {"x": 2}], thermo=[{"x": 1}])
     gr.check_report(rep)
     assert rep.kind == "" and "no_intervals" in _codes(rep) and "no_tables" in _codes(rep) and "report_kind_epb" not in _codes(rep)
+
+
+# ---- вид отчёта «ГИС при ЭПБ» определяется по тексту шапки, не по отсутствию таблиц ----
+@pytest.mark.parametrize("text", ["РЕШАЕМЫЕ ЗАДАЧИ: Оценка технического состояния скважины, оценка характера насыщения пласта-коллектора",
+                                  "Диагностика технического состояния скважины", "Определение технического состояния эксплуатационной колонны",
+                                  "Цель: диагностика скважины, дефектоскопия колонны"])
+def test_epb_kind_from_header_text(text):
+    rep = gr.parse_blocks([wt.Para("Скважина: 21"), wt.Para(text)], "x.docx")
+    assert rep.kind == gr.KIND_EPB and "report_kind_epb" in _codes(rep) and "no_intervals" not in _codes(rep)
+
+
+def test_control_report_is_not_epb_even_without_tables():
+    rep = gr.parse_blocks([wt.Para("Скважина: 21"), wt.Para("РЕШАЕМЫЕ ЗАДАЧИ: Определение характера насыщения пласта-коллектора (Кг), положения ГВК")], "x.pdf")
+    assert rep.kind == "" and "no_intervals" in _codes(rep) and "report_kind_epb" not in _codes(rep)
+
+
+def test_tables_without_header_phrase_do_not_make_epb():
+    rep = gr.Report(file="x.docx", well="1", complex=[{"x": 1}], tables=[{"Тип": "комплекс ГИС"}, {"Тип": "термобарика"}])
+    gr.check_report(rep)
+    assert rep.kind == "" and "no_intervals" in _codes(rep)
