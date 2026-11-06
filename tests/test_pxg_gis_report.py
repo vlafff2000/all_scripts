@@ -693,3 +693,11 @@ def test_kg_with_footnote_mark_or_comment_is_a_number():
     assert gr._kg("0.60\n(заглинизирован)", True)[0] == 0.6
     assert gr._kg("50-55*")[1:3] == (0.5, 0.55)
     assert gr._kg("(заглинизирован)")[0] is None and gr._kg("-")[0] is None and gr._kg("водонасыщен")[0] is None
+
+
+def test_docx_saved_with_doc_extension_is_read(tmp_path):
+    # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
+    p = tmp_path / "21Касимов_010120.doc"
+    _docx(str(p), "<w:p><w:r><w:t>Скважина: 21</w:t></w:r></w:p>")
+    rep = gr.parse_file(str(p))
+    assert not rep.error and rep.well == "21"
