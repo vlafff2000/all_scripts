@@ -1575,6 +1575,23 @@ def resolve_dates(reports: List[Report]) -> None:
             elif len(days[(d.year, d.month)]) == 1:
                 r["Дата замера"], r["Дата точная"] = next(iter(days[(d.year, d.month)])), True
                 r["Основание"] = "; ".join(x for x in (r["Основание"], "точная дата взята из таблицы «ГВК по датам»") if x)
+    # столбец-замер «10.2022» из более позднего отчёта: если по этой скважине в этом месяце есть ровно одна точная дата (отчёт или замер), это она
+    exact = defaultdict(set)
+    for rep in reports:
+        if rep.well and rep.date:
+            exact[(rep.well, rep.date.year, rep.date.month)].add(rep.date)
+        for r in rep.intervals:
+            if r["Дата замера"] is not None and r["Дата точная"]:
+                exact[(rep.well, r["Дата замера"].year, r["Дата замера"].month)].add(r["Дата замера"])
+    for rep in reports:
+        for r in rep.intervals:
+            d = r["Дата замера"]
+            if d is None or r["Дата точная"]:
+                continue
+            days = exact.get((rep.well, d.year, d.month), set())
+            if len(days) == 1:
+                r["Дата замера"], r["Дата точная"] = next(iter(days)), True
+                r["Основание"] = "; ".join(x for x in (r["Основание"], "точная дата замера взята из другого отчёта по этой скважине (в месяце ровно одна дата)") if x)
 
 
 def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[str, str]]:

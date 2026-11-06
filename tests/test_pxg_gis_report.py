@@ -724,3 +724,29 @@ def test_gvk_not_noted_and_table_gvk_not_duplicated():
     gr._add_gvk(rep, g, "Верхняя пачка", "Верхняя песчаная пачка", 796.0, None, "ГВК 796", "таблица 4", gr.HIGH, "")
     gr.read_gvk_text(rep, [wt.Para("ГВК в верхней песчаной пачке отмечается на глубине 796.0 м.")])
     assert len([p for p in rep.packs if p.get("_kind") == "gvk"]) == 1
+
+
+def test_month_only_column_gets_exact_date_from_another_report():
+    # баг: замер «10.2022» из отчёта 2023 года (столбец только с месяцем) получал дату 01.10.2022 и дублировал тот же замер
+    # из собственного отчёта 14.10.2022: в БД один замер был записан дважды под двумя датами
+    own = gr.Report(file="own.docx", well="10", date=dt.date(2022, 10, 14))
+    own.intervals = [_iv(100.0, 105.0, **{"Столбец-замер": "10.2022 г", "Дата замера": dt.date(2022, 10, 1), "Дата точная": False})]
+    later = gr.Report(file="later.docx", well="10", date=dt.date(2023, 4, 10))
+    later.intervals = [_iv(100.0, 105.0, **{"Столбец-замер": "10.2022 г", "Дата замера": dt.date(2022, 10, 1), "Дата точная": False}),
+                       _iv(100.0, 105.0, **{"Столбец-замер": "04.2023 г", "Дата замера": dt.date(2023, 4, 1), "Дата точная": False})]
+    gr.resolve_dates([own, later])
+    assert {r["Дата замера"] for r in own.intervals + later.intervals if r["Столбец-замер"].startswith("10.2022")} == {dt.date(2022, 10, 14)}
+    assert later.intervals[1]["Дата замера"] == dt.date(2023, 4, 10)
+    chosen = gr.pick_measurements([own, later])
+    assert sorted(d for (_w, d) in chosen) == [dt.date(2022, 10, 14), dt.date(2023, 4, 10)]      # замер 10.2022 один, не два
+
+
+def test_month_with_two_exact_dates_stays_month_only():
+    a = gr.Report(file="a.docx", well="10", date=dt.date(2022, 10, 14))
+    b = gr.Report(file="b.docx", well="10", date=dt.date(2022, 10, 25))
+    c = gr.Report(file="c.docx", well="10", date=dt.date(2023, 4, 1))
+    c.intervals = [_iv(100.0, 105.0, **{"Столбец-замер": "10.2022 г", "Дата замера": dt.date(2022, 10, 1), "Дата точная": False})]
+    a.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2022, 10, 14), "Дата точная": True})]
+    b.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2022, 10, 25), "Дата точная": True})]
+    gr.resolve_dates([a, b, c])
+    assert c.intervals[0]["Дата замера"] == dt.date(2022, 10, 1) and c.intervals[0]["Дата точная"] is False
