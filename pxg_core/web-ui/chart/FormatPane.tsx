@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/FormatPane.tsx @ d943607. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/FormatPane.tsx @ 870f8cd. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Панель «Формат» (как «Формат диаграммы» в Excel): один компонент для всех графиков Атласа. Слева выбор элемента — график,
 // оси, ряды; справа его настройки. Меняет график сразу. Оформление графика и осей пишется на выбранный уровень (раздел или
 // весь проект), вид рядов — в тему проекта по ключу ряда (один и тот же год или группа выглядит одинаково везде).
@@ -97,6 +97,7 @@ interface Props {
   scopeLabel?: string
   /** Тепловая карта, матрица, столбцы с подписями (рисуются в файле): оси не настраиваются, остальное — те же поля. */
   plain?: boolean
+  withAxes?: boolean      // «простой» вид, но оси настраиваются (столбцы с подписями в сегментах)
 }
 
 /** «Копировать формат» / «Вставить формат» для графика, оси или ряда: вставляется только в элемент того же вида. */
@@ -111,9 +112,9 @@ function Brush({ kind, value, paste }: { kind: 'chart' | 'axis' | 'series'; valu
   </>
 }
 
-export function FormatPane({ chart, element, onElement, scope, onScope, doc, onDoc, colorOf, looks, onLooks, onClose, onReplace, scopeLabel, plain }: Props) {
-  const axes = plain ? [] : AXES.filter(n => n === 'x' || n === 'y' || chart[n])
-  const [kind, id] = plain && element.startsWith('axis') ? ['chart', ''] : element.split(':')
+export function FormatPane({ chart, element, onElement, scope, onScope, doc, onDoc, colorOf, looks, onLooks, onClose, onReplace, scopeLabel, plain, withAxes }: Props) {
+  const axes = plain && !withAxes ? [] : AXES.filter(n => n === 'x' || n === 'y' || chart[n])
+  const [kind, id] = plain && !withAxes && element.startsWith('axis') ? ['chart', ''] : element.split(':')
   const axisName = (kind === 'axis' && axes.includes(id as AxisName) ? id : 'x') as AxisName
   const s = kind === 'series' ? chart.series[Math.min(Number(id) || 0, chart.series.length - 1)] : undefined
   const setChart = (patch: object) => onDoc({ ...doc, chart: compact({ ...doc.chart, ...patch }) })

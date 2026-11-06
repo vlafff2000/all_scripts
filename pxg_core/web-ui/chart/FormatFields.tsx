@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/FormatFields.tsx @ d943607. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/FormatFields.tsx @ 870f8cd. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AxisFormat } from './chartFormat'
 import type { Annotation, AxisStyle, ChartStyle } from './chartTypes'

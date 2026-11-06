@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartTypes.ts @ d943607. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartTypes.ts @ 870f8cd. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import type { Look } from './chartStyle'
 export type Cell = string | number | boolean | null
 /** Ручное оформление оси; пусто — авто (atlas/chart_style.py). */
@@ -55,7 +55,7 @@ export interface Series {
 export type WindowSeries = Pick<Series, 'x' | 'y' | 'ids' | 'labels' | 'values' | 'total'> & { window: number }
 export interface WindowReply { chart: string; revision: number; series: Record<string, WindowSeries> }
 export interface ChartBand { first: number; last: number; label: string; shaded: boolean }
-export interface ChartEvent { x: string | number; label: string; kind: 'gdi' | 'regime' | 'repair' | 'peak' | 'other'; well: string }
+export interface ChartEvent { x: string | number; label: string; kind: 'gdi' | 'regime' | 'repair' | 'peak' | 'gis' | 'template' | 'other'; well: string }
 export interface ChartTable { rows: string[]; columns: string[]; cells: string[][]; colors: string[]; swatches: boolean; aligned?: boolean }
 export interface HeatMap {
   rows: string[]; columns: string[]; values: (number | null)[][]; texts: string[][]
