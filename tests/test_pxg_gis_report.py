@@ -635,6 +635,57 @@ def test_kg_in_percent_is_not_flagged():
     assert not any(i["Код"] == "kg_scale_suspect" for i in rep.issues)
 
 
+def _row(first, *cells):
+    xs = [(-100, 1600), (1600, 2800), (2800, 3900), (3900, 5100), (5100, 6200), (6200, 7400), (7400, 8500), (8500, 9700)]
+    out = [wt.Cell(first, *xs[0])]
+    for (x0, x1), t in zip(xs[1:], cells):
+        out.append(wt.Cell("" if t == "^" else t, x0, x1, vcont=(t == "^")))
+    return wt.TRow(out)
+
+
+def _nz_table():
+    hdr = [wt.TRow([wt.Cell("Интервалы исследований, м", -100, 1600), wt.Cell("Пористость, д.е.", 1600, 2800), wt.Cell("10.2022 г", 2800, 5100),
+                    wt.Cell("04.2023 г", 5100, 7400), wt.Cell("10.2023г", 7400, 9700)]),
+           wt.TRow([wt.Cell("", -100, 1600, True), wt.Cell("", 1600, 2800, True), wt.Cell("Нг, м", 2800, 3900), wt.Cell("Кг, д. е.", 3900, 5100),
+                    wt.Cell("Нг, м", 5100, 6200), wt.Cell("Кг, д. е.", 6200, 7400), wt.Cell("Нг, м", 7400, 8500), wt.Cell("Кг, д. е.", 8500, 9700)])]
+    body = [wt.TRow([wt.Cell("Верхняя песчаная пачка пласта-коллектора", -100, 7400), wt.Cell("", 7400, 8500), wt.Cell("", 8500, 9700)]),
+            _row("784.8 – 788.4", "0.32", "3.6", "0.85", "3.6", "0.75", "3.6", "0.80"),
+            _row("788.4 – 789.2", "0.24", "0.8", "0.45", "0.8", "0.40", "0.8", "0.45"),
+            _row("789.2 – 790.6", "0.30", "1.4", "0.80", "1.4", "0.70", "1.4", "0.75"),
+            _row("790.6 – 793.3", "^", "5.4", "0.65", "2.7", "0.50", "4.7", "0.55"),
+            _row("793.3 – 794.6", "^", "^", "^", "6.7", "-", "^", "^"),
+            _row("794.6 – 795.3", "^", "^", "^", "^", "^", "^", "^"),          # только первая ячейка с текстом, остальные — продолжение объединённых
+            _row("795.3 – 796.0", "^", "^", "^", "^", "^", "4.7", "-"),
+            _row("796.0 – 800.0", "^", "4.0", "-", "^", "^", "^", "^")]
+    return wt.Table(rows=hdr + body)
+
+
+def test_row_with_only_vertical_continuations_is_not_a_pack_heading():
+    # баг: строка «794.6 – 795.3» (остальные ячейки — продолжение вертикального объединения) принималась за заголовок пачки:
+    # дальше интервалы шли с пустой пачкой, а «794.6 – 795.3» оказывалась в столбце заголовка
+    rep = gr.Report(file="x.docx", well="10")
+    gr.read_intervals(rep, _nz_table(), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    assert rep.intervals
+    assert {r["Пачка"] for r in rep.intervals} == {"Верхняя пачка"}
+    assert not any("–" in r["Заголовок пачки"] for r in rep.intervals)
+    assert (796.0, 800.0) in {(r["От, м"], r["До, м"]) for r in rep.intervals}
+
+
+def test_merged_gas_cell_covers_all_rows_it_spans():
+    # баг: Нг и Кг в ячейке, объединённой по вертикали на несколько строк-интервалов, относились только к первой строке:
+    # hi получался 2,7 вместо 5,4, а сумма Нг по замеру не сходилась с отчётом (11,2)
+    rep = gr.Report(file="x.docx", well="10")
+    gr.read_intervals(rep, _nz_table(), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    rows = {(r["Столбец-замер"][:7], r["От, м"], r["До, м"]): r for r in rep.intervals}
+    r = rows[("10.2022", 790.6, 796.0)]
+    assert r["hi, м"] == 5.4 and r["Нг по отчёту, м"] == 5.4 and r["Кг"] == 0.65
+    assert ("10.2022", 790.6, 793.3) not in rows
+    gas = [x for x in rep.intervals if x["Столбец-замер"].startswith("10.2022") and x["Кг"] is not None]
+    assert round(sum(x["hi, м"] for x in gas), 1) == 11.2
+    water = rows[("04.2023", 793.3, 800.0)]
+    assert water["Кг"] is None and water["Нг по отчёту, м"] == 6.7
+
+
 def test_docx_saved_with_doc_extension_is_read(tmp_path):
     # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
     p = tmp_path / "21Касимов_010120.doc"
