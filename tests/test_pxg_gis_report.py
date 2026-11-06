@@ -589,6 +589,35 @@ def test_same_file_name_in_two_folders_is_not_doubled(ra):
     assert (twice["Интервалы"]["В БД"] == "да").sum() == (once["Интервалы"]["В БД"] == "да").sum()
 
 
+# ---- вид отчёта: «ГИС при ЭПБ» (без таблиц интервалов насыщения) ----
+def _codes(rep):
+    return {i["Код"] for i in rep.issues}
+
+
+def test_report_without_interval_tables_is_epb_not_no_intervals():
+    rep = gr.Report(file="x.docx", well="21", complex=[{"x": 1}], tables=[{"Тип": "комплекс ГИС"}, {"Тип": "термобарика"}])
+    gr.check_report(rep)
+    assert rep.kind == "ГИС при ЭПБ"
+    assert "report_kind_epb" in _codes(rep) and "no_intervals" not in _codes(rep)
+
+
+def test_interval_table_without_rows_is_still_a_warning():
+    rep = gr.Report(file="x.docx", well="21", complex=[{"x": 1}], tables=[{"Тип": "интервалы насыщения"}])
+    gr.check_report(rep)
+    assert rep.kind == "" and "no_intervals" in _codes(rep)
+
+
+def test_empty_report_is_not_epb():
+    rep = gr.Report(file="x.docx", well="21")
+    gr.check_report(rep)
+    assert rep.kind == "" and "no_intervals" in _codes(rep)
+
+
+def test_reports_sheet_has_report_kind():
+    rep = gr.Report(file="x.docx", well="21", kind="ГИС при ЭПБ")
+    assert gr.reports_frame([rep]).loc[0, "Вид отчёта"] == "ГИС при ЭПБ"
+
+
 def test_docx_saved_with_doc_extension_is_read(tmp_path):
     # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
     p = tmp_path / "21Касимов_010120.doc"
