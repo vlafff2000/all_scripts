@@ -1599,7 +1599,9 @@ def check_report(rep: Report) -> None:
     if not rep.filling:
         rep.issue("note", "no_filling", "Заполнение ствола не найдено")
     types = {t.get("Тип") for t in rep.tables}
-    if not rep.intervals and not types & {"интервалы насыщения", "ГВК по датам"} and (rep.complex or rep.thermo or rep.filling or rep.bottoms):
+    if not rep.tables:
+        rep.issue("warn", "no_tables", "Ни одной таблицы нужного вида не найдено (таблицы без разлиновки в PDF или не распознанные OCR): отчёт не считается «ГИС при ЭПБ», значения могли потеряться")
+    if not rep.intervals and not types & {"интервалы насыщения", "ГВК по датам"} and types & {"комплекс ГИС", "термобарика", "заполнение ствола"}:
         rep.kind = KIND_EPB
         rep.issue("note", "report_kind_epb", "Вид отчёта «ГИС при ЭПБ»: таблиц интервалов насыщения и ГВК нет, комплекс ГИС, термобарика и заполнение разобраны")
     elif not rep.intervals:
