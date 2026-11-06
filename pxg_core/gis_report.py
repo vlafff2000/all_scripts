@@ -1632,6 +1632,33 @@ def resolve_packs(reports: List[Report]) -> None:
             rep.issue("note", "pack_by_depth", "Пачка определена по глубине для %d интервалов (заголовок пачку не называет): сверить" % n)
 
 
+def resolve_gvk(reports: List[Report]) -> None:
+    """Замеру без ГВК в самом отчёте ГВК берётся из таблиц «ГВК по датам» (любого отчёта по этой скважине): та же пачка и тот же месяц, ровно одно значение
+    (разброс до 0,15 м). Два разных ГВК в месяце не выбираются. Подсказка, уверенность средняя; ГВК из самого отчёта не заменяется."""
+    hist: Dict[tuple, List[dict]] = defaultdict(list)
+    for rep in reports:
+        for h in rep.gvk_history:
+            if h.get("ГВК MD, м") is not None and h.get("Дата") is not None and h.get("Пачка"):
+                hist[(rep.well, h["Пачка"], h["Дата"].year, h["Дата"].month)].append(h)
+    for rep in reports:
+        have = {(p["Пачка"], p["Столбец-замер"]) for p in rep.packs if p.get("_kind") == "gvk"}
+        done = set()
+        for r in rep.intervals:
+            d = r["Дата замера"]
+            key = (r["Пачка"], r["Столбец-замер"])
+            if d is None or not r["Пачка"] or key in have or key in done:
+                continue
+            cands = hist.get((rep.well, r["Пачка"], d.year, d.month), [])
+            vals = [h["ГВК MD, м"] for h in cands]
+            if not vals or max(vals) - min(vals) > 0.15:
+                continue
+            done.add(key)
+            h = cands[0]
+            g = Group(r["Столбец-замер"], 0, 0, d, bool(r["Дата точная"]))
+            _add_gvk(rep, g, r["Пачка"], r["Заголовок пачки"], h["ГВК MD, м"], h.get("ГВК а.о., м"), h.get("ГВК (как в отчёте)", "") or "ГВК %g" % h["ГВК MD, м"],
+                     "ГВК по датам (%s)" % h.get("Файл", ""), MID, "ГВК в самом отчёте не указан: взят из таблицы «ГВК по датам» за тот же месяц — сверить")
+
+
 def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[str, str]]:
     """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером, иначе самый свежий. Остальные — дубли."""
     best: Dict[Tuple[str, dt.date], Tuple[int, str, str]] = {}
@@ -1650,6 +1677,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
     """Отчёты → `gis.SheetResult` по скважине (замер = дата) и таблица «Интервалы (все)» с отметкой, какой замер вошёл в БД."""
     resolve_dates(reports)
     resolve_packs(reports)
+    resolve_gvk(reports)
     chosen = pick_measurements(reports)
     by_well: Dict[str, Dict[dt.date, List[Tuple[Report, dict]]]] = defaultdict(lambda: defaultdict(list))
     allrows = []

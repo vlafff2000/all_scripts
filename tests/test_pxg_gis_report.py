@@ -800,3 +800,38 @@ def test_pack_by_depth_not_applied_when_ranges_overlap_or_other_well():
     c.well = "99"
     gr.resolve_packs([_pack_rep("a2.docx", [(784.8, 796.0, "Верхняя пачка", "x")]), c])
     assert c.intervals[0]["Пачка"] == ""
+
+
+# ---- ГВК из таблицы «ГВК по датам» для замера, где в самом отчёте ГВК не указан ----
+def _gvk_rep(file, date, md=None):
+    rep = gr.Report(file=file, well="10", alt=135.2, date=date)
+    rep.intervals = [_iv(784.8, 796.0, **{"Столбец-замер": "от %s" % date.strftime("%d.%m.%Y"), "Дата замера": date, "Дата точная": True,
+                                           "Пачка": "Верхняя пачка", "Заголовок пачки": "Верхняя песчаная пачка"})]
+    if md is not None:
+        rep.gvk_history = [{"Скважина": "10", "Дата": date, "Пачка": "Верхняя пачка", "ГВК MD, м": md, "ГВК а.о., м": None}]
+    return rep
+
+
+def test_gvk_filled_from_history_table_of_same_month():
+    # баг: ГВК, указанный только в таблице «ГВК по датам» другого отчёта, не попадал в БД замера (в Excel он есть)
+    silent = _gvk_rep("a.docx", dt.date(2023, 4, 10))
+    hist = _gvk_rep("b.docx", dt.date(2024, 4, 3))
+    hist.gvk_history = [{"Скважина": "10", "Дата": dt.date(2023, 4, 10), "Пачка": "Верхняя пачка", "ГВК MD, м": 803.5, "ГВК а.о., м": None}]
+    gr.resolve_gvk([silent, hist])
+    g = [p for p in silent.packs if p.get("_kind") == "gvk"]
+    assert len(g) == 1 and g[0]["ГВК MD, м"] == 803.5 and g[0]["Уверенность"] == gr.MID and g[0]["Заголовок в документе"] == "Верхняя песчаная пачка"
+
+
+def test_gvk_history_not_used_when_ambiguous_or_present():
+    silent = _gvk_rep("a.docx", dt.date(2023, 4, 10))
+    other = _gvk_rep("b.docx", dt.date(2024, 4, 3))
+    other.gvk_history = [{"Скважина": "10", "Дата": dt.date(2023, 4, 2), "Пачка": "Верхняя пачка", "ГВК MD, м": 803.5, "ГВК а.о., м": None},
+                         {"Скважина": "10", "Дата": dt.date(2023, 4, 20), "Пачка": "Верхняя пачка", "ГВК MD, м": 805.0, "ГВК а.о., м": None}]
+    gr.resolve_gvk([silent, other])
+    assert not [p for p in silent.packs if p.get("_kind") == "gvk"]          # два разных ГВК в месяце: не выбираем
+    own = _gvk_rep("c.docx", dt.date(2023, 4, 10))
+    gr._add_gvk(own, gr.Group("от 10.04.2023", 0, 0, dt.date(2023, 4, 10), True), "Верхняя пачка", "Верхняя песчаная пачка", 801.0, None, "ГВК 801", "таблица 4", gr.HIGH, "")
+    hist = _gvk_rep("d.docx", dt.date(2024, 4, 3))
+    hist.gvk_history = [{"Скважина": "10", "Дата": dt.date(2023, 4, 10), "Пачка": "Верхняя пачка", "ГВК MD, м": 803.5, "ГВК а.о., м": None}]
+    gr.resolve_gvk([own, hist])
+    assert [p["ГВК MD, м"] for p in own.packs if p.get("_kind") == "gvk"] == [801.0]
