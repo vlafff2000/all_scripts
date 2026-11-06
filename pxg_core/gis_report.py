@@ -1021,20 +1021,21 @@ def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list, por_groups: Option
     return out or None
 
 
-def _vspan(tbl: wt.Table, i: int, g: "Group", base: Optional["Group"], nhdr: int) -> Tuple[int, Optional[float]]:
-    """Ячейка Кг/Нг строки i объединена по вертикали с ячейками ниже: число строк и подошва последней из них (из её столбца «Интервал»)."""
+def _vspan(tbl: wt.Table, i: int, g: "Group", base: Optional["Group"], nhdr: int) -> List[List[float]]:
+    """Ячейка Кг/Нг строки i объединена по вертикали с ячейками ниже: интервалы (из столбца «Интервал») строк под ней, без самой строки i."""
     if base is None:
-        return 0, None
+        return []
     key = next((c for c in tbl.rows[i].cells if g.x0 - 3 <= c.xc <= g.x1 + 3 and c.text.strip() and _leaf(tbl, nhdr, c) in ("kg", "hg")), None)
     if key is None:
-        return 0, None
+        return []
+    out: List[List[float]] = []
     j = i + 1
     while j < len(tbl.rows) and any(c.vcont and abs(c.x0 - key.x0) < 5 and abs(c.x1 - key.x1) < 5 for c in tbl.rows[j].cells):
+        vals = [v for c in tbl.rows[j].cells if base.x0 - 3 <= c.xc <= base.x1 + 3 and not c.vcont and _leaf(tbl, nhdr, c) in ("iv", "") for v in nums(c.text)]
+        if len(vals) >= 2:
+            out.append(vals[:2])
         j += 1
-    if j == i + 1:
-        return 0, None
-    vals = [v for c in tbl.rows[j - 1].cells if base.x0 - 3 <= c.xc <= base.x1 + 3 and not c.vcont and _leaf(tbl, nhdr, c) in ("iv", "") for v in nums(c.text)]
-    return j - i, (vals[1] if len(vals) >= 2 else None)
+    return out
 
 
 def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict[str, str]], title: str, section: str) -> int:
@@ -1160,7 +1161,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             cells = [c for c in r.cells if inb(g, c) and c.text.strip()]
             if not cells:
                 continue
-            ivn, rec = [], {"kg": "", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}
+            ivn, rec, extras = [], {"kg": "", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}, []
             for c in cells:
                 k = _leaf(tbl, nhdr, c)
                 if k in ("iv", "") and fnum(c.text) is not None and len(ivn) < 2:
@@ -1169,20 +1170,20 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                     rec[k] = c.text
             if len(ivn) < 2 and base_rows and (rec["kg"] or rec["hg"]) and base_rows[-1]["src"] == _src(tbl, i):
                 ivn = [base_rows[-1]["from"], base_rows[-1]["to"]]   # в замере только Нг и Кг: интервал — из столбца «Интервал» этой строки
-                span_rows, span_end = _vspan(tbl, i, g, base, nhdr)
-                if span_end is not None and span_end > ivn[1]:       # ячейка Нг/Кг объединена по вертикали: она относится ко всем строкам-интервалам под ней
-                    ivn[1] = span_end
-                    rec["_span"] = span_rows
+                extras = _vspan(tbl, i, g, base, nhdr)               # ячейка Нг/Кг объединена по вертикали: значение относится ко всем строкам-интервалам под ней
+                if extras:
+                    rec["_span"] = len(extras) + 1
             if len(ivn) < 2:
                 continue
             row_recs.append((gi, g, ivn, rec))
+            row_recs.extend((gi, g, ex, dict(rec)) for ex in extras)
         rb = _row_base(r, base_rows)
         seq = _seq_epochs(r, len(sgroups), rb, por_groups) if (rb and not row_recs) or _geometry_broken(row_recs, rb) else None
         if seq is not None:
             row_recs = [(gi, sgroups[gi], ivn, rec) for gi, ivn, rec in seq]
         for gi, g, ivn, rec in row_recs:
             emit(gi, g, ivn, rec, "ячейки строки прочитаны по порядку (столбцы шапки не сошлись с данными: OCR) — сверить с оригиналом" if seq is not None else (
-                "ячейка Нг/Кг объединена по вертикали на %d строк: интервал взят от кровли первой до подошвы последней строки" % rec["_span"] if rec.get("_span") else ""))
+                "значения Нг/Кг взяты из ячейки, объединённой по вертикали на %d строк: каждой строке-интервалу они повторены" % rec["_span"] if rec.get("_span") else ""))
     _boundary_gvk(rep, sgroups, tid)
     return n
 
