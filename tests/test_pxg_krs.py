@@ -216,3 +216,58 @@ def test_check_reports_notes(tmp_path):
     assert any(i.code == "SEASON" for i in rep.issues)
     rep = checks.run("Анализ_технического_состояния_скважин_КРС", {"table": str(src), "season": "2025-2026"})
     assert not any(i.level == "ошибка" for i in rep.issues)
+
+
+ACT_CODES = """В.3 Форма акта на проведенный КРС.
+
+# Акт на проведенный капитальный ремонт скважины
+
+от « 10 » \\_\\_\\_\\_ 09 \\_\\_\\_\\_ 2025 года
+
+бригадой КРС, выполняющей ремонтные работы на скважине № 11 (инв. № 1) согласно плану ремонта были проведены следующие операции: КР 1.094-ПА Замена противопесочного фильтра. КР 4.033-ЗР Кислотная обработка под давлением.
+
+В результате проведенных работ получен следующий результат: фильтр заменён.
+
+На «10» 09 2025 г. состояние скважины следующее: ...
+"""
+ACT_NO_CODES = ACT_CODES.replace("№ 11", "№ 12").replace(
+    "КР 1.094-ПА Замена противопесочного фильтра. КР 4.033-ЗР Кислотная обработка под давлением.", "промывка колтюбингом с СКО до забоя.")
+
+
+def test_acts_parse_and_db(tmp_path):
+    from pxg_core import krs_acts
+    a = krs_acts.parse_act(ACT_CODES, "a.md")
+    assert (a["Скважина"], a["Год"], a["Дата акта"]) == (11, 2025, "10.09.2025")
+    assert a["Коды работ"] == "КР 1.094 ПА; КР 4.033 ЗР" and a["Тип ремонта"] == krs.KIND_FILTER
+    b = krs_acts.parse_act(ACT_NO_CODES, "b.md")
+    assert b["Коды работ"] == "" and b["Тип ремонта"] == krs.KIND_CTS and "кодов работ нет" in b["Проверить"]
+    assert krs_acts.parse_act("просто текст", "c.md") is None
+    src = tmp_path / "t.xlsx"
+    make_table(src)
+    data, _ = krs.parse(str(src))
+    n0 = len(data.works)
+    acts = pd.DataFrame([a, b])
+    krs_acts.add_acts(data, acts)
+    assert len(data.works) == n0 + 2
+    krs_acts.add_acts(data, acts)                                    # повторный запуск не дублирует
+    assert len(data.works) == n0 + 2
+    clash = dict(b, **{"Скважина": 12, "Год": 2024})                  # в таблице у скв. 12 за 2024 уже есть ремонт: не затирается
+    notes = krs_acts.add_acts(data, pd.DataFrame([clash]))
+    assert len(data.works) == n0 + 2 and any("уже есть" in n[1] for n in notes)
+
+
+def test_acts_written_to_summary_with_fill(tmp_path):
+    from pxg_core import krs_acts
+    src = tmp_path / "t.xlsx"
+    make_table(src)
+    data, grid = krs.parse(str(src))
+    krs_acts.add_acts(data, pd.DataFrame([krs_acts.parse_act(ACT_CODES, "a.md"), krs_acts.parse_act(ACT_NO_CODES, "b.md")]))
+    prio = krs.final_priorities(data, krs.compute_priorities(data), {})
+    out = tmp_path / "upd.xlsx"
+    notes = krs.write_updated_table(grid, data.columns, data, prio, "2025-2026", str(out), src_path=str(src))
+    ws = openpyxl.load_workbook(out).active
+    col = next(c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value == "Выполнение КР 2025")   # столбца года не было: добавлен
+    assert any("2025" in n[1] and "добавлен" in n[1] for n in notes)
+    assert ws.cell(3, col).value.startswith("КР 1.094-ПА") and ws.cell(3, col).fill.fgColor.rgb.endswith(FILTER)
+    assert ws.cell(4, col).fill.fgColor.rgb.endswith(CTS)
+    assert ws.cell(3, 4).value.startswith("КР 2.022")                    # прежние ячейки на месте
