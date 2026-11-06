@@ -108,8 +108,8 @@ def _signature(heads: List[str]) -> str:
 
 # ------------------------------------------------------------------------------------------------ сбор таблиц
 
-def sources(paths: List[str]) -> List[str]:
-    """Файлы OCR из файлов и папок: на документ один файл (content_list.json предпочтительнее markdown)."""
+def sources(paths: List[str], prefer: str = ".json") -> List[str]:
+    """Файлы OCR из файлов и папок: на документ один файл (по умолчанию content_list.json предпочтительнее markdown; ``prefer=".md"`` — наоборот)."""
     found: Dict[str, str] = {}
     for p in paths:
         names = [p] if os.path.isfile(p) else [os.path.join(r, f) for r, _d, fs in os.walk(p) for f in sorted(fs)] if os.path.isdir(p) else []
@@ -118,7 +118,7 @@ def sources(paths: List[str]) -> List[str]:
                 continue
             base = os.path.basename(f).lower()
             key = os.path.dirname(f) if base == "full.md" or "content_list" in base else ob.ocr_stem(f)
-            if key not in found or (f.lower().endswith(".json") and not found[key].lower().endswith(".json")):
+            if key not in found or (f.lower().endswith(prefer) and not found[key].lower().endswith(prefer)):
                 found[key] = f
     return sorted(found.values())
 

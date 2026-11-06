@@ -722,3 +722,11 @@ def test_gvk_not_noted_and_table_gvk_not_duplicated():
     gr._add_gvk(rep, g, "Верхняя пачка", "Верхняя песчаная пачка", 796.0, None, "ГВК 796", "таблица 4", gr.HIGH, "")
     gr.read_gvk_text(rep, [wt.Para("ГВК в верхней песчаной пачке отмечается на глубине 796.0 м.")])
     assert len([p for p in rep.packs if p.get("_kind") == "gvk"]) == 1
+
+
+def test_docx_saved_with_doc_extension_is_read(tmp_path):
+    # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
+    p = tmp_path / "21Касимов_010120.doc"
+    _docx(str(p), "<w:p><w:r><w:t>Скважина: 21</w:t></w:r></w:p>")
+    rep = gr.parse_file(str(p))
+    assert not rep.error and rep.well == "21"

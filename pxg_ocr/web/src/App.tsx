@@ -44,6 +44,8 @@ export default function App() {
   const [db, setDb] = useState<{ kind: string; sheets: { name: string; columns: string[]; rows: Cell[][] }[] } | null>(null)
   const [dbErr, setDbErr] = useState('')
   const [svod, setSvod] = useState('')
+  const [gpuInfo, setGpuInfo] = useState('')
+  const [allDb, setAllDb] = useState<{ file: string; dir: string; info: string; sheets: { name: string; columns: string[]; rows: Cell[][] }[] } | null>(null)
   const running = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
@@ -132,6 +134,23 @@ export default function App() {
     setSvod(`Файлов: ${r.files}. Листов: ${r.sheets?.length}: ` + (r.sheets || []).map((x) => `${x.name} (${x.rows})`).join(', '))
     await saveUrlAs(fileUrl(r.dir, r.file, true), r.file)
   }
+  const buildAll = async (folder: boolean) => {
+    setErr(''); setAllDb(null)
+    let folders: string[] = []
+    if (folder) {
+      const p = await openFilePicker({ mode: 'folder', title: 'Папка с распознанными файлами (*.ocr.md)' })
+      if (!p) return
+      folders = p.split('\n').filter(Boolean)
+    }
+    const r = await api<{ dir?: string; file?: string; files?: number; recognised?: number; sheets?: { name: string; columns: string[]; rows: Cell[][] }[]; error?: string }>('/api/ocr/db-all', folder ? { folders, scope: 'folders' } : { scope: 'all' })
+    if (r.error || !r.file || !r.sheets || !r.dir) { setErr(r.error || 'БД не собрана'); return }
+    setAllDb({ file: r.file, dir: r.dir, info: `Файлов: ${r.files}, вид документа определён у ${r.recognised}. Остальные перечислены на листе «Файлы» с причиной.`, sheets: r.sheets })
+  }
+  const checkGpu = async () => {
+    setGpuInfo('Проверяю…')
+    const r = await api<{ lines: string[] }>('/api/ocr/gpu')
+    setGpuInfo(r.lines.join('\n'))
+  }
   const del = async () => {
     if (!cur) return
     await api('/api/ocr/delete', { dir: cur.dir }); setSel(''); void refresh()
@@ -170,6 +189,8 @@ export default function App() {
         {plan && <div className={'ocr-plan' + (plan.mode === 'gpu' && plan.why.includes('мало') ? ' warn' : '')}>
           Будет: {plan.mode === 'gpu' ? `видеокарта, лимит ${plan.vram_gb} ГБ` : 'процессор'}, потоков {plan.threads}; {plan.why}.
         </div>}
+        <button type="button" onClick={() => void checkGpu()}>Проверить видеокарту</button>
+        {gpuInfo && <pre className="ocr-log" style={{ maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{gpuInfo}</pre>}
         <label>Страницы
           <input type="text" value={pages} onChange={(e) => setPages(e.target.value)} placeholder="all, 1-5 или 1-5,8" />
         </label>
@@ -179,6 +200,10 @@ export default function App() {
         <button type="button" disabled={!items.some((i) => i.state === 'done')} onClick={() => void collect(false)}>Из всех результатов (xlsx)</button>
         <button type="button" onClick={() => void collect(true)}>Из папки с OCR…</button>
         {svod && <small className="muted">{svod}. Один тип таблицы — один лист, в каждой строке скважина и дата.</small>}
+        <h2>БД из распознанного</h2>
+        <button type="button" disabled={!items.some((i) => i.state === 'done')} onClick={() => void buildAll(false)}>Собрать БД из всех результатов</button>
+        <button type="button" onClick={() => void buildAll(true)}>Собрать БД из папки…</button>
+        <small className="muted">Акты КРС, заключения ГИС, отчёты ГДИ и месячные отчёты ПХГ из многих файлов в один xlsx. Кнопка «БД из этого файла» над результатом собирает только открытый файл.</small>
         <h2>Результаты</h2>
         <div className="ocr-hist">
           {items.length === 0 && <span className="muted">Пока ничего нет.</span>}
@@ -189,6 +214,12 @@ export default function App() {
         </div>
       </aside>
       <main className="ocr-main">
+        {allDb && <div className="ocr-db">
+          <div className="ocr-bar"><h2>БД из многих файлов</h2><span className="muted">{allDb.info}</span><span className="sp" />
+            <button type="button" onClick={() => void saveUrlAs(fileUrl(allDb.dir, allDb.file, true), allDb.file)}>Скачать xlsx</button>
+            <button type="button" onClick={() => setAllDb(null)}>Закрыть</button></div>
+          <Tables scope="ocr-db-all" tables={allDb.sheets.map((sh, i) => tableOf('dball' + i, sh.name, sh.columns, sh.rows, 'Собрано из всех выбранных файлов. Столбец «Проверка» говорит, чему можно доверять; решает инженер.'))} />
+        </div>}
         {!cur && <p className="muted">Выберите файлы слева и нажмите «Распознать». Результат появится здесь: страница исходника рядом с распознанным текстом.</p>}
         {cur && <>
           <div className="ocr-bar">
@@ -200,7 +231,7 @@ export default function App() {
               {result.json && <button type="button" onClick={() => void saveUrlAs(fileUrl(cur.dir, result.json, true), cur.name.replace(/\.[^.]+$/, '') + '.json')}>Скачать JSON</button>}
               <button type="button" onClick={() => void exportFile('docx')}>Скачать Word</button>
               <button type="button" onClick={() => void exportFile('tables')}>Таблицы в xlsx</button>
-              <button type="button" onClick={makeDb}>Собрать БД</button>
+              <button type="button" onClick={makeDb}>БД из этого файла</button>
               {db && <button type="button" onClick={() => void saveUrlAs(fileUrl(cur.dir, 'db.xlsx', true), cur.name.replace(/\.[^.]+$/, '') + '_БД.xlsx')}>Скачать БД (xlsx)</button>}
               {askDel ? <button type="button" onClick={del}>Точно удалить результат?</button> : <button type="button" onClick={() => setAskDel(true)}>Удалить</button>}
             </>}
