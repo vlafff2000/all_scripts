@@ -162,3 +162,21 @@ def test_gpu_diag_never_raises_without_driver(env, monkeypatch):
     lines = engine.gpu_diag()
     assert any("nvidia-smi не найден" in l for l in lines) and any(l.startswith("Режим gpu") for l in lines)
     assert TestClient(api.build_app()).get("/api/ocr/gpu").json()["lines"]
+
+
+def test_db_all_merges_files_and_registers_unrecognised(env, monkeypatch):
+    gdi = "## Отчёт о гидродинамическом исследовании\\n\\n<table><tr><td>Скважина</td><td>533</td></tr></table>"
+    fake = lambda body: FAKE.replace("# Заголовок\\n\\nТекст", body)  # noqa: E731
+    c = TestClient(api.build_app())
+    for n, body in (("a", gdi), ("b", gdi), ("c", "Просто текст без вида документа")):
+        monkeypatch.setattr(engine, "build_cmd", _fake_cmd(fake(body)))
+        src = env / (n + ".pdf")
+        src.write_bytes(b"%PDF")
+        _wait(c.post("/api/ocr/start", json={"path": str(src)}).json()["jobs"][0])
+    r = c.post("/api/ocr/db-all", json={"scope": "all"}).json()
+    assert r["files"] == 3 and r["recognised"] == 2
+    names = [s["name"] for s in r["sheets"]]
+    assert names[-1] == "Файлы" and len(names) >= 2
+    reg = r["sheets"][-1]["rows"]
+    assert sum(1 for row in reg if row[3]) == 1                      # нераспознанный файл назван с замечанием
+    assert (engine.out_root() / "Сводные" / r["file"]).is_file()
