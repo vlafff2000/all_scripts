@@ -684,3 +684,12 @@ def test_merged_gas_cell_covers_all_rows_it_spans():
     assert round(sum(x["hi, м"] for x in gas), 1) == 11.2
     water = rows[("04.2023", 793.3, 800.0)]
     assert water["Кг"] is None and water["Нг по отчёту, м"] == 6.7
+
+
+def test_kg_with_footnote_mark_or_comment_is_a_number():
+    # баг: «0.45*» и «0.60 (заглинизирован)» не читались как число, Кг в БД оставался пустым
+    assert gr._kg("0.45*", True)[:3] == (0.45, 0.45, 0.45) and gr._kg("0.45*", True)[3] == "0.45*"
+    assert gr._kg("60*")[0] == 0.6 and gr._kg("60*")[3] == "60*"
+    assert gr._kg("0.60\n(заглинизирован)", True)[0] == 0.6
+    assert gr._kg("50-55*")[1:3] == (0.5, 0.55)
+    assert gr._kg("(заглинизирован)")[0] is None and gr._kg("-")[0] is None and gr._kg("водонасыщен")[0] is None

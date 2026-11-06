@@ -865,6 +865,11 @@ def _kg(text: str, frac: bool = False) -> Tuple[Optional[float], Optional[float]
     k = 1.0 if frac else 100.0
     if not s or s in ("-", "—", "н/д"):
         return None, None, None, s
+    clean = re.sub(r"\([^)]*\)|[*†‡]+", "", s).strip()      # сноска «0.45*» или пометка в скобках «0.60 (заглинизирован)»: число берётся, исходный текст сохраняется
+    if clean and clean != s:
+        v = _kg(clean, frac)
+        if v[0] is not None:
+            return v[0], v[1], v[2], s
     rng = re.fullmatch(r"~?\s*(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)\s*%?", s)
     if rng:
         a, b = fnum(rng.group(1)) / k, fnum(rng.group(2)) / k
