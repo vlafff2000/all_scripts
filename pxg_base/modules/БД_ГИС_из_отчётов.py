@@ -39,7 +39,8 @@ def main(argv=None):
         "БД ГИС из отчётов", argv,
         files="отчёты ГИС (.doc/.docx/.pdf, вывод OCR *_content_list.json / *.ocr.md), папки и архивы (ZIP, TAR, RAR), по одному пути в строке",
         mapping="файл сопоставления заголовков пачек (Excel/CSV, лист «Заголовки пачек» прежней выгрузки), необязательно",
-        kg_min="порог Кг для hэф, доля единицы (0 — порог 25 %)")
+        kg_min="порог Кг для hэф, доля единицы (0 — порог 25 %)",
+        known="список известных скважин: БД конструкций (csv/Excel со столбцом well), необязательно")
     paths = _paths(args.files)
     if not paths:
         one = параметры.ask_path("Отчёты ГИС: файл, папка или архив", args.files if args.files is not None else None, "folder")
@@ -57,6 +58,8 @@ def main(argv=None):
         if not files:
             print("⚠️ Файлов .doc/.docx/.pdf и вывода OCR не найдено.")
             return 0
+        if args.known:
+            gis_report.set_known_wells(gis_report.load_known_wells(параметры.clean_path(args.known)))
         mapping = gis_report.load_mapping(параметры.clean_path(args.mapping or ""))
         kg_min = float((args.kg_min or "0").replace(",", ".") or 0)
         print("📚 Отчётов: %d" % len(files))
