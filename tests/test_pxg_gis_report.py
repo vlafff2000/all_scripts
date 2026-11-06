@@ -835,3 +835,32 @@ def test_gvk_history_not_used_when_ambiguous_or_present():
     hist.gvk_history = [{"Скважина": "10", "Дата": dt.date(2023, 4, 10), "Пачка": "Верхняя пачка", "ГВК MD, м": 803.5, "ГВК а.о., м": None}]
     gr.resolve_gvk([own, hist])
     assert [p["ГВК MD, м"] for p in own.packs if p.get("_kind") == "gvk"] == [801.0]
+
+
+# ---- таблица «Интервал, м | Мощность, м | Пористость, д.е. | Газонасыщенность, д.е.» (один замер, формат отчётов ЭПБ/OCR) ----
+def _simple_table():
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    return wt.Table(rows=[row("Интервал, м", "Мощность, м", "Пористость, д.е.", "Газонасыщенность, д.е."),
+                          row("784.8 – 788.4", "3.6", "0.32", "0.85"), row("788.4 – 789.2", "0.8", "0.24", "0.45"),
+                          row("789.2 – 790.6", "1.4", "0.30", "0.80"), row("790.6 – 796.0", "5.4", "0.30", "0.65"), row("796.0 – 800.0", "4.0", "0.20", "-")])
+
+
+def test_table_kind_simple_intervals_and_glued_complex_header():
+    assert gr.table_kind(_simple_table())[0] == "simple_intervals"
+    glued = wt.Table(rows=[wt.TRow([wt.Cell("Видисследований", 0, 1000), wt.Cell("Интервалисследования,м", 1000, 2000), wt.Cell("Датаисследования", 2000, 3000)]),
+                           wt.TRow([wt.Cell("ГК", 0, 1000), wt.Cell("500-800", 1000, 2000), wt.Cell("01.10.2022", 2000, 3000)])])
+    assert gr.table_kind(glued)[0] == "complex"
+
+
+def test_simple_interval_table_is_read_with_pack_from_title():
+    # баг: 53 таблицы такого вида (формат отчёта с одним замером) не распознавались, интервалы и Кг терялись из БД
+    title = "Скопления газа отмечаются в пласте-коллекторе щигровского горизонта в верхней песчаной пачке в интервале 784.8 – 796.0 м, Нг = 11.2 м, Кг = 0.45 – 0.85 д.е."
+    rep = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para(title), _simple_table()], "x.docx")
+    rows = [(r["От, м"], r["До, м"], r["Кг"], r["Пористость"], r["Пачка"], r["hi, м"]) for r in rep.intervals]
+    assert rows[0] == (784.8, 788.4, 0.85, 0.32, "Верхняя пачка", 3.6)
+    assert (790.6, 796.0, 0.65, 0.3, "Верхняя пачка", 5.4) in rows
+    assert rows[-1][:3] == (796.0, 800.0, None) and len(rows) == 5
+    assert all(r["Дата замера"] == dt.date(2022, 10, 1) and r["Дата точная"] for r in rep.intervals)
+    assert round(sum(r["hi, м"] for r in rep.intervals if r["Кг"] is not None), 1) == 11.2
+    assert not any(i["Код"] == "hg_mismatch" for i in rep.issues)

@@ -1196,6 +1196,61 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
     return n
 
 
+def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict[str, str]], title: str, section: str) -> int:
+    """Таблица одного замера: «Интервал, м | Мощность, м | Пористость | Газонасыщенность». Замер — по дате отчёта; пачка — по предложению перед таблицей
+    («… в верхней песчаной пачке в интервале 784.8 – 796.0 м, Нг = 11.2 м»); если пачку оно не называет, её подберёт `resolve_packs` по глубине."""
+    cols: Dict[str, int] = {}
+    hdr_cells = [c for r in tbl.rows[:max(nhdr, 1)] for c in r.cells if c.text.strip()]
+    for k, rx in (("iv", r"интервал"), ("h", r"мощност|\bнг\b"), ("kp", r"пористост"), ("kg", r"газонасыщенност|\bкг")):
+        cell = next((c for c in hdr_cells if re.search(rx, low(c.text))), None)
+        if cell is not None:
+            cols[k] = cell.xc
+    if "iv" not in cols or "kg" not in cols:
+        return 0
+    frac_kp = any("д.е" in low(c.text) or "д. е" in low(c.text) for c in hdr_cells if re.search(r"пористост", low(c.text)))
+    frac_kg = any("д.е" in low(c.text) or "д. е" in low(c.text) for c in hdr_cells if re.search(r"газонасыщенност|\bкг", low(c.text)))
+    pack, src, why = classify_pack(title, mapping)
+    m_h = re.search(r"Нг\s*=\s*(" + NUM + r")", title)
+    label = "замер отчёта"
+    g = Group(label, tbl.x0, tbl.x1, rep.date, rep.date is not None)
+    tid = tbl.index + 1
+    rep.tables.append({"Файл": rep.file, "Таблица": tid, "Тип": "интервалы насыщения", "Заголовок перед таблицей": title, "Раздел": section, "Столбцы-замеры": label, "Строк": len(tbl.rows) - nhdr})
+    rep.packs.append({"Файл": rep.file, "Скважина": rep.well, "Заголовок в документе": title, "Пачка": pack, "Горизонт": horizon_of(title), "Источник пачки": src, "Основание": why,
+                      "Источник": _src(tbl, nhdr), "Таблица": tid, "Диапазон пачки от, м": None, "Диапазон пачки до, м": None, "_kind": "heading"})
+    n = 0
+    for i in range(nhdr, len(tbl.rows)):
+        r = tbl.rows[i]
+        cell = lambda k: next((c for c in r.cells if not c.vcont and abs(c.xc - cols[k]) < 450), None) if k in cols else None
+        ivc = cell("iv")
+        ivn = nums(ivc.text) if ivc is not None else []
+        if len(ivn) < 2 or ivn[1] < ivn[0]:
+            continue
+        hc, kpc, kgc = cell("h"), cell("kp"), cell("kg")
+        kg, kmin, kmax, ktext = _kg(kgc.text if kgc is not None else "", frac_kg)
+        kp, _a, _b, _t = _kg(kpc.text if kpc is not None else "", frac_kp)
+        sat = kgc.text if kgc is not None and re.search(r"водонасыщ", kgc.text, re.I) else ""
+        water = bool(sat)
+        conf, why_row = HIGH, ""
+        if ktext and kmin is not None and kmin != kmax:
+            conf, why_row = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
+        elif ktext and kg is not None:
+            conf, why_row = MID, "Кг с припиской «%s»: для расчётов взято число %g %%, исходный текст сохранён" % (ktext, kg * 100)
+        elif kg is None and not water:
+            conf, why_row = MID, "Кг не число («%s»)" % ktext
+        rep.intervals.append(OrderedDict([
+            ("Скважина", rep.well), ("Файл", rep.file), ("Таблица", tid), ("Источник", _src(tbl, i)), ("Столбец-замер", label), ("_g", 0),
+            ("Дата замера", g.date), ("Дата точная", g.exact), ("Раздел таблицы", title), ("Заголовок пачки", title), ("Пачка", pack),
+            ("Горизонт", horizon_of(title)), ("От, м", ivn[0]), ("До, м", ivn[1]), ("От а.о., м", ao(rep, ivn[0])), ("До а.о., м", ao(rep, ivn[1])),
+            ("hi, м", round(ivn[1] - ivn[0], 3)), ("Нобщ по отчёту, м", fnum(hc.text) if hc is not None else None), ("Нг по отчёту, м", None), ("Кг", kg), ("Кг мин", kmin), ("Кг макс", kmax),
+            ("Кг (как в отчёте)", kgc.text if kgc is not None else ""), ("Пористость", kp), ("Пористость (как в отчёте)", kpc.text if kpc is not None else ""), ("Насыщение", sat),
+            ("Литология", ""), ("Водонасыщенный", water), ("Глубины", MD_BASIS), ("Уверенность", conf),
+            ("Основание", "; ".join(x for x in (why_row, "таблица одного замера: дата и пачка взяты из отчёта и предложения перед таблицей") if x))]))
+        n += 1
+    if n and m_h and pack:
+        _pack_summary(rep, g, pack, title, "Нг по отчёту, м", fnum(m_h.group(1)), _src(tbl, nhdr), tid)
+    return n
+
+
 def _boundary_gvk(rep: Report, sgroups: List[Group], tid: int) -> None:
     """Замеру без записанного ГВК: ГВК = кровля первого водонасыщенного интервала под газовыми (подсказка, уверенность средняя)."""
     mine = [r for r in rep.intervals if r["Таблица"] == tid]
@@ -1337,7 +1392,7 @@ def table_kind(tbl: wt.Table) -> Tuple[str, int]:
     nh = header_rows(tbl)
     hdr = low(" ".join(c.text for r in tbl.rows[:max(nh, 1)] for c in r.cells))
     first = [low(r.cells[0].text) if r.cells else "" for r in tbl.rows]
-    if "вид исследования" in hdr:
+    if re.search(r"вид\s*исследовани", hdr):          # OCR склеивает слова шапки: «Видисследований»
         return "complex", nh
     if re.search(r"гвк", hdr) and "дата" in hdr and re.search(r"режим|δh|рпл", hdr):
         return "gvk_history", nh
@@ -1353,6 +1408,8 @@ def table_kind(tbl: wt.Table) -> Tuple[str, int]:
         return "filling", nh
     if re.search(r"\bкг", hdr) and "интервал" in hdr:
         return "intervals", nh
+    if "интервал" in hdr and re.search(r"газонасыщенност", hdr) and re.search(r"мощност|\bнг\b", hdr) and not re.search(r"дат|\bот\b", hdr):
+        return "simple_intervals", nh          # один замер без столбцов-дат: «Интервал, м | Мощность, м | Пористость, д.е. | Газонасыщенность, д.е.»
     return "", nh
 
 
@@ -1370,7 +1427,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
         kind, nh = table_kind(b)
         if not kind:
             continue
-        if kind != "intervals":
+        if kind not in ("intervals", "simple_intervals"):
             rep.tables.append({"Файл": rep.file, "Таблица": b.index + 1, "Тип": KIND_NAMES[kind], "Заголовок перед таблицей": last_title, "Раздел": section,
                                "Столбцы-замеры": "", "Строк": len(b.rows) - nh})
         if kind == "complex":
@@ -1382,6 +1439,9 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
             read_filling_table(rep, b)
         elif kind == "gvk_history":
             read_gvk_history(rep, b, nh, mapping)
+        elif kind == "simple_intervals":
+            if read_simple_intervals(rep, b, nh, mapping, last_title, section) == 0:
+                rep.issue("warn", "intervals_empty", "Таблица интервалов найдена, но строк с интервалами нет", "таблица %d" % (b.index + 1))
         elif kind == "intervals":
             title = last_title if sec_rx.match(last_title) or len(last_title) > 0 else section
             if read_intervals(rep, b, nh, mapping, title, section) == 0:
