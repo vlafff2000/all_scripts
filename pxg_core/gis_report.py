@@ -1271,19 +1271,24 @@ def read_interval_text(rep: Report, blocks: List[wt.Block]) -> int:
         prev = b.text
         for sent in _SENT_SPLIT.split(b.text.replace("\n", " ")):
             low_s = low(sent)
-            if "пачк" not in low_s or not re.search(r"верхн|нижн", low_s):
+            named = "пачк" in low_s and re.search(r"верхн|нижн", low_s)
+            if not named and not re.search(r"коллектор|горизонт", low_s):
                 continue
             m = re.search(r"интервал\w*\s+((?:" + NUM + r"\s*[–—-]\s*" + NUM + r"\s*м\s*(?:и|,)?\s*)+)", sent)
             if not m:
                 continue
             ranges = [(fnum(a), fnum(c2)) for a, c2 in _RANGE.findall(m.group(1))]
             water = "водонасыщ" in low_s and "газонасыщ" not in low_s
-            gas = "газонасыщ" in low_s or bool(re.search(r"скопления газа[^.]{0,60}отмечаются", low_s)) or (ctx_gas and not water and re.match(r"\s*[•\-\\–]", sent) is not None)
+            if re.search(r"не\s+(?:отмечает|выявлен|отмечен|выделяет)", low_s):
+                continue                                   # «скоплений газа не отмечается»
+            gas = "газонасыщ" in low_s or bool(re.search(r"скоплени\w+ газа[^.]{0,60}(?:отмечаются|выделяются)|(?:отмечаются|выделяются)[^.]{0,30}скоплени\w+ газа", low_s)) or (ctx_gas and not water and re.match(r"\s*[•\-\\–]", sent) is not None)
             if not ranges or not (water or gas):
                 continue
-            pack = "Верхняя пачка" if re.search(r"верхн", low_s) else "Нижняя пачка"
-            hg = re.search(r"Нг\s*=\s*(" + NUM + r")", sent)
-            kg_m = re.search(r"Кг\s*=\s*(" + NUM + r")(?:\s*[–—-]\s*(" + NUM + r"))?\s*%", sent)
+            pack = ("Верхняя пачка" if re.search(r"верхн", low_s) else "Нижняя пачка") if named else ""      # пачка не названа: её подберёт resolve_packs по глубине
+            para = b.text.replace("\n", " ")
+            hg = re.search(r"Нг\s*=\s*(" + NUM + r")", sent) or (re.search(r"Нг\s*=\s*(" + NUM + r")", para) if len(ranges) == 1 else None)
+            kg_rx = r"Кг\s*=\s*(" + NUM + r")(?:\s*[–—-]\s*(" + NUM + r"))?\s*%"
+            kg_m = re.search(kg_rx, sent) or (re.search(kg_rx, para) if len(ranges) == 1 else None)
             kg = kmin = kmax = None
             if kg_m:
                 a1 = fnum(kg_m.group(1)) / 100
@@ -1535,8 +1540,17 @@ def pick_report_files(files: List[str]) -> Tuple[List[str], List[str]]:
     have = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith((".doc", ".docx"))}
     pdfs = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith(".pdf")}
     keep, notes = [], []
+    # вывод OCR из отдельной папки с тем же именем, что у PDF: читается он, а PDF (часто без таблиц в текстовом слое) — нет
+    ocr_dirs: Dict[str, set] = {}   # имя → папки, где лежит вывод OCR («папка__имя»: так пакетный OCR различает одноимённые файлы)
+    for f in files:
+        if f.lower().endswith((".json", ".md")) and ocr_blocks.is_ocr_file(f):
+            ocr_dirs.setdefault(os.path.basename(ocr_blocks.ocr_stem(f)).split("__")[-1], set()).add(os.path.dirname(f))
     for f in files:
         low = f.lower()
+        # вывод OCR в той же папке, что и PDF, подбирает сам PDF — там заменять нечего
+        if low.endswith(".pdf") and (ocr_dirs.get(os.path.basename(os.path.splitext(f)[0]).lower(), set()) - {os.path.dirname(f)}) and os.path.splitext(f)[0].lower() not in have:
+            notes.append("%s: есть вывод OCR с тем же именем — читается он, PDF пропускается" % os.path.basename(f))
+            continue
         if low.endswith((".json", ".md")):
             if not ocr_blocks.is_ocr_file(f):
                 continue
@@ -1788,9 +1802,10 @@ def resolve_gvk(reports: List[Report]) -> None:
                      "ГВК по датам (%s)" % h.get("Файл", ""), MID, "ГВК в самом отчёте не указан: взят из таблицы «ГВК по датам» за тот же месяц — сверить")
 
 
-def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[str, str]]:
-    """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером, иначе самый свежий. Остальные — дубли."""
-    best: Dict[Tuple[str, dt.date], Tuple[int, str, str]] = {}
+def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], str]:
+    """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером, иначе самый свежий. Остальные — дубли.
+    Из выбранного отчёта в БД идут все его таблицы этого замера (основная и, например, таблица покрышки)."""
+    best: Dict[Tuple[str, dt.date], Tuple[int, str]] = {}
     for rep in reports:
         seen = {(r["Дата замера"], r["Столбец-замер"]) for r in rep.intervals if r["Дата замера"] is not None}
         for d, label in seen:
@@ -1798,8 +1813,8 @@ def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[
             key = (rep.well, d)
             score = (own, rep.date or dt.date.min)
             if key not in best or score > best[key][0]:
-                best[key] = (score, rep.path or rep.file, label)
-    return {k: (v[1], v[2]) for k, v in best.items()}
+                best[key] = (score, rep.path or rep.file)
+    return {k: v[1] for k, v in best.items()}
 
 
 def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gis.SheetResult], pd.DataFrame]:
@@ -1813,7 +1828,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
     for rep in reports:
         for r in rep.intervals:
             d = r["Дата замера"]
-            ok = d is not None and chosen.get((rep.well, d)) == (rep.path or rep.file, r["Столбец-замер"])
+            ok = d is not None and chosen.get((rep.well, d)) == (rep.path or rep.file)
             allrows.append({**{k: v for k, v in r.items() if not k.startswith("_")}, "В БД": "да" if ok else ("нет: дубль замера из другого отчёта" if d is not None else "нет: дата замера не определена")})
             if ok:
                 by_well[rep.well][d].append((rep, r))

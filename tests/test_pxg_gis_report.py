@@ -921,3 +921,44 @@ def test_wall_thickness_in_complex_table_does_not_make_epb():
                          wt.TRow([wt.Cell("Определение толщины стенок труб", 0, 1000), wt.Cell("МИД", 1000, 2000)])])
     rep = gr.parse_blocks([wt.Para("Скважина: 21"), wt.Para("РЕШАЕМЫЕ ЗАДАЧИ: Определение характера насыщения пласта-коллектора (Кг), положения ГВК"), tbl], "x.docx")
     assert rep.kind == ""
+
+
+def test_ocr_output_in_other_folder_replaces_same_name_pdf():
+    # баг: PDF и его вывод OCR из отдельной папки читались оба: PDF без таблиц давал ложные «нет интервалов/нет таблиц»
+    files = [os.path.join("src", "1Касимов_080526(переувязано).pdf"), os.path.join("ocr", "1Касимов_080526(переувязано).ocr.md"),
+             os.path.join("src", "2Касимов_010120.pdf")]
+    keep, notes = gr.pick_report_files(files)
+    assert keep == [os.path.join("ocr", "1Касимов_080526(переувязано).ocr.md"), os.path.join("src", "2Касимов_010120.pdf")]
+    assert any("вывод OCR" in n for n in notes)
+
+
+def test_all_columns_of_chosen_report_for_same_date_go_to_db():
+    # баг: в отчёте две таблицы одного замера (основная «10.2023 г» и таблица покрышки «Интервал | Мощность | Газонасыщенность»);
+    # в БД шла только одна из них, причём какая — как повезёт (8 интервалов превращались в 1)
+    rep = gr.Report(file="a.docx", well="127", date=dt.date(2023, 10, 24))
+    d = dt.date(2023, 10, 24)
+    rep.intervals = [_iv(784.8 + i, 785.8 + i, **{"Столбец-замер": "10.2023 г", "Дата замера": d, "Дата точная": True}) for i in range(8)]
+    rep.intervals.append(_iv(700.0, 701.0, **{"Столбец-замер": "замер отчёта", "Дата замера": d, "Дата точная": True, "Пачка": "Покрышка"}))
+    for x in rep.intervals:
+        x.update({"Водонасыщенный": False, "hi, м": 1.0, "Заголовок пачки": x["Пачка"], "Кг мин": x["Кг"], "Кг макс": x["Кг"], "Кг (как в отчёте)": "50",
+                  "Пористость": None, "Насыщение": ""})
+    _res, allrows = gr.to_results([rep])
+    assert (allrows["В БД"] == "да").sum() == 9
+
+
+def test_text_interval_without_pack_word_uses_paragraph_ng_kg():
+    # шаблон «Скопления газа выделяются в пласте-коллекторе щигровского горизонта в интервале …. Нг=…, Кг=…»: пачка не названа
+    rep = _text_rep("Скопления газа выделяются в пласте-коллекторе щигровского горизонта в интервале 784.8 – 796.0 м. Нг = 11.2 м, Кг = 45-85%.")
+    r = rep.intervals[0]
+    assert (r["От, м"], r["До, м"], r["Пачка"], r["Нг по отчёту, м"], r["Кг"]) == (784.8, 796.0, "", 11.2, 0.65)
+
+
+def test_text_no_gas_sentence_gives_nothing():
+    rep = _text_rep("В пласте-коллекторе щигровского горизонта в интервале 784.8 – 796.0 м скоплений газа не отмечается.")
+    assert not rep.intervals
+
+
+def test_ocr_output_with_folder_prefix_replaces_pdf():
+    files = [os.path.join("сборка", "178Касимов_230425 (2).pdf"), os.path.join("ocr", "сборка__178Касимов_230425 (2).ocr.md")]
+    keep, _ = gr.pick_report_files(files)
+    assert keep == [os.path.join("ocr", "сборка__178Касимов_230425 (2).ocr.md")]
