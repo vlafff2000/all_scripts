@@ -956,3 +956,9 @@ def test_text_interval_without_pack_word_uses_paragraph_ng_kg():
 def test_text_no_gas_sentence_gives_nothing():
     rep = _text_rep("В пласте-коллекторе щигровского горизонта в интервале 784.8 – 796.0 м скоплений газа не отмечается.")
     assert not rep.intervals
+
+
+def test_ocr_output_with_folder_prefix_replaces_pdf():
+    files = [os.path.join("сборка", "178Касимов_230425 (2).pdf"), os.path.join("ocr", "сборка__178Касимов_230425 (2).ocr.md")]
+    keep, _ = gr.pick_report_files(files)
+    assert keep == [os.path.join("ocr", "сборка__178Касимов_230425 (2).ocr.md")]

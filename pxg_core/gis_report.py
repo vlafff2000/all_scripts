@@ -1541,7 +1541,7 @@ def pick_report_files(files: List[str]) -> Tuple[List[str], List[str]]:
     pdfs = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith(".pdf")}
     keep, notes = [], []
     # вывод OCR из отдельной папки с тем же именем, что у PDF: читается он, а PDF (часто без таблиц в текстовом слое) — нет
-    ocr_names = {os.path.basename(ocr_blocks.ocr_stem(f)) for f in files if f.lower().endswith((".json", ".md")) and ocr_blocks.is_ocr_file(f)}
+    ocr_names = {os.path.basename(ocr_blocks.ocr_stem(f)).split("__")[-1] for f in files if f.lower().endswith((".json", ".md")) and ocr_blocks.is_ocr_file(f)}   # «папка__имя»: так пакетный OCR различает одноимённые файлы
     for f in files:
         low = f.lower()
         if low.endswith(".pdf") and os.path.basename(os.path.splitext(f)[0]).lower() in ocr_names and os.path.splitext(f)[0].lower() not in have:
