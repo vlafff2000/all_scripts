@@ -1235,6 +1235,8 @@ def read_gvk_text(rep: Report, blocks: List[wt.Block]) -> int:
             if not m:
                 continue
             pack = classify_pack(sent)[0]
+            if not pack:
+                continue                                  # пачка в предложении не названа — отнести ГВК некуда
             md = fnum(m.group(1))
             a = _GVK_ABS.search(sent.translate(_MINUS))
             ab = fnum(a.group(1)) if a else None
@@ -1243,7 +1245,7 @@ def read_gvk_text(rep: Report, blocks: List[wt.Block]) -> int:
                 continue
             date, label = same[0]
             title = next((r["Заголовок пачки"] for r in rep.intervals if r["Пачка"] == pack and r["Столбец-замер"] == label), "")
-            if any(p.get("_kind") == "gvk" and p["Пачка"] == pack and p["Столбец-замер"] == label for p in rep.packs):
+            if any(p.get("_kind") == "gvk" and (p["Пачка"] == pack or abs((p.get("ГВК MD, м") or -1e9) - md) < 0.2) for p in rep.packs):      # ГВК этой пачки уже взят из таблицы отчёта — текст его только повторяет
                 continue
             _add_gvk(rep, Group(label, 0, 0, date, True), pack, title, md, ab, sent.strip(), "текст", MID,
                      "ГВК записан предложением вне таблицы: отнесён к замеру этого отчёта — сверить")
