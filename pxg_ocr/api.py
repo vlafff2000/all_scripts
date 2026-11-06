@@ -216,6 +216,11 @@ async def export_collect(request: Request):
     return JSONResponse({"dir": str(out_dir), "file": fname, **stats})
 
 
+async def gpu_check(request: Request):
+    """«Проверить видеокарту»: драйвер, Vulkan, провайдеры движка и выбранный режим текстом (без содержимого документов)."""
+    return JSONResponse({"lines": await run_in_threadpool(engine.gpu_diag)})
+
+
 async def delete_result(request: Request):
     ok = await run_in_threadpool(engine.delete_result, str((await _body(request)).get("dir") or ""))
     return JSONResponse({"ok": ok})
@@ -243,6 +248,7 @@ def build_app() -> Starlette:
         Route("/api/ocr/docx", export_docx, methods=["POST"]),
         Route("/api/ocr/tables", export_tables, methods=["POST"]),
         Route("/api/ocr/collect", export_collect, methods=["POST"]),
+        Route("/api/ocr/gpu", gpu_check),
         Route("/api/ocr/delete", delete_result, methods=["POST"]),
         Route("/api/client-log", client_log, methods=["POST"]),
         *fs_browse.routes(),

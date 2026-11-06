@@ -44,6 +44,7 @@ export default function App() {
   const [db, setDb] = useState<{ kind: string; sheets: { name: string; columns: string[]; rows: Cell[][] }[] } | null>(null)
   const [dbErr, setDbErr] = useState('')
   const [svod, setSvod] = useState('')
+  const [gpuInfo, setGpuInfo] = useState('')
   const running = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
@@ -132,6 +133,11 @@ export default function App() {
     setSvod(`Файлов: ${r.files}. Листов: ${r.sheets?.length}: ` + (r.sheets || []).map((x) => `${x.name} (${x.rows})`).join(', '))
     await saveUrlAs(fileUrl(r.dir, r.file, true), r.file)
   }
+  const checkGpu = async () => {
+    setGpuInfo('Проверяю…')
+    const r = await api<{ lines: string[] }>('/api/ocr/gpu')
+    setGpuInfo(r.lines.join('\n'))
+  }
   const del = async () => {
     if (!cur) return
     await api('/api/ocr/delete', { dir: cur.dir }); setSel(''); void refresh()
@@ -170,6 +176,8 @@ export default function App() {
         {plan && <div className={'ocr-plan' + (plan.mode === 'gpu' && plan.why.includes('мало') ? ' warn' : '')}>
           Будет: {plan.mode === 'gpu' ? `видеокарта, лимит ${plan.vram_gb} ГБ` : 'процессор'}, потоков {plan.threads}; {plan.why}.
         </div>}
+        <button type="button" onClick={() => void checkGpu()}>Проверить видеокарту</button>
+        {gpuInfo && <pre className="ocr-log" style={{ maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{gpuInfo}</pre>}
         <label>Страницы
           <input type="text" value={pages} onChange={(e) => setPages(e.target.value)} placeholder="all, 1-5 или 1-5,8" />
         </label>
