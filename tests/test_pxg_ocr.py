@@ -58,9 +58,9 @@ def test_plan_gpu_limits_vram(monkeypatch):
     assert env["MINERU_VIRTUAL_VRAM_SIZE"] == "5" and "MINERU_DEVICE_MODE" not in env
 
 
-def test_plan_linux_never_uses_gpu(monkeypatch):
+def test_plan_linux_auto_does_not_use_gpu(monkeypatch):
     monkeypatch.setattr(engine, "GPU_SUPPORTED", False)
-    p = engine.plan("gpu", {"cores": 16, "gpu": {"name": "RTX 4060 Ti", "total_gb": 8.0, "free_gb": 7.0}})
+    p = engine.plan("auto", {"cores": 16, "gpu": {"name": "RTX 4060 Ti", "total_gb": 8.0, "free_gb": 7.0}})
     assert p["mode"] == "cpu" and "процессоре" in p["why"]
 
 
@@ -145,3 +145,20 @@ def test_export_docx_tables_and_collect(env, monkeypatch):
     r = c.post("/api/ocr/collect", json={"scope": "all"}).json()
     assert r["files"] == 1 and (engine.out_root() / "Сводные" / r["file"]).is_file()
     assert c.post("/api/ocr/docx", json={"dir": str(env)}).status_code == 404
+
+
+def test_manual_gpu_mode_works_on_linux_but_auto_stays_on_cpu(monkeypatch):
+    monkeypatch.setattr(engine, "GPU_SUPPORTED", False)
+    hw = {"cores": 8, "gpu": {"name": "RTX 3050", "total_gb": 4.0, "free_gb": 3.6}}
+    assert engine.plan("auto", hw)["mode"] == "cpu"
+    p = engine.plan("gpu", hw)
+    assert p["mode"] == "gpu" and p["vram_gb"] == 3.1 and "мало" in p["why"]
+    assert engine.plan("gpu", {"cores": 8, "gpu": None})["mode"] == "cpu"
+
+
+def test_gpu_diag_never_raises_without_driver(env, monkeypatch):
+    monkeypatch.setattr(engine, "_run_text", lambda cmd, timeout=20: "нет")
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    lines = engine.gpu_diag()
+    assert any("nvidia-smi не найден" in l for l in lines) and any(l.startswith("Режим gpu") for l in lines)
+    assert TestClient(api.build_app()).get("/api/ocr/gpu").json()["lines"]
