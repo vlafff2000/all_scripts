@@ -117,6 +117,8 @@ def ru_date(text: str) -> str:
 
 def doc_kind(md: str) -> str:
     f = flat(md).lower()
+    if "отчет по эксплуатации" in f or "отчёт по эксплуатации" in f:
+        return "monthly"
     if "акт на проведен" in f:
         return "krs"
     if "заключение по результатам интерпретации" in f or "геофизических исследований в скважине" in f:
@@ -295,13 +297,18 @@ def extract_gdi(md: str, source: str = "") -> Sheets:
     return sheets
 
 
-EXTRACTORS = {"krs": extract_krs, "gis": extract_gis, "gdi": extract_gdi}
+def _extract_monthly(md: str, source: str = "") -> Sheets:
+    from pxg_ocr.monthly import extract_monthly
+    return extract_monthly(md, source)
+
+
+EXTRACTORS = {"krs": extract_krs, "gis": extract_gis, "gdi": extract_gdi, "monthly": _extract_monthly}
 
 
 def extract(md: str, source: str = "", kind: str = "") -> Tuple[str, Sheets]:
     k = kind or doc_kind(md)
     if k not in EXTRACTORS:
-        raise ValueError("Не удалось определить вид документа (акт КРС, заключение ГИС или отчёт ГДИ).")
+        raise ValueError("Не удалось определить вид документа (акт КРС, заключение ГИС, отчёт ГДИ или месячный отчёт ПХГ).")
     return k, EXTRACTORS[k](md, source)
 
 
