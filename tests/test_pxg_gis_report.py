@@ -587,3 +587,11 @@ def test_same_file_name_in_two_folders_is_not_doubled(ra):
     twice, _ = gr.build([ra, twin])
     assert len(twice["Строки БД"]) == len(once["Строки БД"])
     assert (twice["Интервалы"]["В БД"] == "да").sum() == (once["Интервалы"]["В БД"] == "да").sum()
+
+
+def test_docx_saved_with_doc_extension_is_read(tmp_path):
+    # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
+    p = tmp_path / "21Касимов_010120.doc"
+    _docx(str(p), "<w:p><w:r><w:t>Скважина: 21</w:t></w:r></w:p>")
+    rep = gr.parse_file(str(p))
+    assert not rep.error and rep.well == "21"
