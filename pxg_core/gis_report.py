@@ -1509,7 +1509,7 @@ def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], Tuple[
             key = (rep.well, d)
             score = (own, rep.date or dt.date.min)
             if key not in best or score > best[key][0]:
-                best[key] = (score, rep.file, label)
+                best[key] = (score, rep.path or rep.file, label)
     return {k: (v[1], v[2]) for k, v in best.items()}
 
 
@@ -1522,7 +1522,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
     for rep in reports:
         for r in rep.intervals:
             d = r["Дата замера"]
-            ok = d is not None and chosen.get((rep.well, d)) == (rep.file, r["Столбец-замер"])
+            ok = d is not None and chosen.get((rep.well, d)) == (rep.path or rep.file, r["Столбец-замер"])
             allrows.append({**{k: v for k, v in r.items() if not k.startswith("_")}, "В БД": "да" if ok else ("нет: дубль замера из другого отчёта" if d is not None else "нет: дата замера не определена")})
             if ok:
                 by_well[rep.well][d].append((rep, r))
