@@ -886,3 +886,31 @@ def test_tables_without_header_phrase_do_not_make_epb():
     rep = gr.Report(file="x.docx", well="1", complex=[{"x": 1}], tables=[{"Тип": "комплекс ГИС"}, {"Тип": "термобарика"}])
     gr.check_report(rep)
     assert rep.kind == "" and "no_intervals" in _codes(rep)
+
+
+# ---- интервалы пачки, записанные предложением в тексте (шаблон подрядчика без таблицы интервалов) ----
+def _text_rep(*sentences, date="Дата исследования: 01.10.2022"):
+    return gr.parse_blocks([wt.Para("Скважина: 21"), wt.Para(date)] + [wt.Para(s) for s in sentences], "x.docx")
+
+
+def test_text_gas_interval_with_ng_and_kg_range():
+    rep = _text_rep("Пласт-коллектор в верхней песчаной пачке щигровского горизонта (D3sc) газонасыщен в интервале 784.8-796.0 м, Нг=11.2 м, Кг=45-85%. ГВК в интервале глинистого пропластка.")
+    r = rep.intervals[0]
+    assert (r["От, м"], r["До, м"], r["Пачка"], r["Нг по отчёту, м"]) == (784.8, 796.0, "Верхняя пачка", 11.2)
+    assert (r["Кг"], r["Кг мин"], r["Кг макс"]) == (0.65, 0.45, 0.85) and r["Уверенность"] == gr.MID
+    assert r["Дата замера"] == dt.date(2022, 10, 1) and "из текста" in r["Основание"]
+
+
+def test_text_two_intervals_and_water_pack():
+    rep = _text_rep("Скопления газа отмечаются:", "• в верхней песчаной пачке щигровского горизонта в интервалах 784.8 – 788.4 м и 790.6 – 793.3 м. ГВК на глубине 796.0 м.",
+                    "Нижняя песчаная пачка в интервале 800.0 – 806.0 м водонасыщена.")
+    got = [(r["От, м"], r["До, м"], r["Пачка"], r["Водонасыщенный"]) for r in rep.intervals]
+    assert (784.8, 788.4, "Верхняя пачка", False) in got and (790.6, 793.3, "Верхняя пачка", False) in got and (800.0, 806.0, "Нижняя пачка", True) in got
+
+
+def test_text_intervals_not_used_when_table_has_them_or_epb():
+    rep = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("Скопления газа отмечаются в верхней песчаной пачке в интервале 784.8 – 796.0 м, Нг = 11.2 м, Кг = 0.45 – 0.85 д.е."),
+                           _simple_table()], "x.docx")
+    assert len(rep.intervals) == 5
+    epb = _text_rep("РЕШАЕМЫЕ ЗАДАЧИ: определение толщины стенок НКТ", "в верхней песчаной пачке газонасыщен в интервале 784.8-796.0 м, Нг=11.2 м")
+    assert epb.kind == gr.KIND_EPB and not epb.intervals
