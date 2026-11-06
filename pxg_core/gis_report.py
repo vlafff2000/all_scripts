@@ -1467,7 +1467,8 @@ def table_kind(tbl: wt.Table) -> Tuple[str, int]:
     return "", nh
 
 
-_EPB_RX = re.compile(r"(?:диагностик\w*|определени\w*|оценк\w*|контрол\w*|обследовани\w*)\s+(?:\w+\s+){0,2}?техническ\w+\s+состояни\w*|техническ\w+\s+состояни\w*\s+(?:скважин|колонн|обсадн)|диагностик\w*\s+скважин|толщин\w+\s+(?:стен|труб)", re.I)
+_EPB_RX = re.compile(r"(?:диагностик\w*|определени\w*|оценк\w*|контрол\w*|обследовани\w*)\s+(?:\w+\s+){0,2}?техническ\w+\s+состояни\w*|техническ\w+\s+состояни\w*\s+(?:скважин|колонн|обсадн)|диагностик\w*\s+скважин", re.I)
+_EPB_TASKS_RX = re.compile(r"толщин\w+\s+(?:стен|труб)", re.I)
 
 
 def report_kind(blocks: List[wt.Block]) -> str:
@@ -1475,7 +1476,8 @@ def report_kind(blocks: List[wt.Block]) -> str:
     ГИС-контроль этих слов в шапке не содержит."""
     head = " ".join(b.text for b in blocks[:30] if isinstance(b, wt.Para))[:6000]
     head += " " + " ".join(c.text for b in blocks[:8] if isinstance(b, wt.Table) for r in b.rows for c in r.cells)[:3000]
-    return KIND_EPB if _EPB_RX.search(head) else ""
+    tasks = " ".join(b.text for b in blocks[:40] if isinstance(b, wt.Para) and re.match(r"\s*РЕШАЕМЫЕ ЗАДАЧИ", b.text, re.I))       # метод «толщины стенок» есть и в комплексе ГИС-контроля: смотрим только задачи
+    return KIND_EPB if _EPB_RX.search(head) or _EPB_TASKS_RX.search(tasks) else ""
 
 
 def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, str]] = None) -> Report:

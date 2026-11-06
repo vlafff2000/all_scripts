@@ -914,3 +914,10 @@ def test_text_intervals_not_used_when_table_has_them_or_epb():
     assert len(rep.intervals) == 5
     epb = _text_rep("РЕШАЕМЫЕ ЗАДАЧИ: определение толщины стенок НКТ", "в верхней песчаной пачке газонасыщен в интервале 784.8-796.0 м, Нг=11.2 м")
     assert epb.kind == gr.KIND_EPB and not epb.intervals
+
+
+def test_wall_thickness_in_complex_table_does_not_make_epb():
+    tbl = wt.Table(rows=[wt.TRow([wt.Cell("Вид исследований", 0, 1000), wt.Cell("Применяемая аппаратура", 1000, 2000)]),
+                         wt.TRow([wt.Cell("Определение толщины стенок труб", 0, 1000), wt.Cell("МИД", 1000, 2000)])])
+    rep = gr.parse_blocks([wt.Para("Скважина: 21"), wt.Para("РЕШАЕМЫЕ ЗАДАЧИ: Определение характера насыщения пласта-коллектора (Кг), положения ГВК"), tbl], "x.docx")
+    assert rep.kind == ""
