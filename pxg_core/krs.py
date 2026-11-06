@@ -592,6 +592,55 @@ def _open_source_workbook(src_path: str):
     return None
 
 
+def kind_fills(data: KrsData) -> Dict[str, RGB]:
+    """Тип ремонта → заливка: по легенде самой таблицы, чего нет в ней — по умолчанию."""
+    out: Dict[str, RGB] = {}
+    for src in (data.legend, DEFAULT_LEGEND):
+        for color, kind in src.items():
+            out.setdefault(kind, color)
+    return out
+
+
+def act_cell_text(row) -> str:
+    """Текст ячейки «Выполнение КР»: коды и названия работ, как в таблице; без кодов — описание из акта."""
+    text = " ".join(str(row["Описание работ"] or "").split())
+    items = split_works(text)
+    return ". ".join(frag for _, frag in items) if items else text
+
+
+def _write_act_works(ws, hdr: int, rows: Dict[int, int], cols: Columns, data: KrsData, new_column) -> List[Tuple[str, str]]:
+    """Ремонты из актов → ячейки «Выполнение КР <год>» с заливкой по типу. Чужие значения не затираются; нет столбца года — добавляется справа."""
+    from openpyxl.styles import PatternFill
+    notes: List[Tuple[str, str]] = []
+    if "Источник" not in data.works.columns:
+        return notes
+    acts = data.works[data.works["Источник"].astype(str).str.startswith("Акт")]
+    if acts.empty:
+        return notes
+    fills = kind_fills(data)
+    tmpl = max(cols.works.values()) + 1 if cols.works else None
+    year_col: Dict[int, int] = {y: c + 1 for y, c in cols.works.items()}
+    for _, r in acts.sort_values(["Год", "Скважина"]).iterrows():
+        y, row = int(r["Год"]), rows.get(int(r["Скважина"]))
+        if not row:
+            continue
+        if y not in year_col:
+            year_col[y] = new_column("Выполнение КР %d" % y, tmpl)
+            notes.append(("заметка", "В таблице не было столбца «Выполнение КР %d»: добавлен справа (столбец %d)" % (y, year_col[y])))
+        cell = ws.cell(row, year_col[y])
+        if not _plain(cell.value):
+            notes.append(("предупреждение", "Скв. %d, %d год: в ячейке «Выполнение КР» уже стоит запись, акт не записан, решение за инженером" % (int(r["Скважина"]), y)))
+            continue
+        _copy_style(ws.cell(row, tmpl) if tmpl else None, cell, keep_fill=False)
+        cell.value = act_cell_text(r)
+        rgb = fills.get(r["Тип ремонта"])
+        if rgb:
+            cell.fill = PatternFill("solid", fgColor="%02X%02X%02X" % rgb)
+        else:
+            notes.append(("заметка", "Скв. %d, %d год: тип ремонта не определён, ячейка без заливки — задайте цвет вручную" % (int(r["Скважина"]), y)))
+    return notes
+
+
 def write_updated_table(src_grid: Grid, cols: Columns, data: KrsData, prio: pd.DataFrame, season: str, dst: str,
                         src_path: Optional[str] = None) -> List[Tuple[str, str]]:
     """Исходная таблица анализа, открытая заново (а не пересозданная): формулы, стили, ширины, условное форматирование, фильтр и закрепление
@@ -645,6 +694,7 @@ def write_updated_table(src_grid: Grid, cols: Columns, data: KrsData, prio: pd.D
             elif not _is_mark(cell.value):
                 notes.append(("предупреждение", "Скв. %d: в ячейке вскрытия КРУ %s уже стоит «%s», а в Word-ревизии песок — не затёрто, решение за инженером"
                               % (int(r["Скважина"]), season, _text(cell.value))))
+    notes += _write_act_works(ws, hdr, rows, cols, data, new_column)
     pc = _find_header(ws, hdr, PRIO_HEADER)
     if pc is None:
         pc = new_column(PRIO_HEADER, prev_rev, 16)

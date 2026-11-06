@@ -9,7 +9,7 @@
 «Приоритет вручную» на листе «Приоритет» решает за расчёт и не затирается, если дать прежний результат параметром --prev.
 Вторая книга `Таблица_анализа_обновлённая.xlsx` — исходная таблица, открытая заново (не пересозданная): формулы, оформление, ширины, условное форматирование, фильтр и закрепление сохраняются; добавляются только «х» вскрытий в пустые ячейки (чужие значения не затираются), столбец нового сезона (если его не было) и приоритет с причиной справа. Исходник .xls без LibreOffice оформление не сохранит (будет предупреждение): сохраните его в .xlsx.
 
-Параметры: --table, --kru (необязательно; .docx), --kru-tables (номера таблиц Word), --kru-filter (текст строки, как в Атласе), --season (сезон вскрытий, «2025-2026»), --prev, --relapse (new|two), --per-season, --output.
+Параметры: --table, --acts (акты КРС после OCR: проведённые ремонты дописываются в «Ремонты» и в «Выполнение КР <год>» сводной таблицы с заливкой по типу; запись таблицы главнее акта), --kru (необязательно; .docx), --kru-tables (номера таблиц Word), --kru-filter (текст строки, как в Атласе), --season (сезон вскрытий, «2025-2026»), --prev, --relapse (new|two), --per-season, --output.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import re
 
 import pandas as pd
 
-from pxg_core import krs, параметры
+from pxg_core import krs, krs_acts, параметры
 
 
 def main(argv=None):
@@ -28,6 +28,7 @@ def main(argv=None):
         kru="ревизия КРУ нового сезона — Word (.docx), как в Газовом Атласе (необязательно); запасной вариант: Excel/CSV «№ скв» + «Песок»",
         kru_tables="номера таблиц Word через запятую, если нужны не только распознанные (как в настройках импорта Атласа)",
         kru_filter="брать из Word только строки, где есть этот текст (регулярное выражение; по умолчанию все строки с номерами скважин)",
+        acts="акты на проведённый КРС после OCR (markdown.md/.txt/.docx или папки с ними), через запятую (необязательно)",
         season="сезон вскрытий КРУ, например 2025-2026 (по умолчанию — последний сезон в таблице)",
         prev="прежний результат (КРС_для_Атласа.xlsx): ручные приоритеты переносятся",
         relapse="после замены фильтра: new — счёт заново с 3 (по умолчанию), two — повтор песка сразу даёт 2",
@@ -70,6 +71,12 @@ def main(argv=None):
             notes.append(("предупреждение", "В Word-ревизии указан сезон %s, а вскрытия подставляются в сезон %s: проверьте --season" % (", ".join(hints), season)))
         notes += krs.add_revisions(data, new, season)
         print("🔧 Вскрытия КРУ %s: %d скважин, песок у %d" % (season, len(new), int(new["Песок"].eq("Да").sum())))
+    if (args.acts or "").strip():
+        acts, anotes = krs_acts.read_acts(re.split(r"[,;]\s*", args.acts.strip()))
+        notes += anotes
+        notes += krs_acts.add_acts(data, acts)
+        added = int(data.works["Источник"].astype(str).str.startswith("Акт").sum()) if "Источник" in data.works.columns else 0
+        print("📄 Акты КРС: прочитано %d, в БД ремонтов добавлено %d, к проверке %d" % (len(acts), added, int(acts["Проверить"].astype(bool).sum()) if len(acts) else 0))
     relapse = (args.relapse or krs.RELAPSE_NEW).strip().lower()
     if relapse not in (krs.RELAPSE_NEW, krs.RELAPSE_TWO):
         print("❌ --relapse: new или two.")
