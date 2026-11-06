@@ -1271,19 +1271,24 @@ def read_interval_text(rep: Report, blocks: List[wt.Block]) -> int:
         prev = b.text
         for sent in _SENT_SPLIT.split(b.text.replace("\n", " ")):
             low_s = low(sent)
-            if "пачк" not in low_s or not re.search(r"верхн|нижн", low_s):
+            named = "пачк" in low_s and re.search(r"верхн|нижн", low_s)
+            if not named and not re.search(r"коллектор|горизонт", low_s):
                 continue
             m = re.search(r"интервал\w*\s+((?:" + NUM + r"\s*[–—-]\s*" + NUM + r"\s*м\s*(?:и|,)?\s*)+)", sent)
             if not m:
                 continue
             ranges = [(fnum(a), fnum(c2)) for a, c2 in _RANGE.findall(m.group(1))]
             water = "водонасыщ" in low_s and "газонасыщ" not in low_s
-            gas = "газонасыщ" in low_s or bool(re.search(r"скопления газа[^.]{0,60}отмечаются", low_s)) or (ctx_gas and not water and re.match(r"\s*[•\-\\–]", sent) is not None)
+            if re.search(r"не\s+(?:отмечает|выявлен|отмечен|выделяет)", low_s):
+                continue                                   # «скоплений газа не отмечается»
+            gas = "газонасыщ" in low_s or bool(re.search(r"скоплени\w+ газа[^.]{0,60}(?:отмечаются|выделяются)|(?:отмечаются|выделяются)[^.]{0,30}скоплени\w+ газа", low_s)) or (ctx_gas and not water and re.match(r"\s*[•\-\\–]", sent) is not None)
             if not ranges or not (water or gas):
                 continue
-            pack = "Верхняя пачка" if re.search(r"верхн", low_s) else "Нижняя пачка"
-            hg = re.search(r"Нг\s*=\s*(" + NUM + r")", sent)
-            kg_m = re.search(r"Кг\s*=\s*(" + NUM + r")(?:\s*[–—-]\s*(" + NUM + r"))?\s*%", sent)
+            pack = ("Верхняя пачка" if re.search(r"верхн", low_s) else "Нижняя пачка") if named else ""      # пачка не названа: её подберёт resolve_packs по глубине
+            para = b.text.replace("\n", " ")
+            hg = re.search(r"Нг\s*=\s*(" + NUM + r")", sent) or (re.search(r"Нг\s*=\s*(" + NUM + r")", para) if len(ranges) == 1 else None)
+            kg_rx = r"Кг\s*=\s*(" + NUM + r")(?:\s*[–—-]\s*(" + NUM + r"))?\s*%"
+            kg_m = re.search(kg_rx, sent) or (re.search(kg_rx, para) if len(ranges) == 1 else None)
             kg = kmin = kmax = None
             if kg_m:
                 a1 = fnum(kg_m.group(1)) / 100

@@ -944,3 +944,15 @@ def test_all_columns_of_chosen_report_for_same_date_go_to_db():
                   "Пористость": None, "Насыщение": ""})
     _res, allrows = gr.to_results([rep])
     assert (allrows["В БД"] == "да").sum() == 9
+
+
+def test_text_interval_without_pack_word_uses_paragraph_ng_kg():
+    # шаблон «Скопления газа выделяются в пласте-коллекторе щигровского горизонта в интервале …. Нг=…, Кг=…»: пачка не названа
+    rep = _text_rep("Скопления газа выделяются в пласте-коллекторе щигровского горизонта в интервале 784.8 – 796.0 м. Нг = 11.2 м, Кг = 45-85%.")
+    r = rep.intervals[0]
+    assert (r["От, м"], r["До, м"], r["Пачка"], r["Нг по отчёту, м"], r["Кг"]) == (784.8, 796.0, "", 11.2, 0.65)
+
+
+def test_text_no_gas_sentence_gives_nothing():
+    rep = _text_rep("В пласте-коллекторе щигровского горизонта в интервале 784.8 – 796.0 м скоплений газа не отмечается.")
+    assert not rep.intervals
