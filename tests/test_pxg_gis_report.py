@@ -618,6 +618,23 @@ def test_reports_sheet_has_report_kind():
     assert gr.reports_frame([rep]).loc[0, "Вид отчёта"] == "ГИС при ЭПБ"
 
 
+def test_kg_all_below_one_percent_is_flagged_not_changed():
+    # «0.55» в столбце «Кг, %» читается как 0,55 % (так задано тестом выше), но если ВСЕ значения замера меньше 1 с десятичной точкой,
+    # скорее всего это доли единицы (в БД получается 0,0055): число не меняется, в «Проверку» идёт kg_scale_suspect
+    rep = gr.Report(file="x.docx", well="21")
+    rep.intervals = [_iv(100.0, 105.0, kg=0.0055, **{"Кг (как в отчёте)": "0.55"}), _iv(110.0, 112.0, kg=0.0070, **{"Кг (как в отчёте)": "0.70"})]
+    gr.check_intervals(rep)
+    assert [r["Кг"] for r in rep.intervals] == [0.0055, 0.0070]
+    assert any(i["Код"] == "kg_scale_suspect" for i in rep.issues)
+
+
+def test_kg_in_percent_is_not_flagged():
+    rep = gr.Report(file="x.docx", well="21")
+    rep.intervals = [_iv(100.0, 105.0, kg=0.55, **{"Кг (как в отчёте)": "55"}), _iv(110.0, 112.0, kg=0.7, **{"Кг (как в отчёте)": "0.70"})]
+    gr.check_intervals(rep)
+    assert not any(i["Код"] == "kg_scale_suspect" for i in rep.issues)
+
+
 def test_docx_saved_with_doc_extension_is_read(tmp_path):
     # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
     p = tmp_path / "21Касимов_010120.doc"
