@@ -1541,10 +1541,14 @@ def pick_report_files(files: List[str]) -> Tuple[List[str], List[str]]:
     pdfs = {os.path.splitext(f)[0].lower() for f in files if f.lower().endswith(".pdf")}
     keep, notes = [], []
     # вывод OCR из отдельной папки с тем же именем, что у PDF: читается он, а PDF (часто без таблиц в текстовом слое) — нет
-    ocr_names = {os.path.basename(ocr_blocks.ocr_stem(f)).split("__")[-1] for f in files if f.lower().endswith((".json", ".md")) and ocr_blocks.is_ocr_file(f)}   # «папка__имя»: так пакетный OCR различает одноимённые файлы
+    ocr_dirs: Dict[str, set] = {}   # имя → папки, где лежит вывод OCR («папка__имя»: так пакетный OCR различает одноимённые файлы)
+    for f in files:
+        if f.lower().endswith((".json", ".md")) and ocr_blocks.is_ocr_file(f):
+            ocr_dirs.setdefault(os.path.basename(ocr_blocks.ocr_stem(f)).split("__")[-1], set()).add(os.path.dirname(f))
     for f in files:
         low = f.lower()
-        if low.endswith(".pdf") and os.path.basename(os.path.splitext(f)[0]).lower() in ocr_names and os.path.splitext(f)[0].lower() not in have:
+        # вывод OCR в той же папке, что и PDF, подбирает сам PDF — там заменять нечего
+        if low.endswith(".pdf") and (ocr_dirs.get(os.path.basename(os.path.splitext(f)[0]).lower(), set()) - {os.path.dirname(f)}) and os.path.splitext(f)[0].lower() not in have:
             notes.append("%s: есть вывод OCR с тем же именем — читается он, PDF пропускается" % os.path.basename(f))
             continue
         if low.endswith((".json", ".md")):
