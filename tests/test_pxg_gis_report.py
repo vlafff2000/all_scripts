@@ -633,3 +633,11 @@ def test_kg_in_percent_is_not_flagged():
     rep.intervals = [_iv(100.0, 105.0, kg=0.55, **{"Кг (как в отчёте)": "55"}), _iv(110.0, 112.0, kg=0.7, **{"Кг (как в отчёте)": "0.70"})]
     gr.check_intervals(rep)
     assert not any(i["Код"] == "kg_scale_suspect" for i in rep.issues)
+
+
+def test_docx_saved_with_doc_extension_is_read(tmp_path):
+    # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
+    p = tmp_path / "21Касимов_010120.doc"
+    _docx(str(p), "<w:p><w:r><w:t>Скважина: 21</w:t></w:r></w:p>")
+    rep = gr.parse_file(str(p))
+    assert not rep.error and rep.well == "21"

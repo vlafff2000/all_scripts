@@ -9,7 +9,7 @@
 «Приоритет вручную» на листе «Приоритет» решает за расчёт и не затирается, если дать прежний результат параметром --prev.
 Вторая книга `Таблица_анализа_обновлённая.xlsx` — исходная таблица, открытая заново (не пересозданная): формулы, оформление, ширины, условное форматирование, фильтр и закрепление сохраняются; добавляются только «х» вскрытий в пустые ячейки (чужие значения не затираются), столбец нового сезона (если его не было) и приоритет с причиной справа. Исходник .xls без LibreOffice оформление не сохранит (будет предупреждение): сохраните его в .xlsx.
 
-Параметры: --table, --acts (акты КРС после OCR: проведённые ремонты дописываются в «Ремонты» и в «Выполнение КР <год>» сводной таблицы с заливкой по типу; запись таблицы главнее акта), --kru (необязательно; .docx), --kru-tables (номера таблиц Word), --kru-filter (текст строки, как в Атласе), --season (сезон вскрытий, «2025-2026»), --prev, --relapse (new|two), --per-season, --output.
+Параметры: --table, --sprav (справка о выполнении плана КР, .docx: лист «План КР» — план, состояние по цвету, даты, статусы; выполненные ремонты попадают и в «Ремонты» и в сводную таблицу), --acts (акты КРС после OCR: проведённые ремонты дописываются в «Ремонты» и в «Выполнение КР <год>» сводной таблицы с заливкой по типу; запись таблицы главнее акта), --kru (необязательно; .docx), --kru-tables (номера таблиц Word), --kru-filter (текст строки, как в Атласе), --season (сезон вскрытий, «2025-2026»), --prev, --relapse (new|two), --per-season, --output.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import re
 
 import pandas as pd
 
-from pxg_core import krs, krs_acts, параметры
+from pxg_core import krs, krs_acts, krs_plan, параметры
 
 
 def main(argv=None):
@@ -29,6 +29,7 @@ def main(argv=None):
         kru_tables="номера таблиц Word через запятую, если нужны не только распознанные (как в настройках импорта Атласа)",
         kru_filter="брать из Word только строки, где есть этот текст (регулярное выражение; по умолчанию все строки с номерами скважин)",
         acts="акты на проведённый КРС после OCR (markdown.md/.txt/.docx или папки с ними), через запятую (необязательно)",
+        sprav="справка о выполнении плана КР (.docx) — БД «План КР» (необязательно)",
         season="сезон вскрытий КРУ, например 2025-2026 (по умолчанию — последний сезон в таблице)",
         prev="прежний результат (КРС_для_Атласа.xlsx): ручные приоритеты переносятся",
         relapse="после замены фильтра: new — счёт заново с 3 (по умолчанию), two — повтор песка сразу даёт 2",
@@ -77,6 +78,20 @@ def main(argv=None):
         notes += krs_acts.add_acts(data, acts)
         added = int(data.works["Источник"].astype(str).str.startswith("Акт").sum()) if "Источник" in data.works.columns else 0
         print("📄 Акты КРС: прочитано %d, в БД ремонтов добавлено %d, к проверке %d" % (len(acts), added, int(acts["Проверить"].astype(bool).sum()) if len(acts) else 0))
+    plan = None
+    if (args.sprav or "").strip():
+        sp = args.sprav.strip().strip('"')
+        if not os.path.isfile(sp):
+            print("❌ Справка не найдена: %s" % sp)
+            return 1
+        plan, pnotes = krs_plan.parse_sprav(sp)
+        notes += pnotes
+        plan = krs_plan.merge_manual(plan, pd.read_excel(args.prev.strip().strip('"'), sheet_name="План КР")
+                                     if (args.prev or "").strip() and os.path.isfile(args.prev.strip().strip('"')) else None)
+        notes += krs_acts.add_acts(data, krs_plan.works_from_plan(plan), label="Справка")
+        print("📋 Справка: %d скважин×ремонтов, выполнено %d, в процессе %d, ремонта не будет %d" % (
+            len(plan), int((plan["Состояние"] == krs_plan.STATE_DONE).sum()), int((plan["Состояние"] == krs_plan.STATE_PROGRESS).sum()),
+            int((plan["Ремонт будет"] == "Нет").sum())))
     relapse = (args.relapse or krs.RELAPSE_NEW).strip().lower()
     if relapse not in (krs.RELAPSE_NEW, krs.RELAPSE_TWO):
         print("❌ --relapse: new или two.")
@@ -109,6 +124,8 @@ def main(argv=None):
         data.works.to_excel(xw, sheet_name="Ремонты", index=False)
         data.revisions.sort_values(["Скважина", "Сезон", "Источник"]).to_excel(xw, sheet_name="Ревизии КРУ", index=False)
         data.gdi.to_excel(xw, sheet_name="Спец ГДИ", index=False)
+        if plan is not None:
+            plan.to_excel(xw, sheet_name="План КР", index=False)
         prio.sort_values(["Приоритет итог", "Скважина"], na_position="last")[prio_cols].to_excel(xw, sheet_name="Приоритет", index=False)
         calc.to_excel(xw, sheet_name="Потребность", index=False)
         for name, df in stats.items():
