@@ -752,6 +752,19 @@ def test_month_with_two_exact_dates_stays_month_only():
     assert c.intervals[0]["Дата замера"] == dt.date(2022, 10, 1) and c.intervals[0]["Дата точная"] is False
 
 
+@pytest.mark.parametrize("name, want", [("141Касимов_280524.ocr.md", dt.date(2024, 5, 28)), ("10Касимов_020423.docx", dt.date(2023, 4, 2)),
+                                        ("008Кас_130422.pdf", dt.date(2022, 4, 13)), ("12Касимов_010423.doc", dt.date(2023, 4, 1))])
+def test_date_from_file_name_ddmmyy_when_header_has_none(name, want):
+    # баг: у 133 отчётов не было даты (дата только в имени вида «..._280524»), замеры терялись при сравнении
+    rep = gr.parse_blocks([wt.Para("Скважина: 21")], name)
+    assert rep.date == want and any(i["Код"] == "date_from_name" for i in rep.issues)
+
+
+@pytest.mark.parametrize("name", ["102_0804 контроль.pdf", "21Касимов_999999.doc", "141Касимов_.doc", "500123456.doc"])
+def test_no_date_from_name_when_it_is_not_a_date(name):
+    assert gr.parse_blocks([wt.Para("Скважина: 21")], name).date is None
+
+
 def test_docx_saved_with_doc_extension_is_read(tmp_path):
     # баг: файл .doc, внутри которого на самом деле docx (zip), не читался: «нет подписи OLE2»
     p = tmp_path / "21Касимов_010120.doc"

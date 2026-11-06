@@ -307,6 +307,14 @@ def read_header(rep: Report, blocks: List[wt.Block]) -> None:
     if rep.date is None:
         m = _DATE.search(os.path.basename(rep.file))
         rep.date = pdate(m.group(0)) if m else None
+        if rep.date is None:                          # «141Касимов_280524»: шесть цифр ДДММГГ
+            m6 = re.search(r"(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)", os.path.basename(rep.file))
+            if m6:
+                try:
+                    cand = dt.date(2000 + int(m6.group(3)), int(m6.group(2)), int(m6.group(1)))
+                    rep.date = cand if 2015 <= cand.year <= 2030 else None
+                except ValueError:
+                    rep.date = None
         if rep.date:
             rep.date_note = "дата взята из имени файла"
             rep.issue("warn", "date_from_name", "Дата исследования в тексте не найдена: взята из имени файла", "имя файла")
