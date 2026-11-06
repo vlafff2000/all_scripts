@@ -163,6 +163,28 @@ async def make_db(request: Request):
     return JSONResponse({"kind": kind, "xlsx": "db.xlsx", "sheets": [{"name": n, "columns": c, "rows": r} for n, (c, r) in sheets.items()]})
 
 
+async def make_db_all(request: Request):
+    """«БД из всех результатов»: markdown всех готовых результатов и/или выбранных папок (*.ocr.md) → один xlsx; вид документа определяется у каждого файла."""
+    import datetime
+    b = await _body(request)
+    files: list = []
+    for i in await run_in_threadpool(engine.history):
+        if i.get("state") == "done" and i.get("dir") and b.get("scope") != "folders":
+            md = (engine.collect(Path(i["dir"])) or {}).get("md")
+            if md:
+                files.append(str(Path(i["dir"]) / md))
+    files += [f for f in ocr_export.sources([str(p) for p in (b.get("folders") or []) if p], prefer=".md") if f.lower().endswith(".md")]
+    if not files:
+        return _err("Нет распознанных markdown-файлов для сборки.")
+    sheets, registry = await run_in_threadpool(extract.extract_many, files)
+    book = {**sheets, "Файлы": (["Файл", "Вид документа", "Строк", "Замечание"], registry)}
+    out_dir = engine.out_root() / "Сводные"
+    fname = "БД_из_всех_результатов_%s.xlsx" % datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    await run_in_threadpool(extract.write_xlsx, book, str(out_dir / fname))
+    return JSONResponse({"dir": str(out_dir), "file": fname, "files": len(files), "recognised": sum(1 for r in registry if r[1]),
+                         "sheets": [{"name": n, "columns": c, "rows": r} for n, (c, r) in book.items()]})
+
+
 def _result_md(d: str):
     """(папка результата, markdown, имя исходного файла) или (None, None, ошибка)."""
     base = Path(d).resolve()
@@ -245,6 +267,7 @@ def build_app() -> Starlette:
         Route("/api/ocr/file", result_file),
         Route("/api/ocr/page", source_page),
         Route("/api/ocr/db", make_db, methods=["POST"]),
+        Route("/api/ocr/db-all", make_db_all, methods=["POST"]),
         Route("/api/ocr/docx", export_docx, methods=["POST"]),
         Route("/api/ocr/tables", export_tables, methods=["POST"]),
         Route("/api/ocr/collect", export_collect, methods=["POST"]),

@@ -12,7 +12,7 @@ import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 Sheets = Dict[str, Tuple[List[str], List[list]]]
 MONTHS = {"января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6, "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12}
@@ -310,6 +310,26 @@ def extract(md: str, source: str = "", kind: str = "") -> Tuple[str, Sheets]:
     if k not in EXTRACTORS:
         raise ValueError("Не удалось определить вид документа (акт КРС, заключение ГИС, отчёт ГДИ или месячный отчёт ПХГ).")
     return k, EXTRACTORS[k](md, source)
+
+
+def extract_many(paths: List[str]) -> Tuple[Sheets, List[List[Any]]]:
+    """Сборка БД из многих markdown: одинаковые листы разных файлов склеиваются. Возвращает (листы, реестр [файл, вид, строк, замечание]).
+    Файл с неопределённым видом документа не теряется молча: он записан в реестр с замечанием."""
+    merged: Sheets = {}
+    registry: List[List[Any]] = []
+    for f in paths:
+        name = Path(f).stem
+        try:
+            kind, sheets = extract(Path(f).read_text(encoding="utf-8", errors="replace"), name)
+        except ValueError as e:
+            registry.append([Path(f).name, "", 0, str(e)])
+            continue
+        rows = 0
+        for sheet, (cols, data) in sheets.items():
+            merged.setdefault(sheet, (cols, []))[1].extend(data)
+            rows += len(data)
+        registry.append([Path(f).name, kind, rows, ""])
+    return merged, registry
 
 
 def write_xlsx(sheets: Sheets, path: str) -> str:
