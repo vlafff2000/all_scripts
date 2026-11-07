@@ -1079,3 +1079,23 @@ def test_dash_kg_means_water_saturated_kg_025():
     simple = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("в верхней песчаной пачке"), _simple_table()], "x.docx")
     last = simple.intervals[-1]
     assert (last["От, м"], last["Кг"], last["Водонасыщенный"]) == (796.0, 0.25, True)
+
+
+def _clay_table():
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    return wt.Table(rows=[row("Интервал, м", "Мощность, м", "Пористость, д.е.", "Газонасыщенность, д.е."), row("784.8 – 788.4", "3.6", "0.32", "0.85"),
+                          row("788.4 – 789.2", "0.8", "0.24", "заглинизирован"), row("789.2 – 790.6", "1.4", "0.30", "0.70\n(заглинизирован)")])
+
+
+def test_clay_interlayer_is_kept_marked_and_has_no_gas():
+    # решение инженера: заглинизированные пропластки есть в Excel-базе и в отчётах, терять нельзя; газа в них нет (не коллектор)
+    rep = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("в верхней песчаной пачке"), _clay_table()], "x.docx")
+    r1, r2, r3 = rep.intervals
+    assert (r2["От, м"], r2["Кг"], r2["Насыщение"], r2["Водонасыщенный"]) == (788.4, 0.25, "заглинизирован", False)
+    assert "заглинизирован" in r2["Основание"] and r2["Уверенность"] == gr.MID
+    assert (r3["Кг"], r3["Насыщение"]) == (0.7, "заглинизирован")          # число отчёта сохраняется (как в Excel), пометка добавляется
+    res, allrows = gr.to_results([rep])
+    rows = next(iter(res.values())).rows
+    assert len(rows) == 3 and [x.status for x in rows] == ["", "заглинизирован", "заглинизирован"]
+    assert rows[1].hef == 0.0

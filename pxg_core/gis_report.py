@@ -867,6 +867,11 @@ def _is_frac(label: str) -> bool:
     return bool(_FRAC_UNIT.search(label or ""))
 
 
+def _clay(*texts: str) -> bool:
+    """Заглинизированный пропласток (не коллектор, газа нет): слово в ячейке Кг, насыщения или литологии."""
+    return bool(re.search(r"заглинизир", " ".join(t or "" for t in texts), re.I))
+
+
 def _kg(text: str, frac: bool = False) -> Tuple[Optional[float], Optional[float], Optional[float], str]:
     """«50-55», «70», «<20%», «~20», «-» → (среднее, мин, макс, текст) в долях единицы. Текст — исходная запись, когда она не просто число.
     frac=True: столбец в долях единицы («д.е.»), числа берутся как есть."""
@@ -1170,6 +1175,12 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             if dash:                                              # «-» вместо Кг: интервал водонасыщен, Кг = 0,25 (решение инженера; так же в Excel-базе)
                 kg = kmin = kmax = WATER_KG
                 water = True
+            clay = _clay(rec["kg"], sat, rec["lith"])
+            clay_nokg = clay and kg is None and not re.search(r"\d", rec["kg"] or "")
+            if clay_nokg:                                         # заглинизированный пропласток без числа: газа нет, Кг = 0,25, интервал не теряется
+                kg = kmin = kmax = WATER_KG
+            if clay and not sat:
+                sat = "заглинизирован"
             kp = None
             kp_why = ""
             for br in base_rows:
@@ -1182,12 +1193,17 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             conf, why = HIGH, ""
             if dash:
                 conf, why = MID, "Кг «-» в отчёте: интервал водонасыщен, принято Кг = %g (как водонасыщенный; решение инженера)" % WATER_KG
+            elif clay_nokg:
+                conf, why = MID, "заглинизированный пропласток (не коллектор): газа нет, принято Кг = %g" % WATER_KG
             elif ktext and kmin is not None and kmin != kmax:
                 conf, why = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
             elif ktext and kg is not None:
                 conf, why = MID, "Кг с припиской «%s»: для расчётов взято число %g %%, исходный текст сохранён" % (ktext, kg * 100)
             elif kg is None and not water:
                 conf, why = MID, "Кг не число («%s»)" % ktext
+            if clay and not clay_nokg:
+                why = "; ".join(x for x in (why, "в отчёте пометка «заглинизирован» (число Кг сохранено)") if x)
+                conf = MID
             if extra_why:
                 conf, why = MID, "; ".join(x for x in (extra_why, why) if x)
             rep.intervals.append(OrderedDict([
@@ -1268,9 +1284,18 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
         if dash:
             kg = kmin = kmax = WATER_KG
             water = True
+        kg_cell = kgc.text if kgc is not None else ""
+        clay = _clay(kg_cell)
+        clay_nokg = clay and kg is None and not re.search(r"\d", kg_cell)
+        if clay_nokg:
+            kg = kmin = kmax = WATER_KG
+        if clay and not sat:
+            sat = "заглинизирован"
         conf, why_row = HIGH, ""
         if dash:
             conf, why_row = MID, "Кг «-» в отчёте: интервал водонасыщен, принято Кг = %g (как водонасыщенный; решение инженера)" % WATER_KG
+        elif clay_nokg:
+            conf, why_row = MID, "заглинизированный пропласток (не коллектор): газа нет, принято Кг = %g" % WATER_KG
         elif ktext and kmin is not None and kmin != kmax:
             conf, why_row = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
         elif ktext and kg is not None:
@@ -1906,7 +1931,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
                 note = "; ".join(x for x in (r["Основание"], "ниже ГВК: hэф не считается" if below else "", "водонасыщен" if not gas else "") if x)
                 row = gis.Row(sheet=well, well=well, xl_row=0, block=n, label_raw=r["Заголовок пачки"], frm=r["От, м"], to=r["До, м"], kp=r["Пористость"], kg=r["Кг"],
                               kg_text=r["Кг (как в отчёте)"] if r["Кг"] is None or r["Кг мин"] != r["Кг макс"] or _kg(r["Кг (как в отчёте)"])[3] else "",
-                              pack=r["Пачка"], color="", hi=hi, hef=hef, kg_hef=hef * (r["Кг"] or 0.0), note=note, status=r["Насыщение"] if not gas else "")
+                              pack=r["Пачка"], color="", hi=hi, hef=hef, kg_hef=hef * (r["Кг"] or 0.0), note=note, status=r["Насыщение"] if (not gas or _clay(r["Насыщение"])) else "")
                 b.rows.append(row)
                 res.rows.append(row)
                 if r["Пачка"]:
