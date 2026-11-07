@@ -1182,7 +1182,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             por, _pmin, _pmax, _ptext = _kg(rec.get("kp", ""), frac)
             sat = rec["sat"]
             water = bool(re.search(r"водонасыщ", sat, re.I))
-            dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or ""))
+            gas_text = bool(re.search(r"газонасыщ", sat or "", re.I)) and not re.search(r"водонасыщ", sat or "", re.I)
+            dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or "")) and not gas_text       # «-» при насыщении «Газонасыщ.»: Кг не определён, а не вода
             if dash:                                              # «-» вместо Кг: интервал водонасыщен, Кг = 0,25 (решение инженера; так же в Excel-базе)
                 kg = kmin = kmax = WATER_KG
                 water = True
@@ -1298,7 +1299,8 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
         kp, _a, _b, _t = _kg(kpc.text if kpc is not None else "", frac_kp)
         sat = kgc.text if kgc is not None and re.search(r"водонасыщ", kgc.text, re.I) else ""
         water = bool(sat)
-        dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or ""))
+        gas_text = bool(re.search(r"газонасыщ", " ".join(x.text for x in r.cells), re.I)) and not re.search(r"водонасыщ", " ".join(x.text for x in r.cells), re.I)
+        dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or "")) and not gas_text
         if dash:
             kg = kmin = kmax = WATER_KG
             water = True

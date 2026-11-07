@@ -1247,3 +1247,16 @@ def test_clay_interlayers_and_no_annotations_for_plain_text():
     fr = gr.annotations_frame([rep])
     c = fr[fr["Вид"] == "Заглинизированный прослой"]
     assert len(c) == 2 and set(c["От, м"]) == {788.4, 789.2} and set(c["Пачка"]) == {"Верхняя пачка"}
+
+
+def test_dash_kg_with_gas_saturation_text_is_not_water():
+    # скв. 112: в таблице «Кг: -», но «Насыщение: Газонасыщ.»: Кг не определён, а не вода (прочерк = вода только без указания газа)
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    tbl = wt.Table(rows=[row("Интервал залегания, м", "Н общ, м", "Кг, %", "Насыщение"), row("775.2-785.6", "10.4", "-", "Газонасыщ."), row("796.0-818.8", "22.8", "-", "Водонасыщ.")])
+    rep = gr.Report(file="x.docx", well="112", date=dt.date(2020, 12, 3))
+    top = wt.TRow([wt.Cell("По данным ГИС-контроля от 03.12.2020 г.", 0, 4000)])
+    gr.read_intervals(rep, wt.Table(rows=[top] + tbl.rows), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = [(r["От, м"], r["Кг"], r["Водонасыщенный"]) for r in rep.intervals]
+    assert (775.2, None, False) in got
+    assert any(g[0] == 796.0 and g[2] is True for g in got)
