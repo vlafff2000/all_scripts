@@ -23,6 +23,7 @@ from . import gis, qc, word_doc, word_tables as wt
 
 NUM = r"-?\d+(?:[.,]\d+)?"
 HIGH, MID, LOW = "высокая", "средняя", "низкая"
+WATER_KG = 0.25                       # Кг водонасыщенного интервала (как в Excel-базе); равен порогу hэф, поэтому hэф = 0
 MD_BASIS = "по стволу (MD)"
 _DATE = re.compile(r"(\d{1,2})[./](\d{1,2})[./](\d{4}|\d{2})(?!\d)")
 _MONTH = re.compile(r"(?<![\d.])(\d{1,2})[./](\d{4})(?!\d)")
@@ -1165,6 +1166,10 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             por, _pmin, _pmax, _ptext = _kg(rec.get("kp", ""), frac)
             sat = rec["sat"]
             water = bool(re.search(r"водонасыщ", sat, re.I))
+            dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or ""))
+            if dash:                                              # «-» вместо Кг: интервал водонасыщен, Кг = 0,25 (решение инженера; так же в Excel-базе)
+                kg = kmin = kmax = WATER_KG
+                water = True
             kp = None
             kp_why = ""
             for br in base_rows:
@@ -1175,7 +1180,9 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             if por is None and kp is not None:
                 kp_why = kp_why + " (взята как пористость)"
             conf, why = HIGH, ""
-            if ktext and kmin is not None and kmin != kmax:
+            if dash:
+                conf, why = MID, "Кг «-» в отчёте: интервал водонасыщен, принято Кг = %g (как водонасыщенный; решение инженера)" % WATER_KG
+            elif ktext and kmin is not None and kmin != kmax:
                 conf, why = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
             elif ktext and kg is not None:
                 conf, why = MID, "Кг с припиской «%s»: для расчётов взято число %g %%, исходный текст сохранён" % (ktext, kg * 100)
@@ -1257,8 +1264,14 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
         kp, _a, _b, _t = _kg(kpc.text if kpc is not None else "", frac_kp)
         sat = kgc.text if kgc is not None and re.search(r"водонасыщ", kgc.text, re.I) else ""
         water = bool(sat)
+        dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or ""))
+        if dash:
+            kg = kmin = kmax = WATER_KG
+            water = True
         conf, why_row = HIGH, ""
-        if ktext and kmin is not None and kmin != kmax:
+        if dash:
+            conf, why_row = MID, "Кг «-» в отчёте: интервал водонасыщен, принято Кг = %g (как водонасыщенный; решение инженера)" % WATER_KG
+        elif ktext and kmin is not None and kmin != kmax:
             conf, why_row = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
         elif ktext and kg is not None:
             conf, why_row = MID, "Кг с припиской «%s»: для расчётов взято число %g %%, исходный текст сохранён" % (ktext, kg * 100)
