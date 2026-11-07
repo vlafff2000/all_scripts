@@ -1821,6 +1821,35 @@ def resolve_dates(reports: List[Report]) -> None:
             if len(days) == 1:
                 r["Дата замера"], r["Дата точная"] = next(iter(days)), True
                 r["Основание"] = "; ".join(x for x in (r["Основание"], "точная дата замера взята из другого отчёта по этой скважине (в месяце ровно одна дата)") if x)
+    # точные даты одного исследования из разных источников (дата отчёта и таблица «ГВК по датам») расходятся на день-два: склеиваем в дату отчёта (до 5 суток)
+    cand: Dict[Tuple[str, int, int], set] = defaultdict(set)
+    rdates: Dict[Tuple[str, int, int], set] = defaultdict(set)
+    for rep in reports:
+        if rep.well and rep.date:
+            rdates[(rep.well, rep.date.year, rep.date.month)].add(rep.date)
+        for r in rep.intervals:
+            if r["Дата замера"] is not None and r["Дата точная"]:
+                cand[(rep.well, r["Дата замера"].year, r["Дата замера"].month)].add(r["Дата замера"])
+    remap: Dict[Tuple[str, dt.date], dt.date] = {}
+    for key, days in cand.items():
+        days = sorted(days | rdates.get(key, set()))
+        cluster = [days[0]]
+        for d in days[1:] + [None]:
+            if d is not None and (d - cluster[-1]).days <= 5:
+                cluster.append(d)
+                continue
+            if len(cluster) > 1:
+                own = sorted(x for x in cluster if x in rdates.get(key, set()))
+                for x in cluster:
+                    remap[(key[0], x)] = own[0] if own else cluster[0]
+            cluster = [d] if d is not None else []
+    for rep in reports:
+        for r in rep.intervals:
+            new = remap.get((rep.well, r["Дата замера"])) if r["Дата замера"] is not None and r["Дата точная"] else None
+            if new is not None and new != r["Дата замера"]:
+                r["Основание"] = "; ".join(x for x in (r["Основание"], "дата замера %s приведена к %s (то же исследование: даты источников расходятся на %d сут.)" % (
+                    r["Дата замера"].strftime("%d.%m.%Y"), new.strftime("%d.%m.%Y"), abs((r["Дата замера"] - new).days))) if x)
+                r["Дата замера"] = new
 
 
 def resolve_packs(reports: List[Report]) -> None:

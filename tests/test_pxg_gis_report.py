@@ -1145,3 +1145,19 @@ def test_kg_fraction_fix_works_with_dash_rows_in_same_column():
     rep.intervals = [row(763.2, 765.2, 0.0065, "0.65"), row(765.2, 766.4, 0.0070, "0.70"), row(766.4, 767.2, 0.25, "-"), row(767.2, 768.0, 0.0025, "0.25")]
     gr.check_intervals(rep)
     assert [r["Кг"] for r in rep.intervals] == [0.65, 0.7, 0.25, 0.25]
+
+
+def test_exact_dates_of_one_study_within_few_days_are_merged_to_report_date():
+    # баг (скв. 309, 04.2025): отчёт от 02.04.2025 и столбец «04.2025» в отчёте от 21.10.2025, где дата замера взята из таблицы «ГВК по датам» (03.04.2025),
+    # давали два замера одного исследования (02.04 и 03.04) с разными наборами интервалов
+    own = gr.Report(file="own.doc", well="309", date=dt.date(2025, 4, 2))
+    own.intervals = [_iv(763.2, 765.2, **{"Столбец-замер": "РИГИС от 04.2025", "Дата замера": dt.date(2025, 4, 1), "Дата точная": False})]
+    later = gr.Report(file="later.doc", well="309", date=dt.date(2025, 10, 21))
+    later.intervals = [_iv(764.3, 765.3, **{"Столбец-замер": "РИГИС от 04.2025", "Дата замера": dt.date(2025, 4, 3), "Дата точная": True, "Основание": ""})]
+    gr.resolve_dates([own, later])
+    assert own.intervals[0]["Дата замера"] == dt.date(2025, 4, 2) and later.intervals[0]["Дата замера"] == dt.date(2025, 4, 2)
+    assert gr.pick_measurements([own, later])[("309", dt.date(2025, 4, 2))] == "later.doc"
+    far = gr.Report(file="far.doc", well="309", date=dt.date(2025, 4, 20))           # другой замер того же месяца (больше 5 суток): не склеивается
+    far.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 20), "Дата точная": True})]
+    gr.resolve_dates([own, later, far])
+    assert far.intervals[0]["Дата замера"] == dt.date(2025, 4, 20)
