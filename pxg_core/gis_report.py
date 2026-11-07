@@ -1828,6 +1828,7 @@ def resolve_dates(reports: List[Report]) -> None:
         if rep.well and rep.date:
             rdates[(rep.well, rep.date.year, rep.date.month)].add(rep.date)
     for rep in reports:
+        merged_seen: set = set()
         for r in rep.intervals:
             d = r["Дата замера"]
             if d is None or not r["Дата точная"]:
@@ -1837,8 +1838,10 @@ def resolve_dates(reports: List[Report]) -> None:
                 continue
             near = sorted(x for x in rdates.get(key, set()) if abs((x - d).days) <= 3)
             if len(near) == 1:
-                rep.issue("warn", "date_merged", "Дата замера %s приведена к дате отчёта %s (отличие %d сут., похоже на опечатку ввода); сверить" % (
-                    d.strftime("%d.%m.%Y"), near[0].strftime("%d.%m.%Y"), abs((d - near[0]).days)), "дата замера")
+                if (d, near[0]) not in merged_seen:
+                    merged_seen.add((d, near[0]))
+                    rep.issue("warn", "date_merged", "Дата замера %s приведена к дате отчёта %s (отличие %d сут., похоже на опечатку ввода); сверить" % (
+                        d.strftime("%d.%m.%Y"), near[0].strftime("%d.%m.%Y"), abs((d - near[0]).days)), "дата замера")
                 r["Основание"] = "; ".join(x for x in (r["Основание"], "дата замера %s приведена к дате отчёта %s" % (d.strftime("%d.%m.%Y"), near[0].strftime("%d.%m.%Y"))) if x)
                 r["Дата замера"] = near[0]
 
