@@ -1059,3 +1059,10 @@ def test_two_packs_in_one_sentence_and_gvk_with_ao_dots():
     assert got == [(757.4, 786.0, "Верхняя пачка", False), (788.0, 792.3, "Нижняя пачка", False)]
     g = [p for p in rep.packs if p.get("_kind") == "gvk"]
     assert len(g) == 1 and g[0]["ГВК MD, м"] == 792.3 and g[0]["ГВК а.о., м"] == -664.4 and g[0]["Пачка"] == "Нижняя пачка"
+
+
+def test_target_of_study_control_of_technical_state_is_not_epb():
+    # поглотительные скважины: в шапке «ЦЕЛЬ ИССЛЕДОВАНИЙ: Определение интервала приемистости. Контроль технического состояния скважины» — это ГИС-контроль
+    tbl = wt.Table(rows=[wt.TRow([wt.Cell("ЦЕЛЬ ИССЛЕДОВАНИЙ", 0, 1000), wt.Cell("Определение интервала приемистости. Контроль технического состояния скважины", 1000, 2000)])])
+    rep = gr.parse_blocks([wt.Para("Скважина: 109"), tbl], "x.docx")
+    assert rep.kind == ""
