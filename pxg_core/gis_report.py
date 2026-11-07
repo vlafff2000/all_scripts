@@ -1162,7 +1162,12 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                     t = c.text
                     if re.search(r"ГВК", t, re.I):
                         md, ab = _gvk_from(t)
-                        _add_gvk(rep, g, pack, pack_title, md, ab, t, _src(tbl, i), HIGH, "")
+                        named = classify_pack(t, mapping)[0]         # «ГВК по верхней песчаной пачке…» после заголовка нижней: ГВК названной пачки
+                        gv_pack, gv_title = pack, pack_title
+                        if named and named != pack:
+                            gv_pack = named
+                            gv_title = next((x["Заголовок в документе"] for x in reversed(rep.packs) if x.get("_kind") == "heading" and x.get("Таблица") == tid and x.get("Пачка") == named), pack_title)
+                        _add_gvk(rep, g, gv_pack, gv_title, md, ab, t, _src(tbl, i), HIGH, "")
                     m = re.search(r"Нг\s*=\s*(" + NUM + r")", t, re.I)
                     if m:
                         _pack_summary(rep, g, pack, pack_title, "Нг по отчёту, м", fnum(m.group(1)), _src(tbl, i), tid)

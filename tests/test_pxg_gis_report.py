@@ -1279,3 +1279,18 @@ def test_gvk_row_naming_its_pack_goes_to_that_pack_not_to_current_heading():
     gr.read_intervals(rep, wt.Table(rows=[top, sub, hv, r1, hn, r2, g1, g2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     got = {p["Пачка"]: p["ГВК MD, м"] for p in rep.packs if p.get("_kind") == "gvk"}
     assert got == {"Верхняя пачка": 796.3, "Нижняя пачка": 802.0}
+
+
+def test_gvk_cells_per_measurement_naming_their_pack():
+    # то же в строке итогов, где ГВК стоит отдельной ячейкой в столбце замера
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    top = wt.TRow([wt.Cell("Интервал, м", 0, 1000), wt.Cell("Кг", 1000, 2000), wt.Cell("По данным ГИС-контроля от 31.05.2019 г.", 2000, 4000)])
+    sub = wt.TRow([wt.Cell("", 0, 1000, True), wt.Cell("", 1000, 2000, True), wt.Cell("Нг, м", 2000, 3000), wt.Cell("Кг, д.е.", 3000, 4000)])
+    hv = wt.TRow([wt.Cell("Горизонт Щигровский, верхняя песчаная пачка (763.2-796.3 м)", 0, 4000)])
+    hn = wt.TRow([wt.Cell("Горизонт Щигровский, нижняя песчаная пачка (799.2-824.0 м)", 0, 4000)])
+    rep = gr.Report(file="x.docx", well="309", date=dt.date(2019, 5, 31), alt=132.8)
+    gv = wt.TRow([wt.Cell("", 0, 1000), wt.Cell("", 1000, 2000), wt.Cell("ГВК по верхней песчаной пачке на глубине 796.3 м", 2000, 4000)])
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, hv, row("763.2-796.3", "0.3", "33.1", "0.8"), hn, row("799.2-802.0", "0.3", "2.8", "0.6"), gv]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = {p["Пачка"]: p["ГВК MD, м"] for p in rep.packs if p.get("_kind") == "gvk"}
+    assert got == {"Верхняя пачка": 796.3}
