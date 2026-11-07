@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/format.ts @ 9cfb56a. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/format.ts @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 /** Разряды: неразрывный пробел (U+00A0), как в Python-выгрузке (atlas/engine/core/export_style.py: THOUSANDS_SEP). */
 export const THOUSANDS_SEP = ' '
 

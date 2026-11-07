@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartPrefs.ts @ 9cfb56a. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartPrefs.ts @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Общие настройки вида, запоминаются в браузере: подсказка графиков, события на оси, тема, свёрнутые панели.
 import { useSyncExternalStore } from 'react'
 import type { HoverMode } from './chartHover'
@@ -90,6 +90,11 @@ export const tableBars = pref<boolean>('atlas.table.bars', true)
 /** Общий масштаб по времени: прокрутка бегунка на одном графике двигает все графики по времени. */
 /** Связь таблицы с графиками по времени: курсор на графике подсвечивает строку, наведение на строку ставит курсор на графики. */
 export const tableSync = pref<boolean>('atlas.table.sync', true, raw => raw !== 'false')
+
+/** Всплывающие подсказки при наведении на графики (закрепление щелчком не зависит). */
+export const tooltipsOn = pref<boolean>('atlas.chart.tooltips', true, raw => raw !== 'false')
+/** Общее перекрестие: курсор на одном графике рисует вертикаль и значения на остальных графиках с той же осью X. */
+export const crosshairSync = pref<boolean>('atlas.chart.crosshairSync', true, raw => raw !== 'false')
 
 export const zoomSync = pref<boolean>('atlas.chart.zoomSync', true)
 
