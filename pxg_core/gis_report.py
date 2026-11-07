@@ -940,6 +940,16 @@ def _repair_header_dates(groups: List[Group], rep: Report) -> None:
                     g.label[:30], g.date.strftime("%m.%Y"), prev.strftime("%m.%Y"), fixed.strftime("%m.%Y")), "шапка таблицы")
                 g.date, g.exact = fixed, False
         prev = g.date
+    # последний столбец позже месяца отчёта (отчёт от 30.03.2023, столбец «04.2023г»): такого замера на дату отчёта быть не может, это опечатка текущего замера;
+    # трогаем только если такой столбец один (последний), а предыдущий не позже месяца отчёта
+    dated = [g for g in groups if g.date is not None]
+    if rep.date is not None and len(dated) >= 2:
+        last, before = dated[-1], dated[-2]
+        rep_first = dt.date(rep.date.year, rep.date.month, 1)
+        if last.date > rep_first and before.date <= rep_first and not last.exact:
+            rep.issue("warn", "header_date_fixed", "Дата столбца-замера «%s»: %s позже даты отчёта (%s) — опечатка шапки, принят месяц отчёта %s, сверить по отчёту" % (
+                last.label[:30], last.date.strftime("%m.%Y"), rep.date.strftime("%d.%m.%Y"), rep_first.strftime("%m.%Y")), "шапка таблицы")
+            last.date = rep_first
 
 
 def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
@@ -1235,6 +1245,13 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 continue
             row_recs.append((gi, g, ivn, rec))
             row_recs.extend((gi, g, ex, dict(rec)) for ex in extras)
+        for wide in r.cells:             # одна объединённая ячейка «заглинизирован» на несколько замеров: непроницаемый прослой — строка в каждом замере под ней
+            if wide.vcont or not _clay(wide.text) or re.search(r"\d", wide.text) or not base_rows or base_rows[-1]["src"] != _src(tbl, i):
+                continue
+            for gi, g in enumerate(sgroups):
+                if g.x0 >= wide.x0 - 3 and g.x1 <= wide.x1 + 3 and not any(x[0] == gi for x in row_recs):
+                    row_recs.append((gi, g, [base_rows[-1]["from"], base_rows[-1]["to"]],
+                                     {"kg": "заглинизирован", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}))
         rb = _row_base(r, base_rows)
         seq = _seq_epochs(r, len(sgroups), rb, por_groups) if (rb and not row_recs) or _geometry_broken(row_recs, rb) else None
         if seq is not None:
