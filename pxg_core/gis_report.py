@@ -1875,8 +1875,8 @@ def resolve_gvk(reports: List[Report]) -> None:
 
 
 def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], str]:
-    """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером (или месяц), иначе самый РАННИЙ из отчётов, где замер есть
-    (первая интерпретация; в более поздних он пересчитывается заново, а инженеры при составлении Excel-базы брали первую). Остальные — дубли.
+    """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером (или месяц), иначе самый СВЕЖИЙ из отчётов, где замер есть
+    (решение инженера: в более поздних отчётах замер пересчитан заново; расхождения между отчётами идут в «Проверку»). Остальные — дубли.
     Из выбранного отчёта в БД идут все его таблицы этого замера (основная и, например, таблица покрышки)."""
     best: Dict[Tuple[str, dt.date], Tuple[int, str]] = {}
     for rep in reports:
@@ -1884,7 +1884,7 @@ def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], str]:
         for d, label in seen:
             own = 2 if (rep.date is not None and rep.date == d) else (1 if rep.date and (rep.date.year, rep.date.month) == (d.year, d.month) else 0)
             key = (rep.well, d)
-            score = (own, -(rep.date or dt.date.max).toordinal())
+            score = (own, (rep.date or dt.date.min).toordinal())
             if key not in best or score > best[key][0]:
                 best[key] = (score, rep.path or rep.file)
     return {k: v[1] for k, v in best.items()}
@@ -1912,7 +1912,7 @@ def _flag_measurement_differences(reports: List[Report], chosen: Dict[Tuple[str,
             if diff:
                 others[rep.file] = diff
         if others:
-            base.issue("warn", "measurement_values_differ", "Замер %s есть и в других отчётах с другим Кг: %s. В БД взят этот отчёт (самый ранний или собственный); сверить" % (
+            base.issue("warn", "measurement_values_differ", "Замер %s есть и в других отчётах с другим Кг: %s. В БД взят этот отчёт (собственный или самый свежий); сверить" % (
                 d.strftime("%m.%Y"), "; ".join("%s (%d инт.)" % (f, n) for f, n in sorted(others.items()))))
 
 

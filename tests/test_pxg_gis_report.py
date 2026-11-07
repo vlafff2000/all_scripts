@@ -1125,14 +1125,13 @@ def _mrep(file, rdate, kg, label="10.2022 г"):
     return rep
 
 
-def test_measurement_without_own_report_comes_from_earliest_report_and_differences_are_flagged():
-    # скв. 113, замер 10.2022: собственного отчёта нет, он есть в отчётах 03.2023, 10.2023 и 04.2024; в первом Кг 0,50, в поздних пересчитан 0,35.
-    # Excel-база (инженер) взяла первый отчёт: берём самый ранний, а расхождение между отчётами пишем в «Проверку»
+def test_measurement_without_own_report_comes_from_latest_report_and_differences_are_flagged():
+    # скв. 113, замер 10.2022: собственного отчёта нет, он есть в отчётах 03.2023, 10.2023 и 04.2024 с разным Кг (0,50 и 0,35).
+    # Решение инженера: брать самый свежий отчёт (замер в нём пересчитан), расхождение между отчётами писать в «Проверку»
     first, later1, later2 = _mrep("a_300323", dt.date(2023, 3, 30), 0.5), _mrep("b_271023", dt.date(2023, 10, 27), 0.35), _mrep("c_130424", dt.date(2024, 4, 13), 0.35)
-    resolve = gr.pick_measurements([later2, later1, first])
-    assert resolve[("113", dt.date(2022, 10, 1))] == "a_300323"
-    _res, allrows = gr.to_results([later2, later1, first])
-    assert set(allrows[allrows["В БД"] == "да"]["Кг"]) == {0.5}
-    assert any(i["Код"] == "measurement_values_differ" and "271023" in i["Сообщение"] for i in first.issues)
+    assert gr.pick_measurements([first, later1, later2])[("113", dt.date(2022, 10, 1))] == "c_130424"
+    _res, allrows = gr.to_results([first, later1, later2])
+    assert set(allrows[allrows["В БД"] == "да"]["Кг"]) == {0.35}
+    assert any(i["Код"] == "measurement_values_differ" and "300323" in i["Сообщение"] for i in later2.issues)
     own = _mrep("d_own", dt.date(2022, 10, 20), 0.6)
     assert gr.pick_measurements([first, later1, own])[("113", dt.date(2022, 10, 1))] == "d_own"
