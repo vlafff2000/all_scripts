@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartAxes.ts @ 9cfb56a. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartAxes.ts @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import type { Axis, Chart } from './chartTypes'
 // Ручная правка осей графика: зоны осей, масштаб колесом, сдвиг перетаскиванием, ввод границ.
 /** Шкалы Y по порядку: основная слева, затем правые от графика наружу. */
