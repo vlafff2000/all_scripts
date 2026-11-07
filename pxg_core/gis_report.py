@@ -901,8 +901,8 @@ def _gvk_from(text: str) -> Tuple[Optional[float], Optional[float]]:
     t = text.translate(_MINUS)
     m = re.search(r"ГВК[^0-9\-]*(" + NUM + r")\s*м?", t, re.I)
     md = fnum(m.group(1)) if m else None
-    a = re.search(r"(?:а\.?\s*о\.?|абсолютн\w*\s*(?:глубин\w*|отметк\w*))\s*[:=]?\s*(" + NUM + r")", t, re.I)
-    ab = fnum(a.group(1)) if a else None
+    a = re.search(r"(?:а\.?\s*о\.?|абсолютн\w*\s*(?:глубин\w*|отметк\w*))\s*[:=]?\s*(-?\s*\d+(?:[.,]\d+)?)", t, re.I)      # «(а.о.- 654.2)»: пробел после минуса
+    ab = fnum(a.group(1).replace(" ", "")) if a else None
     return md, ab
 
 
@@ -1486,7 +1486,10 @@ def _boundary_gvk(rep: Report, sgroups: List[Group], tid: int) -> None:
 
 
 def _add_gvk(rep: Report, g: Group, pack: str, title: str, md: Optional[float], ab: Optional[float], text: str, source: str, conf: str, why: str) -> None:
-    calc = ao(rep, md)
+    calc = ao(rep, md) if rep.alt is not None and 0 < rep.alt < 400 else None         # явно ошибочная альтитуда (1970 м) в расчёт а.о. не берётся
+    if ab is not None and ab > 0 and calc is not None and calc < 0 and abs(ab - abs(calc)) <= 0.6:
+        ab = -ab                      # «а.о. 660.7» без минуса: отметка ниже уровня моря, как всегда в этих отчётах
+        why = "; ".join(x for x in (why, "знак а.о. исправлен: в отчёте без минуса, по альтитуде отрицательная") if x)
     notes = why
     abs_val = ab
     if md is not None and ab is None and calc is not None:
@@ -1962,10 +1965,23 @@ def resolve_gvk(reports: List[Report]) -> None:
     """Замеру без ГВК в самом отчёте ГВК берётся из таблиц «ГВК по датам» (любого отчёта по этой скважине): та же пачка и тот же месяц, ровно одно значение
     (разброс до 0,15 м). Два разных ГВК в месяце не выбираются. Подсказка, уверенность средняя; ГВК из самого отчёта не заменяется."""
     hist: Dict[tuple, List[dict]] = defaultdict(list)
+    spans: Dict[Tuple[str, int, int], Dict[str, List[float]]] = defaultdict(dict)       # (скважина, год, месяц) -> пачка -> [кровля, подошва газовых интервалов]
+    for rep in reports:
+        for r in rep.intervals:
+            if r["Дата замера"] is not None and r["Пачка"] and not r.get("Водонасыщенный") and (r["Кг"] is None or r["Кг"] > 0.25):
+                sp = spans[(rep.well, r["Дата замера"].year, r["Дата замера"].month)].setdefault(r["Пачка"], [r["От, м"], r["До, м"]])
+                sp[0], sp[1] = min(sp[0], r["От, м"]), max(sp[1], r["До, м"])
     for rep in reports:
         for h in rep.gvk_history:
-            if h.get("ГВК MD, м") is not None and h.get("Дата") is not None and h.get("Пачка"):
-                hist[(rep.well, h["Пачка"], h["Дата"].year, h["Дата"].month)].append(h)
+            if h.get("ГВК MD, м") is None or h.get("Дата") is None:
+                continue
+            pack = h.get("Пачка")
+            if not pack:           # в таблице «ГВК по датам» нет пачки: ГВК у нижней границы газовых интервалов ровно одной пачки (до 1 м) — её
+                md = h["ГВК MD, м"]
+                near = [pk for pk, (lo, hi) in spans.get((rep.well, h["Дата"].year, h["Дата"].month), {}).items() if lo - 0.15 <= md <= hi + 1.0 and abs(hi - md) <= 1.0]
+                pack = near[0] if len(near) == 1 else ""
+            if pack:
+                hist[(rep.well, pack, h["Дата"].year, h["Дата"].month)].append(h)
     for rep in reports:
         have = {(p["Пачка"], p["Столбец-замер"]) for p in rep.packs if p.get("_kind") == "gvk"}
         done = set()

@@ -1294,3 +1294,33 @@ def test_gvk_cells_per_measurement_naming_their_pack():
     gr.read_intervals(rep, wt.Table(rows=[top, sub, hv, row("763.2-796.3", "0.3", "33.1", "0.8"), hn, row("799.2-802.0", "0.3", "2.8", "0.6"), gv]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     got = {p["Пачка"]: p["ГВК MD, м"] for p in rep.packs if p.get("_kind") == "gvk"}
     assert got == {"Верхняя пачка": 796.3}
+
+
+def test_gvk_history_row_without_pack_is_assigned_by_depth():
+    # таблица «ГВК по датам» без столбца пачки (скв. 1 и ещё 12 скважин, 161 строка ГВК): пачка определяется по глубине (ГВК у нижней границы газовых интервалов пачки)
+    silent = _gvk_rep("a.docx", dt.date(2026, 5, 8))
+    silent.intervals[0].update({"От, м": 775.1, "До, м": 787.7})
+    hist = _gvk_rep("b.docx", dt.date(2026, 10, 20))
+    hist.gvk_history = [{"Скважина": "10", "Дата": dt.date(2026, 5, 8), "Пачка": "", "ГВК MD, м": 787.7, "ГВК а.о., м": None},
+                        {"Скважина": "10", "Дата": dt.date(2026, 10, 20), "Пачка": "", "ГВК MD, м": 900.0, "ГВК а.о., м": None}]      # 900 м ни к какой пачке не подходит
+    gr.resolve_gvk([silent, hist])
+    g = [p for p in silent.packs if p.get("_kind") == "gvk"]
+    assert len(g) == 1 and g[0]["ГВК MD, м"] == 787.7 and g[0]["Пачка"] == "Верхняя пачка"
+    assert not [p for p in hist.packs if p.get("_kind") == "gvk" and p["ГВК MD, м"] == 900.0]
+
+
+@pytest.mark.parametrize("text, md, ao_", [("ГВК на гл. 787.2 (а.о.- 654.2)", 787.2, -654.2), ("ГВК на гл. 803.7м (а.о.-668.7м)", 803.7, -668.7),
+                                           ("ГВК на гл. 788.6 м (а.о. 660.7м)", 788.6, 660.7)])
+def test_gvk_ao_forms(text, md, ao_):
+    assert gr._gvk_from(text) == (md, ao_)
+
+
+def test_positive_ao_that_matches_altitude_minus_md_gets_minus_sign_and_wrong_altitude_is_not_used():
+    # «а.о. 660.7» без минуса при альтитуде 128: а.о. = 128 − 788.6 = −660.6, то есть отметка отрицательная
+    rep = gr.Report(file="x.docx", well="1", alt=128.0, date=dt.date(2022, 10, 12))
+    g = gr.Group("10.2022", 0, 0, dt.date(2022, 10, 12), True)
+    gr._add_gvk(rep, g, "Верхняя пачка", "t", 788.6, 660.7, "ГВК", "таблица", gr.HIGH, "")
+    assert rep.packs[-1]["ГВК а.о., м"] == -660.7
+    bad = gr.Report(file="y.docx", well="15", alt=1970.0, date=dt.date(2023, 12, 1))           # явно ошибочная альтитуда: а.о. по ней не считается
+    gr._add_gvk(bad, g, "Верхняя пачка", "t", 787.2, None, "ГВК", "таблица", gr.HIGH, "")
+    assert bad.packs[-1]["ГВК а.о., м"] is None
