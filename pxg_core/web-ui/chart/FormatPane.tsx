@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/FormatPane.tsx @ 870f8cd. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/FormatPane.tsx @ c76d512. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Панель «Формат» (как «Формат диаграммы» в Excel): один компонент для всех графиков Атласа. Слева выбор элемента — график,
 // оси, ряды; справа его настройки. Меняет график сразу. Оформление графика и осей пишется на выбранный уровень (раздел или
 // весь проект), вид рядов — в тему проекта по ключу ряда (один и тот же год или группа выглядит одинаково везде).
@@ -129,6 +129,7 @@ export function FormatPane({ chart, element, onElement, scope, onScope, doc, onD
         Оформление графика и осей действует на:
         {scopeLabel ? <b>{scopeLabel}</b> : (
           <select value={scope} onChange={e => onScope(e.target.value as FormatScope)} aria-label="Уровень оформления">
+            <option value="chart">только этот график</option>
             <option value="type">графики этого раздела</option>
             <option value="project">все графики проекта</option>
           </select>)}
@@ -147,7 +148,7 @@ export function FormatPane({ chart, element, onElement, scope, onScope, doc, onD
         <div className="cs-editor">
           {kind === 'chart' && <>
             <h3>График</h3>
-            <ChartStyleFields value={doc.chart ?? {}} set={setChart} />
+            <ChartStyleFields value={doc.chart ?? {}} set={setChart} fresh={chart.series.some(s => s.age !== undefined && s.age !== null)} />
             <div className="cs-actions">
               <Brush kind="chart" value={doc.chart} paste={v => setChart(v)} />
               <button type="button" onClick={() => onDoc({ ...doc, chart: undefined })} disabled={!doc.chart || !Object.keys(doc.chart).length}>Сбросить график</button>
