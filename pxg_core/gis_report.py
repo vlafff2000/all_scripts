@@ -901,8 +901,8 @@ def _gvk_from(text: str) -> Tuple[Optional[float], Optional[float]]:
     t = text.translate(_MINUS)
     m = re.search(r"ГВК[^0-9\-]*(" + NUM + r")\s*м?", t, re.I)
     md = fnum(m.group(1)) if m else None
-    a = re.search(r"(?:а\.?\s*о\.?|абсолютн\w*\s*(?:глубин\w*|отметк\w*))\s*[:=]?\s*(" + NUM + r")", t, re.I)
-    ab = fnum(a.group(1)) if a else None
+    a = re.search(r"(?:а\.?\s*о\.?|абсолютн\w*\s*(?:глубин\w*|отметк\w*))\s*[:=]?\s*(-?\s*\d+(?:[.,]\d+)?)", t, re.I)      # «(а.о.- 654.2)»: пробел после минуса
+    ab = fnum(a.group(1).replace(" ", "")) if a else None
     return md, ab
 
 
@@ -1486,7 +1486,10 @@ def _boundary_gvk(rep: Report, sgroups: List[Group], tid: int) -> None:
 
 
 def _add_gvk(rep: Report, g: Group, pack: str, title: str, md: Optional[float], ab: Optional[float], text: str, source: str, conf: str, why: str) -> None:
-    calc = ao(rep, md)
+    calc = ao(rep, md) if rep.alt is not None and 0 < rep.alt < 400 else None         # явно ошибочная альтитуда (1970 м) в расчёт а.о. не берётся
+    if ab is not None and ab > 0 and calc is not None and calc < 0 and abs(ab - abs(calc)) <= 0.6:
+        ab = -ab                      # «а.о. 660.7» без минуса: отметка ниже уровня моря, как всегда в этих отчётах
+        why = "; ".join(x for x in (why, "знак а.о. исправлен: в отчёте без минуса, по альтитуде отрицательная") if x)
     notes = why
     abs_val = ab
     if md is not None and ab is None and calc is not None:

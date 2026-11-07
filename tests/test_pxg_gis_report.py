@@ -1307,3 +1307,20 @@ def test_gvk_history_row_without_pack_is_assigned_by_depth():
     g = [p for p in silent.packs if p.get("_kind") == "gvk"]
     assert len(g) == 1 and g[0]["ГВК MD, м"] == 787.7 and g[0]["Пачка"] == "Верхняя пачка"
     assert not [p for p in hist.packs if p.get("_kind") == "gvk" and p["ГВК MD, м"] == 900.0]
+
+
+@pytest.mark.parametrize("text, md, ao_", [("ГВК на гл. 787.2 (а.о.- 654.2)", 787.2, -654.2), ("ГВК на гл. 803.7м (а.о.-668.7м)", 803.7, -668.7),
+                                           ("ГВК на гл. 788.6 м (а.о. 660.7м)", 788.6, 660.7)])
+def test_gvk_ao_forms(text, md, ao_):
+    assert gr._gvk_from(text) == (md, ao_)
+
+
+def test_positive_ao_that_matches_altitude_minus_md_gets_minus_sign_and_wrong_altitude_is_not_used():
+    # «а.о. 660.7» без минуса при альтитуде 128: а.о. = 128 − 788.6 = −660.6, то есть отметка отрицательная
+    rep = gr.Report(file="x.docx", well="1", alt=128.0, date=dt.date(2022, 10, 12))
+    g = gr.Group("10.2022", 0, 0, dt.date(2022, 10, 12), True)
+    gr._add_gvk(rep, g, "Верхняя пачка", "t", 788.6, 660.7, "ГВК", "таблица", gr.HIGH, "")
+    assert rep.packs[-1]["ГВК а.о., м"] == -660.7
+    bad = gr.Report(file="y.docx", well="15", alt=1970.0, date=dt.date(2023, 12, 1))           # явно ошибочная альтитуда: а.о. по ней не считается
+    gr._add_gvk(bad, g, "Верхняя пачка", "t", 787.2, None, "ГВК", "таблица", gr.HIGH, "")
+    assert bad.packs[-1]["ГВК а.о., м"] is None
