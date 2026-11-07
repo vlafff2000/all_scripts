@@ -1245,6 +1245,13 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 continue
             row_recs.append((gi, g, ivn, rec))
             row_recs.extend((gi, g, ex, dict(rec)) for ex in extras)
+        for wide in r.cells:             # одна объединённая ячейка «заглинизирован» на несколько замеров: непроницаемый прослой — строка в каждом замере под ней
+            if wide.vcont or not _clay(wide.text) or re.search(r"\d", wide.text) or not base_rows or base_rows[-1]["src"] != _src(tbl, i):
+                continue
+            for gi, g in enumerate(sgroups):
+                if g.x0 >= wide.x0 - 3 and g.x1 <= wide.x1 + 3 and not any(x[0] == gi for x in row_recs):
+                    row_recs.append((gi, g, [base_rows[-1]["from"], base_rows[-1]["to"]],
+                                     {"kg": "заглинизирован", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}))
         rb = _row_base(r, base_rows)
         seq = _seq_epochs(r, len(sgroups), rb, por_groups) if (rb and not row_recs) or _geometry_broken(row_recs, rb) else None
         if seq is not None:

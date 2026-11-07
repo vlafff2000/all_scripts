@@ -1195,3 +1195,22 @@ def test_last_header_date_later_than_report_date_is_a_typo():
     two = gr.Report(file="z.docx", well="18", date=dt.date(2023, 3, 30))               # два будущих столбца подряд: не трогаем (неясно, что именно опечатка)
     got3 = gr._groups(_hdr_table(["04.2023г", "05.2023г"]), 2, two)
     assert [g.date for g in got3 if not g.base] == [dt.date(2023, 4, 1), dt.date(2023, 5, 1)]
+
+
+def test_clay_interlayer_written_by_one_wide_cell_across_all_measurements():
+    # скв. 127: у интервала коллектора вместо значений замеров стоит одна объединённая ячейка «заглинизирован» на все замеры:
+    # такие строки (непроницаемый глинистый прослой) терялись, хотя Excel и отчёт их выделяют
+    def cell(t, x0, x1, v=False):
+        return wt.Cell(t, x0, x1, v)
+    top = wt.TRow([cell("Интервал пласта-коллектора, м", 0, 1300), cell("Кп, %", 1300, 2000), cell("РИГИС от 04.2025г", 2000, 5000), cell("РИГИС от 10.2025г", 5000, 8000)])
+    sub = wt.TRow([cell("", 0, 1300, True), cell("", 1300, 2000, True)] + [cell(t, 2000 + 1000 * i, 3000 + 1000 * i) for i, t in enumerate(["Интервалы (Нг), м", "", "Кг, %", "Интервалы (Нг), м", "", "Кг, %"])])
+    head = wt.TRow([cell("Верхняя песчаная пачка пласта-коллектора", 0, 8000)])
+    cols = [(0, 600), (600, 1300), (1300, 2000), (2000, 3000), (3000, 4000), (4000, 5000), (5000, 6000), (6000, 7000), (7000, 8000)]
+    gas1 = wt.TRow([cell(t, *cols[i]) for i, t in enumerate(["763.0", "764.8", "30", "763.0", "764.8", "55", "763.0", "764.8", "55"])])
+    clay = wt.TRow([cell("764.8", 0, 600), cell("765.6", 600, 1300), cell("30", 1300, 2000), cell("заглинизирован", 2000, 8400)])
+    gas2 = wt.TRow([cell(t, *cols[i]) for i, t in enumerate(["765.6", "768.4", "30", "765.6", "768.4", "65", "765.6", "768.4", "65"])])
+    rep = gr.Report(file="x.docx", well="127", date=dt.date(2025, 10, 30))
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, head, gas1, clay, gas2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    cl = [(r["Столбец-замер"][-8:], r["От, м"], r["До, м"], r["Кг"], r["Насыщение"], r["Водонасыщенный"]) for r in rep.intervals if r["От, м"] == 764.8 and r["До, м"] == 765.6]
+    assert len(cl) == 2 and all(x[3] == 0.25 and x[4] == "заглинизирован" and x[5] is False for x in cl)
+    assert len(rep.intervals) == 6
