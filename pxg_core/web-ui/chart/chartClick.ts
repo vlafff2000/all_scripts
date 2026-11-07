@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartClick.ts @ c76d512. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartClick.ts @ 9cfb56a. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Что делает щелчок по графику. Чистая функция без DOM — чтобы выбор между «исключить точку» и «закрепить подсказку» проверялся тестом.
 export type ClickAction = 'none' | 'label' | 'suspect' | 'exclude' | 'not-excludable' | 'pin'
 
