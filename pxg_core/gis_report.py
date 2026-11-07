@@ -940,6 +940,16 @@ def _repair_header_dates(groups: List[Group], rep: Report) -> None:
                     g.label[:30], g.date.strftime("%m.%Y"), prev.strftime("%m.%Y"), fixed.strftime("%m.%Y")), "шапка таблицы")
                 g.date, g.exact = fixed, False
         prev = g.date
+    # последний столбец позже месяца отчёта (отчёт от 30.03.2023, столбец «04.2023г»): такого замера на дату отчёта быть не может, это опечатка текущего замера;
+    # трогаем только если такой столбец один (последний), а предыдущий не позже месяца отчёта
+    dated = [g for g in groups if g.date is not None]
+    if rep.date is not None and len(dated) >= 2:
+        last, before = dated[-1], dated[-2]
+        rep_first = dt.date(rep.date.year, rep.date.month, 1)
+        if last.date > rep_first and before.date <= rep_first and not last.exact:
+            rep.issue("warn", "header_date_fixed", "Дата столбца-замера «%s»: %s позже даты отчёта (%s) — опечатка шапки, принят месяц отчёта %s, сверить по отчёту" % (
+                last.label[:30], last.date.strftime("%m.%Y"), rep.date.strftime("%d.%m.%Y"), rep_first.strftime("%m.%Y")), "шапка таблицы")
+            last.date = rep_first
 
 
 def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:

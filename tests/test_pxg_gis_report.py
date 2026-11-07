@@ -1181,3 +1181,17 @@ def test_dates_are_merged_only_when_other_date_is_not_a_report_date_and_flagged(
     wide.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 9), "Дата точная": True})]
     gr.resolve_dates([one, wide])
     assert wide.intervals[0]["Дата замера"] == dt.date(2025, 4, 9)           # больше 3 суток: не трогаем
+
+
+def test_last_header_date_later_than_report_date_is_a_typo():
+    # баг (скв. 18): отчёт от 30.03.2023, а последний столбец таблицы подписан «04.2023г» (опечатка, текущий замер 03.2023): замер уезжал на 04.2023
+    rep = gr.Report(file="x.docx", well="18", date=dt.date(2023, 3, 30))
+    got = gr._groups(_hdr_table(["04.2022г", "10.2022г", "04.2023г"]), 2, rep)
+    assert [g.date for g in got if not g.base] == [dt.date(2022, 4, 1), dt.date(2022, 10, 1), dt.date(2023, 3, 1)]
+    assert any(i["Код"] == "header_date_fixed" for i in rep.issues)
+    ok = gr.Report(file="y.docx", well="18", date=dt.date(2023, 5, 10))               # дата отчёта позже: столбец настоящий
+    got2 = gr._groups(_hdr_table(["04.2022г", "10.2022г", "04.2023г"]), 2, ok)
+    assert [g.date for g in got2 if not g.base][2] == dt.date(2023, 4, 1)
+    two = gr.Report(file="z.docx", well="18", date=dt.date(2023, 3, 30))               # два будущих столбца подряд: не трогаем (неясно, что именно опечатка)
+    got3 = gr._groups(_hdr_table(["04.2023г", "05.2023г"]), 2, two)
+    assert [g.date for g in got3 if not g.base] == [dt.date(2023, 4, 1), dt.date(2023, 5, 1)]
