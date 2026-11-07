@@ -95,6 +95,7 @@ class Report:
     summary: List[dict] = field(default_factory=list)          # выводы по пачкам из текста
     tables: List[dict] = field(default_factory=list)           # что за таблица найдена (для проверки глазами)
     issues: List[dict] = field(default_factory=list)
+    annotations: List[dict] = field(default_factory=list)      # пометки для Атласа: почему нет ГВК или Кг, недоход, «скоплений газа не отмечено»
 
     def issue(self, level: str, code: str, msg: str, where: str = "") -> None:
         self.issues.append({"Уровень": level, "Код": code, "Файл": self.file, "Скважина": self.well, "Где": where, "Сообщение": msg})
@@ -1127,8 +1128,13 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             if re.match(r"\s*(ГВК|водо)", t, re.I) and re.search(r"ГВК", t, re.I):
                 md, ab = _gvk_from(t)
                 g = sgroups[-1] if sgroups else None
+                named = classify_pack(t, mapping)[0]              # «ГВК по верхней песчаной пачке…» стоит после заголовка нижней: ГВК той пачки, что названа в строке
+                gv_pack, gv_title = pack, pack_title
+                if named and named != pack:
+                    gv_pack = named
+                    gv_title = next((p["Заголовок в документе"] for p in reversed(rep.packs) if p.get("_kind") == "heading" and p.get("Таблица") == tid and p.get("Пачка") == named), pack_title)
                 if g is not None:
-                    _add_gvk(rep, g, pack, pack_title, md, ab, t, _src(tbl, i), MID,
+                    _add_gvk(rep, g, gv_pack, gv_title, md, ab, t, _src(tbl, i), MID,
                              "строка ГВК на всю ширину таблицы: отнесена к последнему замеру (текущему), а не ко всем столбцам")
                 continue
             if re.match(r"\s*примечан", t, re.I):
@@ -1156,7 +1162,12 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                     t = c.text
                     if re.search(r"ГВК", t, re.I):
                         md, ab = _gvk_from(t)
-                        _add_gvk(rep, g, pack, pack_title, md, ab, t, _src(tbl, i), HIGH, "")
+                        named = classify_pack(t, mapping)[0]         # «ГВК по верхней песчаной пачке…» после заголовка нижней: ГВК названной пачки
+                        gv_pack, gv_title = pack, pack_title
+                        if named and named != pack:
+                            gv_pack = named
+                            gv_title = next((x["Заголовок в документе"] for x in reversed(rep.packs) if x.get("_kind") == "heading" and x.get("Таблица") == tid and x.get("Пачка") == named), pack_title)
+                        _add_gvk(rep, g, gv_pack, gv_title, md, ab, t, _src(tbl, i), HIGH, "")
                     m = re.search(r"Нг\s*=\s*(" + NUM + r")", t, re.I)
                     if m:
                         _pack_summary(rep, g, pack, pack_title, "Нг по отчёту, м", fnum(m.group(1)), _src(tbl, i), tid)
@@ -1181,7 +1192,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             por, _pmin, _pmax, _ptext = _kg(rec.get("kp", ""), frac)
             sat = rec["sat"]
             water = bool(re.search(r"водонасыщ", sat, re.I))
-            dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or ""))
+            gas_text = bool(re.search(r"газонасыщ", sat or "", re.I)) and not re.search(r"водонасыщ", sat or "", re.I)
+            dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or "")) and not gas_text       # «-» при насыщении «Газонасыщ.»: Кг не определён, а не вода
             if dash:                                              # «-» вместо Кг: интервал водонасыщен, Кг = 0,25 (решение инженера; так же в Excel-базе)
                 kg = kmin = kmax = WATER_KG
                 water = True
@@ -1297,7 +1309,8 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
         kp, _a, _b, _t = _kg(kpc.text if kpc is not None else "", frac_kp)
         sat = kgc.text if kgc is not None and re.search(r"водонасыщ", kgc.text, re.I) else ""
         water = bool(sat)
-        dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or ""))
+        gas_text = bool(re.search(r"газонасыщ", " ".join(x.text for x in r.cells), re.I)) and not re.search(r"водонасыщ", " ".join(x.text for x in r.cells), re.I)
+        dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or "")) and not gas_text
         if dash:
             kg = kmin = kmax = WATER_KG
             water = True
@@ -1400,6 +1413,59 @@ def read_interval_text(rep: Report, blocks: List[wt.Block]) -> int:
                     ("Основание", "из текста отчёта: интервал пачки целиком, без разбивки по прослоям — сверить с таблицей или оригиналом")]))
                 n += 1
     return n
+
+
+_ANN_RULES = (
+    ("ГВК не достигнут (исследованиями не охвачен)", re.compile(r"ГВК\s+исследовани\w*\s+не\s+охвачен", re.I)),
+    ("ГВК на глубине остановки прибора", re.compile(r"остановк\w*\s+прибора[^.]{0,40}ниже\s+пласт\s+не\s+исследован", re.I)),
+    ("Кг не определён: влияние конструкции/диаметра", re.compile(r"(?:Кг|коэффициент\w*\s+газонасыщенност\w*)\s+(?:не\s+определя\w+|определить\s+затруднительно)[^.]{0,120}?(?:конструкц|диаметр|расширк|фильтр)|(?:влияни\w+\s+конструкц\w+|увеличенн\w+\s+диаметр\w*)[^.]{0,80}Кг\s+не\s+определя", re.I)),
+    ("ГВК без изменений с предыдущего замера", re.compile(r"уровень\s+ГВК\s+не\s+изменил", re.I)),
+    ("Скоплений газа в пачке не отмечено", re.compile(r"(?:верхн|нижн)\w*\s+(?:песчан\w+\s+)?пачк\w*[^.]{0,60}скоплений\s+газа\s+не\s+отмечен", re.I)),
+    ("Пласт ниже не исследован", re.compile(r"пласт[-\s]коллектор\s+исследованиями\s+не\s+охвачен|ниже\s+пласт\s+не\s+исследован", re.I)),
+)
+
+
+def read_annotations(rep: Report, blocks: List[wt.Block]) -> None:
+    """Пометки отчёта для Атласа и таблиц авторского надзора: что в отчёте сказано словами о ГВК, Кг и охвате пласта. Дата — замер этого отчёта."""
+    if rep.date is None:
+        return
+    texts = [b.text for b in blocks if isinstance(b, wt.Para)]
+    texts += [c.text for b in blocks if isinstance(b, wt.Table) for r in b.rows if len(r.cells) <= 4 for c in r.cells if c.text.strip()]
+    seen = set()
+    for t in texts:
+        for sent in _SENT_SPLIT.split(t.replace("\n", " ")):
+            for kind, rx in _ANN_RULES:
+                if not rx.search(sent) or (kind, sent.strip()) in seen:
+                    continue
+                seen.add((kind, sent.strip()))
+                low_s = low(sent)
+                pack = "Верхняя пачка" if re.search(r"верхн", low_s) else "Нижняя пачка" if re.search(r"нижн", low_s) else ""
+                rng = _RANGE.search(sent)
+                rep.annotations.append(OrderedDict([
+                    ("Скважина", rep.well), ("Дата", rep.date), ("Пачка", pack), ("Вид", kind), ("Текст", sent.strip()[:300]),
+                    ("От, м", fnum(rng.group(1)) if rng else None), ("До, м", fnum(rng.group(2)) if rng else None),
+                    ("Файл", rep.file), ("Источник", "текст отчёта"), ("Уверенность", HIGH)]))
+
+
+def annotations_frame(reports: List[Report]) -> pd.DataFrame:
+    """Все пометки: из текста отчётов и заглинизированные прослои из интервалов (непроницаемые, не коллектор)."""
+    rows = [dict(a) for rep in reports if not rep.error for a in rep.annotations]
+    seen = set()
+    for rep in reports:
+        if rep.error:
+            continue
+        for r in rep.intervals:
+            if r.get("Дата замера") is None or not _clay(r.get("Насыщение", ""), r.get("Кг (как в отчёте)", "")):
+                continue
+            key = (rep.well, r["Дата замера"], r["Пачка"], r["От, м"], r["До, м"])
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(OrderedDict([("Скважина", rep.well), ("Дата", r["Дата замера"]), ("Пачка", r["Пачка"]), ("Вид", "Заглинизированный прослой"),
+                                     ("Текст", "непроницаемый глинистый прослой: газа нет, не коллектор"), ("От, м", r["От, м"]), ("До, м", r["До, м"]),
+                                     ("Файл", rep.file), ("Источник", r["Источник"]), ("Уверенность", r["Уверенность"])]))
+    cols = ["Скважина", "Дата", "Пачка", "Вид", "Текст", "От, м", "До, м", "Файл", "Источник", "Уверенность"]
+    return pd.DataFrame(rows, columns=cols)
 
 
 def _boundary_gvk(rep: Report, sgroups: List[Group], tid: int) -> None:
@@ -1621,6 +1687,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
     read_summaries(rep, blocks)
     read_interval_text(rep, blocks)          # сначала интервалы из текста: к ним привязывается ГВК из предложения
     read_gvk_text(rep, blocks)
+    read_annotations(rep, blocks)
     check_report(rep)
     return rep
 
@@ -2119,6 +2186,7 @@ def build(reports: List[Report], mapping: Optional[Dict[str, str]] = None, kg_mi
         "Свод": packs, "Замеры": frames["Замеры"], "Строки БД": frames["Строки"],
     }
     out["_шаблонировки"] = templating_frame(good)
+    out["Аннотации"] = annotations_frame(good)
     return out, results
 
 
@@ -2139,6 +2207,8 @@ EN = {
                     "Уровень (как в отчёте)": "level_raw", "Откуда": "origin", "Файл": "file", "Источник": "source", "Уверенность": "confidence", "Основание": "basis"},
     "gis_pressure_rpl": {"Скважина": "well", "Дата отчёта": "report_date", "Дата замера": "date", "Давление (как в отчёте)": "pressure_raw", "Единица давления": "pressure_unit",
                          "Давление, кгс/см²": "pressure_kgs", "Как в отчёте": "text", "Файл": "file", "Источник": "source", "Уверенность": "confidence", "Основание": "basis"},
+    "gis_annotations": {"Скважина": "well", "Дата": "date", "Пачка": "pack", "Вид": "kind", "Текст": "text", "От, м": "from_m", "До, м": "to_m", "Файл": "file",
+                        "Источник": "source", "Уверенность": "confidence"},
     "gis_gvk_history": {"Скважина": "well", "Дата": "date", "Режим ПХГ": "pxg_mode", "Заголовок пачки": "pack_title", "Пачка": "pack", "ГВК MD, м": "gvk_md_m",
                         "ГВК а.о., м": "gvk_abs_m", "Полностью газонасыщена": "fully_gas", "Δh по стволу, м": "delta_h_m", "Уровень воды/жидкости, м": "level_m",
                         "Рпл, кгс/см²": "p_res_kgs", "ГВК (как в отчёте)": "gvk_raw", "Файл": "file", "Источник": "source", "Уверенность": "confidence", "Основание": "basis"},
@@ -2214,7 +2284,8 @@ def export(reports: List[Report], out_dir: str, mapping: Optional[Dict[str, str]
     atlas["gis_observations"] = with_methods(atlas["gis_observations"], frames["Комплекс ГИС"])
     files += gis_export.write_tables(atlas, out_dir, source, bottom)
     extra = {"gis_complex": frames["Комплекс ГИС"], "gis_thermobaric": frames["Термобарика"], "gis_filling": frames["Заполнение ствола"],
-             "gis_pressure_rpl": frames["Пластовое давление"], "gis_gvk_history": frames["ГВК по датам"], "gis_templating": frames["_шаблонировки"]}
+             "gis_pressure_rpl": frames["Пластовое давление"], "gis_gvk_history": frames["ГВК по датам"], "gis_templating": frames["_шаблонировки"],
+             "gis_annotations": frames["Аннотации"]}
     meta_path = os.path.join(out_dir, "gis_report_meta.json")
     meta = {"format": FORMAT_NAME, "version": FORMAT_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"), "source": source,
             "reports": int(len(reports)), "wells": int(len({r.well for r in reports if r.well})), "tables": {}}

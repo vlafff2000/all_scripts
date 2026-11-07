@@ -1214,3 +1214,83 @@ def test_clay_interlayer_written_by_one_wide_cell_across_all_measurements():
     cl = [(r["Столбец-замер"][-8:], r["От, м"], r["До, м"], r["Кг"], r["Насыщение"], r["Водонасыщенный"]) for r in rep.intervals if r["От, м"] == 764.8 and r["До, м"] == 765.6]
     assert len(cl) == 2 and all(x[3] == 0.25 and x[4] == "заглинизирован" and x[5] is False for x in cl)
     assert len(rep.intervals) == 6
+
+
+# ---- аннотации для Атласа: почему нет ГВК / Кг, заглинизированные прослои, недоход ----
+def _ann(*paras, date="Дата исследования: 01.10.2022"):
+    return gr.parse_blocks([wt.Para("Скважина: 21"), wt.Para(date)] + [wt.Para(p) for p in paras], "x.docx")
+
+
+def test_annotation_gvk_not_reached_and_reason():
+    rep = _ann("ГВК исследованиями не охвачен, коэффициент газонасыщенности определить затруднительно из-за увеличенного диаметра ствола.")
+    kinds = {a["Вид"] for a in rep.annotations}
+    assert "ГВК не достигнут (исследованиями не охвачен)" in kinds and "Кг не определён: влияние конструкции/диаметра" in kinds
+    a = next(x for x in rep.annotations if x["Вид"].startswith("ГВК не достигнут"))
+    assert a["Дата"] == dt.date(2022, 10, 1) and a["Скважина"] == "21" and "увеличенного диаметра" in a["Текст"]
+
+
+@pytest.mark.parametrize("text, kind, pack", [
+    ("ГВК на глубине 803.7 м (абсолютная глубина -668.7 м) *глубина остановки прибора, ниже пласт не исследован", "ГВК на глубине остановки прибора", ""),
+    ("По сравнению с предыдущим ГИС от 12.04.2022 г. уровень ГВК не изменился.", "ГВК без изменений с предыдущего замера", ""),
+    ("В верхней песчаной пачке скоплений газа не отмечено.", "Скоплений газа в пачке не отмечено", "Верхняя пачка"),
+    ("Пласт-коллектор исследованиями не охвачен.", "Пласт ниже не исследован", ""),
+])
+def test_annotation_kinds(text, kind, pack):
+    rep = _ann(text)
+    got = [a for a in rep.annotations if a["Вид"] == kind]
+    assert len(got) == 1 and got[0]["Пачка"] == pack
+
+
+def test_clay_interlayers_and_no_annotations_for_plain_text():
+    assert not _ann("Определение характера насыщения пласта-коллектора.").annotations
+    rep = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("в верхней песчаной пачке"), _clay_table()], "x.docx")
+    fr = gr.annotations_frame([rep])
+    c = fr[fr["Вид"] == "Заглинизированный прослой"]
+    assert len(c) == 2 and set(c["От, м"]) == {788.4, 789.2} and set(c["Пачка"]) == {"Верхняя пачка"}
+
+
+def test_dash_kg_with_gas_saturation_text_is_not_water():
+    # скв. 112: в таблице «Кг: -», но «Насыщение: Газонасыщ.»: Кг не определён, а не вода (прочерк = вода только без указания газа)
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    tbl = wt.Table(rows=[row("Интервал залегания, м", "Н общ, м", "Кг, %", "Насыщение"), row("775.2-785.6", "10.4", "-", "Газонасыщ."), row("796.0-818.8", "22.8", "-", "Водонасыщ.")])
+    rep = gr.Report(file="x.docx", well="112", date=dt.date(2020, 12, 3))
+    top = wt.TRow([wt.Cell("По данным ГИС-контроля от 03.12.2020 г.", 0, 4000)])
+    gr.read_intervals(rep, wt.Table(rows=[top] + tbl.rows), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = [(r["От, м"], r["Кг"], r["Водонасыщенный"]) for r in rep.intervals]
+    assert (775.2, None, False) in got
+    assert any(g[0] == 796.0 and g[2] is True for g in got)
+
+
+def test_gvk_row_naming_its_pack_goes_to_that_pack_not_to_current_heading():
+    # баг (скв. 309): широкая строка «ГВК по верхней песчаной пачке отмечается на глубине 796.3 м» стоит после заголовка нижней пачки,
+    # и ГВК попадал в нижнюю пачку (у нижней при этом был свой ГВК)
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    top = wt.TRow([wt.Cell("Интервал, м", 0, 1000), wt.Cell("Кг", 1000, 2000), wt.Cell("По данным ГИС-контроля от 31.05.2019 г.", 2000, 4000)])
+    sub = wt.TRow([wt.Cell("", 0, 1000, True), wt.Cell("", 1000, 2000, True), wt.Cell("Нг, м", 2000, 3000), wt.Cell("Кг, д.е.", 3000, 4000)])
+    hv = wt.TRow([wt.Cell("Горизонт Щигровский, верхняя песчаная пачка (763.2-796.3 м)", 0, 4000)])
+    r1 = row("763.2-796.3", "0.3", "33.1", "0.8")
+    hn = wt.TRow([wt.Cell("Горизонт Щигровский, нижняя песчаная пачка (799.2-824.0 м)", 0, 4000)])
+    r2 = row("799.2-802.0", "0.3", "2.8", "0.6")
+    g1 = wt.TRow([wt.Cell("ГВК по верхней песчаной пачке отмечается на глубине 796.3 м (абс. отметка -663.5 м)", 0, 4000)])
+    g2 = wt.TRow([wt.Cell("ГВК по нижней песчаной пачке отмечается на глубине 802.0 м (абс. отметка -669.2 м)", 0, 4000)])
+    rep = gr.Report(file="x.docx", well="309", date=dt.date(2019, 5, 31), alt=132.8)
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, hv, r1, hn, r2, g1, g2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = {p["Пачка"]: p["ГВК MD, м"] for p in rep.packs if p.get("_kind") == "gvk"}
+    assert got == {"Верхняя пачка": 796.3, "Нижняя пачка": 802.0}
+
+
+def test_gvk_cells_per_measurement_naming_their_pack():
+    # то же в строке итогов, где ГВК стоит отдельной ячейкой в столбце замера
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    top = wt.TRow([wt.Cell("Интервал, м", 0, 1000), wt.Cell("Кг", 1000, 2000), wt.Cell("По данным ГИС-контроля от 31.05.2019 г.", 2000, 4000)])
+    sub = wt.TRow([wt.Cell("", 0, 1000, True), wt.Cell("", 1000, 2000, True), wt.Cell("Нг, м", 2000, 3000), wt.Cell("Кг, д.е.", 3000, 4000)])
+    hv = wt.TRow([wt.Cell("Горизонт Щигровский, верхняя песчаная пачка (763.2-796.3 м)", 0, 4000)])
+    hn = wt.TRow([wt.Cell("Горизонт Щигровский, нижняя песчаная пачка (799.2-824.0 м)", 0, 4000)])
+    rep = gr.Report(file="x.docx", well="309", date=dt.date(2019, 5, 31), alt=132.8)
+    gv = wt.TRow([wt.Cell("", 0, 1000), wt.Cell("", 1000, 2000), wt.Cell("ГВК по верхней песчаной пачке на глубине 796.3 м", 2000, 4000)])
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, hv, row("763.2-796.3", "0.3", "33.1", "0.8"), hn, row("799.2-802.0", "0.3", "2.8", "0.6"), gv]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = {p["Пачка"]: p["ГВК MD, м"] for p in rep.packs if p.get("_kind") == "gvk"}
+    assert got == {"Верхняя пачка": 796.3}
