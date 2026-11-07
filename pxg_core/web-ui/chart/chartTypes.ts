@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartTypes.ts @ c76d512. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartTypes.ts @ 9cfb56a. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import type { Look } from './chartStyle'
 export type Cell = string | number | boolean | null
 /** Ручное оформление оси; пусто — авто (atlas/chart_style.py). */
@@ -57,7 +57,7 @@ export interface Series {
 export type WindowSeries = Pick<Series, 'x' | 'y' | 'ids' | 'labels' | 'values' | 'total'> & { window: number }
 export interface WindowReply { chart: string; revision: number; series: Record<string, WindowSeries> }
 export interface ChartBand { first: number; last: number; label: string; shaded: boolean }
-export interface ChartEvent { x: string | number; label: string; kind: 'gdi' | 'regime' | 'repair' | 'peak' | 'gis' | 'template' | 'other'; well: string }
+export interface ChartEvent { x: string | number; label: string; kind: 'gdi' | 'regime' | 'repair' | 'peak' | 'gis' | 'template' | 'other'; well: string; x_end?: string | number | null }
 export interface ChartTable { rows: string[]; columns: string[]; cells: string[][]; colors: string[]; swatches: boolean; aligned?: boolean }
 export interface HeatMap {
   rows: string[]; columns: string[]; values: (number | null)[][]; texts: string[][]
@@ -73,6 +73,7 @@ export type FigureData =
       well: string; top: number; bottom: number; cutoff: number; alt: number | null; axis: 'md' | 'abs'; perf: { top: number; bottom: number }[]
       tracks: { title: string; date: string
         bars: { top: number; bottom: number; kg: number | null; pack: string; gas: boolean }[]
+        notes?: { kind: string; pack: string; top: number | null; bottom: number | null }[]        // пометки отчётов ГИС на дату замера: с интервалом — рамка на треке, без — строка внизу
         packs: { pack: string; gvk: number | null; gvk_abs: number | null; h_eff: number | null; kg_avg: number | null }[] }[] } }
 export interface Chart {
   id: string; title: string; x: Axis; y: Axis; y2: Axis | null; y3?: Axis | null; y4?: Axis | null; y5?: Axis | null; series: Series[]; crosshair: boolean
