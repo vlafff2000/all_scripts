@@ -1214,3 +1214,36 @@ def test_clay_interlayer_written_by_one_wide_cell_across_all_measurements():
     cl = [(r["Столбец-замер"][-8:], r["От, м"], r["До, м"], r["Кг"], r["Насыщение"], r["Водонасыщенный"]) for r in rep.intervals if r["От, м"] == 764.8 and r["До, м"] == 765.6]
     assert len(cl) == 2 and all(x[3] == 0.25 and x[4] == "заглинизирован" and x[5] is False for x in cl)
     assert len(rep.intervals) == 6
+
+
+# ---- аннотации для Атласа: почему нет ГВК / Кг, заглинизированные прослои, недоход ----
+def _ann(*paras, date="Дата исследования: 01.10.2022"):
+    return gr.parse_blocks([wt.Para("Скважина: 21"), wt.Para(date)] + [wt.Para(p) for p in paras], "x.docx")
+
+
+def test_annotation_gvk_not_reached_and_reason():
+    rep = _ann("ГВК исследованиями не охвачен, коэффициент газонасыщенности определить затруднительно из-за увеличенного диаметра ствола.")
+    kinds = {a["Вид"] for a in rep.annotations}
+    assert "ГВК не достигнут (исследованиями не охвачен)" in kinds and "Кг не определён: влияние конструкции/диаметра" in kinds
+    a = next(x for x in rep.annotations if x["Вид"].startswith("ГВК не достигнут"))
+    assert a["Дата"] == dt.date(2022, 10, 1) and a["Скважина"] == "21" and "увеличенного диаметра" in a["Текст"]
+
+
+@pytest.mark.parametrize("text, kind, pack", [
+    ("ГВК на глубине 803.7 м (абсолютная глубина -668.7 м) *глубина остановки прибора, ниже пласт не исследован", "ГВК на глубине остановки прибора", ""),
+    ("По сравнению с предыдущим ГИС от 12.04.2022 г. уровень ГВК не изменился.", "ГВК без изменений с предыдущего замера", ""),
+    ("В верхней песчаной пачке скоплений газа не отмечено.", "Скоплений газа в пачке не отмечено", "Верхняя пачка"),
+    ("Пласт-коллектор исследованиями не охвачен.", "Пласт ниже не исследован", ""),
+])
+def test_annotation_kinds(text, kind, pack):
+    rep = _ann(text)
+    got = [a for a in rep.annotations if a["Вид"] == kind]
+    assert len(got) == 1 and got[0]["Пачка"] == pack
+
+
+def test_clay_interlayers_and_no_annotations_for_plain_text():
+    assert not _ann("Определение характера насыщения пласта-коллектора.").annotations
+    rep = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("в верхней песчаной пачке"), _clay_table()], "x.docx")
+    fr = gr.annotations_frame([rep])
+    c = fr[fr["Вид"] == "Заглинизированный прослой"]
+    assert len(c) == 2 and set(c["От, м"]) == {788.4, 789.2} and set(c["Пачка"]) == {"Верхняя пачка"}
