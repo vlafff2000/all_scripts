@@ -1099,3 +1099,18 @@ def test_clay_interlayer_is_kept_marked_and_has_no_gas():
     rows = next(iter(res.values())).rows
     assert len(rows) == 3 and [x.status for x in rows] == ["", "заглинизирован", "заглинизирован"]
     assert rows[1].hef == 0.0
+
+
+def test_kg_header_with_latin_letters_from_ocr_is_recognized():
+    # баг (скв. 103): OCR прочитал «Кг, %» как «Kr %» (латиница), столбец Кг не распознавался, Кг левого замера терялся (hэф = 0)
+    def c(t, x0, x1, v=False):
+        return wt.Cell(t, x0, x1, v)
+    xs = [(0, 1000), (1000, 2000), (2000, 3000), (3000, 4000), (4000, 5000)]
+    top = wt.TRow([c("По данным ГИС-контроля от 15.10.2019 г.", 0, 5000)])
+    sub = wt.TRow([c("Интервал залегания, м", 0, 2000), c("Н общ м.", 2000, 3000), c("Kr %", 3000, 4000), c("Насыщение", 4000, 5000)])
+    head = wt.TRow([c("Горизонт Щигровский, верхняя песчаная пачка (757.0-779.0 м)", 0, 5000)])
+    r1 = wt.TRow([c(t, *xs[i]) for i, t in enumerate(["757.0", "759.6", "2.6", "26", "Слабогазонасыщ."])] if False else [c("757.0", 0, 500), c("759.6", 500, 2000), c("2.6", 2000, 3000), c("44", 3000, 4000), c("Газонасыщ.", 4000, 5000)])
+    rep = gr.Report(file="x.docx", well="103", date=dt.date(2021, 10, 15))
+    assert gr._leaf(wt.Table(rows=[top, sub, head, r1]), 2, sub.cells[2]) == "kg"
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, head, r1]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    assert [(r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals] == [(757.0, 759.6, 0.44)]

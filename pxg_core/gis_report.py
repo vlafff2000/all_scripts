@@ -978,7 +978,7 @@ def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
 
 def _leaf(tbl: wt.Table, nhdr: int, c: wt.Cell) -> str:
     lab = low(hdr_label(tbl, nhdr, c.xc))
-    for key, rx in (("sat", r"насыщен"), ("lith", r"литолог"), ("kp", r"пористост|\bк[пn]\b"), ("kg", r"\bкг"), ("iv", r"интервал"), ("h", r"н\s*общ|мощност|толщин"), ("hg", r"\bнг\b")):
+    for key, rx in (("sat", r"насыщен"), ("lith", r"литолог"), ("kp", r"пористост|\bк[пn]\b"), ("kg", r"(?<![а-яa-z])[кk]\s*[гrg]"), ("iv", r"интервал"), ("h", r"н\s*общ|мощност|толщин"), ("hg", r"\bнг\b")):
         if re.search(rx, lab):
             return key
     return ""
@@ -1251,14 +1251,14 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
     («… в верхней песчаной пачке в интервале 784.8 – 796.0 м, Нг = 11.2 м»); если пачку оно не называет, её подберёт `resolve_packs` по глубине."""
     cols: Dict[str, int] = {}
     hdr_cells = [c for r in tbl.rows[:max(nhdr, 1)] for c in r.cells if c.text.strip()]
-    for k, rx in (("iv", r"интервал|прослои|прослой"), ("h", r"мощност|\bнг\b"), ("kp", r"пористост"), ("kg", r"газонасыщенност|\bкг")):
+    for k, rx in (("iv", r"интервал|прослои|прослой"), ("h", r"мощност|\bнг\b"), ("kp", r"пористост"), ("kg", r"газонасыщенност|(?<![а-яa-z])[кk]\s*[гrg]")):
         cell = next((c for c in hdr_cells if re.search(rx, low(c.text))), None)
         if cell is not None:
             cols[k] = cell.xc
     if "iv" not in cols or "kg" not in cols:
         return 0
     frac_kp = any("д.е" in low(c.text) or "д. е" in low(c.text) for c in hdr_cells if re.search(r"пористост", low(c.text)))
-    frac_kg = any("д.е" in low(c.text) or "д. е" in low(c.text) for c in hdr_cells if re.search(r"газонасыщенност|\bкг", low(c.text)))
+    frac_kg = any("д.е" in low(c.text) or "д. е" in low(c.text) for c in hdr_cells if re.search(r"газонасыщенност|(?<![а-яa-z])[кk]\s*[гrg]", low(c.text)))
     pack, src, why = classify_pack(title, mapping)
     m_h = re.search(r"Нг\s*=\s*(" + NUM + r")", title)
     label = "замер отчёта"
@@ -1541,7 +1541,7 @@ def table_kind(tbl: wt.Table) -> Tuple[str, int]:
         return "filling", nh
     if "тип заполнения" in hdr or ("плотност" in hdr and "интервал" in hdr and "режим" in hdr):
         return "filling", nh
-    if re.search(r"\bкг", hdr) and "интервал" in hdr:
+    if re.search(r"(?<![а-яa-z])[кk]\s*[гrg]", hdr) and "интервал" in hdr:       # OCR: «Kr %» латиницей вместо «Кг %»
         return "intervals", nh
     if re.search(r"интервал|прослои|прослой", hdr) and re.search(r"газонасыщенност", hdr) and re.search(r"мощност|\bнг\b", hdr) and not re.search(r"дат|\bот\b", hdr):
         return "simple_intervals", nh          # один замер без столбцов-дат: «Интервал, м | Мощность, м | Пористость, д.е. | Газонасыщенность, д.е.»
