@@ -1135,3 +1135,13 @@ def test_measurement_always_comes_from_latest_report_and_differences_are_flagged
     assert any(i["Код"] == "measurement_values_differ" and "300323" in i["Сообщение"] for i in later2.issues)
     own = _mrep("d_own", dt.date(2022, 10, 20), 0.6)          # даже собственный отчёт замера уступает более позднему: берётся последняя интерпретация
     assert gr.pick_measurements([first, later1, own])[("113", dt.date(2022, 10, 1))] == "b_271023"
+
+
+def test_kg_fraction_fix_works_with_dash_rows_in_same_column():
+    # баг (скв. 309, баселайн 04.2016): колонка Кг «0.65, 0.70, -, 0.25»: прочерк стал Кг 0,25 и мешал проверке «все значения меньше 1 %»,
+    # поэтому 0.65 оставалось 0,0065, и hэф был 0
+    rep = gr.Report(file="x.docx", well="309")
+    row = lambda frm, to, kg, raw: _iv(frm, to, kg=kg, **{"Кг (как в отчёте)": raw, "Водонасыщенный": raw == "-", "Основание": ""})
+    rep.intervals = [row(763.2, 765.2, 0.0065, "0.65"), row(765.2, 766.4, 0.0070, "0.70"), row(766.4, 767.2, 0.25, "-"), row(767.2, 768.0, 0.0025, "0.25")]
+    gr.check_intervals(rep)
+    assert [r["Кг"] for r in rep.intervals] == [0.65, 0.7, 0.25, 0.25]

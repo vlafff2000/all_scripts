@@ -1726,7 +1726,7 @@ def check_intervals(rep: Report) -> None:
                     a["От, м"], a["До, м"], b["От, м"], b["До, м"], a["Пачка"], a["Столбец-замер"], a["До, м"] - b["От, м"]), b["Источник"])
     by_col: Dict[str, List[dict]] = defaultdict(list)
     for r in kept:
-        if r.get("Кг") is not None:
+        if r.get("Кг") is not None and re.search(r"\d", str(r.get("Кг (как в отчёте)", ""))):      # прочерк, «заглинизирован» (Кг 0,25) в проверку не входят
             by_col[r["Столбец-замер"]].append(r)
     for col, rows in by_col.items():       # все Кг замера меньше 1 % и записаны как «0.55»: вероятно, доли единицы в столбце без «д.е.»
         raws = [str(r.get("Кг (как в отчёте)", "")).strip() for r in rows]
