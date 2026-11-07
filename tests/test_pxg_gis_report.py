@@ -962,3 +962,35 @@ def test_ocr_output_with_folder_prefix_replaces_pdf():
     files = [os.path.join("сборка", "178Касимов_230425 (2).pdf"), os.path.join("ocr", "сборка__178Касимов_230425 (2).ocr.md")]
     keep, _ = gr.pick_report_files(files)
     assert keep == [os.path.join("ocr", "сборка__178Касимов_230425 (2).ocr.md")]
+
+
+# ---- опечатки в датах шапки столбцов-замеров: даты слева направо должны возрастать ----
+def _hdr_table(labels):
+    w = 1000
+    top = [wt.Cell("Интервал, м", 0, w), wt.Cell("Пористость, д.е.", w, 2 * w)] + [wt.Cell(t, 2 * w + i * 2 * w, 2 * w + (i + 1) * 2 * w) for i, t in enumerate(labels)]
+    sub = [wt.Cell("", 0, w, True), wt.Cell("", w, 2 * w, True)]
+    for i in range(len(labels)):
+        sub += [wt.Cell("Нг, м", 2 * w + i * 2 * w, 3 * w + i * 2 * w), wt.Cell("Кг, д.е.", 3 * w + i * 2 * w, 4 * w + i * 2 * w)]
+    body = wt.TRow([wt.Cell("784.8 – 788.4", 0, w), wt.Cell("0.32", w, 2 * w)] + [wt.Cell(v, 2 * w + j * w, 3 * w + j * w) for j, v in enumerate(["3.6", "0.85"] * len(labels))])
+    return wt.Table(rows=[wt.TRow(top), wt.TRow(sub), body])
+
+
+def test_repeated_or_decreasing_header_dates_are_repaired_by_half_year_steps():
+    # баг: в шапке «04.2023г, 10.2023г, 04.2023г» (последний должен быть 04.2024) и «10.2025г, 10.2025г, 04.2026г» (отчёт 10.2026):
+    # текущий замер отчёта терялся как дубль предыдущего
+    rep = gr.Report(file="x.docx", well="9", date=dt.date(2024, 4, 13))
+    got = gr._groups(_hdr_table(["04.2023г", "10.2023г", "04.2023г"]), 2, rep)
+    assert [g.date for g in got if not g.base] == [dt.date(2023, 4, 1), dt.date(2023, 10, 1), dt.date(2024, 4, 1)]
+    assert any(i["Код"] == "header_date_fixed" for i in rep.issues)
+    rep2 = gr.Report(file="y.docx", well="115", date=dt.date(2026, 10, 15))
+    got2 = gr._groups(_hdr_table(["РИГИС от 10.2025г", "РИГИС от 10.2025г", "РИГИС от 04.2026г"]), 2, rep2)
+    assert [g.date for g in got2 if not g.base] == [dt.date(2025, 10, 1), dt.date(2026, 4, 1), dt.date(2026, 10, 1)]
+
+
+def test_increasing_header_dates_untouched_and_no_repair_beyond_report_date():
+    rep = gr.Report(file="x.docx", well="9", date=dt.date(2024, 4, 13))
+    got = gr._groups(_hdr_table(["04.2023г", "10.2023г", "04.2024г"]), 2, rep)
+    assert [g.date for g in got if not g.base] == [dt.date(2023, 4, 1), dt.date(2023, 10, 1), dt.date(2024, 4, 1)] and not rep.issues
+    rep3 = gr.Report(file="z.docx", well="9", date=dt.date(2023, 12, 1))          # починка увела бы дату за дату отчёта: не трогаем
+    got3 = gr._groups(_hdr_table(["04.2023г", "10.2023г", "04.2023г"]), 2, rep3)
+    assert [g.date for g in got3 if not g.base][2] == dt.date(2023, 4, 1)

@@ -913,6 +913,29 @@ class Group:
 _DATE_ONLY = re.compile(r"\s*(?:\d{1,2}[./])?\d{1,2}[./]\d{4}\s*г?\.?\s*", re.I)
 
 
+def _add_months(d: dt.date, n: int) -> dt.date:
+    m = d.month - 1 + n
+    return dt.date(d.year + m // 12, m % 12 + 1, 1)
+
+
+def _repair_header_dates(groups: List[Group], rep: Report) -> None:
+    """Даты столбцов-замеров слева направо возрастают. Повтор или убывание («04.2023, 10.2023, 04.2023») — опечатка шапки: дата сдвигается шагами по полгода,
+    пока не станет больше предыдущей. Не трогаем, если после починки дата ушла бы дальше чем на 2 месяца за дату отчёта."""
+    prev = None
+    for g in groups:
+        if g.date is None:
+            continue
+        if prev is not None and g.date <= prev:
+            fixed = g.date
+            while fixed <= prev:
+                fixed = _add_months(fixed, 6)
+            if rep.date is None or fixed <= _add_months(dt.date(rep.date.year, rep.date.month, 1), 2):
+                rep.issue("warn", "header_date_fixed", "Дата столбца-замера «%s»: %s не больше предыдущей (%s) — опечатка шапки, принята %s (шаг 6 мес.), сверить по отчёту" % (
+                    g.label[:30], g.date.strftime("%m.%Y"), prev.strftime("%m.%Y"), fixed.strftime("%m.%Y")), "шапка таблицы")
+                g.date, g.exact = fixed, False
+        prev = g.date
+
+
 def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
     """Столбцы-замеры: ячейки шапки с датой («РИГИС от 10.2026г», «ГИС-контроль от 19.11.2020 г.»). Слева от них — столбцы коллектора (Кп)."""
     found: List[Group] = []
@@ -937,6 +960,7 @@ def _groups(tbl: wt.Table, nhdr: int, rep: Report) -> List[Group]:
     for g in sorted(found, key=lambda g: g.x0):
         if not any(abs(g.x0 - u.x0) < 5 and abs(g.x1 - u.x1) < 5 for u in uniq):
             uniq.append(g)
+    _repair_header_dates(uniq, rep)
     out: List[Group] = []
     if uniq and uniq[0].x0 - tbl.x0 > 300:
         out.append(Group("коллектор", tbl.x0, uniq[0].x0, None, False, base=True))
