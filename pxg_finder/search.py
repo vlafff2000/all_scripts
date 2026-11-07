@@ -11,6 +11,7 @@ import shlex
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pxg_core import fs_browse
@@ -18,7 +19,9 @@ from pxg_core import fs_browse
 from . import jobs, store
 
 WORKERS_LOCAL = 4
-WORKERS_NET = 12  # сеть ждёт ответа сервера, а не процессора: потоков больше
+WORKERS_NET = int(os.environ.get("PXG_FINDER_NET_WORKERS", "32") or 32)  # сеть ждёт ответа сервера, а не процессора: потоков больше
+STAT_WORKERS_NET = 16  # параллельные stat найденного в индексе сетевой папки
+STAT_BATCH = 32  # результаты индекса выдаются пачками: первые видны сразу
 RESULT_LIMIT = 5000
 LIVE_TIME_LIMIT = 180.0  # секунд на живой обход диска
 SKIP_DIRS = {"$recycle.bin", "system volume information", "$winreagent", "lost+found"}
@@ -212,6 +215,7 @@ def walk(root: str, on_entry: Callable[[str, "os.DirEntry"], bool], job: jobs.Jo
             try:
                 if job.cancel.is_set() or (deadline and time.monotonic() > deadline):
                     continue
+                seen = 0
                 with os.scandir(d) as it:
                     for e in it:
                         if job.cancel.is_set() or state["stop"]:
@@ -223,7 +227,7 @@ def walk(root: str, on_entry: Callable[[str, "os.DirEntry"], bool], job: jobs.Jo
                             is_dir = e.is_dir(follow_symlinks=False)
                         except OSError:
                             is_dir = False
-                        job.bump("scanned")
+                        seen += 1
                         if is_dir:
                             if n.lower() in SKIP_DIRS:
                                 continue
@@ -233,6 +237,7 @@ def walk(root: str, on_entry: Callable[[str, "os.DirEntry"], bool], job: jobs.Jo
                         if on_entry(d, e) is False:
                             state["stop"] = True
                             break
+                job.bump("scanned", seen)
                 job.bump("dirs")
             except OSError:
                 job.bump("denied")
@@ -376,23 +381,55 @@ def search_index(job: jobs.Job, root_key: str, scope: str, pred: Callable[[str],
         cur = con.execute("SELECT path, name, dir, size, mtime FROM f WHERE root=? AND m(name)=1 AND substr(path,1,?)=?",
                           (store.key(root_key), len(prefix), prefix))
         net = fs_browse.is_network(scope)
-        for path, name, is_dir, size, mt in cur:
-            if job.cancel.is_set() or len(job.items) >= limit:
-                job.set(truncated=len(job.items) >= limit)
-                break
-            if not flt.ok_name(name, bool(is_dir)):
-                continue
-            if not flt.hidden and any(p.startswith(".") for p in path[len(prefix):].split(os.sep)):
-                continue
-            if net or not mt:
-                try:  # размер и дата — только для найденного
-                    st = os.stat(path)
-                    size, mt = st.st_size, st.st_mtime
-                except OSError:
-                    continue  # файл уже удалён: индекс устарел
-            if not flt.ok_stat(size, mt, bool(is_dir)):
-                continue
-            job.add(_entry_dict(path, name, bool(is_dir), size, mt))
+        pool = ThreadPoolExecutor(STAT_WORKERS_NET if net else 4) if net else None
+        batch = []  # type: List[tuple]
+
+        def stat_one(path: str) -> Optional[Tuple[int, float]]:
+            try:
+                st = os.stat(path)
+                return st.st_size, st.st_mtime
+            except OSError:
+                return None  # файл уже удалён: индекс устарел
+
+        def flush() -> bool:
+            """Размер и дата — только для найденного, пачкой параллельно (на сети один stat — 20–90 мс). False — хватит."""
+            todo = batch[:]
+            del batch[:]
+            stats = list(pool.map(stat_one, [b[0] for b in todo])) if pool and todo else [None] * len(todo)
+            for (path, name, is_dir, size, mt), got in zip(todo, stats):
+                if job.cancel.is_set() or len(job.items) >= limit:
+                    job.set(truncated=len(job.items) >= limit)
+                    return False
+                if pool is not None:
+                    if got is None:
+                        continue
+                    size, mt = got
+                if not flt.ok_stat(size, mt, is_dir):
+                    continue
+                job.add(_entry_dict(path, name, is_dir, size, mt))
+            return True
+
+        try:
+            for path, name, is_dir, size, mt in cur:
+                if job.cancel.is_set():
+                    break
+                if not flt.ok_name(name, bool(is_dir)):
+                    continue
+                if not flt.hidden and any(p.startswith(".") for p in path[len(prefix):].split(os.sep)):
+                    continue
+                if not net and not mt:  # локальный индекс без даты: один stat на найденное
+                    got = stat_one(path)
+                    if got is None:
+                        continue
+                    size, mt = got
+                batch.append((path, name, bool(is_dir), size, mt))
+                if len(batch) >= STAT_BATCH and not flush():
+                    return
+            if not job.cancel.is_set():
+                flush()
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=False)
     finally:
         con.close()
 

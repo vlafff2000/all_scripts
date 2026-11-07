@@ -245,3 +245,33 @@ def test_search_date_to_partial_is_end_of_period():
     f = search.build_filters({"dateTo": "2020"}) if hasattr(search, "build_filters") else None
     if f is not None:
         assert f.mt_to == dt.datetime(2020, 12, 31).timestamp() + day
+
+
+def test_index_search_on_network_stats_in_parallel(home, monkeypatch):
+    """Поиск по индексу сетевой папки: stat найденного идёт пачками параллельно (раньше — по одному, минуты на сети)."""
+    import threading
+    import time as _t
+    for i in range(80):
+        (home / ("r%02d.xlsx" % i)).write_text("x")
+    store.set_roots([str(home)])
+    _wait(jobs.start("index", lambda j: search.build_index(j, str(home))))
+    local = _names(_wait(search.run_search({"root": str(home), "query": "r"})))
+    monkeypatch.setattr(search.fs_browse, "is_network", lambda p: True)
+    real, state = os.stat, {"now": 0, "max": 0}
+    lock = threading.Lock()
+
+    def slow(p, *a, **k):
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        _t.sleep(0.01)
+        try:
+            return real(p, *a, **k)
+        finally:
+            with lock:
+                state["now"] -= 1
+    monkeypatch.setattr(search.os, "stat", slow)
+    snap = _wait(search.run_search({"root": str(home), "query": "r"}))
+    assert snap["info"]["source"] == "index" and _names(snap) == local and len(local) == 80
+    assert state["max"] > 1 and all(i["size"] == 1 for i in snap["items"])
+    search.drop_index(str(home))
