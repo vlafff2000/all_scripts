@@ -59,9 +59,10 @@ async def jobs_start(request: Request):
     if not paths:
         return _err("Выберите файл.")
     out = []
+    session = engine.new_session()
     try:
         for p in paths:
-            job = engine.start(str(p), str(b.get("tier") or "standard"), str(b.get("mode") or "auto"), str(b.get("ocr_mode") or "ocr"), str(b.get("pages") or "all"))
+            job = engine.start(str(p), str(b.get("tier") or "standard"), str(b.get("mode") or "auto"), str(b.get("ocr_mode") or "ocr"), str(b.get("pages") or "all"), session)
             out.append(job.id)
     except ValueError as e:
         return _err(str(e))
