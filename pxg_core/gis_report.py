@@ -1199,8 +1199,8 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             ivn, rec, extras = [], {"kg": "", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}, []
             for c in cells:
                 k = _leaf(tbl, nhdr, c)
-                if k in ("iv", "") and fnum(c.text) is not None and len(ivn) < 2:
-                    ivn.append(fnum(c.text))
+                if k in ("iv", "") and len(ivn) < 2 and (fnum(c.text) is not None or re.fullmatch(r"\s*" + NUM + r"\s*[–—-]\s*" + NUM + r"\s*", c.text.translate(_MINUS))):
+                    ivn.extend(nums(c.text)[:2 - len(ivn)] if fnum(c.text) is None else [fnum(c.text)])      # интервал одной ячейкой «784.8-788.4» или две ячейки
                 elif k in rec:
                     rec[k] = c.text
             if len(ivn) < 2 and base_rows and (rec["kg"] or rec["hg"]) and base_rows[-1]["src"] == _src(tbl, i):

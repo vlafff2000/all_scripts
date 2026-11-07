@@ -1011,3 +1011,20 @@ def test_epoch_interval_slightly_outside_collector_interval_is_read():
     gr.read_intervals(rep, wt.Table(rows=[top, sub, head, r1, r2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     cur = [(r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals if "05.2026" in r["Столбец-замер"]]
     assert cur == [(777.6, 778.3, 0.3), (778.2, 785.4, 0.35)]
+
+
+def test_interval_written_as_range_in_one_cell_inside_measurement_group():
+    # баг: таблица «По данным ГИС-контроля от …» с колонками «Интервал залегания | Нобщ | Кг | Насыщение», интервал одной ячейкой «784.8-788.4»:
+    # строки не читались (intervals_empty), замер 11.2020 терялся
+    def c(t, x0, x1, v=False):
+        return wt.Cell(t, x0, x1, v)
+    xs = [(0, 1400), (1400, 2100), (2100, 2800), (2800, 5000), (5000, 6400), (6400, 7100), (7100, 7800), (7800, 10000)]
+    top = wt.TRow([c("По данным ГИС-контроля от 20.11.2020 г.", 0, 5000), c("По данным ГИС-контроля от 15.04.2021 г.", 5000, 10000)])
+    sub = wt.TRow([c(t, *xs[i]) for i, t in enumerate(["Интервал залегания, м", "Нобщ, м", "Кг, %", "Насыщение"] * 2)])
+    head = wt.TRow([c("Пласт-коллектор щигровского горизонта", 0, 10000)])
+    r1 = wt.TRow([c(t, *xs[i]) for i, t in enumerate(["784.8-788.4", "3.6", "55-65", "Газонасыщенный", "784.8-788.4", "3.6", "-", "Не исследован"])])
+    r2 = wt.TRow([c(t, *xs[i]) for i, t in enumerate(["788.4-789.2", "0.8", "60", "Газонасыщенный", "", "", "", ""])])
+    rep = gr.Report(file="x.docx", well="23", date=dt.date(2020, 11, 20))
+    n = gr.read_intervals(rep, wt.Table(rows=[top, sub, head, r1, r2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = [(r["Столбец-замер"][:20], r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals]
+    assert (got[0][1:3], got[0][3]) == ((784.8, 788.4), 0.6) and any(g[1:3] == (788.4, 789.2) for g in got) and n >= 3
