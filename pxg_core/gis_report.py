@@ -1821,35 +1821,26 @@ def resolve_dates(reports: List[Report]) -> None:
             if len(days) == 1:
                 r["Дата замера"], r["Дата точная"] = next(iter(days)), True
                 r["Основание"] = "; ".join(x for x in (r["Основание"], "точная дата замера взята из другого отчёта по этой скважине (в месяце ровно одна дата)") if x)
-    # точные даты одного исследования из разных источников (дата отчёта и таблица «ГВК по датам») расходятся на день-два: склеиваем в дату отчёта (до 5 суток)
-    cand: Dict[Tuple[str, int, int], set] = defaultdict(set)
+    # осторожно: дата замера из таблицы или шапки («ГВК по датам», столбец «04.2025»), не являющаяся датой какого-либо отчёта, но отличающаяся от даты отчёта
+    # той же скважины и месяца не больше чем на 3 суток, считается опечаткой ввода и приводится к дате отчёта. Два отчёта с разными датами — разные исследования
     rdates: Dict[Tuple[str, int, int], set] = defaultdict(set)
     for rep in reports:
         if rep.well and rep.date:
             rdates[(rep.well, rep.date.year, rep.date.month)].add(rep.date)
-        for r in rep.intervals:
-            if r["Дата замера"] is not None and r["Дата точная"]:
-                cand[(rep.well, r["Дата замера"].year, r["Дата замера"].month)].add(r["Дата замера"])
-    remap: Dict[Tuple[str, dt.date], dt.date] = {}
-    for key, days in cand.items():
-        days = sorted(days | rdates.get(key, set()))
-        cluster = [days[0]]
-        for d in days[1:] + [None]:
-            if d is not None and (d - cluster[-1]).days <= 5:
-                cluster.append(d)
-                continue
-            if len(cluster) > 1:
-                own = sorted(x for x in cluster if x in rdates.get(key, set()))
-                for x in cluster:
-                    remap[(key[0], x)] = own[0] if own else cluster[0]
-            cluster = [d] if d is not None else []
     for rep in reports:
         for r in rep.intervals:
-            new = remap.get((rep.well, r["Дата замера"])) if r["Дата замера"] is not None and r["Дата точная"] else None
-            if new is not None and new != r["Дата замера"]:
-                r["Основание"] = "; ".join(x for x in (r["Основание"], "дата замера %s приведена к %s (то же исследование: даты источников расходятся на %d сут.)" % (
-                    r["Дата замера"].strftime("%d.%m.%Y"), new.strftime("%d.%m.%Y"), abs((r["Дата замера"] - new).days))) if x)
-                r["Дата замера"] = new
+            d = r["Дата замера"]
+            if d is None or not r["Дата точная"]:
+                continue
+            key = (rep.well, d.year, d.month)
+            if d in rdates.get(key, set()):
+                continue
+            near = sorted(x for x in rdates.get(key, set()) if abs((x - d).days) <= 3)
+            if len(near) == 1:
+                rep.issue("warn", "date_merged", "Дата замера %s приведена к дате отчёта %s (отличие %d сут., похоже на опечатку ввода); сверить" % (
+                    d.strftime("%d.%m.%Y"), near[0].strftime("%d.%m.%Y"), abs((d - near[0]).days)), "дата замера")
+                r["Основание"] = "; ".join(x for x in (r["Основание"], "дата замера %s приведена к дате отчёта %s" % (d.strftime("%d.%m.%Y"), near[0].strftime("%d.%m.%Y"))) if x)
+                r["Дата замера"] = near[0]
 
 
 def resolve_packs(reports: List[Report]) -> None:

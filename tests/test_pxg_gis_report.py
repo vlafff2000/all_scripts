@@ -1161,3 +1161,23 @@ def test_exact_dates_of_one_study_within_few_days_are_merged_to_report_date():
     far.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 20), "Дата точная": True})]
     gr.resolve_dates([own, later, far])
     assert far.intervals[0]["Дата замера"] == dt.date(2025, 4, 20)
+
+
+def test_dates_are_merged_only_when_other_date_is_not_a_report_date_and_flagged():
+    # осторожно: склеиваем только дату из таблицы/шапки (не дату отчёта) с датой отчёта, до 3 суток; два отчёта с разными датами — разные исследования
+    a = gr.Report(file="a.doc", well="5", date=dt.date(2025, 4, 2))
+    b = gr.Report(file="b.doc", well="5", date=dt.date(2025, 4, 4))
+    a.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 2), "Дата точная": True})]
+    b.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 4), "Дата точная": True})]
+    gr.resolve_dates([a, b])
+    assert a.intervals[0]["Дата замера"] == dt.date(2025, 4, 2) and b.intervals[0]["Дата замера"] == dt.date(2025, 4, 4)
+    later = gr.Report(file="l.doc", well="5", date=dt.date(2025, 10, 21))
+    later.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 3), "Дата точная": True, "Основание": ""})]
+    one = gr.Report(file="o.doc", well="5", date=dt.date(2025, 4, 2))
+    one.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 2), "Дата точная": True})]
+    gr.resolve_dates([one, later])
+    assert later.intervals[0]["Дата замера"] == dt.date(2025, 4, 2) and any(i["Код"] == "date_merged" for i in later.issues)
+    wide = gr.Report(file="w.doc", well="5", date=dt.date(2025, 10, 21))
+    wide.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 9), "Дата точная": True})]
+    gr.resolve_dates([one, wide])
+    assert wide.intervals[0]["Дата замера"] == dt.date(2025, 4, 9)           # больше 3 суток: не трогаем
