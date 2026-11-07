@@ -202,8 +202,8 @@ def test_export_atlas_tables_same_structure_as_gis_base(tmp_path, ra, rb):
     assert sorted(tdb["kind"]) == ["доход шаблона", "остановка прибора"]
 
 
-def test_duplicate_measurement_prefers_own_report(tmp_path, ra, rb):
-    # замер 2026-04 есть только в столбце отчёта от 20.10.2026; в БД он один раз
+def test_duplicate_measurement_is_in_db_once(tmp_path, ra, rb):
+    # замер есть в двух отчётах; в БД он один раз (берётся самый свежий отчёт)
     frames, _ = gr.build([ra, rb])
     iv = frames["Интервалы"]
     assert (iv["В БД"] == "да").sum() == len(frames["Строки БД"])
@@ -1125,7 +1125,7 @@ def _mrep(file, rdate, kg, label="10.2022 г"):
     return rep
 
 
-def test_measurement_without_own_report_comes_from_latest_report_and_differences_are_flagged():
+def test_measurement_always_comes_from_latest_report_and_differences_are_flagged():
     # скв. 113, замер 10.2022: собственного отчёта нет, он есть в отчётах 03.2023, 10.2023 и 04.2024 с разным Кг (0,50 и 0,35).
     # Решение инженера: брать самый свежий отчёт (замер в нём пересчитан), расхождение между отчётами писать в «Проверку»
     first, later1, later2 = _mrep("a_300323", dt.date(2023, 3, 30), 0.5), _mrep("b_271023", dt.date(2023, 10, 27), 0.35), _mrep("c_130424", dt.date(2024, 4, 13), 0.35)
@@ -1133,5 +1133,5 @@ def test_measurement_without_own_report_comes_from_latest_report_and_differences
     _res, allrows = gr.to_results([first, later1, later2])
     assert set(allrows[allrows["В БД"] == "да"]["Кг"]) == {0.35}
     assert any(i["Код"] == "measurement_values_differ" and "300323" in i["Сообщение"] for i in later2.issues)
-    own = _mrep("d_own", dt.date(2022, 10, 20), 0.6)
-    assert gr.pick_measurements([first, later1, own])[("113", dt.date(2022, 10, 1))] == "d_own"
+    own = _mrep("d_own", dt.date(2022, 10, 20), 0.6)          # даже собственный отчёт замера уступает более позднему: берётся последняя интерпретация
+    assert gr.pick_measurements([first, later1, own])[("113", dt.date(2022, 10, 1))] == "b_271023"
