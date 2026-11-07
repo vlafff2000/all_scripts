@@ -996,8 +996,11 @@ def _span_frac(tbl: wt.Table, nhdr: int, x0: float, x1: float) -> bool:
     return any(not c.vcont and _is_frac(c.text) and x0 - 3 <= c.xc <= x1 + 3 for r in tbl.rows[:nhdr] for c in r.cells)
 
 
+BASE_TOL = 0.35
+
+
 def _in_base(v: float, base_rows: list) -> bool:
-    return any(br["from"] - 0.05 <= v <= br["to"] + 0.05 for br in base_rows)
+    return any(br["from"] - BASE_TOL <= v <= br["to"] + BASE_TOL for br in base_rows)         # интервал замера может выходить за интервал коллектора на десятые доли метра
 
 
 def _row_base(row: wt.TRow, base_rows: list) -> list:
@@ -1031,7 +1034,7 @@ def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list, por_groups: Option
     if len(toks) < 4 or fnum(toks[0]) is None or fnum(toks[1]) is None:
         return None
     lo, hi = fnum(toks[0]), fnum(toks[1])
-    near = lambda t: fnum(t) is not None and _DEPTH_TOKEN.match(t) is not None and lo - 0.05 <= fnum(t) <= hi + 0.05
+    near = lambda t: fnum(t) is not None and _DEPTH_TOKEN.match(t) is not None and lo - BASE_TOL <= fnum(t) <= hi + BASE_TOL
     pos = 2
     if pos < len(toks) and not near(toks[pos]):
         pos += 1                                       # Кп (или «-»)

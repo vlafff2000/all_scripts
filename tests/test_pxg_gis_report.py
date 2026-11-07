@@ -994,3 +994,20 @@ def test_increasing_header_dates_untouched_and_no_repair_beyond_report_date():
     rep3 = gr.Report(file="z.docx", well="9", date=dt.date(2023, 12, 1))          # починка увела бы дату за дату отчёта: не трогаем
     got3 = gr._groups(_hdr_table(["04.2023г", "10.2023г", "04.2023г"]), 2, rep3)
     assert [g.date for g in got3 if not g.base][2] == dt.date(2023, 4, 1)
+
+
+def test_epoch_interval_slightly_outside_collector_interval_is_read():
+    # баг: в замере интервал 777.6–778.3 при интервале коллектора 777.6–778.2 (расхождение 0,1 м) считался «столбцы не сошлись»:
+    # строки текущего замера пропадали, хотя значения в нужных ячейках
+    def cell(t, x0, x1, v=False):
+        return wt.Cell(t, x0, x1, v)
+    cols = [(0, 600), (600, 1300), (1300, 2000), (2000, 3000), (3000, 4000), (4000, 5000), (5000, 6000), (6000, 7000), (7000, 8000)]
+    top = wt.TRow([cell("Интервал пласта-коллектора, м", 0, 1300), cell("Кп, %", 1300, 2000), cell("РИГИС от 03.2025г", 2000, 5000), cell("РИГИС от 05.2026г", 5000, 8000)])
+    sub = wt.TRow([cell("", 0, 1300, True), cell("", 1300, 2000, True)] + [cell(t, 2000 + 1000 * i, 3000 + 1000 * i) for i, t in enumerate(["Интервалы (Нг), м", "", "Кг, %", "Интервалы (Нг), м", "", "Кг, %"])])
+    head = wt.TRow([cell("Верхняя песчаная пачка пласта-коллектора", 0, 8000)])
+    r1 = wt.TRow([cell(t, *cols[i]) for i, t in enumerate(["777.6", "778.2", "26", "777.6", "778.2", "30", "777.6", "778.3", "30"])])
+    r2 = wt.TRow([cell(t, *cols[i]) for i, t in enumerate(["778.2", "785.3", "30", "778.2", "785.3", "20-25", "778.2", "785.4", "35"])])
+    rep = gr.Report(file="x.docx", well="122", date=dt.date(2026, 5, 7))
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, head, r1, r2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    cur = [(r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals if "05.2026" in r["Столбец-замер"]]
+    assert cur == [(777.6, 778.3, 0.3), (778.2, 785.4, 0.35)]
