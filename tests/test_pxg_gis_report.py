@@ -1294,3 +1294,16 @@ def test_gvk_cells_per_measurement_naming_their_pack():
     gr.read_intervals(rep, wt.Table(rows=[top, sub, hv, row("763.2-796.3", "0.3", "33.1", "0.8"), hn, row("799.2-802.0", "0.3", "2.8", "0.6"), gv]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     got = {p["Пачка"]: p["ГВК MD, м"] for p in rep.packs if p.get("_kind") == "gvk"}
     assert got == {"Верхняя пачка": 796.3}
+
+
+def test_gvk_history_row_without_pack_is_assigned_by_depth():
+    # таблица «ГВК по датам» без столбца пачки (скв. 1 и ещё 12 скважин, 161 строка ГВК): пачка определяется по глубине (ГВК у нижней границы газовых интервалов пачки)
+    silent = _gvk_rep("a.docx", dt.date(2026, 5, 8))
+    silent.intervals[0].update({"От, м": 775.1, "До, м": 787.7})
+    hist = _gvk_rep("b.docx", dt.date(2026, 10, 20))
+    hist.gvk_history = [{"Скважина": "10", "Дата": dt.date(2026, 5, 8), "Пачка": "", "ГВК MD, м": 787.7, "ГВК а.о., м": None},
+                        {"Скважина": "10", "Дата": dt.date(2026, 10, 20), "Пачка": "", "ГВК MD, м": 900.0, "ГВК а.о., м": None}]      # 900 м ни к какой пачке не подходит
+    gr.resolve_gvk([silent, hist])
+    g = [p for p in silent.packs if p.get("_kind") == "gvk"]
+    assert len(g) == 1 and g[0]["ГВК MD, м"] == 787.7 and g[0]["Пачка"] == "Верхняя пачка"
+    assert not [p for p in hist.packs if p.get("_kind") == "gvk" and p["ГВК MD, м"] == 900.0]
