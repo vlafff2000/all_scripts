@@ -145,7 +145,7 @@ def test_two_blocks_baseline_and_current_in_form_b(rb):
     assert set(iv["Столбец-замер"]) == {"По данным каротажа от 11.10.2019 г", "По данным ГИС-контроль от 19.11.2020 г."}
     assert set(iv["Пачка"]) == {"Покрышка", "Верхняя пачка", "Перемычка", "Нижняя пачка"}
     water = iv[iv["Водонасыщенный"]]
-    assert len(water) == 2 and set(water["От, м"]) == {804.6} and water["Кг"].isna().all()
+    assert len(water) == 2 and set(water["От, м"]) == {804.6} and (water["Кг"] == 0.25).all()
     g = {p["Столбец-замер"]: (p["ГВК MD, м"], p["ГВК а.о., м"], p["Уверенность"]) for p in rb.packs if p.get("_kind") == "gvk"}
     assert g["По данным ГИС-контроль от 19.11.2020 г."] == (804.6, -669.6, "высокая")      # ГВК написан под каждым замером (две ячейки строки)
     assert g["По данным каротажа от 11.10.2019 г"] == (804.6, -669.6, "высокая")
@@ -202,8 +202,8 @@ def test_export_atlas_tables_same_structure_as_gis_base(tmp_path, ra, rb):
     assert sorted(tdb["kind"]) == ["доход шаблона", "остановка прибора"]
 
 
-def test_duplicate_measurement_prefers_own_report(tmp_path, ra, rb):
-    # замер 2026-04 есть только в столбце отчёта от 20.10.2026; в БД он один раз
+def test_duplicate_measurement_is_in_db_once(tmp_path, ra, rb):
+    # замер есть в двух отчётах; в БД он один раз (берётся самый свежий отчёт)
     frames, _ = gr.build([ra, rb])
     iv = frames["Интервалы"]
     assert (iv["В БД"] == "да").sum() == len(frames["Строки БД"])
@@ -673,9 +673,9 @@ def test_merged_gas_cell_covers_all_rows_it_spans():
     rows = {(r["Столбец-замер"][:7], r["От, м"], r["До, м"]): r for r in rep.intervals}
     for key in (("10.2022", 790.6, 793.3), ("10.2022", 793.3, 794.6), ("10.2022", 794.6, 795.3), ("10.2022", 795.3, 796.0)):
         assert rows[key]["Кг"] == 0.65 and rows[key]["Нг по отчёту, м"] == 5.4
-    gas = [x for x in rep.intervals if x["Столбец-замер"].startswith("10.2022") and x["Кг"] is not None]
+    gas = [x for x in rep.intervals if x["Столбец-замер"].startswith("10.2022") and not x["Водонасыщенный"]]
     assert round(sum(x["hi, м"] for x in gas), 1) == 11.2
-    water = [x for x in rep.intervals if x["Столбец-замер"].startswith("04.2023") and x["Кг"] is None]
+    water = [x for x in rep.intervals if x["Столбец-замер"].startswith("04.2023") and x["Водонасыщенный"]]
     assert [(x["От, м"], x["До, м"]) for x in water] == [(793.3, 794.6), (794.6, 795.3), (795.3, 796.0), (796.0, 800.0)]
     assert "объединённой по вертикали" in rows[("10.2022", 793.3, 794.6)]["Основание"]
 
@@ -853,9 +853,9 @@ def test_simple_interval_table_is_read_with_pack_from_title():
     rows = [(r["От, м"], r["До, м"], r["Кг"], r["Пористость"], r["Пачка"], r["hi, м"]) for r in rep.intervals]
     assert rows[0] == (784.8, 788.4, 0.85, 0.32, "Верхняя пачка", 3.6)
     assert (790.6, 796.0, 0.65, 0.3, "Верхняя пачка", 5.4) in rows
-    assert rows[-1][:3] == (796.0, 800.0, None) and len(rows) == 5
+    assert rows[-1][:3] == (796.0, 800.0, 0.25) and len(rows) == 5
     assert all(r["Дата замера"] == dt.date(2022, 10, 1) and r["Дата точная"] for r in rep.intervals)
-    assert round(sum(r["hi, м"] for r in rep.intervals if r["Кг"] is not None), 1) == 11.2
+    assert round(sum(r["hi, м"] for r in rep.intervals if not r["Водонасыщенный"]), 1) == 11.2
     assert not any(i["Код"] == "hg_mismatch" for i in rep.issues)
 
 
@@ -868,8 +868,7 @@ def test_report_with_no_recognized_tables_is_not_epb():
 
 
 # ---- вид отчёта «ГИС при ЭПБ» определяется по тексту шапки, не по отсутствию таблиц ----
-@pytest.mark.parametrize("text", ["РЕШАЕМЫЕ ЗАДАЧИ: Оценка технического состояния скважины, оценка характера насыщения пласта-коллектора",
-                                  "Диагностика технического состояния скважины", "Определение технического состояния эксплуатационной колонны",
+@pytest.mark.parametrize("text", ["Диагностика технического состояния скважины", "Определение технического состояния эксплуатационной колонны",
                                   "Цель: диагностика скважины, дефектоскопия колонны",
                                   "РЕШАЕМЫЕ ЗАДАЧИ: Отбивка текущего забоя; определение термобарических условий; определение толщины стенок НКТ и колонны"])
 def test_epb_kind_from_header_text(text):
@@ -962,3 +961,223 @@ def test_ocr_output_with_folder_prefix_replaces_pdf():
     files = [os.path.join("сборка", "178Касимов_230425 (2).pdf"), os.path.join("ocr", "сборка__178Касимов_230425 (2).ocr.md")]
     keep, _ = gr.pick_report_files(files)
     assert keep == [os.path.join("ocr", "сборка__178Касимов_230425 (2).ocr.md")]
+
+
+# ---- опечатки в датах шапки столбцов-замеров: даты слева направо должны возрастать ----
+def _hdr_table(labels):
+    w = 1000
+    top = [wt.Cell("Интервал, м", 0, w), wt.Cell("Пористость, д.е.", w, 2 * w)] + [wt.Cell(t, 2 * w + i * 2 * w, 2 * w + (i + 1) * 2 * w) for i, t in enumerate(labels)]
+    sub = [wt.Cell("", 0, w, True), wt.Cell("", w, 2 * w, True)]
+    for i in range(len(labels)):
+        sub += [wt.Cell("Нг, м", 2 * w + i * 2 * w, 3 * w + i * 2 * w), wt.Cell("Кг, д.е.", 3 * w + i * 2 * w, 4 * w + i * 2 * w)]
+    body = wt.TRow([wt.Cell("784.8 – 788.4", 0, w), wt.Cell("0.32", w, 2 * w)] + [wt.Cell(v, 2 * w + j * w, 3 * w + j * w) for j, v in enumerate(["3.6", "0.85"] * len(labels))])
+    return wt.Table(rows=[wt.TRow(top), wt.TRow(sub), body])
+
+
+def test_repeated_or_decreasing_header_dates_are_repaired_by_half_year_steps():
+    # баг: в шапке «04.2023г, 10.2023г, 04.2023г» (последний должен быть 04.2024) и «10.2025г, 10.2025г, 04.2026г» (отчёт 10.2026):
+    # текущий замер отчёта терялся как дубль предыдущего
+    rep = gr.Report(file="x.docx", well="9", date=dt.date(2024, 4, 13))
+    got = gr._groups(_hdr_table(["04.2023г", "10.2023г", "04.2023г"]), 2, rep)
+    assert [g.date for g in got if not g.base] == [dt.date(2023, 4, 1), dt.date(2023, 10, 1), dt.date(2024, 4, 1)]
+    assert any(i["Код"] == "header_date_fixed" for i in rep.issues)
+    rep2 = gr.Report(file="y.docx", well="115", date=dt.date(2026, 10, 15))
+    got2 = gr._groups(_hdr_table(["РИГИС от 10.2025г", "РИГИС от 10.2025г", "РИГИС от 04.2026г"]), 2, rep2)
+    assert [g.date for g in got2 if not g.base] == [dt.date(2025, 10, 1), dt.date(2026, 4, 1), dt.date(2026, 10, 1)]
+
+
+def test_increasing_header_dates_untouched_and_no_repair_beyond_report_date():
+    rep = gr.Report(file="x.docx", well="9", date=dt.date(2024, 4, 13))
+    got = gr._groups(_hdr_table(["04.2023г", "10.2023г", "04.2024г"]), 2, rep)
+    assert [g.date for g in got if not g.base] == [dt.date(2023, 4, 1), dt.date(2023, 10, 1), dt.date(2024, 4, 1)] and not rep.issues
+    rep3 = gr.Report(file="z.docx", well="9", date=dt.date(2023, 12, 1))          # починка увела бы дату за дату отчёта: не трогаем
+    got3 = gr._groups(_hdr_table(["04.2023г", "10.2023г", "04.2023г"]), 2, rep3)
+    assert [g.date for g in got3 if not g.base][2] == dt.date(2023, 4, 1)
+
+
+def test_epoch_interval_slightly_outside_collector_interval_is_read():
+    # баг: в замере интервал 777.6–778.3 при интервале коллектора 777.6–778.2 (расхождение 0,1 м) считался «столбцы не сошлись»:
+    # строки текущего замера пропадали, хотя значения в нужных ячейках
+    def cell(t, x0, x1, v=False):
+        return wt.Cell(t, x0, x1, v)
+    cols = [(0, 600), (600, 1300), (1300, 2000), (2000, 3000), (3000, 4000), (4000, 5000), (5000, 6000), (6000, 7000), (7000, 8000)]
+    top = wt.TRow([cell("Интервал пласта-коллектора, м", 0, 1300), cell("Кп, %", 1300, 2000), cell("РИГИС от 03.2025г", 2000, 5000), cell("РИГИС от 05.2026г", 5000, 8000)])
+    sub = wt.TRow([cell("", 0, 1300, True), cell("", 1300, 2000, True)] + [cell(t, 2000 + 1000 * i, 3000 + 1000 * i) for i, t in enumerate(["Интервалы (Нг), м", "", "Кг, %", "Интервалы (Нг), м", "", "Кг, %"])])
+    head = wt.TRow([cell("Верхняя песчаная пачка пласта-коллектора", 0, 8000)])
+    r1 = wt.TRow([cell(t, *cols[i]) for i, t in enumerate(["777.6", "778.2", "26", "777.6", "778.2", "30", "777.6", "778.3", "30"])])
+    r2 = wt.TRow([cell(t, *cols[i]) for i, t in enumerate(["778.2", "785.3", "30", "778.2", "785.3", "20-25", "778.2", "785.4", "35"])])
+    rep = gr.Report(file="x.docx", well="122", date=dt.date(2026, 5, 7))
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, head, r1, r2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    cur = [(r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals if "05.2026" in r["Столбец-замер"]]
+    assert cur == [(777.6, 778.3, 0.3), (778.2, 785.4, 0.35)]
+
+
+def test_interval_written_as_range_in_one_cell_inside_measurement_group():
+    # баг: таблица «По данным ГИС-контроля от …» с колонками «Интервал залегания | Нобщ | Кг | Насыщение», интервал одной ячейкой «784.8-788.4»:
+    # строки не читались (intervals_empty), замер 11.2020 терялся
+    def c(t, x0, x1, v=False):
+        return wt.Cell(t, x0, x1, v)
+    xs = [(0, 1400), (1400, 2100), (2100, 2800), (2800, 5000), (5000, 6400), (6400, 7100), (7100, 7800), (7800, 10000)]
+    top = wt.TRow([c("По данным ГИС-контроля от 20.11.2020 г.", 0, 5000), c("По данным ГИС-контроля от 15.04.2021 г.", 5000, 10000)])
+    sub = wt.TRow([c(t, *xs[i]) for i, t in enumerate(["Интервал залегания, м", "Нобщ, м", "Кг, %", "Насыщение"] * 2)])
+    head = wt.TRow([c("Пласт-коллектор щигровского горизонта", 0, 10000)])
+    r1 = wt.TRow([c(t, *xs[i]) for i, t in enumerate(["784.8-788.4", "3.6", "55-65", "Газонасыщенный", "784.8-788.4", "3.6", "-", "Не исследован"])])
+    r2 = wt.TRow([c(t, *xs[i]) for i, t in enumerate(["788.4-789.2", "0.8", "60", "Газонасыщенный", "", "", "", ""])])
+    rep = gr.Report(file="x.docx", well="23", date=dt.date(2020, 11, 20))
+    n = gr.read_intervals(rep, wt.Table(rows=[top, sub, head, r1, r2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = [(r["Столбец-замер"][:20], r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals]
+    assert (got[0][1:3], got[0][3]) == ((784.8, 788.4), 0.6) and any(g[1:3] == (788.4, 789.2) for g in got) and n >= 3
+
+
+def test_permeable_layers_table_with_kg_range_and_water():
+    # баг (скважина 447): таблица «Проницаемые прослои | Мощность, м | Коэффициент пористость, д.е. | Коэффициент газонасыщенности, д.е.»
+    # под предложением «… в проницаемых прослоях глинистой покрышки» не распознавалась, замеры 04.2022 и 10.2022 брались только из Excel
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    tbl = wt.Table(rows=[row("Проницаемые прослои", "Мощность, м", "Коэффициент пористость, д.е.", "Коэффициент газонасыщенности, д.е."),
+                         row("785.6 – 787.2", "1.6", "0.27", "водонасыщен"), row("788.9 – 792.6", "3.7", "0.28", "0.60 - 0.80"),
+                         row("792.6 – 793.4", "0.8", "0.28", "0.60"), row("795.4 – 796.0", "0.6", "0.30", "0.40")])
+    assert gr.table_kind(tbl)[0] == "simple_intervals"
+    rep = gr.parse_blocks([wt.Para("Скважина: 447"), wt.Para("Дата исследования: 19.04.2022"), wt.Para("Скопления газа отмечаются:"),
+                           wt.Para("в проницаемых прослоях глинистой покрышки"), tbl], "x.docx")
+    got = [(r["От, м"], r["До, м"], r["Кг"], r["Водонасыщенный"], r["Пачка"]) for r in rep.intervals]
+    assert got == [(785.6, 787.2, None, True, "Покрышка"), (788.9, 792.6, 0.7, False, "Покрышка"), (792.6, 793.4, 0.6, False, "Покрышка"), (795.4, 796.0, 0.4, False, "Покрышка")]
+
+
+def test_absorbing_well_tasks_with_technical_state_is_control_not_epb():
+    # поглотительные скважины (108, 109): в задачах «Оценка технического состояния скважины, … определение работающих интервалов поглощения»,
+    # но это ГИС-контроль с характером насыщения пласта-коллектора
+    rep = gr.parse_blocks([wt.Para("Скважина: 108"), wt.Para("Дата исследования: 08.12.2023"),
+                           wt.Para("РЕШАЕМЫЕ ЗАДАЧИ: Оценка технического состояния скважины, оценка характера насыщения пласта-коллектора, определение работающих интервалов поглощения.")], "x.docx")
+    assert rep.kind == ""
+
+
+def test_two_packs_in_one_sentence_and_gvk_with_ao_dots():
+    rep = _text_rep("Пласт-коллектор щигровского горизонта газонасыщен в верхней песчаной пачке в интервале 757.4 – 786.0 м, в нижней песчаной пачке в интервале 788.0 – 792.3 м. "
+                    "ГВК по нижней песчаной пачке отмечается на глубине 792.3 м (а.о.-664.4 м).")
+    got = [(r["От, м"], r["До, м"], r["Пачка"], r["Водонасыщенный"]) for r in rep.intervals]
+    assert got == [(757.4, 786.0, "Верхняя пачка", False), (788.0, 792.3, "Нижняя пачка", False)]
+    g = [p for p in rep.packs if p.get("_kind") == "gvk"]
+    assert len(g) == 1 and g[0]["ГВК MD, м"] == 792.3 and g[0]["ГВК а.о., м"] == -664.4 and g[0]["Пачка"] == "Нижняя пачка"
+
+
+def test_target_of_study_control_of_technical_state_is_not_epb():
+    # поглотительные скважины: в шапке «ЦЕЛЬ ИССЛЕДОВАНИЙ: Определение интервала приемистости. Контроль технического состояния скважины» — это ГИС-контроль
+    tbl = wt.Table(rows=[wt.TRow([wt.Cell("ЦЕЛЬ ИССЛЕДОВАНИЙ", 0, 1000), wt.Cell("Определение интервала приемистости. Контроль технического состояния скважины", 1000, 2000)])])
+    rep = gr.parse_blocks([wt.Para("Скважина: 109"), tbl], "x.docx")
+    assert rep.kind == ""
+
+
+def test_dash_kg_means_water_saturated_kg_025():
+    # решение инженера: «-» в Кг — интервал водонасыщен, Кг = 0,25 (так же заполнена Excel-база: 764 строки с Кг 0,25 и hэф 0)
+    assert gr._kg("-")[3] == "-"
+    rep = gr.Report(file="x.docx", well="10", date=dt.date(2023, 10, 1))
+    gr.read_intervals(rep, _nz_table(), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    dash = [r for r in rep.intervals if r["Кг (как в отчёте)"] == "-"]
+    assert dash and all(r["Кг"] == 0.25 and r["Кг мин"] == 0.25 and r["Водонасыщенный"] is True for r in dash)
+    assert all("водонасыщен" in r["Основание"] and r["Уверенность"] == gr.MID for r in dash)
+    simple = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("в верхней песчаной пачке"), _simple_table()], "x.docx")
+    last = simple.intervals[-1]
+    assert (last["От, м"], last["Кг"], last["Водонасыщенный"]) == (796.0, 0.25, True)
+
+
+def _clay_table():
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    return wt.Table(rows=[row("Интервал, м", "Мощность, м", "Пористость, д.е.", "Газонасыщенность, д.е."), row("784.8 – 788.4", "3.6", "0.32", "0.85"),
+                          row("788.4 – 789.2", "0.8", "0.24", "заглинизирован"), row("789.2 – 790.6", "1.4", "0.30", "0.70\n(заглинизирован)")])
+
+
+def test_clay_interlayer_is_kept_marked_and_has_no_gas():
+    # решение инженера: заглинизированные пропластки есть в Excel-базе и в отчётах, терять нельзя; газа в них нет (не коллектор)
+    rep = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("в верхней песчаной пачке"), _clay_table()], "x.docx")
+    r1, r2, r3 = rep.intervals
+    assert (r2["От, м"], r2["Кг"], r2["Насыщение"], r2["Водонасыщенный"]) == (788.4, 0.25, "заглинизирован", False)
+    assert "заглинизирован" in r2["Основание"] and r2["Уверенность"] == gr.MID
+    assert (r3["Кг"], r3["Насыщение"]) == (0.7, "заглинизирован")          # число отчёта сохраняется (как в Excel), пометка добавляется
+    res, allrows = gr.to_results([rep])
+    rows = next(iter(res.values())).rows
+    assert len(rows) == 3 and [x.status for x in rows] == ["", "заглинизирован", "заглинизирован"]
+    assert rows[1].hef == 0.0
+
+
+def test_kg_header_with_latin_letters_from_ocr_is_recognized():
+    # баг (скв. 103): OCR прочитал «Кг, %» как «Kr %» (латиница), столбец Кг не распознавался, Кг левого замера терялся (hэф = 0)
+    def c(t, x0, x1, v=False):
+        return wt.Cell(t, x0, x1, v)
+    xs = [(0, 1000), (1000, 2000), (2000, 3000), (3000, 4000), (4000, 5000)]
+    top = wt.TRow([c("По данным ГИС-контроля от 15.10.2019 г.", 0, 5000)])
+    sub = wt.TRow([c("Интервал залегания, м", 0, 2000), c("Н общ м.", 2000, 3000), c("Kr %", 3000, 4000), c("Насыщение", 4000, 5000)])
+    head = wt.TRow([c("Горизонт Щигровский, верхняя песчаная пачка (757.0-779.0 м)", 0, 5000)])
+    r1 = wt.TRow([c(t, *xs[i]) for i, t in enumerate(["757.0", "759.6", "2.6", "26", "Слабогазонасыщ."])] if False else [c("757.0", 0, 500), c("759.6", 500, 2000), c("2.6", 2000, 3000), c("44", 3000, 4000), c("Газонасыщ.", 4000, 5000)])
+    rep = gr.Report(file="x.docx", well="103", date=dt.date(2021, 10, 15))
+    assert gr._leaf(wt.Table(rows=[top, sub, head, r1]), 2, sub.cells[2]) == "kg"
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, head, r1]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    assert [(r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals] == [(757.0, 759.6, 0.44)]
+
+
+def _mrep(file, rdate, kg, label="10.2022 г"):
+    rep = gr.Report(file=file, path=file, well="113", date=rdate)
+    d = dt.date(2022, 10, 1)
+    rep.intervals = [_iv(798.2 + i * 1.0, 799.2 + i * 1.0, kg=kg, **{"Столбец-замер": label, "Дата замера": d, "Дата точная": False, "Водонасыщенный": False, "hi, м": 1.0,
+                                                                   "Заголовок пачки": "Нижняя пачка", "Пачка": "Нижняя пачка", "Кг мин": kg, "Кг макс": kg, "Кг (как в отчёте)": "x",
+                                                                   "Пористость": None, "Насыщение": ""}) for i in range(2)]
+    return rep
+
+
+def test_measurement_always_comes_from_latest_report_and_differences_are_flagged():
+    # скв. 113, замер 10.2022: собственного отчёта нет, он есть в отчётах 03.2023, 10.2023 и 04.2024 с разным Кг (0,50 и 0,35).
+    # Решение инженера: брать самый свежий отчёт (замер в нём пересчитан), расхождение между отчётами писать в «Проверку»
+    first, later1, later2 = _mrep("a_300323", dt.date(2023, 3, 30), 0.5), _mrep("b_271023", dt.date(2023, 10, 27), 0.35), _mrep("c_130424", dt.date(2024, 4, 13), 0.35)
+    assert gr.pick_measurements([first, later1, later2])[("113", dt.date(2022, 10, 1))] == "c_130424"
+    _res, allrows = gr.to_results([first, later1, later2])
+    assert set(allrows[allrows["В БД"] == "да"]["Кг"]) == {0.35}
+    assert any(i["Код"] == "measurement_values_differ" and "300323" in i["Сообщение"] for i in later2.issues)
+    own = _mrep("d_own", dt.date(2022, 10, 20), 0.6)          # даже собственный отчёт замера уступает более позднему: берётся последняя интерпретация
+    assert gr.pick_measurements([first, later1, own])[("113", dt.date(2022, 10, 1))] == "b_271023"
+
+
+def test_kg_fraction_fix_works_with_dash_rows_in_same_column():
+    # баг (скв. 309, баселайн 04.2016): колонка Кг «0.65, 0.70, -, 0.25»: прочерк стал Кг 0,25 и мешал проверке «все значения меньше 1 %»,
+    # поэтому 0.65 оставалось 0,0065, и hэф был 0
+    rep = gr.Report(file="x.docx", well="309")
+    row = lambda frm, to, kg, raw: _iv(frm, to, kg=kg, **{"Кг (как в отчёте)": raw, "Водонасыщенный": raw == "-", "Основание": ""})
+    rep.intervals = [row(763.2, 765.2, 0.0065, "0.65"), row(765.2, 766.4, 0.0070, "0.70"), row(766.4, 767.2, 0.25, "-"), row(767.2, 768.0, 0.0025, "0.25")]
+    gr.check_intervals(rep)
+    assert [r["Кг"] for r in rep.intervals] == [0.65, 0.7, 0.25, 0.25]
+
+
+def test_exact_dates_of_one_study_within_few_days_are_merged_to_report_date():
+    # баг (скв. 309, 04.2025): отчёт от 02.04.2025 и столбец «04.2025» в отчёте от 21.10.2025, где дата замера взята из таблицы «ГВК по датам» (03.04.2025),
+    # давали два замера одного исследования (02.04 и 03.04) с разными наборами интервалов
+    own = gr.Report(file="own.doc", well="309", date=dt.date(2025, 4, 2))
+    own.intervals = [_iv(763.2, 765.2, **{"Столбец-замер": "РИГИС от 04.2025", "Дата замера": dt.date(2025, 4, 1), "Дата точная": False})]
+    later = gr.Report(file="later.doc", well="309", date=dt.date(2025, 10, 21))
+    later.intervals = [_iv(764.3, 765.3, **{"Столбец-замер": "РИГИС от 04.2025", "Дата замера": dt.date(2025, 4, 3), "Дата точная": True, "Основание": ""})]
+    gr.resolve_dates([own, later])
+    assert own.intervals[0]["Дата замера"] == dt.date(2025, 4, 2) and later.intervals[0]["Дата замера"] == dt.date(2025, 4, 2)
+    assert gr.pick_measurements([own, later])[("309", dt.date(2025, 4, 2))] == "later.doc"
+    far = gr.Report(file="far.doc", well="309", date=dt.date(2025, 4, 20))           # другой замер того же месяца (больше 5 суток): не склеивается
+    far.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 20), "Дата точная": True})]
+    gr.resolve_dates([own, later, far])
+    assert far.intervals[0]["Дата замера"] == dt.date(2025, 4, 20)
+
+
+def test_dates_are_merged_only_when_other_date_is_not_a_report_date_and_flagged():
+    # осторожно: склеиваем только дату из таблицы/шапки (не дату отчёта) с датой отчёта, до 3 суток; два отчёта с разными датами — разные исследования
+    a = gr.Report(file="a.doc", well="5", date=dt.date(2025, 4, 2))
+    b = gr.Report(file="b.doc", well="5", date=dt.date(2025, 4, 4))
+    a.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 2), "Дата точная": True})]
+    b.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 4), "Дата точная": True})]
+    gr.resolve_dates([a, b])
+    assert a.intervals[0]["Дата замера"] == dt.date(2025, 4, 2) and b.intervals[0]["Дата замера"] == dt.date(2025, 4, 4)
+    later = gr.Report(file="l.doc", well="5", date=dt.date(2025, 10, 21))
+    later.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 3), "Дата точная": True, "Основание": ""})]
+    one = gr.Report(file="o.doc", well="5", date=dt.date(2025, 4, 2))
+    one.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 2), "Дата точная": True})]
+    gr.resolve_dates([one, later])
+    assert later.intervals[0]["Дата замера"] == dt.date(2025, 4, 2) and any(i["Код"] == "date_merged" for i in later.issues)
+    wide = gr.Report(file="w.doc", well="5", date=dt.date(2025, 10, 21))
+    wide.intervals = [_iv(1.0, 2.0, **{"Дата замера": dt.date(2025, 4, 9), "Дата точная": True})]
+    gr.resolve_dates([one, wide])
+    assert wide.intervals[0]["Дата замера"] == dt.date(2025, 4, 9)           # больше 3 суток: не трогаем
