@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/FormatFields.tsx @ 870f8cd. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/FormatFields.tsx @ c76d512. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AxisFormat } from './chartFormat'
 import type { Annotation, AxisStyle, ChartStyle } from './chartTypes'
@@ -154,9 +154,41 @@ function AnnotationFields({ value, set }: { value: Annotation[] | undefined; set
   )
 }
 
-export function ChartStyleFields({ value: st, set, title }: Setter<ChartStyle> & { title?: ReactNode }) {
+/** Цвета по умолчанию для кривых по свежести: те же, что у дат ГДИ (atlas/engine/core/config.py COLORS). */
+export const FRESH_DEFAULT = ['#dc3545', '#2563eb', '#169b62', '#ed8b23', '#9955cc', '#149ba5', '#bd548d', '#8c7542']
+
+/** Цвета кривых по свежести сразу для всех графиков: самая свежая — первый цвет, вторая — второй и т. д. */
+export function FreshColorsFields({ value, set }: { value: string[] | undefined; set: (v: string[] | undefined) => void }) {
+  const on = !!value?.length
+  const list = value ?? []
+  const put = (i: number, c: string) => set(list.map((x, j) => (j === i ? c : x)))
+  return (
+    <fieldset>
+      <legend>Цвета кривых по свежести</legend>
+      <Flag label="Красить кривые по свежести" value={on} onChange={v => set(v ? FRESH_DEFAULT : undefined)}
+        title="Самый свежий замер — первый цвет, второй по свежести — второй и так далее, на всех графиках сразу" />
+      {on && <>
+        {list.map((c, i) => (
+          <Field key={i} label={i === 0 ? '1-й (самый свежий)' : `${i + 1}-й по свежести`}>
+            <span className="cs-range">
+              <input type="color" value={HEX.test(c) ? c : '#888888'} onChange={e => put(i, e.target.value)} />
+              <button type="button" className="cs-auto" disabled={list.length <= 1} onClick={() => set(list.filter((_, j) => j !== i))} title="Убрать цвет из списка">убрать</button>
+            </span>
+          </Field>))}
+        <div className="cs-actions">
+          <button type="button" disabled={list.length >= 12} onClick={() => set([...list, FRESH_DEFAULT[list.length % FRESH_DEFAULT.length]])}>Добавить цвет</button>
+          <button type="button" onClick={() => set(FRESH_DEFAULT)}>Цвета по умолчанию</button>
+        </div>
+        <p className="cs-hint">Когда кривых больше, чем цветов, цвета повторяются по кругу. Цвет, заданный вручную для отдельной даты, главнее.</p>
+      </>}
+    </fieldset>
+  )
+}
+
+export function ChartStyleFields({ value: st, set, title, fresh }: Setter<ChartStyle> & { title?: ReactNode; fresh?: boolean }) {
   return (
     <>
+      {fresh && <FreshColorsFields value={st.fresh_colors} set={v => set({ fresh_colors: v })} />}
       <fieldset>
         <legend>Заголовок</legend>
         {title}

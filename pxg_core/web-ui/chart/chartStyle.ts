@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartStyle.ts @ 870f8cd. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartStyle.ts @ c76d512. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Вид рядов графика (окно «Настройка»): цвет, линия, маркеры. Хранится в проекте (projectLooks.ts); данные и расчёт не меняются.
 import type { Chart, Series } from './chartTypes'
 
@@ -77,6 +77,19 @@ export const yearOfKey = (key: string): number | null => {
 /** Личный вид, относящийся к рядам этого графика: из общего хранилища берутся только его ключи. */
 export function looksOf(chart: Chart, all: Record<string, Look>): Record<string, Look> {
   return Object.fromEntries(chart.series.map(seriesLookKey).filter(k => all[k]).map(k => [k, all[k]]))
+}
+
+/** Палитра «по свежести»: кривая со свежестью (``Series.age``: 0 — самая свежая) красится цветом с её номером по кругу.
+ *  Цвет, заданный вручную (личный вид ряда или макет), главнее; остальное в виде ряда не меняется. */
+export function withFreshColors(chart: Chart, palette: string[] | undefined, looks: Record<string, Look> | undefined): Record<string, Look> | undefined {
+  if (!palette?.length) return looks
+  const out = { ...looks }
+  for (const s of chart.series) {
+    if (s.age === undefined || s.age === null || s.look?.color) continue
+    const k = seriesLookKey(s)
+    if (!out[k]?.color) out[k] = { ...out[k], color: palette[s.age % palette.length] }
+  }
+  return out
 }
 
 /** График с личным видом рядов: у каждого ряда, для которого он задан, появляется поле look. */

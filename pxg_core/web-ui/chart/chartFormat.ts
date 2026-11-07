@@ -1,9 +1,9 @@
-// Копия gas_atlas web/src/chartFormat.ts @ 870f8cd. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartFormat.ts @ c76d512. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Единая модель оформления графика (как в atlas/chart_style.py): документ {chart, axes, series}.
 // Уровни (тема проекта → тип графика → график) складываются mergeFormats: поле более позднего уровня главнее.
 import { errorSeries, trendSeries } from './trend'
 import type { Axis, AxisStyle, Chart, ChartStyle } from './chartTypes'
-import { applyLooks, type Look } from './chartStyle'
+import { applyLooks, withFreshColors, type Look } from './chartStyle'
 
 export type AxisName = 'x' | 'y' | 'y2' | 'y3' | 'y4' | 'y5'
 /** Настройки оси: оформление (AxisStyle) + цвет, границы и деления текстом (проверяются на сервере). */
@@ -31,11 +31,14 @@ export function mergeFormats(...docs: (ChartFormat | null | undefined)[]): Chart
 }
 
 /** Оформление проекта (settings.chart_formats): тема для всех графиков и свои настройки по типам графиков (id модуля). */
-export interface FormatStore { theme?: ChartFormat; types?: Record<string, ChartFormat>; templates?: Record<string, ChartFormat> }
+export interface FormatStore { theme?: ChartFormat; types?: Record<string, ChartFormat>; charts?: Record<string, ChartFormat>; templates?: Record<string, ChartFormat> }
 
 /** Документ для графика модуля: тема проекта → тип графика (как atlas/chart_style.format_of). */
-export const formatOf = (store: FormatStore | null | undefined, module?: string): ChartFormat =>
-  mergeFormats(store?.theme, module ? store?.types?.[module] : undefined)
+export const formatOf = (store: FormatStore | null | undefined, module?: string, chartId?: string): ChartFormat =>
+  mergeFormats(store?.theme, module ? store?.types?.[module] : undefined, module && chartId ? store?.charts?.[chartKey(module, chartId)] : undefined)
+
+/** Ключ «только этот график» (как atlas/chart_style.chart_key). */
+export const chartKey = (module: string, chartId: string) => `${module}::${chartId}`
 
 const STYLE_KEYS: (keyof AxisStyle)[] = ['decimals', 'date_format', 'font', 'tick_size', 'title_size', 'title_bold', 'title_italic',
   'tick_bold', 'tick_italic', 'ticks', 'minor_ticks', 'line', 'line_color', 'line_width', 'label_rotate', 'units', 'title_place']
@@ -95,8 +98,9 @@ export function applyFormat(chart: Chart, doc: ChartFormat | null | undefined): 
       .flatMap(s => s.y.filter((v): v is number => typeof v === 'number' && Number.isFinite(v)))
     out = { ...out, [name]: formatAxis(axis, spec, values) }
   }
-  if (!doc.series) return out
-  const looked = applyLooks(out, doc.series)
+  const looks = withFreshColors(out, out.style?.fresh_colors, doc.series)
+  if (!looks) return out
+  const looked = applyLooks(out, looks)
   const trends = [...trendSeries(looked.series), ...errorSeries(looked.series)]
   return trends.length ? { ...looked, series: [...looked.series, ...trends] } : looked
 }

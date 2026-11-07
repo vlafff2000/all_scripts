@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartPrefs.ts @ 870f8cd. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartPrefs.ts @ c76d512. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Общие настройки вида, запоминаются в браузере: подсказка графиков, события на оси, тема, свёрнутые панели.
 import { useSyncExternalStore } from 'react'
 import type { HoverMode } from './chartHover'
@@ -104,8 +104,9 @@ export const seriesLooks = pref<Record<string, Look>>('', {})
 export const projectFormats = pref<FormatStore>('', {})
 /** Общий шрифт графиков проекта (settings.chart_font): times — по умолчанию, base — шрифт приложения, arial_narrow. */
 export const chartFont = pref<string>('', 'times')
-/** Уровень, на который панель «Формат» пишет оформление графика и осей: раздел или весь проект. */
-export const formatScope = pref<'type' | 'project'>('atlas.format.scope', 'type')
+/** Уровень, на который панель «Формат» пишет оформление графика и осей: только этот график (по умолчанию, чтобы правка не
+ *  размазывалась на остальные), графики раздела или весь проект. */
+export const formatScope = pref<'chart' | 'type' | 'project'>('atlas.format.scope', 'chart')
 /** Вид рядов, который раньше хранился в браузере (до хранения в проекте): переносится в проекты без своего оформления. */
 export function browserLooks(): Record<string, Look> {
   try {
