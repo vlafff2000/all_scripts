@@ -160,10 +160,16 @@ def build_cmd(py: Path, src: str, out_zip: str, tier: str, ocr_mode: str, pages:
     return cmd
 
 
+def new_session() -> str:
+    """Сессия — один запуск «Распознать» (может быть несколько файлов): метка времени ГГГГММДД_ЧЧММСС."""
+    return dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 class Job:
-    def __init__(self, src: str, params: Dict[str, Any]):
+    def __init__(self, src: str, params: Dict[str, Any], session: str = ""):
         self.id = uuid.uuid4().hex[:10]
         self.src = src
+        self.session = session or new_session()
         self.params = params
         self.dir = out_root() / ("%s_%s" % (dt.datetime.now().strftime("%Y%m%d_%H%M%S"), re.sub(r"[^\w.-]+", "_", Path(src).stem)[:60]))
         self.state = "queued"  # queued | running | done | error | cancelled
@@ -177,7 +183,7 @@ class Job:
 
     def snapshot(self) -> Dict[str, Any]:
         return {"id": self.id, "src": self.src, "name": Path(self.src).name, "state": self.state, "error": self.error, "log": self.log[-30:],
-                "plan": self.plan, "params": self.params, "dir": str(self.dir), "elapsed": round((self.t1 or time.monotonic()) - self.t0, 1)}
+                "plan": self.plan, "params": self.params, "session": self.session, "dir": str(self.dir), "elapsed": round((self.t1 or time.monotonic()) - self.t0, 1)}
 
 
 _jobs: Dict[str, Job] = {}
@@ -190,7 +196,7 @@ def get(job_id: str) -> Optional[Job]:
         return _jobs.get(job_id)
 
 
-def start(src: str, tier: str = "standard", mode: str = "auto", ocr_mode: str = "ocr", pages: str = "all") -> Job:
+def start(src: str, tier: str = "standard", mode: str = "auto", ocr_mode: str = "ocr", pages: str = "all", session: str = "") -> Job:
     if not os.path.isfile(src):
         raise ValueError("Файл не найден: %s" % src)
     if Path(src).suffix.lower() not in SUFFIXES:
@@ -201,7 +207,7 @@ def start(src: str, tier: str = "standard", mode: str = "auto", ocr_mode: str = 
         raise ValueError("Страницы: all, 1-5 или 1-5,8 (r3-r1 — с конца).")
     if home() is None:
         raise ValueError("Движок распознавания не найден. Положите папку ocr рядом с программой или задайте PXG_OCR_HOME.")
-    job = Job(src, {"tier": tier, "mode": mode, "ocr_mode": ocr_mode, "pages": pages})
+    job = Job(src, {"tier": tier, "mode": mode, "ocr_mode": ocr_mode, "pages": pages}, session)
     with _lock:
         _jobs[job.id] = job
     threading.Thread(target=_run, args=(job,), daemon=True).start()
@@ -312,9 +318,12 @@ def history(limit: int = 50) -> List[Dict[str, Any]]:
     if root.is_dir():
         for d in sorted((p for p in root.iterdir() if p.is_dir()), reverse=True)[:limit]:
             try:
-                rows.append(json.loads((d / "meta.json").read_text(encoding="utf-8")))
+                row = json.loads((d / "meta.json").read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
+            if not row.get("session"):  # записи до появления сессий — одна сессия на день папки
+                row["session"] = d.name[:8] if d.name[:8].isdigit() else "earlier"
+            rows.append(row)
     return rows
 
 

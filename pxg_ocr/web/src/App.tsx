@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 import { saveUrlAs } from '../../../pxg_core/web-ui/desktopDownload'
 import { renderMarkdown } from './markdown'
+import { CollapsibleGroup } from '../../../pxg_core/web-ui/CollapsibleGroup'
 import { Tables } from '../../../pxg_core/web-ui/table/Tables'
 import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 import type { Cell } from '../../../pxg_core/web-ui/table/tableTypes'
@@ -13,13 +14,20 @@ interface Info {
 }
 interface Result { md: string; json: string; files: string[] }
 interface Route { path: string; name: string; route: string; auto: string; reason: string; manual: boolean }
-interface Item { id: string; src: string; name: string; state: string; error: string; log: string[]; plan: Plan | Record<string, never>; dir: string; elapsed: number; result?: Result }
+interface Item { session?: string; id: string; src: string; name: string; state: string; error: string; log: string[]; plan: Plan | Record<string, never>; dir: string; elapsed: number; result?: Result }
 
 const STATES: Record<string, string> = { queued: 'в очереди', running: 'идёт', done: 'готово', error: 'ошибка', cancelled: 'отменено' }
 const FILTER = 'pdf png jpg jpeg tif tiff jp2 webp bmp doc docx rtf odt pptx xlsx'
 const api = async <T,>(url: string, body?: unknown): Promise<T> => {
   const r = await fetch(url, body === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   return (await r.json()) as T
+}
+// Метка сессии: ГГГГММДД_ЧЧММСС — запуск «Распознать»; ГГГГММДД — записи до учёта сессий (одна на день)
+const sessionTitle = (k: string) => {
+  const m = /^(\d{4})(\d{2})(\d{2})(?:_(\d{2})(\d{2}))?/.exec(k)
+  if (!m) return 'Раньше'
+  const d = `${m[3]}.${m[2]}.${m[1]}`
+  return m[4] ? `Сессия ${d} ${m[4]}:${m[5]}` : `${d} (до учёта сессий)`
 }
 const fmt = (s: number) => (s < 60 ? `${Math.round(s)} с` : `${Math.floor(s / 60)} мин ${Math.round(s % 60)} с`)
 const fileUrl = (dir: string, name: string, download = false) => `/api/ocr/file?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}${download ? '&download=1' : ''}`
@@ -46,6 +54,7 @@ export default function App() {
   const [svod, setSvod] = useState('')
   const [gpuInfo, setGpuInfo] = useState('')
   const [allDb, setAllDb] = useState<{ file: string; dir: string; info: string; sheets: { name: string; columns: string[]; rows: Cell[][] }[] } | null>(null)
+  const [opened, setOpened] = useState<Record<string, boolean>>({})  // ручной выбор: развёрнута / свёрнута сессия
   const running = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
@@ -74,6 +83,12 @@ export default function App() {
     }, 1500)
     return () => window.clearInterval(t)
   }, [refresh])
+
+  const sessions = useMemo(() => {
+    const m = new Map<string, Item[]>()
+    for (const i of items) { const k = i.session || 'earlier'; m.set(k, [...(m.get(k) || []), i]) }
+    return Array.from(m, ([key, its]) => ({ key, items: its })).sort((a, b) => (a.key < b.key ? 1 : -1))
+  }, [items])
 
   const cur = useMemo(() => items.find((i) => (i.id || i.dir) === sel), [items, sel])
 
@@ -207,10 +222,19 @@ export default function App() {
         <h2>Результаты</h2>
         <div className="ocr-hist">
           {items.length === 0 && <span className="muted">Пока ничего нет.</span>}
-          {items.map((i) => { const k = i.id || i.dir; return (
-            <button type="button" key={k} aria-current={sel === k} onClick={() => setSel(k)}>
-              <span>{i.name}</span><small>{STATES[i.state] || i.state}{i.elapsed ? `, ${fmt(i.elapsed)}` : ''}</small>
-            </button>) })}
+          {sessions.map((g, gi) => {
+            const hasCur = g.items.some((i) => (i.id || i.dir) === sel) || g.items.some((i) => i.state === 'running' || i.state === 'queued')
+            const open = opened[g.key] ?? (gi === 0 || hasCur)
+            const done = g.items.filter((i) => i.state === 'done').length
+            return (
+              <CollapsibleGroup key={g.key} title={sessionTitle(g.key)} count={g.items.length} hint={`готово ${done}`} open={open}
+                onToggle={(o) => setOpened((c) => ({ ...c, [g.key]: o }))}>
+                {g.items.map((i) => { const k = i.id || i.dir; return (
+                  <button type="button" key={k} aria-current={sel === k} onClick={() => setSel(k)}>
+                    <span>{i.name}</span><small>{STATES[i.state] || i.state}{i.elapsed ? `, ${fmt(i.elapsed)}` : ''}</small>
+                  </button>) })}
+              </CollapsibleGroup>)
+          })}
         </div>
       </aside>
       <main className="ocr-main">

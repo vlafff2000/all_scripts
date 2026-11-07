@@ -1,0 +1,6 @@
+.cgroup { border-bottom: 1px solid var(--line); }
+.cgroup-head { cursor: pointer; display: flex; gap: 8px; align-items: baseline; padding: 6px 4px; font-weight: 700; font-size: 13px; }
+.cgroup-head:hover { background: var(--row-hover); }
+.cgroup-count { background: var(--accent-soft); color: var(--info-ink); border-radius: 10px; padding: 0 7px; font-size: 12px; font-weight: 400; }
+.cgroup-hint { color: var(--muted); font-weight: 400; margin-left: auto; }
+.cgroup-body { padding-bottom: 4px; }

@@ -180,3 +180,23 @@ def test_db_all_merges_files_and_registers_unrecognised(env, monkeypatch):
     reg = r["sheets"][-1]["rows"]
     assert sum(1 for row in reg if row[3]) == 1                      # нераспознанный файл назван с замечанием
     assert (engine.out_root() / "Сводные" / r["file"]).is_file()
+
+
+def test_history_groups_by_session(env, monkeypatch):
+    """Один запуск «Распознать» = одна сессия; старые записи без сессии получают сессию по дню папки."""
+    import json
+    monkeypatch.setattr(engine, "build_cmd", _fake_cmd(FAKE))
+    a, b = env / "a.pdf", env / "b.pdf"
+    a.write_bytes(b"%PDF")
+    b.write_bytes(b"%PDF")
+    c = TestClient(api.build_app())
+    ids = c.post("/api/ocr/start", json={"paths": [str(a), str(b)]}).json()["jobs"]
+    for i in ids:
+        _wait(i)
+    items = c.get("/api/ocr/history").json()["items"]
+    assert len(items) == 2 and items[0]["session"] == items[1]["session"] != ""
+    old = engine.out_root() / "20250102_030405_old"
+    old.mkdir()
+    (old / "meta.json").write_text(json.dumps({"id": "", "name": "old.pdf", "state": "done", "dir": str(old)}), encoding="utf-8")
+    sessions = {i["name"]: i["session"] for i in c.get("/api/ocr/history").json()["items"]}
+    assert sessions["old.pdf"] == "20250102"
