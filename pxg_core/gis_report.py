@@ -1128,8 +1128,13 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             if re.match(r"\s*(ГВК|водо)", t, re.I) and re.search(r"ГВК", t, re.I):
                 md, ab = _gvk_from(t)
                 g = sgroups[-1] if sgroups else None
+                named = classify_pack(t, mapping)[0]              # «ГВК по верхней песчаной пачке…» стоит после заголовка нижней: ГВК той пачки, что названа в строке
+                gv_pack, gv_title = pack, pack_title
+                if named and named != pack:
+                    gv_pack = named
+                    gv_title = next((p["Заголовок в документе"] for p in reversed(rep.packs) if p.get("_kind") == "heading" and p.get("Таблица") == tid and p.get("Пачка") == named), pack_title)
                 if g is not None:
-                    _add_gvk(rep, g, pack, pack_title, md, ab, t, _src(tbl, i), MID,
+                    _add_gvk(rep, g, gv_pack, gv_title, md, ab, t, _src(tbl, i), MID,
                              "строка ГВК на всю ширину таблицы: отнесена к последнему замеру (текущему), а не ко всем столбцам")
                 continue
             if re.match(r"\s*примечан", t, re.I):

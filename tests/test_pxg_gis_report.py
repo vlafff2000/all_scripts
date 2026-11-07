@@ -1260,3 +1260,22 @@ def test_dash_kg_with_gas_saturation_text_is_not_water():
     got = [(r["От, м"], r["Кг"], r["Водонасыщенный"]) for r in rep.intervals]
     assert (775.2, None, False) in got
     assert any(g[0] == 796.0 and g[2] is True for g in got)
+
+
+def test_gvk_row_naming_its_pack_goes_to_that_pack_not_to_current_heading():
+    # баг (скв. 309): широкая строка «ГВК по верхней песчаной пачке отмечается на глубине 796.3 м» стоит после заголовка нижней пачки,
+    # и ГВК попадал в нижнюю пачку (у нижней при этом был свой ГВК)
+    def row(*t):
+        return wt.TRow([wt.Cell(x, i * 1000, (i + 1) * 1000) for i, x in enumerate(t)])
+    top = wt.TRow([wt.Cell("Интервал, м", 0, 1000), wt.Cell("Кг", 1000, 2000), wt.Cell("По данным ГИС-контроля от 31.05.2019 г.", 2000, 4000)])
+    sub = wt.TRow([wt.Cell("", 0, 1000, True), wt.Cell("", 1000, 2000, True), wt.Cell("Нг, м", 2000, 3000), wt.Cell("Кг, д.е.", 3000, 4000)])
+    hv = wt.TRow([wt.Cell("Горизонт Щигровский, верхняя песчаная пачка (763.2-796.3 м)", 0, 4000)])
+    r1 = row("763.2-796.3", "0.3", "33.1", "0.8")
+    hn = wt.TRow([wt.Cell("Горизонт Щигровский, нижняя песчаная пачка (799.2-824.0 м)", 0, 4000)])
+    r2 = row("799.2-802.0", "0.3", "2.8", "0.6")
+    g1 = wt.TRow([wt.Cell("ГВК по верхней песчаной пачке отмечается на глубине 796.3 м (абс. отметка -663.5 м)", 0, 4000)])
+    g2 = wt.TRow([wt.Cell("ГВК по нижней песчаной пачке отмечается на глубине 802.0 м (абс. отметка -669.2 м)", 0, 4000)])
+    rep = gr.Report(file="x.docx", well="309", date=dt.date(2019, 5, 31), alt=132.8)
+    gr.read_intervals(rep, wt.Table(rows=[top, sub, hv, r1, hn, r2, g1, g2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = {p["Пачка"]: p["ГВК MD, м"] for p in rep.packs if p.get("_kind") == "gvk"}
+    assert got == {"Верхняя пачка": 796.3, "Нижняя пачка": 802.0}
