@@ -1278,6 +1278,7 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
     return n
 
 
+_CLAUSE_SPLIT = re.compile(r",\s*(?=(?:а\s+)?(?:в|во)\s+(?:верхн|нижн)\w*)", re.I)
 _SENT_SPLIT = re.compile(r"(?<=[а-яёa-z)%м])\.\s+(?=[А-ЯЁA-Z\-•\\])")
 _RANGE = re.compile(r"(" + NUM + r")\s*[–—-]\s*(" + NUM + r")\s*м")
 
@@ -1296,8 +1297,17 @@ def read_interval_text(rep: Report, blocks: List[wt.Block]) -> int:
             continue
         ctx_gas = bool(re.search(r"скоплени\w+ газа|газонасыщ", prev, re.I)) and len(prev) < 200       # «Скопления газа отмечаются:» и список пачек ниже
         prev = b.text
-        for sent in _SENT_SPLIT.split(b.text.replace("\n", " ")):
+        sentences = []
+        for whole in _SENT_SPLIT.split(b.text.replace("\n", " ")):
+            parts = _CLAUSE_SPLIT.split(whole)         # «… газонасыщен в верхней пачке в интервале A–B м, в нижней пачке в интервале C–D м»: по пачке на часть
+            whole_low = low(whole)
+            sentences += [(p, whole_low) for p in parts] if len(parts) > 1 else [(whole, whole_low)]
+        for sent, whole_low in sentences:
             low_s = low(sent)
+            if len(sentences) and sent is not None and whole_low != low_s:
+                low_s_ctx = whole_low
+            else:
+                low_s_ctx = low_s
             named = "пачк" in low_s and re.search(r"верхн|нижн", low_s)
             if not named and not re.search(r"коллектор|горизонт", low_s):
                 continue
@@ -1305,10 +1315,10 @@ def read_interval_text(rep: Report, blocks: List[wt.Block]) -> int:
             if not m:
                 continue
             ranges = [(fnum(a), fnum(c2)) for a, c2 in _RANGE.findall(m.group(1))]
-            water = "водонасыщ" in low_s and "газонасыщ" not in low_s
+            water = "водонасыщ" in low_s and "газонасыщ" not in low_s_ctx if "водонасыщ" in low_s_ctx else False
             if re.search(r"не\s+(?:отмечает|выявлен|отмечен|выделяет)", low_s):
                 continue                                   # «скоплений газа не отмечается»
-            gas = "газонасыщ" in low_s or bool(re.search(r"скоплени\w+ газа[^.]{0,60}(?:отмечаются|выделяются)|(?:отмечаются|выделяются)[^.]{0,30}скоплени\w+ газа", low_s)) or (ctx_gas and not water and re.match(r"\s*[•\-\\–]", sent) is not None)
+            gas = "газонасыщ" in low_s_ctx or bool(re.search(r"скоплени\w+ газа[^.]{0,60}(?:отмечаются|выделяются)|(?:отмечаются|выделяются)[^.]{0,30}скоплени\w+ газа", low_s)) or (ctx_gas and not water and re.match(r"\s*[•\-\\–]", sent) is not None)
             if not ranges or not (water or gas):
                 continue
             pack = ("Верхняя пачка" if re.search(r"верхн", low_s) else "Нижняя пачка") if named else ""      # пачка не названа: её подберёт resolve_packs по глубине
@@ -1370,6 +1380,7 @@ def _add_gvk(rep: Report, g: Group, pack: str, title: str, md: Optional[float], 
 
 _GVK_SENT = re.compile(r"ГВК[^.]{0,60}?(?:отмечается|фиксируется)\s+на\s+глубине\s*[–—-]?\s*(" + NUM + r")\s*м", re.I)
 _GVK_ABS = re.compile(r"абс[^()]{0,12}?[–—-]\s*[–—-]?\s*(" + NUM + r")\s*м", re.I)
+_GVK_AO = re.compile(r"(?<![а-яa-z])а\.\s?о\.\s*[:=]?\s*(" + NUM + r")\s*м", re.I)         # «(а.о.-664.4 м)»: тире — это минус
 
 
 def read_gvk_text(rep: Report, blocks: List[wt.Block]) -> int:
@@ -1388,7 +1399,7 @@ def read_gvk_text(rep: Report, blocks: List[wt.Block]) -> int:
             if not pack:
                 continue                                  # пачка в предложении не названа — отнести ГВК некуда
             md = fnum(m.group(1))
-            a = _GVK_ABS.search(sent.translate(_MINUS))
+            a = _GVK_ABS.search(sent.translate(_MINUS)) or _GVK_AO.search(sent.translate(_MINUS))
             ab = fnum(a.group(1)) if a else None
             same = [x for x in cols if rep.date is not None and x[0] == rep.date] or [x for x in cols if rep.date is not None and x[0] and (x[0].year, x[0].month) == (rep.date.year, rep.date.month)] or cols[-1:]
             if not same or md is None:
@@ -1506,7 +1517,7 @@ _EPB_TASKS_RX = re.compile(r"толщин\w+\s+(?:стен|труб)", re.I)
 def report_kind(blocks: List[wt.Block]) -> str:
     """«ГИС при ЭПБ» — по тексту шапки отчёта (решаемые задачи, заголовок): диагностика / оценка / определение технического состояния скважины.
     ГИС-контроль этих слов в шапке не содержит."""
-    head = " ".join(b.text for b in blocks[:30] if isinstance(b, wt.Para))[:6000]
+    head = " ".join(b.text for b in blocks[:30] if isinstance(b, wt.Para) and not re.match(r"\s*РЕШАЕМЫЕ ЗАДАЧИ", b.text, re.I))[:6000]     # «Оценка технического состояния скважины» в задачах есть и у поглотительных скважин (ГИС-контроль)
     head += " " + " ".join(c.text for b in blocks[:8] if isinstance(b, wt.Table) for r in b.rows for c in r.cells)[:3000]
     tasks = " ".join(b.text for b in blocks[:40] if isinstance(b, wt.Para) and re.match(r"\s*РЕШАЕМЫЕ ЗАДАЧИ", b.text, re.I))       # метод «толщины стенок» есть и в комплексе ГИС-контроля: смотрим только задачи
     return KIND_EPB if _EPB_RX.search(head) or _EPB_TASKS_RX.search(tasks) else ""
@@ -1553,8 +1564,8 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
     read_filling_text(rep, blocks)
     read_rpl(rep, blocks)
     read_summaries(rep, blocks)
+    read_interval_text(rep, blocks)          # сначала интервалы из текста: к ним привязывается ГВК из предложения
     read_gvk_text(rep, blocks)
-    read_interval_text(rep, blocks)
     check_report(rep)
     return rep
 
