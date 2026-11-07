@@ -1875,7 +1875,8 @@ def resolve_gvk(reports: List[Report]) -> None:
 
 
 def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], str]:
-    """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером, иначе самый свежий. Остальные — дубли.
+    """Какой отчёт кормит замер (скважина, дата): сначала отчёт, дата которого совпала с замером (или месяц), иначе самый РАННИЙ из отчётов, где замер есть
+    (первая интерпретация; в более поздних он пересчитывается заново, а инженеры при составлении Excel-базы брали первую). Остальные — дубли.
     Из выбранного отчёта в БД идут все его таблицы этого замера (основная и, например, таблица покрышки)."""
     best: Dict[Tuple[str, dt.date], Tuple[int, str]] = {}
     for rep in reports:
@@ -1883,10 +1884,36 @@ def pick_measurements(reports: List[Report]) -> Dict[Tuple[str, dt.date], str]:
         for d, label in seen:
             own = 2 if (rep.date is not None and rep.date == d) else (1 if rep.date and (rep.date.year, rep.date.month) == (d.year, d.month) else 0)
             key = (rep.well, d)
-            score = (own, rep.date or dt.date.min)
+            score = (own, -(rep.date or dt.date.max).toordinal())
             if key not in best or score > best[key][0]:
                 best[key] = (score, rep.path or rep.file)
     return {k: v[1] for k, v in best.items()}
+
+
+def _flag_measurement_differences(reports: List[Report], chosen: Dict[Tuple[str, dt.date], str]) -> None:
+    """Замер есть в нескольких отчётах, и Кг (или границы) в них разные: в «Проверку» отчёта, взятого в БД, — какие отчёты и сколько интервалов расходятся."""
+    byfile = {(r.path or r.file): r for r in reports}
+    for (well, d), fkey in chosen.items():
+        base = byfile.get(fkey)
+        if base is None:
+            continue
+        mine = {(round(x["От, м"], 1), round(x["До, м"], 1)): x["Кг"] for x in base.intervals if x["Дата замера"] == d}
+        others = {}
+        for rep in reports:
+            if rep is base or rep.well != well:
+                continue
+            diff = 0
+            for x in rep.intervals:
+                if x["Дата замера"] != d:
+                    continue
+                k = (round(x["От, м"], 1), round(x["До, м"], 1))
+                if k in mine and x["Кг"] is not None and mine[k] is not None and abs(x["Кг"] - mine[k]) > 0.03:
+                    diff += 1
+            if diff:
+                others[rep.file] = diff
+        if others:
+            base.issue("warn", "measurement_values_differ", "Замер %s есть и в других отчётах с другим Кг: %s. В БД взят этот отчёт (самый ранний или собственный); сверить" % (
+                d.strftime("%m.%Y"), "; ".join("%s (%d инт.)" % (f, n) for f, n in sorted(others.items()))))
 
 
 def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gis.SheetResult], pd.DataFrame]:
@@ -1895,6 +1922,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
     resolve_packs(reports)
     resolve_gvk(reports)
     chosen = pick_measurements(reports)
+    _flag_measurement_differences(reports, chosen)
     by_well: Dict[str, Dict[dt.date, List[Tuple[Report, dict]]]] = defaultdict(lambda: defaultdict(list))
     allrows = []
     for rep in reports:
