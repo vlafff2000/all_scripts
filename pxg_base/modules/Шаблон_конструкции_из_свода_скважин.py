@@ -17,7 +17,7 @@ _ = sys
 
 
 def max_perf(text) -> float:
-    """Порог глубины перфорации: пусто — 950 м, 0 — фильтр выключен."""
+    """Порог глубины перфорации: пусто или 0 — не отсеивать."""
     value = (text or "").strip().replace(",", ".")
     return wc.DEFAULT_MAX_PERF_DEPTH if not value else float(value)
 
@@ -38,6 +38,7 @@ def main(argv=None):
     args = параметры.parse(
         "Шаблон конструкции из свода скважин", argv,
         file="свод скважин (Excel, форма ПХГ-01)",
+        pxg="часть названия ПХГ (в своде несколько ПХГ с одинаковыми номерами скважин; пусто — первое)",
         date="дата конструкции ДД.ММ.ГГГГ (по умолчанию «По состоянию на» из шапки свода)",
         atlas_storage="папка хранилища Атласа (по умолчанию GAS_ATLAS_STORAGE)",
         atlas_project="id проекта Атласа (по умолчанию самый свежий с расходами)",
@@ -49,7 +50,7 @@ def main(argv=None):
         print("❌ Свод скважин не выбран.")
         return 1
     try:
-        book = wc.read(path, date=args.date or "", max_perf=max_perf(args.max_perf))
+        book = wc.read(path, date=args.date or "", max_perf=max_perf(args.max_perf), pxg=args.pxg or "")
     except ValueError as err:
         print("❌ %s" % err)
         return 1

@@ -41,8 +41,10 @@ def make_svod(path, header_date="По состоянию на: 01.01.2000 г.", 
         ws.cell(9, col, name)
     ws["A10"] = "УПХГ Тестовое"
     r = 11
-    for number, rows in (wells or WELLS):
+    for number, rows, *pxg in (wells or WELLS):
         first = r
+        if pxg:
+            ws.cell(first, 1, pxg[0])             # название ПХГ в первом столбце строки скважины, как в настоящем своде
         for k, cells in enumerate(rows):
             for col, v in cells.items():
                 ws.cell(r + k, col, v)
@@ -255,3 +257,38 @@ def test_artificial_bottom_is_a_svod_element():
     names = {name for _, name, _ in wc.ELEMENTS}
     assert "Искусственный забой" in names
     assert wc._target("(искусственный забой) глубина", "глубина")[0] == "«Искусственный забой»: верх и низ (точка)"
+
+
+def test_two_storages_with_same_well_numbers_are_not_mixed(tmp_path):
+    """В своде два ПХГ с одинаковыми номерами скважин (Касимовское и Увязовское): без разделения их строки сливались в одну скважину."""
+    kas = {32: 168, 33: 800, 39: 89, 40: 700, 19: 760, 20: 770}
+    uvy = {32: 168, 33: 400, 39: 89, 40: 350, 19: 380, 20: 390}
+    p = tmp_path / "two.xlsx"
+    make_svod(p, wells=[(1, [kas], "Касимовское ПХГ"), (2, [kas], "Касимовское ПХГ"), (1, [uvy], "Увязовское ПХГ")])
+    book = wc.read(str(p), date="01.11.2025")
+    assert [w.number for w in book.wells] == ["1", "2"] and {w.section for w in book.wells} == {"Касимовское ПХГ"}
+    t = wc.atlas_table(book)
+    prod = t[(t["Скважина"] == "1") & (t["Элемент"] == "Эксплуатационная колонна")]
+    assert list(prod["Низ интервала, м"]) == [800]                      # нет чужой колонны на 400 м
+    assert any(i.code == "PXG" and "Увязовское" in i.message for i in book.issues)
+    assert not any(i.code == "DUP" for i in book.issues)
+    other = wc.read(str(p), date="01.11.2025", pxg="увяз")
+    assert [w.number for w in other.wells] == ["1"]
+    assert list(wc.atlas_table(other).query("Элемент == 'Эксплуатационная колонна'")["Низ интервала, м"]) == [400]
+
+
+def test_artificial_bottom_from_passport_and_deep_perforation_kept(tmp_path):
+    """Искусственный забой — элемент скважины (поле паспорта с опечаткой «Искуственный»); нижние интервалы под ним не отсеиваются порогом 950 м."""
+    p = tmp_path / "art.xlsx"
+    make_svod(p, wells=[(7, [{32: 168, 33: 1300, 19: 780, 20: 798}, {19: 1173, 20: 1192}])])
+    wb = openpyxl.load_workbook(p)
+    ws = wb.active
+    ws.cell(9, 15, "Искуственный забой, м")
+    ws.cell(11, 15, 804)
+    wb.save(p)
+    book = wc.read(str(p), date="01.11.2025")
+    t = wc.atlas_table(book)
+    art = t[t["Элемент"] == "Искусственный забой"]
+    assert list(art["Верх интервала, м"]) == [804] and list(art["Низ интервала, м"]) == [804]
+    perf = t[t["Элемент"] == "Интервал перфорации"]
+    assert sorted(perf["Низ интервала, м"]) == [798, 1192] and not book.excluded
