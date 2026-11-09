@@ -13,7 +13,7 @@
 Глубины свода — по стволу (MD) от стола ротора. Абсолютная отметка: а.о. = альтитуда + высота стола ротора − глубина
 (флажок `rotor`; без него а.о. = альтитуда − глубина, как в Атласе по умолчанию). Считается по альтитуде Атласа и по альтитуде
 свода рядом: какую взять, решает инженер. Нет высоты стола у скважины при включённом флажке — а.о. пуста и есть замечание.
-Перфорации глубже порога (`max_perf`, в модуле по умолчанию 950 м) в итог не идут, а перечислены на листе «Исключено» с причиной.
+Перфорации глубже порога (`max_perf`; по умолчанию не отсеиваются, порог включается вручную) в итог не идут, а перечислены на листе «Исключено» с причиной.
 Проверка только сообщает: спорные значения не правятся молча, а попадают в «Проверку» с причиной; решение за инженером.
 """
 from __future__ import annotations
@@ -58,7 +58,7 @@ DATE_RE = re.compile(r"(\d{1,2}\.\d{1,2}\.\d{4})\s*[-–—]\s*(\d{1,2}\.\d{1,2}
 HEADER_DATE_RE = re.compile(r"состоянию\s+на:?\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.I)
 WORKS_SUB = "проведенные на скважине работы"
 ALT_LABEL, TABLE_LABEL = "Альтитуда, м", "Высота стола ротора, м"
-DEFAULT_MAX_PERF_DEPTH = 950.0   # м: глубже этого перфорация в своде считается ошибочной (значение по умолчанию для модуля)
+DEFAULT_MAX_PERF_DEPTH = 0.0     # м: порог отсева перфораций выключен; нижние интервалы под искусственным забоем (1170–1210 м) настоящие, не ошибка свода
 ALT_TOLERANCE = 1.0      # м: как допуск сверки альтитуд в Атласе (`atlas/base_model.py: TOLERANCE`)
 
 
@@ -116,10 +116,15 @@ def _num(value) -> Tuple[Optional[float], bool]:
         return None, True
 
 
+# Номера, записанные в своде числом без косой черты; подтверждено инженером (Egor, 2026-11-09): 115200 = скважина 115/200
+NUMBER_ALIASES = {"115200": "115/200"}
+
+
 def _well_name(value) -> str:
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    return str(value).strip()
+    name = str(value).strip()
+    return NUMBER_ALIASES.get(name, name)
 
 
 def parse_date(text) -> Optional[dt.date]:
@@ -173,7 +178,7 @@ def _pick(cols: List[Tuple[int, str, str]], group_key: str, *needles: str, nth: 
     return found[nth] if len(found) > nth else None
 
 
-def read(path: str, date: str = "", sheet: str = "", max_perf: Optional[float] = None) -> Book:
+def read(path: str, date: str = "", sheet: str = "", max_perf: Optional[float] = None, pxg: str = "") -> Book:
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb[sheet] if sheet else wb.active
     hr, wc = _find_header(ws)
@@ -192,7 +197,8 @@ def read(path: str, date: str = "", sheet: str = "", max_perf: Optional[float] =
     for r in range(hr + 1, ws.max_row + 1):
         raw = ws.cell(r, wc).value
         if raw is not None and str(raw).strip():
-            current = Well(_well_name(raw), section, [r])
+            own = ws.cell(r, 1).value                  # в настоящем своде название ПХГ стоит в первом столбце каждой скважины
+            current = Well(_well_name(raw), str(own).strip() if own is not None and str(own).strip() else section, [r])
             book.wells.append(current)
         else:
             a = ws.cell(r, 1).value
@@ -202,6 +208,7 @@ def read(path: str, date: str = "", sheet: str = "", max_perf: Optional[float] =
                 section = str(a).strip()
             elif current is not None:
                 current.rows.append(r)
+    _select_storage(book, pxg)
     seen: Dict[str, int] = {}
     for w in book.wells:
         seen[w.number] = seen.get(w.number, 0) + 1
@@ -220,6 +227,26 @@ def read(path: str, date: str = "", sheet: str = "", max_perf: Optional[float] =
                  hint="Порог настраивается; интервалы можно вернуть, дописав их в таблицу вручную")
     book.mapping = _mapping(ws, cols)
     return book
+
+
+def _select_storage(book: Book, pxg: str) -> None:
+    """В одном своде бывает несколько ПХГ с одинаковыми номерами скважин: без разделения их строки сливались под одним номером.
+    ``pxg`` — часть названия (без учёта регистра); пусто — первое ПХГ свода, остальные перечислены в замечании."""
+    names = list(dict.fromkeys(w.section for w in book.wells))
+    if len(names) < 2 and not pxg.strip():
+        return
+    want = pxg.strip().lower()
+    chosen = next((n for n in names if want in n.lower()), None) if want else names[0]
+    if chosen is None:
+        book.add("ошибка", "PXG", "В своде нет ПХГ «%s». Есть: %s" % (pxg, "; ".join(names)), hint="Проверьте параметр pxg")
+        book.wells = []
+        return
+    count = {n: sum(1 for w in book.wells if w.section == n) for n in names}
+    book.wells = [w for w in book.wells if w.section == chosen]
+    if len(names) > 1:
+        rest = "; ".join("%s (%d скв.)" % (n, count[n]) for n in names if n != chosen)
+        book.add("предупреждение", "PXG", "В своде несколько ПХГ: выгружено «%s» (%d скв.), не включены: %s" % (chosen, count[chosen], rest),
+                 hint="Другое ПХГ — параметр pxg (часть названия); номера скважин у ПХГ повторяются, смешивать их нельзя")
 
 
 def _first(ws, rows: List[int], c: int):
@@ -251,7 +278,25 @@ def _fill_main(book: Book, ws, cols, hr: int) -> None:
             w.main[label] = v
 
 
+ART_RE = re.compile(r"искус+твенн\w*\s+забой", re.I)       # в своде бывает написано «Искуственный»
+
+
+def _passport_artificial(w: Well) -> None:
+    """Искусственный забой — элемент скважины (глубина определена точно): берётся из поля паспорта, если отдельной колонки-элемента нет."""
+    if any(e["Элемент"] == "Искусственный забой" for e in w.elements):
+        return
+    label = next((k for k in w.main if ART_RE.search(str(k))), None)
+    value, _ = _num(w.main.get(label)) if label else (None, False)
+    if value is not None and value > 0:
+        _emit(w, "Искусственный забой", value, value, None, "из паспорта свода", w.rows[0])
+
+
 def _fill_elements(book: Book, ws, cols, w: Well) -> None:
+    _fill_elements_cols(book, ws, cols, w)
+    _passport_artificial(w)
+
+
+def _fill_elements_cols(book: Book, ws, cols, w: Well) -> None:
     for key, name, kind in ELEMENTS:
         if kind == "string":
             c_d, c_z = _pick(cols, key, ", мм"), _pick(cols, key, "глубина")
