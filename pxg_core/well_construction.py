@@ -116,10 +116,15 @@ def _num(value) -> Tuple[Optional[float], bool]:
         return None, True
 
 
+# Номера, записанные в своде числом без косой черты; подтверждено инженером (Egor, 2026-11-09): 115200 = скважина 115/200
+NUMBER_ALIASES = {"115200": "115/200"}
+
+
 def _well_name(value) -> str:
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    return str(value).strip()
+    name = str(value).strip()
+    return NUMBER_ALIASES.get(name, name)
 
 
 def parse_date(text) -> Optional[dt.date]:

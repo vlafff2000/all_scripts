@@ -292,3 +292,10 @@ def test_artificial_bottom_from_passport_and_deep_perforation_kept(tmp_path):
     assert list(art["Верх интервала, м"]) == [804] and list(art["Низ интервала, м"]) == [804]
     perf = t[t["Элемент"] == "Интервал перфорации"]
     assert sorted(perf["Низ интервала, м"]) == [798, 1192] and not book.excluded
+
+
+def test_well_115_200_keeps_its_slash(tmp_path):
+    p = tmp_path / "slash.xlsx"
+    make_svod(p, wells=[(115200, [{32: 168, 33: 800, 39: 89, 40: 700}])])
+    book = wc.read(str(p), date="01.11.2025")
+    assert [w.number for w in book.wells] == ["115/200"]
