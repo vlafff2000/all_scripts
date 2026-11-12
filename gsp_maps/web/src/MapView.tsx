@@ -1,5 +1,7 @@
 import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { customGroups, groupLabel, groupOfWells, usePresets, type CustomGroup } from './customGroups'
+import CustomGroupsPanel from './CustomGroupsPanel'
 import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo, type GdiCatalog, type GdiValues } from './api'
@@ -79,18 +81,21 @@ const Glyph = memo(function Glyph(p: {
   well: number; x: number; y: number; r: number; rmax: number; total: number; share: number; months: number[]; order: number[]; monthColors: string[]
   sectors: boolean; paint?: { color: string; label: string } | null; water: { factor: number | null; flow: number | null; color: string }[]; maxFlow: number; showShare: boolean
   selected: boolean; label: string; dim: boolean; hot?: boolean; gcolor?: string; pal: Pal; lf?: LabelFmt
+  /** Пользовательская группа скважин: свой цвет и множитель размера круга (customGroups.ts). */
+  cg?: { color: string; size: number }
 }) {
   const { x, y, rmax, pal } = p
   const idle = p.paint === undefined ? !(p.total > 0) : !p.paint
-  const r = p.paint !== undefined ? (p.paint ? rmax * 0.62 : rmax * 0.24) : idle ? rmax * 0.24 : p.r
+  const k = p.cg?.size ?? 1
+  const r = k * (p.paint !== undefined ? (p.paint ? rmax * 0.62 : rmax * 0.24) : idle ? rmax * 0.24 : p.r)
   const ring = rmax * 0.05
   const els: React.ReactNode[] = []
   if (idle) {
-    els.push(<circle key="c" cx={x} cy={y} r={r} fill={pal.surface} stroke={pal.muted} strokeWidth={rmax * 0.04} strokeDasharray={`${rmax * 0.09} ${rmax * 0.07}`} />)
+    els.push(<circle key="c" cx={x} cy={y} r={r} fill={pal.surface} stroke={p.cg?.color ?? pal.muted} strokeWidth={rmax * (p.cg ? 0.09 : 0.04)} strokeDasharray={`${rmax * 0.09} ${rmax * 0.07}`} />)
   } else if (p.paint) {
-    els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.paint.color} stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
-  } else if (!p.sectors) {
-    els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.gcolor || pal.gas} stroke={pal.surface} strokeWidth={ring} />)
+    els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.paint.color} stroke={p.cg?.color || p.gcolor || pal.surface} strokeWidth={p.cg ? ring * 3.2 : p.gcolor ? ring * 2.2 : ring} />)
+  } else if (!p.sectors || p.cg) {
+    els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.cg?.color || p.gcolor || pal.gas} stroke={pal.surface} strokeWidth={ring} />)
   } else {
     const sum = p.months.reduce((s, v) => s + v, 0) || 1
     const parts = p.order.filter(m => p.months[m] > 0)
@@ -604,6 +609,10 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const isRef = options.paint === 'ref'
   const useCluster = clusterPref && !isRef
   const refList = usePref(refWells), refK = usePref(refSize)
+  // пользовательские группы: скважина → группа (пресет фильтра); выделяют скважины, ничего не прячут
+  const cgList = usePref(customGroups), cgPresets = usePresets()
+  const cgMap = useMemo(() => (isRef ? new Map<number, CustomGroup>() : groupOfWells(cgList, cgPresets)), [cgList, cgPresets, isRef])
+  const cgCovered = useMemo(() => { const m = new Map<string, number>(); placed.forEach(q => { const c = cgMap.get(q.well); if (c) m.set(c.id, (m.get(c.id) ?? 0) + 1) }); return m }, [cgMap, placed])
   const refNums = useMemo(() => parseRefWells(refList), [refList])
   const paints = useMemo(() => {
     if (!paintData) return null
@@ -622,7 +631,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     placed.forEach((q, n) => {
       const t = win.stats[n].total
       const hidden = !paintData && !isRef && ((options.hideIdle && !(t > 0)) || (options.minValue > 0 && t < options.minValue * 1e6))
-      if (!hidden || selected === q.well || group.includes(q.well)) vis.push(n)
+      if (!hidden || selected === q.well || group.includes(q.well) || cgMap.has(q.well)) vis.push(n)
     })
     vis.sort((u, v) => win.stats[v].total - win.stats[u].total)
     type Cl = { id: number; x: number; y: number; idx: number[]; total: number }
@@ -632,7 +641,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const grid = new Map<string, number[]>()
     const key = (x: number, y: number) => Math.floor(x / cell) + ',' + Math.floor(y / cell)
     const taken = new Set<number>()
-    const pinned = (n: number) => selected === placed[n].well || group.includes(placed[n].well)
+    const pinned = (n: number) => selected === placed[n].well || group.includes(placed[n].well) || cgMap.has(placed[n].well)
     vis.forEach(n => { const k = key(placed[n].x, placed[n].y); const a = grid.get(k); if (a) a.push(n); else grid.set(k, [n]) })
     let id = 0
     for (const n of vis) {
@@ -650,7 +659,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       out.push({ cl: { id: id++, x: cx / sw, y: cy / sw, idx: mem, total } })
     }
     return out
-  }, [placed, win, paintData, isRef, options.hideIdle, options.minValue, options.scale, selected, group, useCluster, view.k, rd])
+  }, [placed, win, paintData, isRef, options.hideIdle, options.minValue, options.scale, selected, group, useCluster, view.k, rd, cgMap])
   const zoomTo = (idx: number[]) => {
     const xs = idx.map(n => placed[n].x), ys = idx.map(n => placed[n].y)
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
@@ -744,7 +753,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 ci = clustersRef.current.findIndex(x => x === c.idx)
                 return <ClusterGlyph key={'c' + c.idx.map(n => placed[n].well).join('-')} id={ci} x={c.x} y={c.y} r={rr} rd={rd} count={c.idx.length} fill={fill} ring={paintData ? ringC : undefined} title={title} pal={pal} />
               }
-              const n = it.single!, q = placed[n]
+              const n = it.single!, q = placed[n], cg = cgMap.get(q.well)
+              const base = options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)
               return (
               <Glyph key={q.well} well={q.well} x={q.x} y={q.y} rmax={rd} total={win.stats[n].total} pal={pal}
                 r={win.stats[n].total > 0 ? Math.max(rd * 0.45 * options.scale, rd * options.scale * Math.sqrt(win.stats[n].total / win.scaleMax)) : rd * 0.25}
@@ -752,13 +762,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 months={win.months[n] || EMPTY} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
                 paint={paints ? paints.get(q.well) ?? null : undefined}
                 water={options.water ? rings.get(q.well) || EMPTY : EMPTY} maxFlow={maxFlow} showShare={options.share}
-                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} lf={lf} label={options.labels === 'none' ? '' : options.labels === 'val' && win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : String(q.well)} />
+                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} cg={cg} lf={cg && (cg.labelSize !== 1 || cg.labelColor) ? { ...lf, size: lf.size * cg.labelSize, color: cg.labelColor || lf.color } : lf}
+                label={cg ? groupLabel(cg, q.well, base, win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : '') : base} />
               )
             })}
       </>
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lf, items, rd, isRef, refNums, refK, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
+  }, [lf, items, rd, isRef, refNums, refK, cgMap, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
   // наблюдательные (ромб) и геофизические (треугольник) скважины вне групп: в координатах карты; при «схеме» положения условные, поэтому они не рисуются
   const obsLayer = obsPts.length ? <g aria-label="Наблюдательные и геофизические скважины">
     {obsPts.map(o => {
@@ -1062,6 +1073,8 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 <button type="button" className="quiet" onClick={() => labelColor.set('')} disabled={!lfColor}>Автоматически</button></label>
               <button type="button" className="quiet" onClick={() => { labelFont.set(''); labelSize.set(1); labelColor.set('') }} disabled={!lfFont && lfSize === 1 && !lfColor}>Сбросить подписи</button>
             </details>}
+            <details className="pal-det"><summary>Пользовательские группы{cgList.length ? ` · ${cgList.length}` : ''}</summary>
+              <CustomGroupsPanel groups={cgList} covered={cgCovered} /></details>
             {multiG && <label className="check" title="Цвет группы: заливка круга, а при секторах по месяцам или раскраске по значению — обводка"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
             <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
             <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
