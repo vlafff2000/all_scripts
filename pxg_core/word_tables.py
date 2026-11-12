@@ -15,7 +15,7 @@ import struct
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from . import word_doc
 
@@ -28,6 +28,8 @@ class Cell:
     x0: float
     x1: float
     vcont: bool = False        # продолжение вертикального объединения (текст пуст)
+    origin: int = 0            # после `unmerge_table`: номер исходной ячейки (одинаков у всех её копий); 0 — ячейка не копия
+    dup: str = ""              # после `unmerge_table`: "h" — копия по горизонтали (та же строка), "v" — копия из ячейки выше (вертикальное объединение)
 
     @property
     def xc(self) -> float:
@@ -64,6 +66,73 @@ class Table:
         """Ячейка на всю ширину таблицы (объединённая строка-заголовок)."""
         return len(row.cells) == 1 or (self.x1 > self.x0 and row.width >= tol * (self.x1 - self.x0) and len([c for c in row.cells if c.text.strip()]) == 1
                                        and len(row.cells) <= 2 and row.cells[0].text.strip() != "")
+
+
+def _grid_columns(tbl: "Table", tol: float, sliver: float) -> List[float]:
+    """Границы столбцов сетки таблицы: все x0/x1 ячеек. У Word сетка каждой строки своя (границы одного столбца в разных строках расходятся на десятки твипов),
+    поэтому близкие границы (до tol) склеиваются, а столбец уже sliver — не столбец: его убирает слабейшая из двух границ (на которой сошлось меньше краёв ячеек)."""
+    xs = sorted(round(v, 1) for r in tbl.rows for c in r.cells for v in (c.x0, c.x1))
+    groups: List[List[float]] = []
+    for x in xs:
+        if groups and x - groups[-1][-1] <= tol:
+            groups[-1].append(x)
+        else:
+            groups.append([x])
+    bounds = [[sum(g) / len(g), len(g)] for g in groups]
+    while len(bounds) > 2:
+        i = min(range(len(bounds) - 1), key=lambda k: bounds[k + 1][0] - bounds[k][0])
+        if bounds[i + 1][0] - bounds[i][0] >= sliver:
+            break
+        drop = i + 1 if (i == 0 or (i + 1 < len(bounds) - 1 and bounds[i + 1][1] <= bounds[i][1])) else i
+        if drop == len(bounds) - 1:
+            drop = i
+        del bounds[drop]
+    return [b[0] for b in bounds]
+
+
+def unmerge_table(tbl: "Table", first_row: int = 0, tol: Optional[float] = None, wide: float = 0.8) -> "Table":
+    """Таблица без объединённых ячеек: каждая ячейка режется по сетке столбцов, значение дублируется во все части (по горизонтали — `dup="h"`),
+    продолжение вертикального объединения получает значение ячейки над ним (`dup="v"`, `vcont` снимается). Все копии одной исходной ячейки
+    имеют общий `origin` — по нему читающий код не считает одно значение дважды.
+
+    `tol` — на каком расстоянии границы считаются одной (по умолчанию 6); столбец уже 3 % ширины таблицы столбцом не считается.
+    Строки до `first_row` (шапка) и строки на всю ширину таблицы (названия пачек, ГВК) остаются как есть. Исходная таблица не меняется."""
+    full = tbl.x1 - tbl.x0
+    grid = _grid_columns(tbl, 6.0 if tol is None else tol, 0.03 * full)
+    if len(grid) < 2:
+        return tbl
+    width = grid[-1] - grid[0]
+    near = lambda x: min(range(len(grid)), key=lambda i: abs(grid[i] - x))
+    master: Dict[int, Optional[tuple]] = {}    # столбец сетки -> (текст, origin) непустой ячейки, продолжающейся вниз
+    rows: List[TRow] = []
+    uid = 0
+    for ri, row in enumerate(tbl.rows):
+        filled = [c for c in row.cells if c.text.strip() and not c.vcont]
+        keep = ri < first_row or (len(filled) == 1 and row.width >= wide * width and not any(c.vcont for c in row.cells))
+        new: List[Cell] = []
+        if keep and ri >= first_row:
+            master.clear()                         # название пачки на всю ширину обрывает вертикальные объединения над ним
+        for c in row.cells:
+            cols = list(range(near(c.x0), near(c.x1)))
+            if c.vcont:
+                if keep or not cols:
+                    new.append(c)
+                    continue
+                for k in cols:
+                    m = master.get(k)
+                    new.append(Cell(m[0] if m else "", grid[k], grid[k + 1], m is None, m[1] if m else 0, "v" if m else ""))
+                continue
+            uid += 1
+            for k in cols:
+                master[k] = (c.text, uid) if c.text.strip() else None
+            if keep or len(cols) <= 1:
+                new.append(c)
+                continue
+            for n, k in enumerate(cols):
+                new.append(Cell(c.text, grid[k], grid[k + 1], False, uid, "" if n == 0 else "h"))
+        new.sort(key=lambda x: x.x0)
+        rows.append(TRow(new))
+    return Table(rows, tbl.index, list(tbl.row_pages))
 
 
 @dataclass
