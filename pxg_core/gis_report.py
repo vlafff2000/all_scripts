@@ -23,6 +23,7 @@ from . import gis, qc, word_doc, word_tables as wt
 
 NUM = r"-?\d+(?:[.,]\d+)?"
 HIGH, MID, LOW = "высокая", "средняя", "низкая"
+_WATER_RX = re.compile(r"вод[оа]насы[щшс]", re.I)      # «водонасыщен» (в отчётах встречается и «водонасышен» — опечатка/OCR)
 WATER_KG = 0.25                       # Кг водонасыщенного интервала (как в Excel-базе); равен порогу hэф, поэтому hэф = 0
 MD_BASIS = "по стволу (MD)"
 _DATE = re.compile(r"(\d{1,2})[./](\d{1,2})[./](\d{4}|\d{2})(?!\d)")
@@ -119,6 +120,8 @@ def _is_header_row(row: wt.TRow) -> bool:
             return True
     for v in vals:
         s = v.strip()
+        if re.fullmatch(r"(?:0?[1-9]|1[0-2])[./](?:19|20)\d\d\s*(?:г\.?)?", s):
+            continue                                              # «04.2024» без слова «г» — месяц замера в шапке, а не число
         if re.fullmatch(r"-?\d+(?:[.,]\d+)?", s) or re.match(r"\d{1,2}[./]\d{1,2}[./]\d{2,4}", s) or re.fullmatch(r"\d+(?:[.,]\d+)?\s*[-–]\s*\d+(?:[.,]\d+)?", s):
             return False
     return True
@@ -870,7 +873,7 @@ def _is_frac(label: str) -> bool:
 
 def _clay(*texts: str) -> bool:
     """Заглинизированный пропласток (не коллектор, газа нет): слово в ячейке Кг, насыщения или литологии."""
-    return bool(re.search(r"заглинизир", " ".join(t or "" for t in texts), re.I))
+    return bool(re.search(r"заглинизир|глинист\w*\s+(?:пропласт|прослой|прослои|перемыч)", " ".join(t or "" for t in texts), re.I))
 
 
 def _kg(text: str, frac: bool = False) -> Tuple[Optional[float], Optional[float], Optional[float], str]:
@@ -899,7 +902,7 @@ def _kg(text: str, frac: bool = False) -> Tuple[Optional[float], Optional[float]
 def _gvk_from(text: str) -> Tuple[Optional[float], Optional[float]]:
     """«ГВК на гл. 803.7м (а.о-668.7м)» → (MD, а.о.)."""
     t = text.translate(_MINUS)
-    m = re.search(r"ГВК[^0-9\-]*(" + NUM + r")\s*м?", t, re.I)
+    m = re.search(r"ГВК(?:[^0-9\-]|(?<=[а-яёa-z])-(?=[а-яёa-z]))*(" + NUM + r")\s*м?", t, re.I)       # дефис внутри слова («пласта-коллектора») не минус
     md = fnum(m.group(1)) if m else None
     a = re.search(r"(?:а\.?\s*о\.?|абсолютн\w*\s*(?:глубин\w*|отметк\w*))\s*[:=]?\s*(-?\s*\d+(?:[.,]\d+)?)", t, re.I)      # «(а.о.- 654.2)»: пробел после минуса
     ab = fnum(a.group(1).replace(" ", "")) if a else None
@@ -1024,7 +1027,7 @@ def _row_base(row: wt.TRow, base_rows: list) -> list:
     """Интервал коллектора строки: из столбцов коллектора, а если шапка их не отделила (OCR) — две первые ячейки-глубины строки."""
     if base_rows:
         return base_rows
-    toks = [c.text.strip() for c in row.cells if not c.vcont and c.text.strip()]
+    toks = [c.text.strip() for c in row.cells if not c.vcont and not c.dup and c.text.strip()]
     if len(toks) >= 4 and _DEPTH_TOKEN.match(toks[0]) and _DEPTH_TOKEN.match(toks[1]) and fnum(toks[0]) < fnum(toks[1]):
         return [{"from": fnum(toks[0]), "to": fnum(toks[1])}]
     return []
@@ -1047,7 +1050,7 @@ def _seq_epochs(row: wt.TRow, n_groups: int, base_rows: list, por_groups: Option
     """Строка данных по порядку ячеек: [от, до (коллектор), Кп] и для каждого замера [от, до, (пористость,) Кг]; Кг, потерянный OCR, остаётся пустым.
     Пористость идёт сразу после интервала замера, только если в шапке замера есть её столбец (por_groups).
     Возвращает [(номер замера, [от, до], {"kg": …})] или None, если порядок не угадывается."""
-    toks = [c.text.strip() for c in row.cells if not c.vcont and c.text.strip()]
+    toks = [c.text.strip() for c in row.cells if not c.vcont and not c.dup and c.text.strip()]
     if len(toks) < 4 or fnum(toks[0]) is None or fnum(toks[1]) is None:
         return None
     lo, hi = fnum(toks[0]), fnum(toks[1])
@@ -1090,7 +1093,31 @@ def _vspan(tbl: wt.Table, i: int, g: "Group", base: Optional["Group"], nhdr: int
     return out
 
 
+def _once(cells: List[wt.Cell]) -> List[wt.Cell]:
+    """Копии одной объединённой ячейки (после `wt.unmerge_table`) считаются один раз: остаётся первая."""
+    seen: set = set()
+    out: List[wt.Cell] = []
+    for c in cells:
+        if c.origin:
+            if c.origin in seen:
+                continue
+            seen.add(c.origin)
+        out.append(c)
+    return out
+
+
+UNMERGE = True            # False — прежнее чтение с объединёнными ячейками (только для сверки «до/после», tools/gis_unmerge_report.py)
+_FOOT = re.compile(r"^[*†‡\s]+|[*†‡\s]+$")
+_SUMMARY_ROW = re.compile(r"(?:^|\s)[НнHh]\s?[гg]?\s*=\s*\d|(?:^|\s)ГВК|полностью|^\s*\*|примечан", re.I)
+_WORD_VALUE = re.compile(r"заглинизир|глинист\w*\s+(?:пропласт|прослой|прослои|перемыч)|вод[оа]насы[щшс]", re.I)
+_HAS_VALUE = re.compile(r"\d|заглинизир|глинист\w*\s+(?:пропласт|прослой|прослои|перемыч)|вод[оа]насы[щшс]", re.I)
+
+
 def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict[str, str]], title: str, section: str) -> int:
+    if UNMERGE:
+        tbl = wt.unmerge_table(tbl, nhdr)      # объединённые ячейки разъединены, значения продублированы: границы исследований определяются по столбцам
+    wanted: Dict[tuple, str] = {}              # самопроверка: (строка, замер) → значения в столбцах замера; у каждого должен появиться интервал
+    got: set = set()
     groups = _groups(tbl, nhdr, rep)
     base = next((g for g in groups if g.base), None)
     sgroups = [g for g in groups if not g.base]
@@ -1156,9 +1183,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
         joined = " ".join(c.text for c in texts)
         if re.search(r"Нг\s*=|ГВК|полностью", joined, re.I) and not any(re.fullmatch(NUM, c.text.strip()) for c in texts):
             for g in sgroups:
-                for c in texts:
-                    if not inb(g, c):
-                        continue
+                for c in _once([x for x in texts if inb(g, x)]):
                     t = c.text
                     if re.search(r"ГВК", t, re.I):
                         md, ab = _gvk_from(t)
@@ -1176,13 +1201,13 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             continue
         # строка данных
         if base is not None:
-            vals = [c for c in r.cells if inb(base, c) and c.text.strip()]
+            vals = _once([c for c in r.cells if inb(base, c) and c.text.strip()])
             iv = [c for c in vals if _leaf(tbl, nhdr, c) in ("iv", "")]
             kpc = [c for c in vals if _leaf(tbl, nhdr, c) == "kp"]
             ivn = [v for c in iv for v in nums(c.text)]            # «775.0-777.1» в одной ячейке или две ячейки
             if len(ivn) >= 2:
                 kp = _kg(kpc[0].text, base_frac)[0] if kpc else None
-                base_rows.append({"from": ivn[0], "to": ivn[1], "kp": kp, "src": _src(tbl, i)})
+                base_rows.append({"from": ivn[0], "to": ivn[1], "kp": kp, "src": _src(tbl, i), "fresh": any(c.dup != "v" for c in iv)})
         def emit(gi, g, ivn, rec, extra_why="", cap_conf=False):
             nonlocal n
             frac = gi in frac_groups
@@ -1191,12 +1216,15 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             hg = fnum(rec.get("hg", ""))
             por, _pmin, _pmax, _ptext = _kg(rec.get("kp", ""), frac)
             sat = rec["sat"]
-            water = bool(re.search(r"водонасыщ", sat, re.I))
-            gas_text = bool(re.search(r"газонасыщ", sat or "", re.I)) and not re.search(r"водонасыщ", sat or "", re.I)
+            water = bool(_WATER_RX.search(sat) or _WATER_RX.search(rec["kg"] or ""))
+            gas_text = bool(re.search(r"газонасыщ", sat or "", re.I)) and not _WATER_RX.search(sat or "")
             dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or "")) and not gas_text       # «-» при насыщении «Газонасыщ.»: Кг не определён, а не вода
             if dash:                                              # «-» вместо Кг: интервал водонасыщен, Кг = 0,25 (решение инженера; так же в Excel-базе)
                 kg = kmin = kmax = WATER_KG
                 water = True
+            water_nokg = water and kg is None and not dash
+            if water_nokg:                                        # приписка «водонасыщен» вместо числа: обводнённый интервал, Кг = 0,25 (как в Excel-базе)
+                kg = kmin = kmax = WATER_KG
             clay = _clay(rec["kg"], sat, rec["lith"])
             clay_nokg = clay and kg is None and not re.search(r"\d", rec["kg"] or "")
             if clay_nokg:                                         # заглинизированный пропласток без числа: газа нет, Кг = 0,25, интервал не теряется
@@ -1213,7 +1241,9 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             if por is None and kp is not None:
                 kp_why = kp_why + " (взята как пористость)"
             conf, why = HIGH, ""
-            if dash:
+            if water_nokg:
+                conf, why = MID, "в отчёте приписка «водонасыщен» без числа Кг: интервал обводнён, принято Кг = %g" % WATER_KG
+            elif dash:
                 conf, why = MID, "Кг «-» в отчёте: интервал водонасыщен, принято Кг = %g (как водонасыщенный; решение инженера)" % WATER_KG
             elif clay_nokg:
                 conf, why = MID, "заглинизированный пропласток (не коллектор): газа нет, принято Кг = %g" % WATER_KG
@@ -1238,41 +1268,84 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             n += 1
         row_recs = []
         for gi, g in enumerate(sgroups):
-            cells = [c for c in r.cells if inb(g, c) and c.text.strip()]
+            cells = _once([c for c in r.cells if inb(g, c) and c.text.strip()])
             if not cells:
                 continue
             ivn, rec, extras = [], {"kg": "", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}, []
+            fresh = any(c.dup != "v" for c in cells)             # все значения — повтор вертикально объединённых ячеек строки выше: нового исследования нет
             for c in cells:
                 k = _leaf(tbl, nhdr, c)
-                if k in ("iv", "") and len(ivn) < 2 and (fnum(c.text) is not None or re.fullmatch(r"\s*" + NUM + r"\s*[–—-]\s*" + NUM + r"\s*", c.text.translate(_MINUS))):
-                    ivn.extend(nums(c.text)[:2 - len(ivn)] if fnum(c.text) is None else [fnum(c.text)])      # интервал одной ячейкой «784.8-788.4» или две ячейки
+                if not re.search(r"\d", c.text) and (_clay(c.text) or _WATER_RX.search(c.text)):      # слово в объединённой ячейке стоит над столбцами разных признаков: относится к замеру целиком
+                    if _clay(c.text):
+                        rec["kg"] = rec["kg"] or c.text
+                    else:
+                        rec["sat"] = rec["sat"] or c.text
+                    continue
+                ctext = _FOOT.sub("", c.text)                      # «792.3*»: звёздочка — сноска («глубина остановки прибора»), глубина — число
+                if k in ("iv", "") and len(ivn) < 2 and (fnum(ctext) is not None or re.fullmatch(r"\s*" + NUM + r"\s*[–—-]\s*" + NUM + r"\s*", ctext.translate(_MINUS))):
+                    ivn.extend(nums(ctext)[:2 - len(ivn)] if fnum(ctext) is None else [fnum(ctext)])      # интервал одной ячейкой «784.8-788.4» или две ячейки
                 elif k in rec:
                     rec[k] = c.text
-            if len(ivn) < 2 and base_rows and (rec["kg"] or rec["hg"]) and base_rows[-1]["src"] == _src(tbl, i):
+            if len(ivn) < 2 and base_rows and (rec["kg"] or rec["hg"] or rec["sat"]) and base_rows[-1]["src"] == _src(tbl, i):
                 ivn = [base_rows[-1]["from"], base_rows[-1]["to"]]   # в замере только Нг и Кг: интервал — из столбца «Интервал» этой строки
-                extras = _vspan(tbl, i, g, base, nhdr)               # ячейка Нг/Кг объединена по вертикали: значение относится ко всем строкам-интервалам под ней
-                if extras:
-                    rec["_span"] = len(extras) + 1
-            if len(ivn) < 2:
+                fresh = fresh or base_rows[-1].get("fresh", True)
+                if any(c.dup == "v" for c in cells):
+                    rec["_span"] = 1                                 # ячейка Нг/Кг объединена по вертикали: значение относится ко всем строкам-интервалам под ней
+                if not UNMERGE:                                      # прежнее чтение (для сверки «до/после»): интервалы строк под объединённой ячейкой берутся отсюда
+                    extras = _vspan(tbl, i, g, base, nhdr)
+                    if extras:
+                        rec["_span"] = len(extras) + 1
+            seq_nums = [c.text.strip() for c in _once(r.cells) if c.text.strip()]
+            ints = [int(x) for t in seq_nums for x in re.findall(r"\d+", t)] if all(re.fullmatch(r"\d{1,2}(?:\s+\d{1,2})*", t) for t in seq_nums) else []
+            numbering = len(ints) >= 3 and ints == sorted(set(ints))               # строка номеров столбцов «1 2 3 4 5» (с пропусками, склеенные OCR)
+            numbering = numbering or len(set(seq_nums)) <= 1                         # одно и то же число на всю строку — итог (Нг), а не исследование
+            if fresh and not numbering and not any(_SUMMARY_ROW.search(c.text) for c in cells) and any(_HAS_VALUE.search(c.text) for c in cells) and (
+                    any(_WORD_VALUE.search(c.text) or re.match(r"\d{3,4}[.,]\d", _FOOT.sub("", c.text)) for c in cells) or any(b["src"] == _src(tbl, i) and b.get("fresh", True) for b in base_rows)):
+                wanted[(i, gi)] = " | ".join(c.text.replace("\n", " ")[:20] for c in cells)[:80]
+            if len(ivn) < 2 or not fresh:
                 continue
             row_recs.append((gi, g, ivn, rec))
             row_recs.extend((gi, g, ex, dict(rec)) for ex in extras)
-        for wide in r.cells:             # одна объединённая ячейка «заглинизирован» на несколько замеров: непроницаемый прослой — строка в каждом замере под ней
-            if wide.vcont or not _clay(wide.text) or re.search(r"\d", wide.text) or not base_rows or base_rows[-1]["src"] != _src(tbl, i):
+        for wide in _once([x for x in r.cells if not x.vcont and _clay(x.text) and not re.search(r"\d", x.text)]):      # одна объединённая ячейка «заглинизирован» на несколько замеров: непроницаемый прослой — строка в каждом замере под ней
+            if not base_rows or base_rows[-1]["src"] != _src(tbl, i):
                 continue
+            copies = [x for x in r.cells if x.origin and x.origin == wide.origin] or [wide]
             for gi, g in enumerate(sgroups):
-                if g.x0 >= wide.x0 - 3 and g.x1 <= wide.x1 + 3 and not any(x[0] == gi for x in row_recs):
+                if (any(inb(g, x) for x in copies) if wide.origin else (g.x0 >= wide.x0 - 3 and g.x1 <= wide.x1 + 3)) and not any(x[0] == gi for x in row_recs):
                     row_recs.append((gi, g, [base_rows[-1]["from"], base_rows[-1]["to"]],
                                      {"kg": "заглинизирован", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}))
         rb = _row_base(r, base_rows)
+        if rb is base_rows and not any(b["src"] == _src(tbl, i) and b.get("fresh", True) for b in base_rows):
+            rb = []                      # интервал коллектора в этой строке — продолжение ячейки выше: границы замера с ним не сверяются
         seq = _seq_epochs(r, len(sgroups), rb, por_groups) if (rb and not row_recs) or _geometry_broken(row_recs, rb) else None
+        if seq is not None and row_recs and len(seq) < len(row_recs):
+            seq = None                   # чтение «по порядку» нашло меньше замеров, чем столбцы шапки: ячейки по столбцам надёжнее, замер не теряется
         if seq is not None:
             row_recs = [(gi, sgroups[gi], ivn, rec) for gi, ivn, rec in seq]
         for gi, g, ivn, rec in row_recs:
+            got.add((i, gi))
             emit(gi, g, ivn, rec, "ячейки строки прочитаны по порядку (столбцы шапки не сошлись с данными: OCR) — сверить с оригиналом" if seq is not None else (
-                "значения Нг/Кг взяты из ячейки, объединённой по вертикали на %d строк: каждой строке-интервалу они повторены" % rec["_span"] if rec.get("_span") else ""))
+                "значения Нг/Кг взяты из ячейки, объединённой по вертикали: каждой строке-интервалу они повторены" if rec.get("_span") else ""))
     _boundary_gvk(rep, sgroups, tid)
+    _check_coverage(rep, tbl, tid, sgroups, wanted, got, n)
     return n
+
+
+def _check_coverage(rep: Report, tbl: wt.Table, tid: int, sgroups: List[Group], wanted: Dict[tuple, str], got: set, n: int) -> None:
+    """Самопроверка разбора: каждая ячейка исследования со значением (число, «водонасыщен», «заглинизирован») должна стать интервалом БД. Сверяется число
+    «строка × исследование» в таблице с числом взятых интервалов; расхождение — предупреждение со списком пропущенных ячеек (в «Проверку»)."""
+    lost = sorted(k for k in wanted if k not in got)
+    rep.tables[-1].update({"Исследований в шапке": len(sgroups), "Ячеек со значениями": len(wanted), "Интервалов взято": n, "Не взято": len(lost)})
+    for i, gi in lost[:20]:
+        rep.issue("warn", "interval_cell_skipped", "Таблица %d, замер «%s»: в строке есть значения (%s), но интервал не определён — исследование не взято в БД, сверить с отчётом" % (
+            tid, sgroups[gi].label[:30], wanted[(i, gi)]), _src(tbl, i))
+    if len(lost) > 20:
+        rep.issue("warn", "interval_cell_skipped", "Таблица %d: ещё %d ячеек исследований без интервала" % (tid, len(lost) - 20), "таблица %d" % tid)
+    if sgroups and not got:
+        return
+    empty = [g.label[:30] for gi, g in enumerate(sgroups) if not any(k[1] == gi for k in got)]
+    if empty and got and len(sgroups) > 1:
+        rep.issue("warn", "study_without_intervals", "Таблица %d: у замеров %s нет ни одного интервала, хотя в шапке они есть — исследование пропущено?" % (tid, "; ".join(empty)), "таблица %d" % tid)
 
 
 def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict[str, str]], title: str, section: str) -> int:
@@ -1647,6 +1720,19 @@ def report_kind(blocks: List[wt.Block]) -> str:
     return KIND_EPB if _EPB_RX.search(head) or _EPB_TASKS_RX.search(tasks) else ""
 
 
+def _check_unrecognized(rep: Report, tbl: wt.Table) -> None:
+    """Самопроверка: таблица похожа на результаты интерпретации (в верхних строках «Кг», внутри — глубины интервалов), но не распознана — её интервалы потеряны."""
+    if len(tbl.rows) < 3:
+        return
+    top = " ".join(c.text for r in tbl.rows[:3] for c in r.cells)
+    if not re.search(r"(?<![а-яa-z])[кk]\s*[гrg](?![а-яa-z])", top, re.I):
+        return
+    depths = sum(1 for r in tbl.rows[2:] for c in r.cells if re.search(r"(?<![\d.])[5-9]\d\d[.,]\d", c.text))
+    if depths >= 4:
+        rep.issue("warn", "table_unrecognized", "Таблица %d похожа на результаты интерпретации (есть «Кг» и %d глубин), но не распознана как таблица интервалов — интервалы из неё не взяты" % (
+            tbl.index + 1, depths), "таблица %d" % (tbl.index + 1))
+
+
 def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, str]] = None) -> Report:
     rep = Report(file=os.path.basename(file), path=file)
     read_header(rep, blocks)
@@ -1661,6 +1747,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
             continue
         kind, nh = table_kind(b)
         if not kind:
+            _check_unrecognized(rep, b)
             continue
         if kind not in ("intervals", "simple_intervals"):
             rep.tables.append({"Файл": rep.file, "Таблица": b.index + 1, "Тип": KIND_NAMES[kind], "Заголовок перед таблицей": last_title, "Раздел": section,
@@ -2042,6 +2129,34 @@ def _flag_measurement_differences(reports: List[Report], chosen: Dict[Tuple[str,
                 d.strftime("%m.%Y"), "; ".join("%s (%d инт.)" % (f, n) for f, n in sorted(others.items()))))
 
 
+def fill_gaps(reports: List[Report], chosen: Dict[Tuple[str, dt.date], str]) -> Dict[int, str]:
+    """Замер берётся из самого свежего отчёта, но свежий отчёт иногда не повторяет строку таблицы (скв. 8: заглинизированный прослой 795,0–795,7 есть
+    в отчёте замера и пропал в последующих) — интервал терялся. Интервал другого отчёта того же замера, который не пересекается ни с одним интервалом
+    выбранного отчёта (и ни с уже добавленным), дополняет замер. Первым идёт собственный отчёт замера (ближайший по дате), затем остальные от свежих к старым.
+    Возвращает {id(строки интервала): основание}; интервалы, пересекающиеся с выбранными (переинтерпретация), не трогаются."""
+    byfile = {(r.path or r.file): r for r in reports}
+    out: Dict[int, str] = {}
+    for (well, d), fkey in chosen.items():
+        base = byfile.get(fkey)
+        if base is None:
+            continue
+        taken = [(x["От, м"], x["До, м"]) for x in base.intervals if x["Дата замера"] == d]
+        others = [rp for rp in reports if rp is not base and rp.well == well and any(x["Дата замера"] == d for x in rp.intervals)]
+        others.sort(key=lambda rp: (abs(((rp.date or dt.date.min) - d).days), (rp.path or rp.file).lower().endswith((".md", ".json")),     # Word надёжнее OCR
+                                    -(rp.date or dt.date.min).toordinal()))
+        for rp in others:
+            for x in rp.intervals:
+                if x["Дата замера"] != d or x["До, м"] - x["От, м"] <= 0.05:
+                    continue
+                if any(min(x["До, м"], b) - max(x["От, м"], a) > 0.05 for a, b in taken):
+                    continue
+                taken.append((x["От, м"], x["До, м"]))
+                out[id(x)] = "интервал из отчёта %s: в отчёте, взятом в БД (%s), этой строки нет" % (rp.file, base.file)
+                base.issue("warn", "interval_gap_filled", "Замер %s: интервал %g–%g есть в отчёте %s, но в этом (самом свежем) отчёте его нет — добавлен в БД из %s, сверить" % (
+                    d.strftime("%m.%Y"), x["От, м"], x["До, м"], rp.file, rp.file), x["Источник"])
+    return out
+
+
 def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gis.SheetResult], pd.DataFrame]:
     """Отчёты → `gis.SheetResult` по скважине (замер = дата) и таблица «Интервалы (все)» с отметкой, какой замер вошёл в БД."""
     resolve_dates(reports)
@@ -2049,15 +2164,23 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
     resolve_gvk(reports)
     chosen = pick_measurements(reports)
     _flag_measurement_differences(reports, chosen)
+    gaps = fill_gaps(reports, chosen)
     by_well: Dict[str, Dict[dt.date, List[Tuple[Report, dict]]]] = defaultdict(lambda: defaultdict(list))
     allrows = []
     for rep in reports:
         for r in rep.intervals:
             d = r["Дата замера"]
             ok = d is not None and chosen.get((rep.well, d)) == (rep.path or rep.file)
-            allrows.append({**{k: v for k, v in r.items() if not k.startswith("_")}, "В БД": "да" if ok else ("нет: дубль замера из другого отчёта" if d is not None else "нет: дата замера не определена")})
-            if ok:
+            gap = not ok and id(r) in gaps
+            if gap:
+                r = {**r, "Основание": "; ".join(x for x in (r["Основание"], gaps[id(r)]) if x), "Уверенность": MID, "_gap": True}
+            allrows.append({**{k: v for k, v in r.items() if not k.startswith("_")},
+                            "В БД": "да" if ok else "да: дополнено — в свежем отчёте этой строки нет" if gap else ("нет: дубль замера из другого отчёта" if d is not None else "нет: дата замера не определена")})
+            if ok or gap:
                 by_well[rep.well][d].append((rep, r))
+    for dates in by_well.values():
+        for d in dates:
+            dates[d].sort(key=lambda x: (x[1]["От, м"], x[1]["До, м"]))
     out: Dict[str, gis.SheetResult] = {}
     for well, dates in by_well.items():
         reps = [rp for dl in dates.values() for rp, _ in dl]
@@ -2065,12 +2188,12 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
         res = gis.SheetResult(sheet=well, well=well, header_row=None, alt=alt, alt_source="шапка отчёта", hints=[], blocks=[], rows=[], legend=[], issues=[], alt_sheet=alt)
         for n, d in enumerate(sorted(dates), 1):
             items = dates[d]
-            rep0 = items[0][0]
-            exact = d if items[0][1]["Дата точная"] else None
-            b = gis.Block(sheet=well, well=well, block=n, xl_row=0, date_text=items[0][1]["Столбец-замер"], date=d, exact=exact, season=gis.season_of(d.month),
+            rep0, first = next(((rp, r) for rp, r in items if not r.get("_gap")), items[0])      # замер описывает отчёт, взятый в БД, а не дополнение
+            exact = d if first["Дата точная"] else None
+            b = gis.Block(sheet=well, well=well, block=n, xl_row=0, date_text=first["Столбец-замер"], date=d, exact=exact, season=gis.season_of(d.month),
                           quality="" if exact else "только месяц и год", note=rep0.file)
             gvk_by_pack: Dict[str, dict] = {}
-            cols = {(rp.file, r["Столбец-замер"]) for rp, r in items}
+            cols = {(rp.file, r["Столбец-замер"]) for rp, r in items if not r.get("_gap")}       # ГВК — только из отчёта, взятого в БД
             for rp in {id(x): x for x, _ in items}.values():
                 for p in rp.packs:
                     if p.get("_kind") == "gvk" and (rp.file, p["Столбец-замер"]) in cols and p.get("ГВК MD, м") is not None:
@@ -2203,7 +2326,33 @@ def build(reports: List[Report], mapping: Optional[Dict[str, str]] = None, kg_mi
     }
     out["_шаблонировки"] = templating_frame(good)
     out["Аннотации"] = annotations_frame(good)
+    out["Сверка"] = reconcile_frame(good, all_iv)
     return out, results
+
+
+def reconcile_frame(reports: List[Report], db_intervals: pd.DataFrame) -> pd.DataFrame:
+    """Самопроверка сборки: по каждому отчёту — сколько ячеек исследований со значениями в таблицах, сколько интервалов разобрано и сколько попало в БД.
+    Строка с расхождением (не взято ячеек, разобрано ≠ в БД) помечена в «Статус» — такой отчёт надо сверить с оригиналом."""
+    in_db = db_intervals.groupby("Файл").size().to_dict() if len(db_intervals) and "Файл" in db_intervals else {}
+    same_name: Dict[str, int] = defaultdict(int)      # один и тот же файл в двух папках: строки БД различаются только именем, сверяем по сумме
+    for rep in reports:
+        same_name[rep.file] += len(rep.intervals)
+    rows = []
+    for rep in reports:
+        tabs = [t for t in rep.tables if "Ячеек со значениями" in t]
+        cells, taken, lost = (sum(t[k] for t in tabs) for k in ("Ячеек со значениями", "Интервалов взято", "Не взято"))
+        empty = sum(1 for i in rep.issues if i["Код"] == "study_without_intervals")
+        parsed, stored = same_name[rep.file], int(in_db.get(rep.file, 0))
+        bad = []
+        if lost:
+            bad.append("не взято ячеек исследований: %d" % lost)
+        if empty:
+            bad.append("замеры без интервалов: %d" % empty)
+        if parsed != stored:
+            bad.append("разобрано %d, в БД %d" % (parsed, stored))
+        rows.append({"Файл": rep.file, "Скважина": rep.well, "Таблиц интервалов": len(tabs), "Ячеек исследований со значениями": cells, "Интервалов взято из таблиц": taken,
+                     "Не взято": lost, "Замеров без интервалов": empty, "Интервалов разобрано": parsed, "Интервалов в БД": stored, "Статус": "; ".join(bad) or "сходится"})
+    return pd.DataFrame(rows)
 
 
 # Русское имя столбца → ключ в таблицах для Атласа/других программ (латиница, метры)
@@ -2249,7 +2398,7 @@ def _write_pair(table: pd.DataFrame, out_dir: str, name: str) -> List[str]:
 
 
 SHEET_ORDER = ("Свод", "Замеры", "Интервалы", "Комплекс ГИС", "Доход шаблона", "Термобарика", "Пластовое давление", "Заполнение ствола", "ГВК", "Итоги пачек", "ГВК по датам",
-               "Выводы (текст)", "Заголовки пачек", "Таблицы в отчётах", "Отчёты", "Проверка", "Строки БД")
+               "Выводы (текст)", "Заголовки пачек", "Таблицы в отчётах", "Сверка", "Отчёты", "Проверка", "Строки БД")
 PERCENT = ("Кг", "Пористость", "Кг мин", "Кг макс", "Кг ср.взв", "Кг ср.взв (весь замер)")
 
 

@@ -1324,3 +1324,144 @@ def test_positive_ao_that_matches_altitude_minus_md_gets_minus_sign_and_wrong_al
     bad = gr.Report(file="y.docx", well="15", alt=1970.0, date=dt.date(2023, 12, 1))           # явно ошибочная альтитуда: а.о. по ней не считается
     gr._add_gvk(bad, g, "Верхняя пачка", "t", 787.2, None, "ГВК", "таблица", gr.HIGH, "")
     assert bad.packs[-1]["ГВК а.о., м"] is None
+
+
+# ------------------------------------------------------------------------------------------------ разъединение объединённых ячеек
+
+def _water_table():
+    t = _nz_table()
+    t.rows.insert(5, wt.TRow([wt.Cell("803.0 – 811.8", -100, 1600), wt.Cell("", 1600, 2800), wt.Cell("водонасышен", 2800, 9700)]))      # одна ячейка на три замера
+    return t
+
+
+def test_unmerge_duplicates_values_over_columns_and_rows():
+    # ячейка на два столбца и ячейка на две строки: значение повторяется в каждой клетке сетки, копии помечены общим origin
+    t = wt.Table([wt.TRow([wt.Cell("A", 0, 100), wt.Cell("B", 100, 200), wt.Cell("C", 200, 300)]),
+                  wt.TRow([wt.Cell("x", 0, 200), wt.Cell("y", 200, 300)]),
+                  wt.TRow([wt.Cell("", 0, 200, vcont=True), wt.Cell("z", 200, 300)])])
+    u = wt.unmerge_table(t, 1)
+    assert [(c.text, c.x0, c.dup) for c in u.rows[1].cells] == [("x", 0, ""), ("x", 100, "h"), ("y", 200, "")]
+    assert [(c.text, c.dup) for c in u.rows[2].cells] == [("x", "v"), ("x", "v"), ("z", "")]
+    assert u.rows[2].cells[0].origin == u.rows[1].cells[0].origin == u.rows[2].cells[1].origin != 0
+    assert [c.text for c in t.rows[2].cells] == ["", "z"]              # исходная таблица не меняется
+
+
+def test_unmerge_ignores_small_misalignment_of_word_grid():
+    # у Word сетка каждой строки своя: граница одного столбца расходится на десятки твипов, лишних столбцов-«щепок» быть не должно
+    t = wt.Table([wt.TRow([wt.Cell("A", 0, 1000), wt.Cell("B", 1000, 2000), wt.Cell("C", 2000, 10000)]),
+                  wt.TRow([wt.Cell("1", 0, 1050), wt.Cell("2", 1050, 2000), wt.Cell("3", 2000, 10000)]),
+                  wt.TRow([wt.Cell("4", 0, 1000), wt.Cell("5", 1000, 1960), wt.Cell("6", 1960, 10000)])])
+    u = wt.unmerge_table(t, 1)
+    assert [len(r.cells) for r in u.rows] == [3, 3, 3] and not any(c.dup for r in u.rows for c in r.cells)
+
+
+def test_unmerge_keeps_pack_heading_row_whole():
+    t = wt.Table([wt.TRow([wt.Cell("A", 0, 100), wt.Cell("B", 100, 200)]), wt.TRow([wt.Cell("Верхняя пачка", 0, 200)]), wt.TRow([wt.Cell("1", 0, 100), wt.Cell("2", 100, 200)])])
+    u = wt.unmerge_table(t, 1)
+    assert [(c.text, c.x0, c.x1) for c in u.rows[1].cells] == [("Верхняя пачка", 0, 200)]
+
+
+def test_merged_water_note_makes_water_interval_in_every_study():
+    # баг: «водонасыщен» (в отчёте с опечаткой «водонасышен») одной ячейкой на все замеры — интервал или пропускался, или шёл без Кг;
+    # теперь по строке на каждый замер, обводнённый интервал, Кг = 0,25
+    rep = gr.Report(file="x.docx", well="10")
+    gr.read_intervals(rep, _water_table(), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    rows = [r for r in rep.intervals if (r["От, м"], r["До, м"]) == (803.0, 811.8)]
+    assert sorted(r["Столбец-замер"][:7] for r in rows) == ["04.2023", "10.2022", "10.2023"]
+    assert all(r["Кг"] == gr.WATER_KG and r["Водонасыщенный"] for r in rows)
+    assert not any(i["Код"] == "interval_cell_skipped" for i in rep.issues)
+
+
+def test_collector_interval_merged_down_does_not_lose_studies():
+    # баг: интервал коллектора объединён по вертикали на две строки, в замерах под ним свои интервалы — вторая строка пропускалась
+    # (нет интервала коллектора в своей строке); значения Кг объединённой ячейки повторяются в строках под ней
+    t = wt.Table([
+        wt.TRow([wt.Cell("Интервал, м", 0, 2000), wt.Cell("10.2022 г", 2000, 5000), wt.Cell("04.2023 г", 5000, 8000)]),
+        wt.TRow([wt.Cell("", 0, 2000, True), wt.Cell("Нг, м", 2000, 3500), wt.Cell("Кг, д.е.", 3500, 5000), wt.Cell("Нг, м", 5000, 6500), wt.Cell("Кг, д.е.", 6500, 8000)]),
+        wt.TRow([wt.Cell("Верхняя пачка", 0, 8000)]),
+        wt.TRow([wt.Cell("790.0 – 795.0", 0, 2000), wt.Cell("2.0", 2000, 3500), wt.Cell("0.70", 3500, 5000), wt.Cell("2.0", 5000, 6500), wt.Cell("0.60", 6500, 8000)]),
+        wt.TRow([wt.Cell("", 0, 2000, True), wt.Cell("3.0", 2000, 3500), wt.Cell("0.55", 3500, 5000), wt.Cell("", 5000, 6500, True), wt.Cell("", 6500, 8000, True)])])
+    rep = gr.Report(file="x.docx", well="10")
+    gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    got = sorted((r["Столбец-замер"][:7], r["Кг"], r["Нг по отчёту, м"]) for r in rep.intervals)
+    assert ("10.2022", 0.7, 2.0) in got and ("10.2022", 0.55, 3.0) in got      # обе строки замера 10.2022 прочитаны
+    assert sum(1 for g in got if g[0] == "04.2023") == 1                         # вторая строка замера 04.2023 — продолжение ячейки выше, не новое исследование
+
+
+def test_self_check_reports_study_cell_without_interval():
+    # самопроверка: в строке под замером есть глубина, но интервал не складывается — исследование не должно пропадать молча
+    t = _nz_table()
+    t.rows.insert(5, wt.TRow([wt.Cell("", -100, 1600), wt.Cell("", 1600, 2800), wt.Cell("775.2", 2800, 3900), wt.Cell("0.70", 3900, 5100)]))
+    rep = gr.Report(file="x.docx", well="10")
+    gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    miss = [i for i in rep.issues if i["Код"] == "interval_cell_skipped"]
+    assert len(miss) == 1 and "775.2" in miss[0]["Сообщение"]
+    info = rep.tables[-1]
+    assert info["Не взято"] == 1 and info["Интервалов взято"] == len(rep.intervals) and info["Исследований в шапке"] == 3
+
+
+def test_footnote_star_on_interval_depth_is_still_a_depth():
+    # «792.3*» (сноска «глубина остановки прибора») — не число для fnum: интервал 788.5–792.3 терялся
+    t = wt.Table([
+        wt.TRow([wt.Cell("По данным ГИС-контроль от 14.10.2019", 0, 6000)]),
+        wt.TRow([wt.Cell("Интервал залегания", 0, 2000), wt.Cell("Н общ, м", 2000, 3000), wt.Cell("Кг, %", 3000, 4000), wt.Cell("Насыщение", 4000, 6000)]),
+        wt.TRow([wt.Cell("Верхняя пачка", 0, 6000)]),
+        wt.TRow([wt.Cell("788.5", 0, 1000), wt.Cell("792.3*", 1000, 2000), wt.Cell("3.8", 2000, 3000), wt.Cell("62", 3000, 4000), wt.Cell("Газонасыщ.", 4000, 6000)])])
+    rep = gr.Report(file="x.docx", well="10")
+    gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    assert [(r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals] == [(788.5, 792.3, 0.62)]
+
+
+def test_build_has_reconciliation_sheet(ra):
+    # самопроверка сборки: по каждому отчёту сверяются ячейки исследований, взятые интервалы и строки БД
+    frames, _ = gr.build([ra])
+    sv = frames["Сверка"]
+    assert len(sv) == 1 and sv.iloc[0]["Интервалов разобрано"] == sv.iloc[0]["Интервалов в БД"] == len(ra.intervals)
+    assert sv.iloc[0]["Статус"] == "сходится" and sv.iloc[0]["Ячеек исследований со значениями"] == sv.iloc[0]["Интервалов взято из таблиц"] == 44
+
+
+def _month_only_table():
+    # скв. 8: даты замеров в шапке без слова «г» («04.2024», «10.2024») принимались за числа — вся шапка считалась строкой данных, таблица не распознавалась
+    return wt.Table([
+        wt.TRow([wt.Cell("Интервал, м", 0, 2000), wt.Cell("10.2023г", 2000, 4000), wt.Cell("04.2024", 4000, 6000), wt.Cell("10.2024", 6000, 8000)]),
+        wt.TRow([wt.Cell("", 0, 2000, True), wt.Cell("Нг, м", 2000, 3000), wt.Cell("Кг, д.е.", 3000, 4000), wt.Cell("Нг, м", 4000, 5000), wt.Cell("Кг, д.е.", 5000, 6000),
+                 wt.Cell("Нг, м", 6000, 7000), wt.Cell("Кг, д.е.", 7000, 8000)]),
+        wt.TRow([wt.Cell("792.8–794.1", 0, 2000), wt.Cell("1.3", 2000, 3000), wt.Cell("0.50", 3000, 4000), wt.Cell("1.3", 4000, 5000), wt.Cell("0.30", 5000, 6000),
+                 wt.Cell("1.3", 6000, 7000), wt.Cell("0.45", 7000, 8000)]),
+        wt.TRow([wt.Cell("794.1–795.0", 0, 2000), wt.Cell("0.9", 2000, 3000), wt.Cell("0.42", 3000, 4000), wt.Cell("0.9", 4000, 5000), wt.Cell("0.30", 5000, 6000),
+                 wt.Cell("0.9", 6000, 7000), wt.Cell("0.42", 7000, 8000)])])
+
+
+def test_header_with_month_only_dates_is_a_header():
+    t = _month_only_table()
+    assert gr.header_rows(t) == 2 and gr.table_kind(t)[0] == "intervals"
+    rep = gr.Report(file="x.docx", well="8")
+    gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    assert len(rep.intervals) == 6
+
+
+def test_unrecognized_results_table_is_reported():
+    # самопроверка: таблица с «Кг» и глубинами, которую не удалось распознать, не должна пропадать молча
+    t = wt.Table([wt.TRow([wt.Cell("Показатель Кг", 0, 2000), wt.Cell("A", 2000, 4000)])] + [wt.TRow([wt.Cell("792.8", 0, 2000), wt.Cell("794.1", 2000, 4000)]) for _ in range(4)])
+    rep = gr.parse_blocks([gr.wt.Para("Результаты"), t], "x.docx")
+    assert any(i["Код"] == "table_unrecognized" for i in rep.issues)
+
+
+def test_gvk_depth_after_hyphenated_word():
+    # скв. 8: «ГВК по верхней песчаной пачке пласта-коллектора отмечается на глубине 796.3 м» — дефис в слове обрывал поиск глубины, ГВК не читался
+    assert gr._gvk_from("ГВК по верхней песчаной пачке пласта-коллектора отмечается на глубине 796.3 м (а.о-674.4 м)") == (796.3, -674.4)
+    assert gr._gvk_from("ГВК на гл. 803.7м (а.о-668.7м)")[0] == 803.7
+
+
+def test_interval_missing_in_latest_report_is_filled_from_own_report():
+    # скв. 8, замер 04.2024: в отчёте замера 6 строк, в том числе заглинизированный прослой 795,0–795,7; более свежий отчёт (взятый в БД)
+    # эту строку не повторяет — интервал терялся. Теперь он дополняется из отчёта замера; пересекающиеся (переинтерпретированные) не трогаются
+    own, later = _mrep("own_050424", dt.date(2024, 4, 5), 0.5), _mrep("later_280325", dt.date(2025, 3, 28), 0.35)
+    own.intervals.append({**own.intervals[0], "От, м": 805.0, "До, м": 805.7, "Кг": 0.25, "Источник": "таблица 4, строка 9"})
+    _res, allrows = gr.to_results([own, later])
+    db = allrows[allrows["В БД"].str.startswith("да")]
+    assert sorted(zip(db["От, м"], db["До, м"])) == [(798.2, 799.2), (799.2, 800.2), (805.0, 805.7)]
+    assert set(db[db["От, м"] < 805]["Кг"]) == {0.35}                                    # пересекающиеся строки — из свежего отчёта
+    assert any(i["Код"] == "interval_gap_filled" for i in later.issues)
+    res = _res["113"]
+    assert sorted((r.frm, r.to) for r in res.rows) == [(798.2, 799.2), (799.2, 800.2), (805.0, 805.7)]
