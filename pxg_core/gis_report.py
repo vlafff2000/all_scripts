@@ -23,7 +23,7 @@ from . import gis, qc, word_doc, word_tables as wt
 
 NUM = r"-?\d+(?:[.,]\d+)?"
 HIGH, MID, LOW = "высокая", "средняя", "низкая"
-_WATER_RX = re.compile(r"вод[оа][\s\-]*насы[щшс]", re.I)      # «водонасыщен» (в отчётах встречается «водо насыщен», «водо-насыщен», «водонасышен» — опечатка/OCR)
+_WATER_RX = re.compile(r"вод[оа]?[\s\-­]*на[\s\-­]*сы[щшс]", re.I)      # «водонасыщен» (в отчётах встречается «водо насыщен», «водо-насыщен», «водонасышен» — опечатка/OCR)
 WATER_KG = 0.25                       # справочно: Кг водонасыщенного интервала в Excel-базе (в сборке из отчётов не подставляется); равен порогу hэф, поэтому hэф = 0
 MD_BASIS = "по стволу (MD)"
 _DATE = re.compile(r"(\d{1,2})[./](\d{1,2})[./](\d{4}|\d{2})(?!\d)")
@@ -930,18 +930,19 @@ def _add_months(d: dt.date, n: int) -> dt.date:
 
 def _repair_header_dates(groups: List[Group], rep: Report) -> None:
     """Даты столбцов-замеров слева направо возрастают. Повтор или убывание («04.2023, 10.2023, 04.2023») — опечатка шапки: дата сдвигается шагами по полгода,
-    пока не станет больше предыдущей. Не трогаем, если после починки дата ушла бы дальше чем на 2 месяца за дату отчёта."""
+    пока не станет больше предыдущей (если месяц другой — шагами по году: опечатка в годе). Не трогаем, если после починки дата ушла бы дальше чем на 2 месяца за дату отчёта."""
     prev = None
     for g in groups:
         if g.date is None:
             continue
         if prev is not None and g.date <= prev:
             fixed = g.date
+            step = 6 if g.date.month == prev.month else 12       # другой месяц — опечатка в годе («05.2025» вместо «05.2026»: месяц сохраняется), тот же — повтор столбца
             while fixed <= prev:
-                fixed = _add_months(fixed, 6)
+                fixed = _add_months(fixed, step)
             if rep.date is None or fixed <= _add_months(dt.date(rep.date.year, rep.date.month, 1), 2):
-                rep.issue("warn", "header_date_fixed", "Дата столбца-замера «%s»: %s не больше предыдущей (%s) — опечатка шапки, принята %s (шаг 6 мес.), сверить по отчёту" % (
-                    g.label[:30], g.date.strftime("%m.%Y"), prev.strftime("%m.%Y"), fixed.strftime("%m.%Y")), "шапка таблицы")
+                rep.issue("warn", "header_date_fixed", "Дата столбца-замера «%s»: %s не больше предыдущей (%s) — опечатка шапки, принята %s (шаг %d мес.), сверить по отчёту" % (
+                    g.label[:30], g.date.strftime("%m.%Y"), prev.strftime("%m.%Y"), fixed.strftime("%m.%Y"), step), "шапка таблицы")
                 g.date, g.exact = fixed, False
         prev = g.date
     # последний столбец позже месяца отчёта (отчёт от 30.03.2023, столбец «04.2023г»): такого замера на дату отчёта быть не может, это опечатка текущего замера;
@@ -1106,6 +1107,47 @@ def _once(cells: List[wt.Cell]) -> List[wt.Cell]:
     return out
 
 
+_SEP = r"[\s\-­]*"          # перенос слова в ячейке: OCR разрывает его пробелом, переводом строки или дефисом («водона сыщен», «водо-насыщен»)
+
+
+def _spaced(*parts: str) -> "re.Pattern":
+    return re.compile(r"(?<![а-яё])" + _SEP.join(parts), re.I)
+
+
+_GLUE = ((_spaced("в", "о", "д", "[оа]?", "н", "а", "с", "ы", "[щшс]"), "водонасыщ"),
+         (_spaced("г", "а", "з", "[оа]?", "н", "а", "с", "ы", "щ"), "газонасыщ"),
+         (_spaced("з", "а", "г", "л", "и", "н", "и", "з", "и", "р"), "заглинизир"))
+_CLAY_WORD = re.compile(r"(заглинизир\w*|глинист\w*)(?:\s+(?:пропласт\w*|прослой\w*|прослои\w*|перемыч\w*))?", re.I)
+_CLAY_ALIAS = re.compile(r"глинист\w*\s+(?:пропласт|прослой|прослои|перемыч)", re.I)
+
+
+def normalize_words(text: str) -> str:
+    """Слова ячейки приводятся к одному написанию: разорванные переносом склеиваются («водона сыщен» → «водонасыщен»), «глинистый прослой»/«заглинизированный» →
+    «заглинизирован» (одно и то же по смыслу). Остальной текст не меняется."""
+    if not text:
+        return text
+    for rx, stem in _GLUE:
+        text = rx.sub(lambda m, stem=stem: (stem[0].upper() if m.group(0)[:1].isupper() else stem[0]) + stem[1:], text)
+    return _CLAY_WORD.sub(lambda m: ("З" if m.group(0)[:1].isupper() else "з") + "аглинизирован" if (m.group(1).lower().startswith("заглинизир") or _CLAY_ALIAS.match(m.group(0))) else m.group(0), text)
+
+
+def _kg_clean(text: str) -> str:
+    """Лишние знаки в ячейке Кг («70*», «‘-») убираются: остаётся число/диапазон/прочерк/слово."""
+    return re.sub(r"[*†‡‘’'\"“”`´ʼ]", "", text or "").strip()
+
+
+def normalized(tbl: wt.Table, first_row: int) -> wt.Table:
+    """Копия таблицы с `normalize_words` в ячейках данных (строки с `first_row`); шапка не трогается."""
+    width = tbl.x1 - tbl.x0
+
+    def heading(r: wt.TRow) -> bool:            # название пачки на всю ширину не трогаем: по нему определяется пачка
+        return len([c for c in r.cells if c.text.strip()]) == 1 and r.width >= 0.8 * width and not any(c.vcont for c in r.cells)
+
+    rows = [wt.TRow([wt.Cell(normalize_words(c.text), c.x0, c.x1, c.vcont, c.origin, c.dup) for c in r.cells]) if i >= first_row and not heading(r) else r
+            for i, r in enumerate(tbl.rows)]
+    return wt.Table(rows, tbl.index, list(tbl.row_pages))
+
+
 UNMERGE = True            # False — прежнее чтение с объединёнными ячейками (только для сверки «до/после», tools/gis_unmerge_report.py)
 _FOOT = re.compile(r"^[*†‡\s]+|[*†‡\s]+$")
 _SUMMARY_ROW = re.compile(r"(?:^|\s)[НнHh]\s?[гg]?\s*=\s*\d|(?:^|\s)ГВК|полностью|^\s*\*|примечан", re.I)
@@ -1114,6 +1156,7 @@ _HAS_VALUE = re.compile(r"\d|заглинизир|глинист\w*\s+(?:про�
 
 
 def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict[str, str]], title: str, section: str) -> int:
+    tbl = normalized(tbl, nhdr)
     if UNMERGE:
         tbl = wt.unmerge_table(tbl, nhdr)      # объединённые ячейки разъединены, значения продублированы: границы исследований определяются по столбцам
     wanted: Dict[tuple, str] = {}              # самопроверка: (строка, замер) → значения в столбцах замера; у каждого должен появиться интервал
@@ -1279,7 +1322,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 if k in ("iv", "") and len(ivn) < 2 and (fnum(ctext) is not None or re.fullmatch(r"\s*" + NUM + r"\s*[–—-]\s*" + NUM + r"\s*", ctext.translate(_MINUS))):
                     ivn.extend(nums(ctext)[:2 - len(ivn)] if fnum(ctext) is None else [fnum(ctext)])      # интервал одной ячейкой «784.8-788.4» или две ячейки
                 elif k in rec:
-                    rec[k] = c.text
+                    rec[k] = _kg_clean(c.text) if k == "kg" else c.text
             if len(ivn) < 2 and base_rows and (rec["kg"] or rec["hg"] or rec["sat"]) and base_rows[-1]["src"] == _src(tbl, i):
                 ivn = [base_rows[-1]["from"], base_rows[-1]["to"]]   # в замере только Нг и Кг: интервал — из столбца «Интервал» этой строки
                 fresh = fresh or base_rows[-1].get("fresh", True)
@@ -1345,6 +1388,7 @@ def _check_coverage(rep: Report, tbl: wt.Table, tid: int, sgroups: List[Group], 
 def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict[str, str]], title: str, section: str) -> int:
     """Таблица одного замера: «Интервал, м | Мощность, м | Пористость | Газонасыщенность». Замер — по дате отчёта; пачка — по предложению перед таблицей
     («… в верхней песчаной пачке в интервале 784.8 – 796.0 м, Нг = 11.2 м»); если пачку оно не называет, её подберёт `resolve_packs` по глубине."""
+    tbl = normalized(tbl, nhdr)
     cols: Dict[str, int] = {}
     hdr_cells = [c for r in tbl.rows[:max(nhdr, 1)] for c in r.cells if c.text.strip()]
     for k, rx in (("iv", r"интервал|прослои|прослой"), ("h", r"мощност|\bнг\b"), ("kp", r"пористост"), ("kg", r"газонасыщенност|(?<![а-яa-z])[кk]\s*[гrg]")):
@@ -1372,13 +1416,14 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
         if len(ivn) < 2 or ivn[1] < ivn[0]:
             continue
         hc, kpc, kgc = cell("h"), cell("kp"), cell("kg")
-        kg, kmin, kmax, ktext = _kg(kgc.text if kgc is not None else "", frac_kg)
+        kg_raw = _kg_clean(kgc.text) if kgc is not None else ""
+        kg, kmin, kmax, ktext = _kg(kg_raw, frac_kg)
         kp, _a, _b, _t = _kg(kpc.text if kpc is not None else "", frac_kp)
-        sat = kgc.text if kgc is not None and _WATER_RX.search(kgc.text) else ""
+        sat = kg_raw if _WATER_RX.search(kg_raw) else ""
         water = bool(sat)
         gas_text = bool(re.search(r"газонасыщ", " ".join(x.text for x in r.cells), re.I)) and not _WATER_RX.search(" ".join(x.text for x in r.cells))
         dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or "")) and not gas_text
-        kg_cell = kgc.text if kgc is not None else ""
+        kg_cell = kg_raw
         clay = _clay(kg_cell)
         clay_nokg = clay and kg is None and not re.search(r"\d", kg_cell)
         if clay and not sat:
@@ -1399,7 +1444,7 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
             ("Дата замера", g.date), ("Дата точная", g.exact), ("Раздел таблицы", title), ("Заголовок пачки", title), ("Пачка", pack),
             ("Горизонт", horizon_of(title)), ("От, м", ivn[0]), ("До, м", ivn[1]), ("От а.о., м", ao(rep, ivn[0])), ("До а.о., м", ao(rep, ivn[1])),
             ("hi, м", round(ivn[1] - ivn[0], 3)), ("Нобщ по отчёту, м", fnum(hc.text) if hc is not None else None), ("Нг по отчёту, м", None), ("Кг", kg), ("Кг мин", kmin), ("Кг макс", kmax),
-            ("Кг (как в отчёте)", kgc.text if kgc is not None else ""), ("Пористость", kp), ("Пористость (как в отчёте)", kpc.text if kpc is not None else ""), ("Насыщение", sat),
+            ("Кг (как в отчёте)", kg_raw), ("Пористость", kp), ("Пористость (как в отчёте)", kpc.text if kpc is not None else ""), ("Насыщение", sat),
             ("Литология", ""), ("Водонасыщенный", water), ("Глубины", MD_BASIS), ("Уверенность", conf),
             ("Основание", "; ".join(x for x in (why_row, "таблица одного замера: дата и пачка взяты из отчёта и предложения перед таблицей") if x))]))
         n += 1

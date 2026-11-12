@@ -1368,7 +1368,7 @@ def test_merged_water_note_makes_water_interval_in_every_study():
     gr.read_intervals(rep, _water_table(), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     rows = [r for r in rep.intervals if (r["От, м"], r["До, м"]) == (803.0, 811.8)]
     assert sorted(r["Столбец-замер"][:7] for r in rows) == ["04.2023", "10.2022", "10.2023"]
-    assert all(r["Кг"] is None and r["Водонасыщенный"] and r["Кг (как в отчёте)"] == "водонасышен" for r in rows)
+    assert all(r["Кг"] is None and r["Водонасыщенный"] and r["Кг (как в отчёте)"] == "водонасыщен" for r in rows)       # опечатка «ш» исправлена вместе со склейкой
     assert not any(i["Код"] == "interval_cell_skipped" for i in rep.issues)
 
 
@@ -1467,12 +1467,40 @@ def test_interval_missing_in_latest_report_is_filled_from_own_report():
     assert sorted((r.frm, r.to) for r in res.rows) == [(798.2, 799.2), (799.2, 800.2), (805.0, 805.7)]
 
 
+def test_header_date_with_typo_in_year_keeps_its_month():
+    # скв. 1: столбцы «10.2025», «05.2025», «10.2026»: средний — это 05.2026 (опечатка в годе). Шаг в полгода давал 11.2025 («последующий сезон»),
+    # и Кг замера 05.2026 попадал в осень 2025, подменяя замер 10.2025 (Кг 40 вместо <20 в таблице 5.4)
+    groups = [gr.Group("10.2025", 0, 1, dt.date(2025, 10, 1), False), gr.Group("05.2025", 1, 2, dt.date(2025, 5, 1), False), gr.Group("10.2026", 2, 3, dt.date(2026, 10, 1), False)]
+    gr._repair_header_dates(groups, gr.Report(file="x", well="1", date=dt.date(2026, 10, 20)))
+    assert [g.date for g in groups] == [dt.date(2025, 10, 1), dt.date(2026, 5, 1), dt.date(2026, 10, 1)]
+
+
+def test_kg_cell_noise_is_removed_in_the_database():
+    t = _nz_table()
+    t.rows[3].cells[3].text = "0.85*"
+    t.rows[4].cells[3].text = "‘-"
+    rep = gr.Report(file="x.docx", well="10")
+    gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    first = [r for r in rep.intervals if r["От, м"] == 784.8 and r["Столбец-замер"].startswith("10.2022")]
+    dash = [r for r in rep.intervals if r["От, м"] == 788.4 and r["Столбец-замер"].startswith("10.2022")]
+    assert first and first[0]["Кг (как в отчёте)"] == "0.85" and dash and dash[0]["Кг (как в отчёте)"] == "-"
+
+
 def test_water_note_with_space_or_hyphen_is_water():
-    # «водо насыщен», «водо-насыщен» (так бывает в ячейках отчётов) форматируются как водонасыщенные, текст Кг остаётся как в отчёте
-    for word in ("водо насыщен", "Водо-насыщен", "водонасыщен"):
+    # «водо насыщен», «водо-насыщен» и слово, перенесённое OCR на несколько строк, склеиваются и форматируются как водонасыщенные
+    for word in ("водо насыщен", "водо-насыщен", "водона\nсыщен", "в о д о насыщен", "водонасыщен"):
         t = _nz_table()
         t.rows.insert(5, wt.TRow([wt.Cell("803.0 – 811.8", -100, 1600), wt.Cell("", 1600, 2800), wt.Cell(word, 2800, 9700)]))
         rep = gr.Report(file="x.docx", well="10")
         gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
         rows = [r for r in rep.intervals if (r["От, м"], r["До, м"]) == (803.0, 811.8)]
-        assert len(rows) == 3 and all(r["Водонасыщенный"] and r["Кг"] is None and r["Кг (как в отчёте)"] == word for r in rows), word
+        assert len(rows) == 3 and all(r["Водонасыщенный"] and r["Кг"] is None and r["Кг (как в отчёте)"] == "водонасыщен" for r in rows), word
+
+
+def test_normalize_words_glues_clay_synonyms_and_kg_noise():
+    # замечания инженера (12.11): слова, разорванные OCR, склеиваются; «глинистый прослой» и «заглинизирован» — одно и то же; в Кг лишние знаки убираются
+    assert gr.normalize_words("водона\nсыщен") == "водонасыщен" and gr.normalize_words("Водо-насыщ.") == "Водонасыщ."
+    assert gr.normalize_words("газо насыщ.") == "газонасыщ."
+    assert gr.normalize_words("глинистый прослой") == "заглинизирован" and gr.normalize_words("заглинизированный") == "заглинизирован"
+    assert gr.normalize_words("0.70\n(заглинизирован)") == "0.70\n(заглинизирован)" and gr.normalize_words("песчаник") == "песчаник"
+    assert [gr._kg_clean(x) for x in ("70*", "‘-", "'-'", "<20%", "0,45†")] == ["70", "-", "-", "<20%", "0,45"]
