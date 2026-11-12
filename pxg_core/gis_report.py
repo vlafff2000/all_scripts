@@ -2129,6 +2129,34 @@ def _flag_measurement_differences(reports: List[Report], chosen: Dict[Tuple[str,
                 d.strftime("%m.%Y"), "; ".join("%s (%d инт.)" % (f, n) for f, n in sorted(others.items()))))
 
 
+def fill_gaps(reports: List[Report], chosen: Dict[Tuple[str, dt.date], str]) -> Dict[int, str]:
+    """Замер берётся из самого свежего отчёта, но свежий отчёт иногда не повторяет строку таблицы (скв. 8: заглинизированный прослой 795,0–795,7 есть
+    в отчёте замера и пропал в последующих) — интервал терялся. Интервал другого отчёта того же замера, который не пересекается ни с одним интервалом
+    выбранного отчёта (и ни с уже добавленным), дополняет замер. Первым идёт собственный отчёт замера (ближайший по дате), затем остальные от свежих к старым.
+    Возвращает {id(строки интервала): основание}; интервалы, пересекающиеся с выбранными (переинтерпретация), не трогаются."""
+    byfile = {(r.path or r.file): r for r in reports}
+    out: Dict[int, str] = {}
+    for (well, d), fkey in chosen.items():
+        base = byfile.get(fkey)
+        if base is None:
+            continue
+        taken = [(x["От, м"], x["До, м"]) for x in base.intervals if x["Дата замера"] == d]
+        others = [rp for rp in reports if rp is not base and rp.well == well and any(x["Дата замера"] == d for x in rp.intervals)]
+        others.sort(key=lambda rp: (abs(((rp.date or dt.date.min) - d).days), (rp.path or rp.file).lower().endswith((".md", ".json")),     # Word надёжнее OCR
+                                    -(rp.date or dt.date.min).toordinal()))
+        for rp in others:
+            for x in rp.intervals:
+                if x["Дата замера"] != d or x["До, м"] - x["От, м"] <= 0.05:
+                    continue
+                if any(min(x["До, м"], b) - max(x["От, м"], a) > 0.05 for a, b in taken):
+                    continue
+                taken.append((x["От, м"], x["До, м"]))
+                out[id(x)] = "интервал из отчёта %s: в отчёте, взятом в БД (%s), этой строки нет" % (rp.file, base.file)
+                base.issue("warn", "interval_gap_filled", "Замер %s: интервал %g–%g есть в отчёте %s, но в этом (самом свежем) отчёте его нет — добавлен в БД из %s, сверить" % (
+                    d.strftime("%m.%Y"), x["От, м"], x["До, м"], rp.file, rp.file), x["Источник"])
+    return out
+
+
 def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gis.SheetResult], pd.DataFrame]:
     """Отчёты → `gis.SheetResult` по скважине (замер = дата) и таблица «Интервалы (все)» с отметкой, какой замер вошёл в БД."""
     resolve_dates(reports)
@@ -2136,15 +2164,23 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
     resolve_gvk(reports)
     chosen = pick_measurements(reports)
     _flag_measurement_differences(reports, chosen)
+    gaps = fill_gaps(reports, chosen)
     by_well: Dict[str, Dict[dt.date, List[Tuple[Report, dict]]]] = defaultdict(lambda: defaultdict(list))
     allrows = []
     for rep in reports:
         for r in rep.intervals:
             d = r["Дата замера"]
             ok = d is not None and chosen.get((rep.well, d)) == (rep.path or rep.file)
-            allrows.append({**{k: v for k, v in r.items() if not k.startswith("_")}, "В БД": "да" if ok else ("нет: дубль замера из другого отчёта" if d is not None else "нет: дата замера не определена")})
-            if ok:
+            gap = not ok and id(r) in gaps
+            if gap:
+                r = {**r, "Основание": "; ".join(x for x in (r["Основание"], gaps[id(r)]) if x), "Уверенность": MID, "_gap": True}
+            allrows.append({**{k: v for k, v in r.items() if not k.startswith("_")},
+                            "В БД": "да" if ok else "да: дополнено — в свежем отчёте этой строки нет" if gap else ("нет: дубль замера из другого отчёта" if d is not None else "нет: дата замера не определена")})
+            if ok or gap:
                 by_well[rep.well][d].append((rep, r))
+    for dates in by_well.values():
+        for d in dates:
+            dates[d].sort(key=lambda x: (x[1]["От, м"], x[1]["До, м"]))
     out: Dict[str, gis.SheetResult] = {}
     for well, dates in by_well.items():
         reps = [rp for dl in dates.values() for rp, _ in dl]
@@ -2152,12 +2188,12 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
         res = gis.SheetResult(sheet=well, well=well, header_row=None, alt=alt, alt_source="шапка отчёта", hints=[], blocks=[], rows=[], legend=[], issues=[], alt_sheet=alt)
         for n, d in enumerate(sorted(dates), 1):
             items = dates[d]
-            rep0 = items[0][0]
-            exact = d if items[0][1]["Дата точная"] else None
-            b = gis.Block(sheet=well, well=well, block=n, xl_row=0, date_text=items[0][1]["Столбец-замер"], date=d, exact=exact, season=gis.season_of(d.month),
+            rep0, first = next(((rp, r) for rp, r in items if not r.get("_gap")), items[0])      # замер описывает отчёт, взятый в БД, а не дополнение
+            exact = d if first["Дата точная"] else None
+            b = gis.Block(sheet=well, well=well, block=n, xl_row=0, date_text=first["Столбец-замер"], date=d, exact=exact, season=gis.season_of(d.month),
                           quality="" if exact else "только месяц и год", note=rep0.file)
             gvk_by_pack: Dict[str, dict] = {}
-            cols = {(rp.file, r["Столбец-замер"]) for rp, r in items}
+            cols = {(rp.file, r["Столбец-замер"]) for rp, r in items if not r.get("_gap")}       # ГВК — только из отчёта, взятого в БД
             for rp in {id(x): x for x, _ in items}.values():
                 for p in rp.packs:
                     if p.get("_kind") == "gvk" and (rp.file, p["Столбец-замер"]) in cols and p.get("ГВК MD, м") is not None:
@@ -2298,12 +2334,15 @@ def reconcile_frame(reports: List[Report], db_intervals: pd.DataFrame) -> pd.Dat
     """Самопроверка сборки: по каждому отчёту — сколько ячеек исследований со значениями в таблицах, сколько интервалов разобрано и сколько попало в БД.
     Строка с расхождением (не взято ячеек, разобрано ≠ в БД) помечена в «Статус» — такой отчёт надо сверить с оригиналом."""
     in_db = db_intervals.groupby("Файл").size().to_dict() if len(db_intervals) and "Файл" in db_intervals else {}
+    same_name: Dict[str, int] = defaultdict(int)      # один и тот же файл в двух папках: строки БД различаются только именем, сверяем по сумме
+    for rep in reports:
+        same_name[rep.file] += len(rep.intervals)
     rows = []
     for rep in reports:
         tabs = [t for t in rep.tables if "Ячеек со значениями" in t]
         cells, taken, lost = (sum(t[k] for t in tabs) for k in ("Ячеек со значениями", "Интервалов взято", "Не взято"))
         empty = sum(1 for i in rep.issues if i["Код"] == "study_without_intervals")
-        parsed, stored = len(rep.intervals), int(in_db.get(rep.file, 0))
+        parsed, stored = same_name[rep.file], int(in_db.get(rep.file, 0))
         bad = []
         if lost:
             bad.append("не взято ячеек исследований: %d" % lost)
