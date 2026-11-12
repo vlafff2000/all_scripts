@@ -2274,7 +2274,30 @@ def build(reports: List[Report], mapping: Optional[Dict[str, str]] = None, kg_mi
     }
     out["_шаблонировки"] = templating_frame(good)
     out["Аннотации"] = annotations_frame(good)
+    out["Сверка"] = reconcile_frame(good, all_iv)
     return out, results
+
+
+def reconcile_frame(reports: List[Report], db_intervals: pd.DataFrame) -> pd.DataFrame:
+    """Самопроверка сборки: по каждому отчёту — сколько ячеек исследований со значениями в таблицах, сколько интервалов разобрано и сколько попало в БД.
+    Строка с расхождением (не взято ячеек, разобрано ≠ в БД) помечена в «Статус» — такой отчёт надо сверить с оригиналом."""
+    in_db = db_intervals.groupby("Файл").size().to_dict() if len(db_intervals) and "Файл" in db_intervals else {}
+    rows = []
+    for rep in reports:
+        tabs = [t for t in rep.tables if "Ячеек со значениями" in t]
+        cells, taken, lost = (sum(t[k] for t in tabs) for k in ("Ячеек со значениями", "Интервалов взято", "Не взято"))
+        empty = sum(1 for i in rep.issues if i["Код"] == "study_without_intervals")
+        parsed, stored = len(rep.intervals), int(in_db.get(rep.file, 0))
+        bad = []
+        if lost:
+            bad.append("не взято ячеек исследований: %d" % lost)
+        if empty:
+            bad.append("замеры без интервалов: %d" % empty)
+        if parsed != stored:
+            bad.append("разобрано %d, в БД %d" % (parsed, stored))
+        rows.append({"Файл": rep.file, "Скважина": rep.well, "Таблиц интервалов": len(tabs), "Ячеек исследований со значениями": cells, "Интервалов взято из таблиц": taken,
+                     "Не взято": lost, "Замеров без интервалов": empty, "Интервалов разобрано": parsed, "Интервалов в БД": stored, "Статус": "; ".join(bad) or "сходится"})
+    return pd.DataFrame(rows)
 
 
 # Русское имя столбца → ключ в таблицах для Атласа/других программ (латиница, метры)
@@ -2320,7 +2343,7 @@ def _write_pair(table: pd.DataFrame, out_dir: str, name: str) -> List[str]:
 
 
 SHEET_ORDER = ("Свод", "Замеры", "Интервалы", "Комплекс ГИС", "Доход шаблона", "Термобарика", "Пластовое давление", "Заполнение ствола", "ГВК", "Итоги пачек", "ГВК по датам",
-               "Выводы (текст)", "Заголовки пачек", "Таблицы в отчётах", "Отчёты", "Проверка", "Строки БД")
+               "Выводы (текст)", "Заголовки пачек", "Таблицы в отчётах", "Сверка", "Отчёты", "Проверка", "Строки БД")
 PERCENT = ("Кг", "Пористость", "Кг мин", "Кг макс", "Кг ср.взв", "Кг ср.взв (весь замер)")
 
 

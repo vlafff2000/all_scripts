@@ -1410,3 +1410,11 @@ def test_footnote_star_on_interval_depth_is_still_a_depth():
     rep = gr.Report(file="x.docx", well="10")
     gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     assert [(r["От, м"], r["До, м"], r["Кг"]) for r in rep.intervals] == [(788.5, 792.3, 0.62)]
+
+
+def test_build_has_reconciliation_sheet(ra):
+    # самопроверка сборки: по каждому отчёту сверяются ячейки исследований, взятые интервалы и строки БД
+    frames, _ = gr.build([ra])
+    sv = frames["Сверка"]
+    assert len(sv) == 1 and sv.iloc[0]["Интервалов разобрано"] == sv.iloc[0]["Интервалов в БД"] == len(ra.intervals)
+    assert sv.iloc[0]["Статус"] == "сходится" and sv.iloc[0]["Ячеек исследований со значениями"] == sv.iloc[0]["Интервалов взято из таблиц"] == 44
