@@ -1363,12 +1363,12 @@ def test_unmerge_keeps_pack_heading_row_whole():
 
 def test_merged_water_note_makes_water_interval_in_every_study():
     # баг: «водонасыщен» (в отчёте с опечаткой «водонасышен») одной ячейкой на все замеры — интервал или пропускался, или шёл без Кг;
-    # теперь по строке на каждый замер, обводнённый интервал, Кг = 0,25
+    # теперь по строке на каждый замер, интервал водонасыщенный, Кг остаётся как в отчёте (текстом), число не подставляется
     rep = gr.Report(file="x.docx", well="10")
     gr.read_intervals(rep, _water_table(), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     rows = [r for r in rep.intervals if (r["От, м"], r["До, м"]) == (803.0, 811.8)]
     assert sorted(r["Столбец-замер"][:7] for r in rows) == ["04.2023", "10.2022", "10.2023"]
-    assert all(r["Кг"] == gr.WATER_KG and r["Водонасыщенный"] for r in rows)
+    assert all(r["Кг"] is None and r["Водонасыщенный"] and r["Кг (как в отчёте)"] == "водонасышен" for r in rows)
     assert not any(i["Код"] == "interval_cell_skipped" for i in rep.issues)
 
 
@@ -1465,3 +1465,14 @@ def test_interval_missing_in_latest_report_is_filled_from_own_report():
     assert any(i["Код"] == "interval_gap_filled" for i in later.issues)
     res = _res["113"]
     assert sorted((r.frm, r.to) for r in res.rows) == [(798.2, 799.2), (799.2, 800.2), (805.0, 805.7)]
+
+
+def test_water_note_with_space_or_hyphen_is_water():
+    # «водо насыщен», «водо-насыщен» (так бывает в ячейках отчётов) форматируются как водонасыщенные, текст Кг остаётся как в отчёте
+    for word in ("водо насыщен", "Водо-насыщен", "водонасыщен"):
+        t = _nz_table()
+        t.rows.insert(5, wt.TRow([wt.Cell("803.0 – 811.8", -100, 1600), wt.Cell("", 1600, 2800), wt.Cell(word, 2800, 9700)]))
+        rep = gr.Report(file="x.docx", well="10")
+        gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+        rows = [r for r in rep.intervals if (r["От, м"], r["До, м"]) == (803.0, 811.8)]
+        assert len(rows) == 3 and all(r["Водонасыщенный"] and r["Кг"] is None and r["Кг (как в отчёте)"] == word for r in rows), word
