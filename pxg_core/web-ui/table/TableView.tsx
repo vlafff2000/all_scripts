@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/TableView.tsx @ 37f2840. Не править: tools/sync_table_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/TableView.tsx @ 208b526. Не править: tools/sync_table_from_atlas.py обновляет копию.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Assignments, Cell, Column, Table } from './tableTypes'
 import { formatCell } from './tableFormat'
