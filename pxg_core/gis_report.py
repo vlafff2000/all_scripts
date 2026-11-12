@@ -24,7 +24,7 @@ from . import gis, qc, word_doc, word_tables as wt
 NUM = r"-?\d+(?:[.,]\d+)?"
 HIGH, MID, LOW = "высокая", "средняя", "низкая"
 _WATER_RX = re.compile(r"вод[оа][\s\-]*насы[щшс]", re.I)      # «водонасыщен» (в отчётах встречается «водо насыщен», «водо-насыщен», «водонасышен» — опечатка/OCR)
-WATER_KG = 0.25                       # Кг водонасыщенного интервала (как в Excel-базе); равен порогу hэф, поэтому hэф = 0
+WATER_KG = 0.25                       # справочно: Кг водонасыщенного интервала в Excel-базе (в сборке из отчётов не подставляется); равен порогу hэф, поэтому hэф = 0
 MD_BASIS = "по стволу (MD)"
 _DATE = re.compile(r"(\d{1,2})[./](\d{1,2})[./](\d{4}|\d{2})(?!\d)")
 _MONTH = re.compile(r"(?<![\d.])(\d{1,2})[./](\d{4})(?!\d)")
@@ -1219,14 +1219,9 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             water = bool(_WATER_RX.search(sat) or _WATER_RX.search(rec["kg"] or ""))
             gas_text = bool(re.search(r"газонасыщ", sat or "", re.I)) and not _WATER_RX.search(sat or "")
             dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or "")) and not gas_text       # «-» при насыщении «Газонасыщ.»: Кг не определён, а не вода
-            if dash:                                              # «-» вместо Кг: интервал водонасыщен, Кг = 0,25 (решение инженера; так же в Excel-базе)
-                kg = kmin = kmax = WATER_KG
-                water = True
-            water_nokg = water and kg is None and not dash      # приписка «водонасыщен» вместо числа: интервал водонасыщенный, Кг остаётся как в отчёте (текстом), число не подставляется
+            water_nokg = water and kg is None and not dash      # приписка «водонасыщен» вместо числа: интервал водонасыщенный, Кг остаётся как в отчёте (текстом); прочерк «-» тоже остаётся как в отчёте — ничего не подставляется (решение инженера)
             clay = _clay(rec["kg"], sat, rec["lith"])
-            clay_nokg = clay and kg is None and not re.search(r"\d", rec["kg"] or "")
-            if clay_nokg:                                         # заглинизированный пропласток без числа: газа нет, Кг = 0,25, интервал не теряется
-                kg = kmin = kmax = WATER_KG
+            clay_nokg = clay and kg is None and not re.search(r"\d", rec["kg"] or "")       # заглинизированный пропласток без числа: интервал не теряется, Кг не подставляется
             if clay and not sat:
                 sat = "заглинизирован"
             kp = None
@@ -1242,9 +1237,9 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             if water_nokg:
                 conf, why = MID, "в отчёте приписка «%s» вместо числа Кг: интервал водонасыщенный, Кг оставлен как в отчёте (текстом)" % (ktext or sat)
             elif dash:
-                conf, why = MID, "Кг «-» в отчёте: интервал водонасыщен, принято Кг = %g (как водонасыщенный; решение инженера)" % WATER_KG
+                conf, why = MID, "Кг «-» в отчёте: оставлено как в отчёте, число не подставлено"
             elif clay_nokg:
-                conf, why = MID, "заглинизированный пропласток (не коллектор): газа нет, принято Кг = %g" % WATER_KG
+                conf, why = MID, "заглинизированный пропласток (не коллектор): Кг в отчёте не числом, оставлено как в отчёте"
             elif ktext and kmin is not None and kmin != kmax:
                 conf, why = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
             elif ktext and kg is not None:
@@ -1383,21 +1378,16 @@ def read_simple_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Option
         water = bool(sat)
         gas_text = bool(re.search(r"газонасыщ", " ".join(x.text for x in r.cells), re.I)) and not _WATER_RX.search(" ".join(x.text for x in r.cells))
         dash = kg is None and bool(re.fullmatch(r"[-–—]", ktext or "")) and not gas_text
-        if dash:
-            kg = kmin = kmax = WATER_KG
-            water = True
         kg_cell = kgc.text if kgc is not None else ""
         clay = _clay(kg_cell)
         clay_nokg = clay and kg is None and not re.search(r"\d", kg_cell)
-        if clay_nokg:
-            kg = kmin = kmax = WATER_KG
         if clay and not sat:
             sat = "заглинизирован"
         conf, why_row = HIGH, ""
         if dash:
-            conf, why_row = MID, "Кг «-» в отчёте: интервал водонасыщен, принято Кг = %g (как водонасыщенный; решение инженера)" % WATER_KG
+            conf, why_row = MID, "Кг «-» в отчёте: оставлено как в отчёте, число не подставлено"
         elif clay_nokg:
-            conf, why_row = MID, "заглинизированный пропласток (не коллектор): газа нет, принято Кг = %g" % WATER_KG
+            conf, why_row = MID, "заглинизированный пропласток (не коллектор): Кг в отчёте не числом, оставлено как в отчёте"
         elif ktext and kmin is not None and kmin != kmax:
             conf, why_row = MID, "Кг дан диапазоном: взято среднее; границы — в столбцах Кг мин/макс"
         elif ktext and kg is not None:

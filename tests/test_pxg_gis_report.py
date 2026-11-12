@@ -145,7 +145,7 @@ def test_two_blocks_baseline_and_current_in_form_b(rb):
     assert set(iv["Столбец-замер"]) == {"По данным каротажа от 11.10.2019 г", "По данным ГИС-контроль от 19.11.2020 г."}
     assert set(iv["Пачка"]) == {"Покрышка", "Верхняя пачка", "Перемычка", "Нижняя пачка"}
     water = iv[iv["Водонасыщенный"]]
-    assert len(water) == 2 and set(water["От, м"]) == {804.6} and (water["Кг"] == 0.25).all()
+    assert len(water) == 2 and set(water["От, м"]) == {804.6} and water["Кг"].isna().all()       # Кг «-» остаётся как в отчёте, водонасыщенность — по слову «Водонасыщ.»
     g = {p["Столбец-замер"]: (p["ГВК MD, м"], p["ГВК а.о., м"], p["Уверенность"]) for p in rb.packs if p.get("_kind") == "gvk"}
     assert g["По данным ГИС-контроль от 19.11.2020 г."] == (804.6, -669.6, "высокая")      # ГВК написан под каждым замером (две ячейки строки)
     assert g["По данным каротажа от 11.10.2019 г"] == (804.6, -669.6, "высокая")
@@ -673,9 +673,9 @@ def test_merged_gas_cell_covers_all_rows_it_spans():
     rows = {(r["Столбец-замер"][:7], r["От, м"], r["До, м"]): r for r in rep.intervals}
     for key in (("10.2022", 790.6, 793.3), ("10.2022", 793.3, 794.6), ("10.2022", 794.6, 795.3), ("10.2022", 795.3, 796.0)):
         assert rows[key]["Кг"] == 0.65 and rows[key]["Нг по отчёту, м"] == 5.4
-    gas = [x for x in rep.intervals if x["Столбец-замер"].startswith("10.2022") and not x["Водонасыщенный"]]
+    gas = [x for x in rep.intervals if x["Столбец-замер"].startswith("10.2022") and x["Кг"] is not None]
     assert round(sum(x["hi, м"] for x in gas), 1) == 11.2
-    water = [x for x in rep.intervals if x["Столбец-замер"].startswith("04.2023") and x["Водонасыщенный"]]
+    water = [x for x in rep.intervals if x["Столбец-замер"].startswith("04.2023") and x["Кг"] is None]          # Кг «-» — без числа
     assert [(x["От, м"], x["До, м"]) for x in water] == [(793.3, 794.6), (794.6, 795.3), (795.3, 796.0), (796.0, 800.0)]
     assert "объединённой по вертикали" in rows[("10.2022", 793.3, 794.6)]["Основание"]
 
@@ -853,9 +853,9 @@ def test_simple_interval_table_is_read_with_pack_from_title():
     rows = [(r["От, м"], r["До, м"], r["Кг"], r["Пористость"], r["Пачка"], r["hi, м"]) for r in rep.intervals]
     assert rows[0] == (784.8, 788.4, 0.85, 0.32, "Верхняя пачка", 3.6)
     assert (790.6, 796.0, 0.65, 0.3, "Верхняя пачка", 5.4) in rows
-    assert rows[-1][:3] == (796.0, 800.0, 0.25) and len(rows) == 5
+    assert rows[-1][:3] == (796.0, 800.0, None) and len(rows) == 5          # «-» остаётся как в отчёте
     assert all(r["Дата замера"] == dt.date(2022, 10, 1) and r["Дата точная"] for r in rep.intervals)
-    assert round(sum(r["hi, м"] for r in rep.intervals if not r["Водонасыщенный"]), 1) == 11.2
+    assert round(sum(r["hi, м"] for r in rep.intervals if r["Кг"] is not None), 1) == 11.2
     assert not any(i["Код"] == "hg_mismatch" for i in rep.issues)
 
 
@@ -1068,17 +1068,17 @@ def test_target_of_study_control_of_technical_state_is_not_epb():
     assert rep.kind == ""
 
 
-def test_dash_kg_means_water_saturated_kg_025():
-    # решение инженера: «-» в Кг — интервал водонасыщен, Кг = 0,25 (так же заполнена Excel-база: 764 строки с Кг 0,25 и hэф 0)
+def test_dash_kg_stays_as_written_in_the_report():
+    # решение инженера (12.11): «-» в Кг остаётся как в отчёте, ничего не подставляется (ни 0,25, ни 0); водонасыщенным интервал считается только по тексту отчёта
     assert gr._kg("-")[3] == "-"
     rep = gr.Report(file="x.docx", well="10", date=dt.date(2023, 10, 1))
     gr.read_intervals(rep, _nz_table(), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     dash = [r for r in rep.intervals if r["Кг (как в отчёте)"] == "-"]
-    assert dash and all(r["Кг"] == 0.25 and r["Кг мин"] == 0.25 and r["Водонасыщенный"] is True for r in dash)
-    assert all("водонасыщен" in r["Основание"] and r["Уверенность"] == gr.MID for r in dash)
+    assert dash and all(r["Кг"] is None and r["Кг мин"] is None and r["Водонасыщенный"] is False for r in dash)
+    assert all("как в отчёте" in r["Основание"] and r["Уверенность"] == gr.MID for r in dash)
     simple = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("в верхней песчаной пачке"), _simple_table()], "x.docx")
     last = simple.intervals[-1]
-    assert (last["От, м"], last["Кг"], last["Водонасыщенный"]) == (796.0, 0.25, True)
+    assert (last["От, м"], last["Кг"], last["Кг (как в отчёте)"]) == (796.0, None, "-")
 
 
 def _clay_table():
@@ -1092,7 +1092,7 @@ def test_clay_interlayer_is_kept_marked_and_has_no_gas():
     # решение инженера: заглинизированные пропластки есть в Excel-базе и в отчётах, терять нельзя; газа в них нет (не коллектор)
     rep = gr.parse_blocks([wt.Para("Скважина: 10"), wt.Para("Дата исследования: 01.10.2022"), wt.Para("в верхней песчаной пачке"), _clay_table()], "x.docx")
     r1, r2, r3 = rep.intervals
-    assert (r2["От, м"], r2["Кг"], r2["Насыщение"], r2["Водонасыщенный"]) == (788.4, 0.25, "заглинизирован", False)
+    assert (r2["От, м"], r2["Кг"], r2["Насыщение"], r2["Водонасыщенный"]) == (788.4, None, "заглинизирован", False)
     assert "заглинизирован" in r2["Основание"] and r2["Уверенность"] == gr.MID
     assert (r3["Кг"], r3["Насыщение"]) == (0.7, "заглинизирован")          # число отчёта сохраняется (как в Excel), пометка добавляется
     res, allrows = gr.to_results([rep])
@@ -1212,7 +1212,7 @@ def test_clay_interlayer_written_by_one_wide_cell_across_all_measurements():
     rep = gr.Report(file="x.docx", well="127", date=dt.date(2025, 10, 30))
     gr.read_intervals(rep, wt.Table(rows=[top, sub, head, gas1, clay, gas2]), 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
     cl = [(r["Столбец-замер"][-8:], r["От, м"], r["До, м"], r["Кг"], r["Насыщение"], r["Водонасыщенный"]) for r in rep.intervals if r["От, м"] == 764.8 and r["До, м"] == 765.6]
-    assert len(cl) == 2 and all(x[3] == 0.25 and x[4] == "заглинизирован" and x[5] is False for x in cl)
+    assert len(cl) == 2 and all(x[3] is None and x[4] == "заглинизирован" and x[5] is False for x in cl)
     assert len(rep.intervals) == 6
 
 
