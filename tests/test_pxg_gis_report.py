@@ -1418,3 +1418,36 @@ def test_build_has_reconciliation_sheet(ra):
     sv = frames["Сверка"]
     assert len(sv) == 1 and sv.iloc[0]["Интервалов разобрано"] == sv.iloc[0]["Интервалов в БД"] == len(ra.intervals)
     assert sv.iloc[0]["Статус"] == "сходится" and sv.iloc[0]["Ячеек исследований со значениями"] == sv.iloc[0]["Интервалов взято из таблиц"] == 44
+
+
+def _month_only_table():
+    # скв. 8: даты замеров в шапке без слова «г» («04.2024», «10.2024») принимались за числа — вся шапка считалась строкой данных, таблица не распознавалась
+    return wt.Table([
+        wt.TRow([wt.Cell("Интервал, м", 0, 2000), wt.Cell("10.2023г", 2000, 4000), wt.Cell("04.2024", 4000, 6000), wt.Cell("10.2024", 6000, 8000)]),
+        wt.TRow([wt.Cell("", 0, 2000, True), wt.Cell("Нг, м", 2000, 3000), wt.Cell("Кг, д.е.", 3000, 4000), wt.Cell("Нг, м", 4000, 5000), wt.Cell("Кг, д.е.", 5000, 6000),
+                 wt.Cell("Нг, м", 6000, 7000), wt.Cell("Кг, д.е.", 7000, 8000)]),
+        wt.TRow([wt.Cell("792.8–794.1", 0, 2000), wt.Cell("1.3", 2000, 3000), wt.Cell("0.50", 3000, 4000), wt.Cell("1.3", 4000, 5000), wt.Cell("0.30", 5000, 6000),
+                 wt.Cell("1.3", 6000, 7000), wt.Cell("0.45", 7000, 8000)]),
+        wt.TRow([wt.Cell("794.1–795.0", 0, 2000), wt.Cell("0.9", 2000, 3000), wt.Cell("0.42", 3000, 4000), wt.Cell("0.9", 4000, 5000), wt.Cell("0.30", 5000, 6000),
+                 wt.Cell("0.9", 6000, 7000), wt.Cell("0.42", 7000, 8000)])])
+
+
+def test_header_with_month_only_dates_is_a_header():
+    t = _month_only_table()
+    assert gr.header_rows(t) == 2 and gr.table_kind(t)[0] == "intervals"
+    rep = gr.Report(file="x.docx", well="8")
+    gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
+    assert len(rep.intervals) == 6
+
+
+def test_unrecognized_results_table_is_reported():
+    # самопроверка: таблица с «Кг» и глубинами, которую не удалось распознать, не должна пропадать молча
+    t = wt.Table([wt.TRow([wt.Cell("Показатель Кг", 0, 2000), wt.Cell("A", 2000, 4000)])] + [wt.TRow([wt.Cell("792.8", 0, 2000), wt.Cell("794.1", 2000, 4000)]) for _ in range(4)])
+    rep = gr.parse_blocks([gr.wt.Para("Результаты"), t], "x.docx")
+    assert any(i["Код"] == "table_unrecognized" for i in rep.issues)
+
+
+def test_gvk_depth_after_hyphenated_word():
+    # скв. 8: «ГВК по верхней песчаной пачке пласта-коллектора отмечается на глубине 796.3 м» — дефис в слове обрывал поиск глубины, ГВК не читался
+    assert gr._gvk_from("ГВК по верхней песчаной пачке пласта-коллектора отмечается на глубине 796.3 м (а.о-674.4 м)") == (796.3, -674.4)
+    assert gr._gvk_from("ГВК на гл. 803.7м (а.о-668.7м)")[0] == 803.7

@@ -120,6 +120,8 @@ def _is_header_row(row: wt.TRow) -> bool:
             return True
     for v in vals:
         s = v.strip()
+        if re.fullmatch(r"(?:0?[1-9]|1[0-2])[./](?:19|20)\d\d\s*(?:г\.?)?", s):
+            continue                                              # «04.2024» без слова «г» — месяц замера в шапке, а не число
         if re.fullmatch(r"-?\d+(?:[.,]\d+)?", s) or re.match(r"\d{1,2}[./]\d{1,2}[./]\d{2,4}", s) or re.fullmatch(r"\d+(?:[.,]\d+)?\s*[-–]\s*\d+(?:[.,]\d+)?", s):
             return False
     return True
@@ -900,7 +902,7 @@ def _kg(text: str, frac: bool = False) -> Tuple[Optional[float], Optional[float]
 def _gvk_from(text: str) -> Tuple[Optional[float], Optional[float]]:
     """«ГВК на гл. 803.7м (а.о-668.7м)» → (MD, а.о.)."""
     t = text.translate(_MINUS)
-    m = re.search(r"ГВК[^0-9\-]*(" + NUM + r")\s*м?", t, re.I)
+    m = re.search(r"ГВК(?:[^0-9\-]|(?<=[а-яёa-z])-(?=[а-яёa-z]))*(" + NUM + r")\s*м?", t, re.I)       # дефис внутри слова («пласта-коллектора») не минус
     md = fnum(m.group(1)) if m else None
     a = re.search(r"(?:а\.?\s*о\.?|абсолютн\w*\s*(?:глубин\w*|отметк\w*))\s*[:=]?\s*(-?\s*\d+(?:[.,]\d+)?)", t, re.I)      # «(а.о.- 654.2)»: пробел после минуса
     ab = fnum(a.group(1).replace(" ", "")) if a else None
@@ -1718,6 +1720,19 @@ def report_kind(blocks: List[wt.Block]) -> str:
     return KIND_EPB if _EPB_RX.search(head) or _EPB_TASKS_RX.search(tasks) else ""
 
 
+def _check_unrecognized(rep: Report, tbl: wt.Table) -> None:
+    """Самопроверка: таблица похожа на результаты интерпретации (в верхних строках «Кг», внутри — глубины интервалов), но не распознана — её интервалы потеряны."""
+    if len(tbl.rows) < 3:
+        return
+    top = " ".join(c.text for r in tbl.rows[:3] for c in r.cells)
+    if not re.search(r"(?<![а-яa-z])[кk]\s*[гrg](?![а-яa-z])", top, re.I):
+        return
+    depths = sum(1 for r in tbl.rows[2:] for c in r.cells if re.search(r"(?<![\d.])[5-9]\d\d[.,]\d", c.text))
+    if depths >= 4:
+        rep.issue("warn", "table_unrecognized", "Таблица %d похожа на результаты интерпретации (есть «Кг» и %d глубин), но не распознана как таблица интервалов — интервалы из неё не взяты" % (
+            tbl.index + 1, depths), "таблица %d" % (tbl.index + 1))
+
+
 def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, str]] = None) -> Report:
     rep = Report(file=os.path.basename(file), path=file)
     read_header(rep, blocks)
@@ -1732,6 +1747,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
             continue
         kind, nh = table_kind(b)
         if not kind:
+            _check_unrecognized(rep, b)
             continue
         if kind not in ("intervals", "simple_intervals"):
             rep.tables.append({"Файл": rep.file, "Таблица": b.index + 1, "Тип": KIND_NAMES[kind], "Заголовок перед таблицей": last_title, "Раздел": section,
