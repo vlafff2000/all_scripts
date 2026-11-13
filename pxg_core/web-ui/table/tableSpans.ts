@@ -1,10 +1,10 @@
-// Копия gas_atlas web/src/tableSpans.ts @ 37f2840. Не править: tools/sync_table_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/tableSpans.ts @ 208b526. Не править: tools/sync_table_from_atlas.py обновляет копию.
 // Оформление таблицы как в XLSX (atlas/render.py): заливка и цвет шрифта по ячейкам и объединённые ячейки.
 // Ключ ячейки — «строка:колонка» (индексы исходной таблицы, не отсортированной).
 import type { Table } from './tableTypes'
 
 export interface Paint {
-  cell: Map<string, { backgroundColor?: string; color?: string; borderTop?: string }>
+  cell: Map<string, { backgroundColor?: string; color?: string; borderTop?: string; borderLeft?: string }>
   covered: Set<string>                             // ячейки под объединением, кроме левой верхней: не выводятся
   starts: Map<string, { rowSpan: number; colSpan: number }>
 }
@@ -20,6 +20,7 @@ export function paintOf(table: Table): Paint {
         if (s.fill) current.backgroundColor = '#' + s.fill
         if (s.font) current.color = '#' + s.font
         if (s.border === 'top') current.borderTop = '2px solid #000'
+        if (s.border === 'left') current.borderLeft = '2px solid #000'      // граница группы колонок (сезона)
         cell.set(key, current)
       }
     }
