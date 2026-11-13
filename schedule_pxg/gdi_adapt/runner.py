@@ -296,6 +296,18 @@ def run(cfg, project_dir: str, provider, progress: Optional[Callable[[int, int],
                             journal.add(r, state=cfg.snapshot_state, note=os.path.basename(run_dir))
                 n = outputs.write_include(out.results, os.path.join(run_dir, 'wpimult_wdfac.inc'), cfg.include_only_ok, cfg.include_sequential, journal)
                 log(f'Include для модели: {n} скважин')
+                if cfg.data_file:
+                    from . import data_patch
+                    src = cfg.path('data_file', project_dir)
+                    ent = data_patch.entries_from_results(out.results, journal, cfg.include_only_ok, cfg.include_sequential)
+                    dest, rep = data_patch.patch_data_copy(src, os.path.join(run_dir, 'model_copy'), ent)
+                    log(f'Копия .data с мультами: {dest} (даты: имеющиеся {len(rep["existing_dates"])}, новые {len(rep["new_dates"])}); оригинал не изменён')
+                    text, _ = data_patch._read(src)
+                    for (w, d), msgs in data_patch.control_warnings(text, [(r.wname, r.date) for r in out.results]).items():
+                        for r in out.results:
+                            if r.wname == w and r.date == d:
+                                r.notes.extend(msgs)
+                        log(f'WARNING {w} {d:%d.%m.%Y}: ' + '; '.join(msgs))
             if cfg.make_png:
                 n = report.write_pngs(out.results, os.path.join(run_dir, 'figs'), log=log)
                 if n:

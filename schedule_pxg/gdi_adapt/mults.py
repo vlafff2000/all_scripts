@@ -30,13 +30,12 @@ def parse_mults(text: str) -> List[dict]:
             block = up
             continue
         if line == '/':
-            if block in ('WPIMULT', 'WDFAC'):
+            if block in ('WPIMULT', 'WDFAC', 'DATES'):
                 block = None
             continue
         toks = line.replace('/', ' ').split()
         if block == 'DATES' and len(toks) >= 3 and toks[1].upper()[:3] in _MONTHS:
-            date = datetime(int(toks[2]), _MONTHS[toks[1].upper()[:3]], int(toks[0]))
-            block = None
+            date = datetime(int(toks[2]), _MONTHS[toks[1].upper()[:3]], int(toks[0]))   # в блоке может быть несколько дат: до '/' берём последнюю
         elif block in ('WPIMULT', 'WDFAC') and len(toks) >= 2 and '*' not in toks[0] and '?' not in toks[0]:
             try:
                 v = float(toks[1].replace('D', 'E'))
