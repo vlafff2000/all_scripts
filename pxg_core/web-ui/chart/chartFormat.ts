@@ -1,8 +1,9 @@
-// Копия gas_atlas web/src/chartFormat.ts @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartFormat.ts @ ac18868. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Единая модель оформления графика (как в atlas/chart_style.py): документ {chart, axes, series}.
 // Уровни (тема проекта → тип графика → график) складываются mergeFormats: поле более позднего уровня главнее.
 import { errorSeries, trendSeries } from './trend'
 import type { Axis, AxisStyle, Chart, ChartStyle } from './chartTypes'
+import { fitChart, unfitted } from './axisFit'
 import { applyLooks, withFreshColors, type Look } from './chartStyle'
 
 export type AxisName = 'x' | 'y' | 'y2' | 'y3' | 'y4' | 'y5'
@@ -12,10 +13,14 @@ export type AxisFormat = Omit<AxisStyle, 'minor_step' | 'cross'> & {
   break_from?: string; break_to?: string     // разрыв оси: от и до (число или дата дд.мм.гггг)
   log?: boolean; inverse?: boolean; from_zero?: boolean
 }
+/** Ручное положение элемента файла: сдвиг вправо и вниз в долях рисунка; hide — спрятать (одну подпись точки). */
+export interface ElementPlace { dx?: number; dy?: number; hide?: boolean }
 export interface ChartFormat {
   chart?: ChartStyle
   axes?: Partial<Record<AxisName, AxisFormat>>
   series?: Record<string, Look>      // ключ ряда — seriesLookKey: группа или имя, и вид ряда
+  elements?: Record<string, ElementPlace>      // имя элемента сцены (atlas/engine/core/export_scene.py): только у «этого графика»
+  checks?: { skip?: string[] }      // находки проверки качества, снятые инженером (atlas/chart_qc.py): только у «этого графика»
 }
 
 /** Уровни оформления по порядку: поле более позднего уровня главнее, остальное наследуется. */
@@ -26,6 +31,8 @@ export function mergeFormats(...docs: (ChartFormat | null | undefined)[]): Chart
     if (d.chart) out.chart = { ...out.chart, ...d.chart }
     for (const [k, v] of Object.entries(d.axes ?? {})) out.axes = { ...out.axes, [k]: { ...out.axes?.[k as AxisName], ...v } }
     for (const [k, v] of Object.entries(d.series ?? {})) out.series = { ...out.series, [k]: { ...out.series?.[k], ...v } }
+    for (const [k, v] of Object.entries(d.elements ?? {})) out.elements = { ...out.elements, [k]: { ...out.elements?.[k], ...v } }
+    if (d.checks) out.checks = d.checks
   }
   return out
 }
@@ -41,7 +48,7 @@ export const formatOf = (store: FormatStore | null | undefined, module?: string,
 export const chartKey = (module: string, chartId: string) => `${module}::${chartId}`
 
 const STYLE_KEYS: (keyof AxisStyle)[] = ['decimals', 'date_format', 'font', 'tick_size', 'title_size', 'title_bold', 'title_italic',
-  'tick_bold', 'tick_italic', 'ticks', 'minor_ticks', 'line', 'line_color', 'line_width', 'label_rotate', 'units', 'title_place']
+  'tick_bold', 'tick_italic', 'ticks', 'minor_ticks', 'line', 'line_color', 'line_width', 'label_rotate', 'units', 'title_place', 'positive', 'fit']
 
 /** Граница оси из текста (как chart_style.bound): число с запятой или дата дд.мм.гггг / гггг-мм-дд (мс). Неверное — null. */
 export function parseBound(text: string | number | undefined, time: boolean): number | null {
@@ -61,10 +68,10 @@ export function parseBound(text: string | number | undefined, time: boolean): nu
 /** Ось с настройками документа (как chart_style.style_axis): то, что к оси не подходит, пропускается. */
 export function formatAxis(axis: Axis, spec: AxisFormat, values: number[]): Axis {
   const time = axis.scale === 'time'
-  const out: Axis = { ...axis, style: { ...axis.style } }
+  const out: Axis = { ...unfitted(axis), style: { ...axis.style } }
   if (spec.color) out.color = spec.color
   for (const k of STYLE_KEYS) if (spec[k] !== undefined) (out.style as Record<string, unknown>)[k] = spec[k]
-  if (spec.inverse) out.inverse = true
+  if (spec.inverse !== undefined) out.inverse = spec.inverse
   if (spec.from_zero && axis.scale === 'value') out.from_zero = true
   const low = parseBound(spec.min, time), high = parseBound(spec.max, time)
   if (low === null || high === null || low < high) {
@@ -90,6 +97,10 @@ const AXES: AxisName[] = ['x', 'y', 'y2', 'y3', 'y4', 'y5']
  *  Данные и расчёт не меняются; оси, которой у графика нет, настройка не создаёт. */
 export function applyFormat(chart: Chart, doc: ChartFormat | null | undefined): Chart {
   if (!doc) return chart
+  return fitChart(formatted(chart, doc))      // пределы шкал — после оформления, тем же подбором, что в файле (atlas/axis_auto.py)
+}
+
+function formatted(chart: Chart, doc: ChartFormat): Chart {
   let out: Chart = doc.chart && Object.keys(doc.chart).length ? { ...chart, style: { ...chart.style, ...doc.chart } } : chart
   for (const name of AXES) {
     const spec = doc.axes?.[name], axis = out[name]

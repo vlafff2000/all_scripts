@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/FormatPane.tsx @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/FormatPane.tsx @ ac18868. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Панель «Формат» (как «Формат диаграммы» в Excel): один компонент для всех графиков Атласа. Слева выбор элемента — график,
 // оси, ряды; справа его настройки. Меняет график сразу. Оформление графика и осей пишется на выбранный уровень (раздел или
 // весь проект), вид рядов — в тему проекта по ключу ряда (один и тот же год или группа выглядит одинаково везде).
@@ -156,7 +156,7 @@ export function FormatPane({ chart, element, onElement, scope, onScope, doc, onD
           </>}
           {kind === 'axis' && <>
             <h3>{AXIS_TITLE[axisName]}{axis?.label ? <small> {axis.label}</small> : null}</h3>
-            {(axis?.scale === 'value' || axis?.scale === 'log' || axis?.scale === 'time') && <AxisScaleFields id={axisName} value={doc.axes?.[axisName] ?? {}} set={setAxis} time={axis.scale === 'time'} />}
+            {(axis?.scale === 'value' || axis?.scale === 'log' || axis?.scale === 'time') && <AxisScaleFields id={axisName} value={doc.axes?.[axisName] ?? {}} set={setAxis} time={axis.scale === 'time'} inverseBase={axis.inverse} axis={axis} />}
             <AxisStyleFields value={doc.axes?.[axisName] ?? {}} set={setAxis} time={axis?.scale === 'time'} />
             {(axis?.scale === 'value' || axis?.scale === 'time') && <fieldset>
               <legend>Разрыв оси</legend>

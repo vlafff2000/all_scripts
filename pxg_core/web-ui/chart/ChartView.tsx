@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/ChartView.tsx @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/ChartView.tsx @ ac18868. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
@@ -14,7 +14,7 @@ import { RichText } from './RichField'
 import { alpha, chartTokens, FONT, SIZE, fontCss, PALETTE, palette, seriesColor, setDarkPalette, type ChartTokens } from './chartTheme'
 import { clickAction } from './chartClick'
 import { buildTracks, canExclude, decimalsFor, hover, placeTip, toNumber, type Hover, type HoverMode, type Track, type View } from './chartHover'
-import { STEP_UNITS, MAX_TICKS, calendarTicks, parseStep, stepText, type AxisStep, type StepUnit, Y_BAND, Y_NAMES, axisAt, formatBound, parseBound, fitAxisName, rightAxes, rightOffset, shiftRange, wheelFactor, yAxesOf, yIndex, zoomRange, type AxisName, type Range, type YName } from './chartAxes'
+import { positiveNumber, STEP_UNITS, MAX_TICKS, calendarTicks, parseStep, stepText, type AxisStep, type StepUnit, Y_BAND, Y_NAMES, axisAt, formatBound, parseBound, fitAxisName, rightAxes, rightOffset, shiftRange, wheelFactor, yAxesOf, yIndex, zoomRange, type AxisName, type Range, type YName } from './chartAxes'
 import { seriesLooks, projectFormats, chartFont, formatScope, hiddenEvents, smoothLines, thinCharts, pinSync, pinSyncKind, crosshairSync, tooltipsOn, savedRanges, savedSteps, setHoverMode, sharedRange, zoomSync, useAppliedTheme, useHoverMode, usePref } from './chartPrefs'
 import { looksOf, markerSymbol, seriesLookKey, yearOfKey, type Look } from './chartStyle'
 import { applyFormat, chartKey, mergeFormats, type ChartFormat } from './chartFormat'
@@ -187,11 +187,12 @@ function formatter(a: Axis, span: number) {
       return formatDate(span < 3 * 86400e3 ? iso.slice(0, 16) : iso.slice(0, 10))
     }
     if (typeof v !== 'number') return String(v)
+    v = positiveNumber(v, a.style?.positive)
     return formatNumber(v, Math.abs(v) >= 1e4 ? Math.min(decimals, 1) : decimals).replace(/(,\d*?)0+$/, '$1').replace(/,$/, '')
   }
 }
 
-const TICK_INTERVALS = 5      // то же число делений, что в atlas/render.py
+const TICK_INTERVALS = 5      // делений по умолчанию, когда шкалу не подбирал общий автоподбор (atlas/axis_fit.py)
 
 /** Наименьший «круглый» шаг (1, 2, 2.5, 5 × 10^k), не меньший raw. */
 function niceStep(raw: number) {
@@ -226,8 +227,11 @@ function alignedYAxes(chart: Chart, base: Chart): Record<YName, { min: number; m
   const out = {} as Record<YName, { min: number; max: number; step: number }>
   const hasData = base.series.some(s => s.kind !== 'box' && s.y.some(v => typeof v === 'number' && Number.isFinite(v)))
   if (!hasData) return null
+  const n = gridIntervals(chart)
   for (const key of names) {
     const spec = yAxisAt(chart, Y_NAMES.indexOf(key))
+    const fit = fittedAxis(spec)
+    if (fit) { out[key] = fit; continue }
     let lo = Infinity, hi = -Infinity
     const stacks = new Map<string, number[]>()      // стопка складывается по номеру точки: шкала по сумме, а не по одной серии
     for (const s of base.series) {
@@ -240,12 +244,23 @@ function alignedYAxes(chart: Chart, base: Chart): Record<YName, { min: number; m
       }
     }
     for (const sum of stacks.values()) for (const v of sum) if (v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v) }
-    if (lo > hi) { lo = 0; hi = 1 }      // у оси без данных всё равно те же 5 делений
+    if (lo > hi) { lo = 0; hi = 1 }      // у оси без данных всё равно те же деления
     if (spec.from_zero || hasBars(base, key)) { lo = Math.min(lo, 0); hi = Math.max(hi, 0) }
-    const { start, step } = alignedRange(lo, hi, spec.minimum, spec.maximum)
-    out[key] = { min: start, max: start + TICK_INTERVALS * step, step }
+    const { start, step } = alignedRange(lo, hi, spec.minimum, spec.maximum, n)
+    out[key] = { min: start, max: start + n * step, step }
   }
   return out
+}
+
+/** Границы и шаг шкалы, подобранные общим автоподбором (atlas/axis_auto.py): деления на экране ровно те же, что в файле. */
+function fittedAxis(a: Axis): { min: number; max: number; step: number } | null {
+  return a.auto && a.scale === 'value' && a.minimum != null && a.maximum != null && a.step ? { min: a.minimum, max: a.maximum, step: a.step } : null
+}
+
+/** Число делений общей сетки шкал Y: выбрано автоподбором (от 4 до 8), без него — привычные пять. */
+function gridIntervals(chart: Chart): number {
+  for (let i = 0; i < yCount(chart); i++) { const n = yAxisAt(chart, i).auto?.n; if (n) return n }
+  return TICK_INTERVALS
 }
 
 /** Размах оси времени в мс по всем сериям (для решения, нужен ли ползунок). */
@@ -287,7 +302,7 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
   const axis = (a: Axis, position: 'x' | YName) => {
     const plain = axisBase(a, position), fixed = (position === 'x' ? null : manual[position]) ?? pin?.[position], grid = position !== 'x' ? dual?.[position] : undefined
     const st = steps[position]
-    if (fixed) return withStep({ ...plain, min: fixed[0], max: fixed[1], ...(twin ? { interval: (fixed[1] - fixed[0]) / TICK_INTERVALS } : {}) }, a, st)
+    if (fixed) return withStep({ ...plain, min: fixed[0], max: fixed[1], ...(twin ? { interval: (fixed[1] - fixed[0]) / gridIntervals(chart) } : {}) }, a, st)
     return withStep(grid ? { ...plain, min: grid.min, max: grid.max, interval: grid.step } : plain, a, st)
   }
   /** Ручной основной интервал: у числовой оси — interval, у оси дат — календарные деления по всему размаху рядов. */
@@ -330,7 +345,11 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
       type: a.scale, inverse: a.inverse, scale: !zero,
       min: a.scale === 'category' ? undefined : a.minimum ?? (zero ? 0 : undefined),
       max: a.scale === 'category' ? undefined : a.maximum ?? undefined,
-      interval: a.step && a.scale === 'value' ? a.step : undefined,
+      // подобранный шаг оси X — не жёсткий interval: при увеличении делений стало бы 0–1. Число делений и предел шага дают
+      // тот же шаг на полном виде (как в файле) и более мелкий при увеличении
+      ...(!y && a.scale === 'value' && a.step && a.auto?.step === a.step
+        ? { splitNumber: a.auto.n ?? 5, maxInterval: a.step }
+        : { interval: a.step && a.scale === 'value' ? a.step : undefined }),
       ...(as.break_lo !== undefined && as.break_hi !== undefined && (a.scale === 'value' || a.scale === 'time') ? { breaks: [{ start: as.break_lo, end: as.break_hi, gap: 8 }] } : {}),
       minInterval: (a.unit === 'скв.' || a.unit === 'ед.') && a.scale === 'value' ? 1 : undefined,      // скважин — целое число, делений по 0,5 не бывает
       data: a.scale === 'category' ? a.categories ?? [] : undefined,
@@ -353,7 +372,7 @@ function toOption(chart: Chart, excludeMode: boolean, tk: ChartTokens, custom: b
         ...(as.label_rotate ? { rotate: as.label_rotate } : {}),
         ...(a.scale === 'time'
           ? dateFormat ? { formatter: dateFormat } : { formatter: { year: '{yyyy}', month: '{MM}.{yyyy}', day: '{dd}.{MM}', hour: '{HH}:{mm}', minute: '{HH}:{mm}', second: '{HH}:{mm}:{ss}', none: '{dd}.{MM}.{yyyy}' } }
-          : a.scale === 'category' ? {} : { formatter: (v: number) => formatNumber(v / factor, as.decimals ?? null) }),
+          : a.scale === 'category' ? {} : { formatter: (v: number) => formatNumber(positiveNumber(v, as.positive) / factor, as.decimals ?? null) }),
       },
       splitLine: { show: showGrid && (position === 'y' || position === 'x') && (y || a.scale !== 'category'),
         lineStyle: { color: cs.grid_color || tk.grid, width: cs.grid_width ?? 1, ...(cs.grid_dash ? { type: DASH[cs.grid_dash] } : {}) } },
@@ -1693,7 +1712,7 @@ export function ChartView({ chart: given, module, format, compact, excludeMode, 
         <FormatPane chart={chart} element={element} onElement={setElement} scope="project" onScope={() => {}} scopeLabel={format.label}
           doc={format.doc} onDoc={format.onDoc} colorOf={colorOf(chart)} looks={format.doc.series ?? {}}
           onLooks={series => format.onDoc({ ...format.doc, series: Object.keys(series).length ? series : undefined })}
-          onReplace={format.onDoc} onClose={() => setSettings(false)} />
+          onReplace={d => format.onDoc({ ...d, elements: format.doc.elements, checks: format.doc.checks })} onClose={() => setSettings(false)} />
       ) : (
         <FormatPane chart={chart} element={element} onElement={setElement} scope={module ? scope : 'project'}
           onScope={module ? setScope : () => {}} doc={formatDoc(store, module ? scope : 'project', module ?? '', given.id)}
