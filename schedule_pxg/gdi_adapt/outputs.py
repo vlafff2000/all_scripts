@@ -20,12 +20,8 @@ def increments(rows: List[AdaptResult]) -> dict:
     return out
 
 
-def write_include(results: List[AdaptResult], path: str, only_ok: bool = False, sequential: bool = True, journal=None) -> int:
-    """
-    Формат как в исходном results_to_str: комментарии с r2, затем для каждой даты ГДИ
-    DATES / WPIMULT / WDFAC. Возвращает число записанных скважин.
-    journal (MultJournal): приращения и D берутся из журнала итераций (там учтены стоящие мульты и ручные правки).
-    """
+def resolve_mults(results, only_ok: bool = False, sequential: bool = True, journal=None):
+    """Строки (по дате и скважине), приращения WPIMULT и D-факторы {id(r): значение}; журнал приоритетнее (ручные правки)."""
     rows = [r for r in results if (r.ok or not only_ok)]
     rows.sort(key=lambda r: (r.date, r.wname))
     inc = increments(rows) if sequential else {id(r): r.pi_mult for r in rows}
@@ -37,6 +33,16 @@ def write_include(results: List[AdaptResult], path: str, only_ok: bool = False, 
                 inc[id(r)] = e['increment']
                 if e['dfac'] is not None:
                     dval[id(r)] = e['dfac']
+    return rows, inc, dval
+
+
+def write_include(results: List[AdaptResult], path: str, only_ok: bool = False, sequential: bool = True, journal=None) -> int:
+    """
+    Формат как в исходном results_to_str: комментарии с r2, затем для каждой даты ГДИ
+    DATES / WPIMULT / WDFAC. Возвращает число записанных скважин.
+    journal (MultJournal): приращения и D берутся из журнала итераций (там учтены стоящие мульты и ручные правки).
+    """
+    rows, inc, dval = resolve_mults(results, only_ok, sequential, journal)
     multi = len({r.wname for r in rows}) < len(rows)
     out = ['-- Результаты адаптации ГДИ (WPIMULT, WDFAC)']
     if multi and sequential:
