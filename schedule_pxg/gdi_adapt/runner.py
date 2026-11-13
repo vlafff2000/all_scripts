@@ -287,7 +287,14 @@ def run(cfg, project_dir: str, provider, progress: Optional[Callable[[int, int],
             report.write_excel(out.results, out.failures, cfg, meta, os.path.join(run_dir, 'report.xlsx'), qc_rows=out.qc_rows)
             outputs.write_csv(out.results, os.path.join(run_dir, 'results.csv'))
             if cfg.write_include:
-                n = outputs.write_include(out.results, os.path.join(run_dir, 'wpimult_wdfac.inc'), cfg.include_only_ok, cfg.include_sequential)
+                journal = None
+                if cfg.mult_journal:
+                    from .mults import MultJournal
+                    journal = MultJournal(cfg.mult_journal)
+                    for r in sorted(out.results, key=lambda r: r.date):
+                        if r.ok or not cfg.include_only_ok:
+                            journal.add(r, state=cfg.snapshot_state, note=os.path.basename(run_dir))
+                n = outputs.write_include(out.results, os.path.join(run_dir, 'wpimult_wdfac.inc'), cfg.include_only_ok, cfg.include_sequential, journal)
                 log(f'Include для модели: {n} скважин')
             if cfg.make_png:
                 n = report.write_pngs(out.results, os.path.join(run_dir, 'figs'), log=log)

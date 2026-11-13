@@ -20,14 +20,23 @@ def increments(rows: List[AdaptResult]) -> dict:
     return out
 
 
-def write_include(results: List[AdaptResult], path: str, only_ok: bool = False, sequential: bool = True) -> int:
+def write_include(results: List[AdaptResult], path: str, only_ok: bool = False, sequential: bool = True, journal=None) -> int:
     """
     Формат как в исходном results_to_str: комментарии с r2, затем для каждой даты ГДИ
     DATES / WPIMULT / WDFAC. Возвращает число записанных скважин.
+    journal (MultJournal): приращения и D берутся из журнала итераций (там учтены стоящие мульты и ручные правки).
     """
     rows = [r for r in results if (r.ok or not only_ok)]
     rows.sort(key=lambda r: (r.date, r.wname))
     inc = increments(rows) if sequential else {id(r): r.pi_mult for r in rows}
+    dval = {id(r): r.d for r in rows}
+    if journal is not None:
+        for r in rows:
+            e = journal.for_result(r)
+            if e:
+                inc[id(r)] = e['increment']
+                if e['dfac'] is not None:
+                    dval[id(r)] = e['dfac']
     multi = len({r.wname for r in rows}) < len(rows)
     out = ['-- Результаты адаптации ГДИ (WPIMULT, WDFAC)']
     if multi and sequential:
@@ -47,7 +56,7 @@ def write_include(results: List[AdaptResult], path: str, only_ok: bool = False, 
         out += [f'{r.wname}\t{inc[id(r)]:.8g}\t/' for r in grp]
         out.append('/')
         out.append('WDFAC')
-        out += [f'{r.wname}\t{r.d:.8e}\t/' for r in grp]
+        out += [f'{r.wname}\t{dval[id(r)]:.8e}\t/' for r in grp]
         out.append('/')
         out.append('')
     with open(path, 'w', encoding='utf-8') as f:
