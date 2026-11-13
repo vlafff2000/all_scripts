@@ -31,7 +31,7 @@ def test_maps_and_gdm_read_same_volume(tmp_path):
     gas = pd.DataFrame({"date": DAYS, "kind": "withdrawal", "gas": 250.0})
     root = write_project(tmp_path / "st", {"production": pd.DataFrame(rows), "gas_db": gas})
     arrays = atlas_source.AtlasData(root, "a" * 32).flow_arrays()
-    assert arrays["flow"].tolist() == [250.0] * 3                       # Карты: тыс. м³/сут
+    assert arrays["flow"].tolist() == [250000.0] * 3                    # Карты: м³/сут
     hist, ref, _name, _found, _groups = atlas_data.load(str(root))
     assert hist["rate"].tolist() == [250000.0] * 3                      # ГДМ: м³/сут
     assert ref["Объем"].tolist() == [250000.0] * 3                      # эталон — те же м³/сут, что и у скважины
