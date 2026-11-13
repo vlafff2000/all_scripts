@@ -19,6 +19,7 @@ from typing import List
 import numpy as np
 from scipy.optimize import minimize
 
+from . import depression as dpm
 from . import physics as ph
 from .errors import AdaptError
 from .gdi import GDI, b_negative, fit_ab_dp2
@@ -79,6 +80,20 @@ class AdaptResult:
     # --- устойчивость: WPIMULT при отбрасывании по одному режиму (jackknife) ---
     pi_lo: float = float('nan')
     pi_hi: float = float('nan')
+    # --- депрессия модели против ГДИ, три меры (depression.py); давления абсолютные, депрессия в барах ---
+    dep_gdi: np.ndarray = None                          # Pпл - Pзаб ГДИ по режимам
+    dep_before: np.ndarray = None                       # депрессия модели при дебитах режимов ГДИ, до адаптации
+    dep_after: np.ndarray = None                        # то же после адаптации
+    dep_hist_gdi: float = float('nan')                  # депрессия по кривой ГДИ при дебите истории модели
+    dep_hist_before: float = float('nan')               # модель при дебите истории: до / после адаптации
+    dep_hist_after: float = float('nan')
+    dep_errs_before: dict = field(default_factory=dict)   # {мера: отклонение, %} до адаптации
+    dep_errs_after: dict = field(default_factory=dict)
+    p_res_gap: float = float('nan')                     # Pпл модели - Pпл ГДИ, бар
+    dep_metric: str = ''                                # основная мера и порог, заданные инженером
+    dep_threshold_pct: float = None
+    dep_status: str = ''                                # '' | 'green' | 'red' - подсказка
+    dep_reason: str = ''                                # причина цвета
 
     @property
     def ok(self) -> bool:
@@ -215,6 +230,23 @@ def adapt_well(gdi: GDI, snap, pvt, cfg) -> AdaptResult:
         problems.append(f'дебит модели на дату ГДИ ({q_op:,.0f} м³/сут) в {k:.1f} раз {word} дебитов ГДИ '
                         f'(модель на эту дату не соответствует режиму исследования?)'.replace(',', ' '))
 
+    # ---- депрессия модели против ГДИ: три меры ----
+    dep_gdi = p_res - pbhp
+    dep_b = flow.dp_for_rate(q_std, 1.0, None)
+    dep_a = flow.dp_for_rate(q_std, mult, d_well)
+    p_gdi_mean = float(np.mean(p_res))
+    dep_h_gdi = dpm.gdi_dep_at_rate(gdi.a, gdi.b, q_op, p_gdi_mean, cfg.ab_q_units)
+    dep_h_b = float(flow.dp_for_rate(q_op, 1.0, None)[0]) if q_op > 0 else float('nan')
+    dep_h_a = float(flow.dp_for_rate(q_op, mult, d_well)[0]) if q_op > 0 else float('nan')
+    errs_b = {'regimes': dpm.rel_err_pct(dep_b, dep_gdi), 'history': dpm.rel_err_pct(dep_h_b, dep_h_gdi), 'dp2': rel_err(dp2_b)}
+    errs_a = {'regimes': dpm.rel_err_pct(dep_a, dep_gdi), 'history': dpm.rel_err_pct(dep_h_a, dep_h_gdi), 'dp2': rel_err(dp2_a)}
+    gap = dpm.p_res_gap(snap.wbp, p_res)
+    warn = dpm.p_res_gap_warning(gap, dep_gdi, cfg.p_res_gap_warn_bar)
+    if warn:
+        problems.append(warn)
+    dep_metric, dep_thr = cfg.dep_criterion_for(gdi.wname)
+    dep_status, dep_reason, _ = dpm.verdict(dep_metric, errs_a, dep_thr)
+
     # A, B модели - из её собственной кривой dP^2(Q) после адаптации (та же МНК-процедура, что для ГДИ)
     a_mod, b_mod = fit_ab_dp2(grid, curve_a, cfg.ab_q_units)
     if b_negative(a_mod, b_mod, float(np.max(grid)), cfg.ab_q_units):
@@ -230,7 +262,10 @@ def adapt_well(gdi: GDI, snap, pvt, cfg) -> AdaptResult:
         success=bool(best.success), problems=problems, notes=notes, source=gdi.source,
         dp2_gdi=dp2_gdi, dp2_before=dp2_b, dp2_after=dp2_a, dp2_err_before=rel_err(dp2_b), dp2_err_after=rel_err(dp2_a),
         curve_q=grid, curve_dp2_before=curve_b, curve_dp2_after=curve_a,
-        q_op=q_op, dp_op=dp_op, dp2_op=dp2_op, dp2_op_gdi=dp2_op_gdi, q_ratio=q_ratio)
+        q_op=q_op, dp_op=dp_op, dp2_op=dp2_op, dp2_op_gdi=dp2_op_gdi, q_ratio=q_ratio,
+        dep_gdi=dep_gdi, dep_before=dep_b, dep_after=dep_a, dep_hist_gdi=dep_h_gdi, dep_hist_before=dep_h_b, dep_hist_after=dep_h_a,
+        dep_errs_before=errs_b, dep_errs_after=errs_a, p_res_gap=gap, dep_metric=dep_metric, dep_threshold_pct=dep_thr,
+        dep_status=dep_status, dep_reason=dep_reason)
 
 
 def jackknife(gdi: GDI, snap, pvt, cfg, res: AdaptResult):

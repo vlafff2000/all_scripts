@@ -22,6 +22,10 @@ const COLS: [Key, string, (r: AdaptResultRow) => string][] = [
   ['a_gdi', 'A ГДИ', r => fmt(r.a_gdi, 4)], ['a_model', 'A модель', r => fmt(r.a_model, 4)],
   ['b_gdi', 'B ГДИ', r => fmt(r.b_gdi, 5)], ['b_model', 'B модель', r => fmt(r.b_model, 5)],
   ['q_ratio', 'Q модели / Q ГДИ', r => fmt(r.q_ratio, 2)],
+  ['dep_err_after', 'Откл. депрессии по режимам ГДИ, %', r => fmt(r.dep_err_after?.regimes, 1)],
+  ['dep_hist_after', 'Откл. депрессии при дебите истории, %', r => fmt(r.dep_err_after?.history, 1)],
+  ['p_res_gap', 'Pпл модели − ГДИ, бар', r => fmt(r.p_res_gap, 1)],
+  ['dep_status', 'Критерий депрессии (порог инженера)', r => r.dep_status === 'green' ? '✓ ' + r.dep_reason : r.dep_status === 'red' ? '✗ ' + r.dep_reason : r.dep_reason || '—'],
 ]
 
 /** Период выборки: последние 3 или 5 лет от последней даты в результатах, всё, либо свои даты «с» и «по». */

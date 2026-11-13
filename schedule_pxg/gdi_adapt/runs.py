@@ -52,7 +52,12 @@ def result_dict(r: AdaptResult, qc: str = "") -> dict:
         t_requested=r.t_requested, shift_days=_f(r.shift_days),
         q_gdi=_arr(r.q_gdi, Q_SHOW), q_before=_arr(r.q_before, Q_SHOW), q_after=_arr(r.q_after, Q_SHOW), dp2_gdi=_arr(r.dp2_gdi),
         curve_q=_arr(r.curve_q, Q_SHOW), curve_before=_arr(r.curve_dp2_before), curve_after=_arr(r.curve_dp2_after),
-        at_bound=any("границе" in p for p in r.problems), dep_qmax=_dep_qmax(r))
+        at_bound=any("границе" in p for p in r.problems), dep_qmax=_dep_qmax(r),
+        dep_gdi=_arr(r.dep_gdi), dep_before=_arr(r.dep_before), dep_after=_arr(r.dep_after),
+        dep_hist_gdi=_f(r.dep_hist_gdi), dep_hist_before=_f(r.dep_hist_before), dep_hist_after=_f(r.dep_hist_after),
+        dep_err_before={k: _f(v) for k, v in r.dep_errs_before.items()}, dep_err_after={k: _f(v) for k, v in r.dep_errs_after.items()},
+        p_res_gap=_f(r.p_res_gap), dep_metric=r.dep_metric, dep_threshold_pct=r.dep_threshold_pct,
+        dep_status=r.dep_status, dep_reason=r.dep_reason)
 
 
 def _med(v):
