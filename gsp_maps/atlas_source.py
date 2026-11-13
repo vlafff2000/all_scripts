@@ -25,6 +25,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from pxg_core import atlas_flows
+
 from . import atlas_seasons
 from .store import KIND_BY_NAME, _frame_to_arrays
 
@@ -147,7 +149,7 @@ class AtlasData:
         if prod is None or prod.empty:
             raise ValueError("В проекте Атласа «%s» нет расходов: загрузите базу расходов в Атласе." % self.name)
         prod = prod.copy()
-        prod["q"] = pd.to_numeric(prod["q"], errors="coerce")
+        prod["q"] = atlas_flows.production_m3(prod["q"])      # Атлас хранит м³/сут; Карты считают в м³ (интерфейс делит на 1e6 → млн м³)
         if self.excluded:       # исключённая в Атласе точка — пропуск, а не ноль
             prod.loc[point_ids(prod, "production").isin(self.excluded), "q"] = np.nan
         override = self.groups_override()
