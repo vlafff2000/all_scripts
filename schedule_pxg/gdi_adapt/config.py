@@ -16,6 +16,7 @@ INFLOWS = ('p-p', 'r-g')
 OBJECTIVES = ('relative', 'absolute')
 P_UNITS = ('bar', 'psi', 'MPa', 'kgf/cm2')
 Q_UNITS = ('m3/day', '10^3 m3/day')
+METRICS = ('regimes', 'history', 'dp2')
 
 
 @dataclass
@@ -64,6 +65,12 @@ class Config:
 
     model_rate_ratio_tol: float = 3.0     # дебит модели на дату ГДИ отличается от дебитов ГДИ более чем в N раз -> замечание
     max_step_shift_days: float = 90.0     # снимок взят с шага модели, сдвинутого от даты ГДИ больше чем на N дней -> замечание
+
+    # ---------------- критерий депрессии (подсказка: решение за инженером, см. depression.py) ----------------
+    dep_metric: str = 'regimes'           # основная мера: 'regimes' - по режимам ГДИ; 'history' - при дебите истории; 'dp2' - по dP^2 (A, B)
+    dep_threshold_pct: Optional[float] = None   # допустимое отклонение депрессии модели от ГДИ, %; None - не красить
+    dep_well_criteria: Optional[dict] = None    # по скважинам: {"33": {"metric": "history", "threshold_pct": 15}}
+    p_res_gap_warn_bar: float = 2.0       # Pпл модели и ГДИ расходятся больше N бар (или >50% депрессии) -> предупреждение
 
     # ---------------- входной контроль качества ГДИ (см. pi_dfac/quality.py) ----------------
     qc_enabled: bool = True
@@ -123,12 +130,31 @@ class Config:
                 raise ValueError(f'well_bounds[{w}].dfac_bounds={df}: нужно 0 <= min < max')
             wb[str(w)] = {'pi_mult_bounds': list(pm), 'dfac_bounds': list(df)}
         self.well_bounds = wb or None
+        one_of('dep_metric', METRICS)
+        if self.dep_threshold_pct is not None and float(self.dep_threshold_pct) <= 0:
+            raise ValueError('dep_threshold_pct: нужно > 0 или null')
+        crit = {}
+        for w, d in (self.dep_well_criteria or {}).items():
+            m = d.get('metric', self.dep_metric)
+            if m not in METRICS:
+                raise ValueError(f'dep_well_criteria[{w}].metric={m!r}: допустимо {METRICS}')
+            t = d.get('threshold_pct', self.dep_threshold_pct)
+            if t is not None and float(t) <= 0:
+                raise ValueError(f'dep_well_criteria[{w}].threshold_pct: нужно > 0 или null')
+            crit[str(w)] = {'metric': m, 'threshold_pct': None if t is None else float(t)}
+        self.dep_well_criteria = crit or None
         if self.max_step_shift_days < 0:
             raise ValueError('max_step_shift_days должно быть >= 0')
         if self.n_starts < 1:
             raise ValueError('n_starts должно быть >= 1')
         if self.wells is not None:
             self.wells = [str(w) for w in self.wells]
+
+    def dep_criterion_for(self, wname: str):
+        """(мера, порог %) депрессии для скважины: индивидуальный критерий инженера или общий."""
+        d = (self.dep_well_criteria or {}).get(str(wname), {})
+        t = d.get('threshold_pct', self.dep_threshold_pct)
+        return d.get('metric', self.dep_metric), (None if t is None else float(t))
 
     def bounds_for(self, wname: str):
         """((min, max) WPIMULT, (min, max) D-фактора) для скважины: индивидуальные границы или общие."""

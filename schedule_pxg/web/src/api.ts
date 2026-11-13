@@ -281,6 +281,10 @@ export interface AdaptResultRow {
   ok: boolean; problems: string[]; notes: string[]; substituted: boolean; t_name: string
   q_gdi: (number | null)[]; q_before: (number | null)[]; q_after: (number | null)[]; dp2_gdi: (number | null)[]
   curve_q: (number | null)[]; curve_before: (number | null)[]; curve_after: (number | null)[]; at_bound: boolean; dep_qmax: number | null
+  dep_gdi: (number | null)[]; dep_before: (number | null)[]; dep_after: (number | null)[]
+  dep_hist_gdi: number | null; dep_hist_before: number | null; dep_hist_after: number | null
+  dep_err_before: Record<string, number | null>; dep_err_after: Record<string, number | null>
+  p_res_gap: number | null; dep_metric: string; dep_threshold_pct: number | null; dep_status: '' | 'green' | 'red'; dep_reason: string
 }
 export interface AdaptGroupRow { group: string; wells: number; q_gdi: number; q_before: number; q_after: number; err_before: number | null; err_after: number | null }
 export interface AdaptView {
