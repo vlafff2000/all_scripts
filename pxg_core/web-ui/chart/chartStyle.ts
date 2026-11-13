@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartStyle.ts @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartStyle.ts @ ac18868. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 // Вид рядов графика (окно «Настройка»): цвет, линия, маркеры. Хранится в проекте (projectLooks.ts); данные и расчёт не меняются.
 import type { Chart, Series } from './chartTypes'
 

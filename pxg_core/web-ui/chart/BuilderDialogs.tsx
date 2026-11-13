@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/BuilderDialogs.tsx @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/BuilderDialogs.tsx @ ac18868. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { AxisStyle, ChartStyle } from './chartTypes'

@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/richText.ts @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/richText.ts @ ac18868. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 /**
  * Подписи с верхними и нижними индексами: `<sup>…</sup>` и `<sub>…</sub>`.
  * Тот же набор тегов понимает Plotly (выгрузка PNG/PDF/SVG), поэтому строка хранится одна и та же

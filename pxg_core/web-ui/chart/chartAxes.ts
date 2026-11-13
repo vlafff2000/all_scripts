@@ -1,4 +1,4 @@
-// Копия gas_atlas web/src/chartAxes.ts @ f26c7ed. Не править: tools/sync_charts_from_atlas.py обновляет копию.
+// Копия gas_atlas web/src/chartAxes.ts @ ac18868. Не править: tools/sync_charts_from_atlas.py обновляет копию.
 import type { Axis, Chart } from './chartTypes'
 // Ручная правка осей графика: зоны осей, масштаб колесом, сдвиг перетаскиванием, ввод границ.
 /** Шкалы Y по порядку: основная слева, затем правые от графика наружу. */
@@ -167,3 +167,9 @@ export function calendarTicks(lo: number, hi: number, step: AxisStep): number[] 
 }
 
 export const stepText = (s: AxisStep | null | undefined) => (s ? String(s.n).replace('.', ',') : '')
+
+/** Обратное направление оси: настройка документа главнее оси модуля, в том числе явное «нет» (уровень жидкости идёт обратным по умолчанию). */
+export const effectiveInverse = (base: boolean | undefined, spec: boolean | undefined): boolean => spec ?? !!base
+
+/** Число без минуса при настройке оси «положительные числа» (только вид подписей и подсказок, данные не меняются). */
+export const positiveNumber = (v: number, on: boolean | undefined): number => (on ? Math.abs(v) : v)
