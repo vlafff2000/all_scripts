@@ -918,6 +918,7 @@ class Group:
     exact: bool
     base: bool = False
     text: str = ""
+    pos: int = -1          # номер столбца-замера в таблице: два столбца могут называться одинаково («10.2025» дважды — опечатка), метка не различает их
 
 
 _DATE_ONLY = re.compile(r"\s*(?:\d{1,2}[./])?\d{1,2}[./]\d{4}\s*г?\.?\s*", re.I)
@@ -1164,8 +1165,16 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
     groups = _groups(tbl, nhdr, rep)
     base = next((g for g in groups if g.base), None)
     sgroups = [g for g in groups if not g.base]
+    for n_, g_ in enumerate(sgroups):
+        g_.pos = n_
     por_groups = {gi for gi, g in enumerate(sgroups) if _group_has_porosity(tbl, nhdr, g)}
     frac_groups = {gi for gi, g in enumerate(sgroups) if _span_frac(tbl, nhdr, g.x0, g.x1)}
+    kg_hdr = re.compile(r"(?<![а-яa-z])[кk]\s*[гrg]|газонасыщенност", re.I)
+    kg_noted: set = set()
+    no_kg = {gi for gi, g in enumerate(sgroups)         # в шапке замера нет «Кг» (скв. 447: «Нг, м | Нг, м» — вторая «Нг» опечатка): Кг — последний из двух столбцов «Нг»
+             if not any(not c.vcont and g.x0 - 3 <= c.xc <= g.x1 + 3 and kg_hdr.search(c.text) for r in tbl.rows[:nhdr] for c in r.cells)}
+    if frac_groups:
+        frac_groups |= no_kg                              # единица Кг («д.е.») у замера без «Кг» в шапке — как у соседних замеров
     base_frac = base is not None and _span_frac(tbl, nhdr, base.x0, base.x1)
     tid = tbl.index + 1
     rep.tables.append({"Файл": rep.file, "Таблица": tid, "Тип": "интервалы насыщения", "Заголовок перед таблицей": title, "Раздел": section,
@@ -1309,8 +1318,11 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                 continue
             ivn, rec, extras = [], {"kg": "", "h": "", "sat": "", "lith": "", "kp": "", "hg": ""}, []
             fresh = any(c.dup != "v" for c in cells)             # все значения — повтор вертикально объединённых ячеек строки выше: нового исследования нет
+            hgs: List[str] = []
             for c in cells:
                 k = _leaf(tbl, nhdr, c)
+                if k == "hg":
+                    hgs.append(c.text)
                 if not re.search(r"\d", c.text) and (_clay(c.text) or _WATER_RX.search(c.text)):      # слово в объединённой ячейке стоит над столбцами разных признаков: относится к замеру целиком
                     if _clay(c.text):
                         rec["kg"] = rec["kg"] or c.text
@@ -1323,6 +1335,11 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                     ivn.extend(nums(ctext)[:2 - len(ivn)] if fnum(ctext) is None else [fnum(ctext)])      # интервал одной ячейкой «784.8-788.4» или две ячейки
                 elif k in rec:
                     rec[k] = _kg_clean(c.text) if k == "kg" else c.text
+            if gi in no_kg and not rec["kg"] and len(hgs) >= 2 and not re.search(r"[а-яa-z]", hgs[-1], re.I):
+                rec["hg"], rec["kg"] = hgs[0], _kg_clean(hgs[-1])
+                if gi not in kg_noted:
+                    kg_noted.add(gi)
+                    rep.issue("note", "kg_column_by_position", "Таблица %d, замер «%s»: в шапке нет «Кг» (две колонки «Нг»): Кг взят из второй колонки" % (tid, sgroups[gi].label[:30]), _src(tbl, i))
             if len(ivn) < 2 and base_rows and (rec["kg"] or rec["hg"] or rec["sat"]) and base_rows[-1]["src"] == _src(tbl, i):
                 ivn = [base_rows[-1]["from"], base_rows[-1]["to"]]   # в замере только Нг и Кг: интервал — из столбца «Интервал» этой строки
                 fresh = fresh or base_rows[-1].get("fresh", True)
@@ -1606,7 +1623,7 @@ def _add_gvk(rep: Report, g: Group, pack: str, title: str, md: Optional[float], 
         notes = "; ".join(x for x in (notes, "а.о. в отчёте расходится с альтитудой − MD (%g)" % calc) if x)
         conf = MID
     rep.packs.append({"Файл": rep.file, "Скважина": rep.well, "Столбец-замер": g.label, "Дата замера": g.date, "Заголовок в документе": title, "Пачка": pack,
-                      "Источник": source, "Основание": notes, "Уверенность": conf, "ГВК MD, м": md, "ГВК а.о., м": abs_val, "ГВК (как в отчёте)": text, "_kind": "gvk"})
+                      "Источник": source, "Основание": notes, "Уверенность": conf, "ГВК MD, м": md, "ГВК а.о., м": abs_val, "ГВК (как в отчёте)": text, "_kind": "gvk", "_g": g.pos})
 
 
 _GVK_SENT = re.compile(r"ГВК[^.]{0,60}?(?:отмечается|фиксируется)\s+на\s+глубине\s*[–—-]?\s*(" + NUM + r")\s*м", re.I)
@@ -1767,22 +1784,48 @@ def _check_unrecognized(rep: Report, tbl: wt.Table) -> None:
             tbl.index + 1, depths), "таблица %d" % (tbl.index + 1))
 
 
+def best_title(candidates: List[str], tbl: wt.Table, first_row: int, default: str) -> str:
+    """Перед двумя таблицами подряд бывает два абзаца («… в верхней песчаной пачке в интервале 760.9–780.1», «… в нижней … 790.0–798.3»): таблица берёт тот,
+    чьи глубины совпадают с её интервалами, а не просто последний (скв. 26: обе таблицы получали «нижнюю пачку»)."""
+    depth = [v for r in tbl.rows[first_row:] for c in r.cells if re.fullmatch(r"[\s\d.,–—\-]+", c.text or "") for v in nums(c.text) if 300 <= v <= 2500]
+    if len(depth) < 2:
+        return default
+
+    def score(text: str) -> float:
+        given = [v for v in nums(text) if 300 <= v <= 2500]
+        if len(given) < 2 or not re.search(r"пачк", text, re.I):
+            return -1.0
+        lo, hi = min(given), max(given)
+        return sum(1 for d in depth if lo - 0.6 <= d <= hi + 0.6) / len(depth)
+
+    best = max(candidates, key=score, default=default)
+    return best if score(best) >= 0.8 and score(best) > score(default) else default
+
+
 def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, str]] = None) -> Report:
     rep = Report(file=os.path.basename(file), path=file)
     read_header(rep, blocks)
     rep.kind = report_kind(blocks)
     last_title, section = "", ""
     sec_rx = re.compile(r"^(отбивка|определение|оценка|поиск|результаты|выводы|таблица)", re.I)
+    recent: List[str] = []              # абзацы перед группой таблиц (две таблицы подряд делят абзацы перед ними)
+    last_para, after_table = "", False
     for b in blocks:
         if isinstance(b, wt.Para):
-            last_title = b.text
+            last_title = last_para = b.text
+            if after_table:
+                recent, after_table = [], False
+            recent.append(b.text)
             if sec_rx.match(b.text) and len(b.text) < 160:
                 section = b.text
             continue
         kind, nh = table_kind(b)
+        candidates, after_table = recent[-4:], True
         if not kind:
             _check_unrecognized(rep, b)
             continue
+        if kind in ("intervals", "simple_intervals"):
+            last_title = best_title(candidates, b, nh, last_para)
         if kind not in ("intervals", "simple_intervals"):
             rep.tables.append({"Файл": rep.file, "Таблица": b.index + 1, "Тип": KIND_NAMES[kind], "Заголовок перед таблицей": last_title, "Раздел": section,
                                "Столбцы-замеры": "", "Строк": len(b.rows) - nh})
@@ -2227,10 +2270,11 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
             b = gis.Block(sheet=well, well=well, block=n, xl_row=0, date_text=first["Столбец-замер"], date=d, exact=exact, season=gis.season_of(d.month),
                           quality="" if exact else "только месяц и год", note=rep0.file)
             gvk_by_pack: Dict[str, dict] = {}
-            cols = {(rp.file, r["Столбец-замер"]) for rp, r in items if not r.get("_gap")}       # ГВК — только из отчёта, взятого в БД
+            cols = {(rp.file, r["Столбец-замер"], r.get("_g")) for rp, r in items if not r.get("_gap")}       # ГВК — только из отчёта, взятого в БД, и из того же столбца-замера
+            labels = {(f, lab) for f, lab, _g in cols}
             for rp in {id(x): x for x, _ in items}.values():
                 for p in rp.packs:
-                    if p.get("_kind") == "gvk" and (rp.file, p["Столбец-замер"]) in cols and p.get("ГВК MD, м") is not None:
+                    if p.get("_kind") == "gvk" and ((rp.file, p["Столбец-замер"], p.get("_g")) in cols if p.get("_g", -1) is not None and p.get("_g", -1) >= 0 else (rp.file, p["Столбец-замер"]) in labels) and p.get("ГВК MD, м") is not None:
                         gvk_by_pack[p["Пачка"] + "|" + p["Заголовок в документе"]] = p
             last_row: Dict[str, gis.Row] = {}
             for rp, r in items:
