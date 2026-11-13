@@ -1,7 +1,7 @@
 """История и эталон из проекта Газового Атласа (его `storage/`): база расходов и «БД по учету газа» подтягиваются сами.
 
-Читаем так же, как «Карты» (`gsp_maps.atlas_source`): только чтение таблиц `production` и `gas_db` снимка проекта. Расходы Атласа —
-тыс. м³/сут, ГДМ считает в м³/сут, поэтому ×1000. Точки, исключённые в Атласе, пропускаются (последнее слово за инженером там).
+Читаем так же, как «Карты» (`gsp_maps.atlas_source`): только чтение таблиц `production` и `gas_db` снимка проекта. Расходы скважин Атласа —
+м³/сут, «БД по учету газа» — тыс. м³/сут (пересчёт — `pxg_core.atlas_flows`). Точки, исключённые в Атласе, пропускаются (последнее слово за инженером там).
 Какое хранилище и какой проект — подсказка: хранилище из `GAS_ATLAS_STORAGE` или заданное вручную, проект — самый свежий не
 демонстрационный с расходами; выбор можно поменять.
 Python 3.8+.
@@ -11,6 +11,8 @@ from __future__ import annotations
 from typing import List, Optional, Tuple
 
 import pandas as pd
+
+from pxg_core import atlas_flows
 
 from . import history
 
@@ -55,19 +57,19 @@ def load(storage: str = "", project_id: str = ""):
     if prod is None or prod.empty:
         return None
     prod = prod[prod["kind"].isin(KIND)].copy()
-    prod["q"] = pd.to_numeric(prod["q"], errors="coerce")
+    prod["q"] = atlas_flows.production_m3(prod["q"])      # уже м³/сут: Атлас хранит расходы скважин в м³/сут
     if data.excluded:
         prod = prod[~atlas_source.point_ids(prod, "production").isin(data.excluded)]
     prod = prod[prod["q"].notna()]
     hist = pd.DataFrame({"well": prod["well"].astype(str).str.strip().to_numpy(),
                          "date": pd.to_datetime(prod["date"]).dt.normalize().to_numpy(),
-                         "rate": (prod["q"] * 1000.0).to_numpy(), "hours": float("nan"),
+                         "rate": prod["q"].to_numpy(), "hours": float("nan"),
                          "kind": prod["kind"].map(KIND).to_numpy()})[history.COLUMNS].reset_index(drop=True)
     gas = data.frame("gas_db")
     if gas is not None and not gas.empty:
-        g = gas.assign(d=pd.to_datetime(gas["date"]).dt.normalize(), gas=pd.to_numeric(gas["gas"], errors="coerce"))
+        g = gas.assign(d=pd.to_datetime(gas["date"]).dt.normalize(), gas=atlas_flows.gas_db_m3(gas["gas"]))
         g = g.dropna(subset=["gas"]).groupby("d")["gas"].sum().reset_index()
-        daily = pd.DataFrame({"Дата": g["d"], "Объем": g["gas"] * 1000.0})
+        daily = pd.DataFrame({"Дата": g["d"], "Объем": g["gas"]})
     else:
         daily = pd.DataFrame(columns=["Дата", "Объем"])
     return hist, daily, "проект Атласа «%s»" % data.name, found, well_groups(data)

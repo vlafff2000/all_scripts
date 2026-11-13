@@ -45,7 +45,7 @@ def test_flows_become_store_with_atlas_groups_runtime_and_gaps(tmp_path):
     assert store.seasons("ГСП 1", OTBOR) == ["2025-2026"] and store.seasons("ГСП 1", ZAKACHKA) == ["2025"]
     assert store.has_runtime
     agg = store.aggregate("ГСП 1", OTBOR, "2025-2026").set_index("Скважина")
-    assert agg.loc[11, "Накопленный_расход_газа"] == pytest.approx(100.0 * len(DAYS))
+    assert agg.loc[11, "Накопленный_расход_газа"] == pytest.approx(100.0 * len(DAYS) / 1000.0)     # Атлас хранит м³/сут, Карты считают в тыс. м³/сут
     assert agg.loc[12, "Накопленный_расход_газа"] == 0.0     # простой — строка с нулём
 
 

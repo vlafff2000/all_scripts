@@ -210,12 +210,12 @@ def test_history_from_model_folder_schedule(tmp_path, monkeypatch):
 
 
 def _atlas_storage(root, h, daily, name="Объект"):
-    """Минимальное хранилище Атласа: manifest.json и снимок с таблицами production и gas_db (расходы — тыс. м³/сут)."""
+    """Минимальное хранилище Атласа: manifest.json и снимок с таблицами production и gas_db (расходы скважин — м³/сут, БД учёта газа — тыс. м³/сут)."""
     import json
     base = root / "projects" / "p1"
     snap = base / "snapshots" / "s1"
     snap.mkdir(parents=True)
-    prod = pd.DataFrame({"kind": h["kind"].map({hm.PROD: "withdrawal", hm.INJ: "injection"}), "well": h["well"], "date": h["date"], "q": h["rate"] / 1000.0,
+    prod = pd.DataFrame({"kind": h["kind"].map({hm.PROD: "withdrawal", hm.INJ: "injection"}), "well": h["well"], "date": h["date"], "q": h["rate"],
                          "group": h["well"].map({"W1": "ГСП-1", "W2": "ГСП-2"})})
     prod.to_parquet(snap / "production.parquet")
     gas = pd.DataFrame({"kind": "withdrawal", "date": daily["Дата"], "gas": daily["Объем"] / 1000.0})
