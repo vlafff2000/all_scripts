@@ -12,9 +12,10 @@ from __future__ import annotations
 import os
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from . import pass_run as pr
 from . import regime_run as rr
 from .data_patch import _clean, _date, _read, scan_dates
 
@@ -226,3 +227,86 @@ def restart_step_from_log(steps: Sequence[Tuple[int, float]], t: float) -> int:
     if not before:
         raise CaseError('в журнале расчёта нет шага не позже даты ГДИ')
     return max(before)
+
+
+def rr_conn(with_conn: bool):
+    """Векторы соединений нужны только для снимка (базовый прогон); дальше RSM без них в разы меньше и разбирается быстрее."""
+    return ('CTFAC', 'CEKH', 'CDFAC', 'CDRD', 'CGPR', 'CPR') if with_conn else ()
+
+
+def build_pass_case(src_data: str, workdir: str, studies: Sequence[dict], mults: Optional[dict] = None,
+                    name: str = 'pass', step_days: int = 1, with_conn: bool = True) -> dict:
+    """Рабочая копия для сквозного прогона по многим датам ГДИ (см. pass_run): include расписания до самой поздней даты, на каждой
+    дате ГДИ свои мульты и режимы. studies: [{'well', 'date', 'q'}], mults: {(скважина, 'ГГГГ-ММ-ДД'): (приращение, D|None)}."""
+    src_data = os.path.abspath(src_data)
+    src_dir = os.path.dirname(src_data)
+    workdir = os.path.abspath(workdir)
+    if os.path.normcase(workdir) == os.path.normcase(src_dir):
+        raise CaseError('рабочая папка не может совпадать с папкой модели: оригинал менять нельзя')
+    text, enc = _read(src_data)
+    nl = chr(13) + chr(10) if chr(13) + chr(10) in text else chr(10)
+    lines = text.replace(chr(13), '').split(chr(10))
+    m_start = model_start(text)
+    sched, end = _split_sections(lines)
+    head, body, tail = lines[:sched + 1], lines[sched + 1:end], lines[end:]
+    wells = sorted({s['well'] for s in studies})
+    for i, j, nm in include_records(head):
+        head[j] = _rewrite_include(head[j], _abs(nm, src_dir))
+    head_text = rr.set_summary(nl.join(head), rr.summary_block(wells, conn_vectors=rr_conn(with_conn)))
+    if [k for k, ln in enumerate(body) if _clean(ln).upper() == 'DATES']:
+        raise CaseError('в секции SCHEDULE файла .data есть DATES вне include: такое расписание пока не поддерживается')
+    recs = include_records(body)
+    if not recs:
+        raise CaseError('в секции SCHEDULE нет INCLUDE: расписание прямо в .data пока не поддерживается')
+    texts = []
+    for i, j, nm in recs:
+        path = _abs(nm, src_dir)
+        if not os.path.isfile(path):
+            raise CaseError('нет файла расписания «%s»' % path)
+        t, e = _read(path)
+        lns = t.replace(chr(13), '').split(chr(10))
+        ds = [d for b in scan_dates(lns) for _, d in b['items']]
+        texts.append((t, e, min(ds) if ds else None, max(ds) if ds else None))
+    last_date = max(s['date'] + timedelta(days=(len(s['q']) + 1) * step_days) for s in studies)
+    # включаемые файлы: пока есть даты ГДИ; include, которому принадлежит самая поздняя дата, - последний
+    firsts = [t[2] for t in texts]
+    def owner(d):
+        idx = None
+        for k, f in enumerate(firsts):
+            if f is not None and f <= d:
+                idx = k
+        return idx
+    assigned: Dict[int, List[dict]] = {}
+    for s in studies:
+        k = owner(s['date'])
+        if k is None:
+            raise CaseError('дата ГДИ %s раньше начала расписания' % s['date'].strftime('%d.%m.%Y'))
+        assigned.setdefault(k, []).append(s)
+    final_k = max(assigned)
+    os.makedirs(workdir, exist_ok=True)
+    prior_text = ''
+    new_body = body[:recs[0][0]]
+    steps: List = []
+    skipped: Dict[str, str] = {}
+    for k, (i, j, nm) in enumerate(recs):
+        if k > final_k:
+            break
+        t, e, _f, _l = texts[k]
+        if k in assigned:
+            sch, st, rep = pr.build_pass_schedule(t, prior_text, assigned[k], mults, step_days, final=(k == final_k))
+            fname = 'sch_%s_%d.inc' % (name, k)
+            with open(os.path.join(workdir, fname), 'w', encoding=e if e != 'utf-8-sig' else 'utf-8', newline='') as f:
+                f.write(sch)
+            steps += st
+            skipped.update(rep['skipped'])
+            new_body += ["INCLUDE", "'%s' /" % fname, '/']
+        else:
+            new_body += ["INCLUDE", "'%s' /" % _abs(nm, src_dir), '/']
+        prior_text += t + nl
+    data_name = os.path.basename(src_data)
+    data_text = head_text + nl + nl.join(new_body + ['', 'END', ''])
+    dest = os.path.join(workdir, data_name)
+    with open(dest, 'w', encoding=enc if enc != 'utf-8-sig' else 'utf-8', newline='') as f:
+        f.write(data_text)
+    return {'data': dest, 'include': os.path.join(workdir, 'sch_%s_%d.inc' % (name, final_k)), 'steps': steps, 'model_start': m_start,
+            'skipped': skipped, 'last_date': last_date, 'notes': []}

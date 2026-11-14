@@ -268,3 +268,140 @@ def rsm_for_date(case, t0):
     finally:
         START = old
     return os.path.join(os.path.dirname(case['data']), 'BASE.RSM')
+
+
+# ---------- сквозной прогон по датам после последнего шага модели ----------
+from schedule_pxg.gdi_adapt import pass_run as pr   # noqa: E402
+from schedule_pxg.gdi_adapt.data_patch import scan_dates   # noqa: E402
+
+PASS_TEXT = """DATES
+ 1 JAN 2014 /
+/
+WCONHIST
+W1\tOPEN\tGRAT\t1*\t1*\t300000.0\t1*\t/
+W2\tOPEN\tGRAT\t1*\t1*\t250000.0\t1*\t/
+/
+DATES
+ 15 JAN 2014 /
+/
+WCONHIST
+W1\tOPEN\tGRAT\t1*\t1*\t111000.0\t1*\t/
+/
+DATES
+ 25 JAN 2014 /
+ 28 JAN 2014 /
+/
+WCONHIST
+W2\tOPEN\tGRAT\t1*\t1*\t777.0\t1*\t/
+/
+DATES
+ 5 FEB 2014 /
+/
+"""
+
+
+class TestPassSchedule(unittest.TestCase):
+    def build(self, studies, mults=None):
+        return pr.build_pass_schedule(PASS_TEXT, '', studies, mults)
+
+    def test_regimes_mults_and_history_restore_with_original_changes_in_window(self):
+        st = [{'well': 'W1', 'date': datetime(2014, 1, 14), 'q': [1.0e5, 2.0e5, 3.0e5]},
+              {'well': 'W2', 'date': datetime(2014, 1, 20), 'q': [4.0e5, 5.0e5]}]
+        text, steps, rep = self.build(st, {('W1', '2014-01-14'): (2.5, 1e-5)})
+        lines = text.splitlines()
+        dates = [d for b in scan_dates(lines) for _, d in b['items']]
+        self.assertEqual(dates, sorted(dates))                                                    # даты по возрастанию
+        self.assertNotIn('5 FEB', text)                                                          # всё после последней нужной даты отброшено
+        self.assertIn('WPIMULT\nW1\t2.5\t/', text)
+        # W1: режимы 14, 15, 16 янв.; на 15 янв. исходный WCONHIST 111000 перекрыт режимом, возврат 17 янв. = 111000 (действует с 15 янв.)
+        sec = {d: body for d, body in pr.split_sections(lines)[1]}
+        self.assertIn('W1\tOPEN\tGRAT\t1*\t1*\t200000.0\t1*\t/', '\n'.join(sec[datetime(2014, 1, 15)]))
+        self.assertIn('W1\tOPEN\tGRAT\t1*\t1*\t111000.0\t1*\t/', '\n'.join(sec[datetime(2014, 1, 17)]))
+        # W2: режимы 20, 21 янв., возврат 22 янв. = 250000 (исходное 777 только с 28 янв.)
+        self.assertIn('W2\tOPEN\tGRAT\t1*\t1*\t250000.0\t1*\t/', '\n'.join(sec[datetime(2014, 1, 22)]))
+        self.assertEqual([(s.well, s.k, s.end.day) for s in steps], [('W1', 0, 15), ('W1', 1, 16), ('W1', 2, 17), ('W2', 0, 21), ('W2', 1, 22)])
+
+    def test_original_event_on_the_same_date_is_overridden_by_regime(self):
+        st = [{'well': 'W1', 'date': datetime(2014, 1, 15), 'q': [5.0e5]}]
+        text, _, _ = self.build(st)
+        sec = {d: '\n'.join(body) for d, body in pr.split_sections(text.splitlines())[1]}
+        body = sec[datetime(2014, 1, 15)]
+        self.assertLess(body.index('111000.0'), body.index('500000.0'))                         # наши строки в конце секции: режим перекрывает
+
+    def test_no_history_rate_is_skipped_with_reason(self):
+        st = [{'well': 'Z', 'date': datetime(2014, 1, 14), 'q': [1.0]}, {'well': 'W1', 'date': datetime(2014, 1, 14), 'q': [1.0e5]}]
+        _, steps, rep = self.build(st)
+        self.assertIn('Z', rep['skipped'])
+        self.assertEqual({s.well for s in steps}, {'W1'})
+
+
+def rsm_multi(case, mults):
+    """RSM подставного симулятора для сквозного прогона: на каждой скважине свои даты; t0 скважины = начало её первого режима."""
+    def row(*v):
+        return ' ' + ''.join('%-13s' % (format(x, '.7g') if isinstance(x, float) else str(x)) for x in v)
+    sep = ' ' + '-' * 100
+    wells = sorted({s.well for s in case['steps']})
+    first = {w: min(s.end for s in case['steps'] if s.well == w) - __import__('datetime').timedelta(days=1) for w in wells}
+    times = sorted({0.0} | {float((s.end - MODEL_START).days) for s in case['steps']} | {float((first[w] - MODEL_START).days) for w in wells})
+    out = ['1', sep, ' SUMMARY OF RUN BASE', sep, row('TIME', *sum(([('WBHP'), ('WBP')] for _ in wells), [])), row('DAYS', *['BARS'] * (2 * len(wells))),
+           row('', *sum(([w, w] for w in wells), [])), sep]
+    cols = []
+    for w in wells:
+        ends = {float((s.end - MODEL_START).days): s.q for s in case['steps'] if s.well == w}
+        m = mults.get(w, 1.0)
+        cols.append([80.0 - K * ends[t] / 1000.0 / m if t in ends else 78.0 for t in times])
+        cols.append([80.0] * len(times))
+    for i, t in enumerate(times):
+        out.append(row(t, *[c[i] for c in cols]))
+    cc = [(v, w, c, x) for w in wells for c in ('1 1 1', '1 1 2') for v, x in (('CEKH', 2000.0), ('CTFAC', 25.0), ('CGPR', 100000.0), ('CDRD', 1.0), ('CDFAC', 5e-4), ('CPR', 78.0))]
+    out += ['', '1', sep, ' SUMMARY OF RUN BASE', sep, row('TIME', *[c[0] for c in cc]), row('DAYS', *[''] * len(cc)), row('', *[c[1] for c in cc]),
+            row('', *[c[2] for c in cc]), sep] + [row(t, *[c[3] for c in cc]) for t in times]
+    out += ['', '1', sep, ' SUMMARY OF RUN BASE', sep, row('TIME', *['WGPR'] * len(wells)), row('DAYS', *['SM3/DAY'] * len(wells)), row('', *wells), sep]
+    out += [row(t, *[200000.0] * len(wells)) for t in times]
+    with open(os.path.join(os.path.dirname(case['data']), 'BASE.RSM'), 'w', encoding='latin-1') as f:
+        f.write('\n'.join(out) + '\n')
+    return os.path.join(os.path.dirname(case['data']), 'BASE.RSM')
+
+
+class TestLatePass(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.src = os.path.join(self.tmp.name, 'model')
+        make_model(self.src)
+        with open(os.path.join(self.src, 'sch_b.inc'), 'w', encoding='utf-8') as f:
+            f.write("DATES\n 10 JAN 2014 /\n 14 JAN 2014 /\n 20 JAN 2014 /\n 30 JAN 2014 /\n/\n")
+        os.makedirs(os.path.join(self.src, 'RESULTS'))                                           # результаты модели кончаются на 5-м дне
+        with open(os.path.join(self.src, 'RESULTS', 'BASE.job.log'), 'w', encoding='utf-8') as f:
+            f.write('###### ОТЧЁТ N 4 ДЕНЬ  3 ДАТА 4 ЯНВ 2014 ######' + chr(10) + '###### ОТЧЁТ N 5 ДЕНЬ  5 ДАТА 6 ЯНВ 2014 ######' + chr(10))
+        self.data = os.path.join(self.src, 'BASE.DATA')
+        self.work = os.path.join(self.tmp.name, 'work')
+        self.cfg = Config.load(None, gdi_file='x', wbp_units='bar', bhp_units='bar', q_units='m3/day', from_date='01.01.1900')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_late_dates_go_through_one_pass_and_converge(self):
+        gd = make_gdi()
+        gd[1].date = datetime(2014, 1, 20)
+        calls = []
+
+        class R(FakeRunner):
+            def run(s, case, restart, label, cancel):
+                txt = open(case['include'], encoding='utf-8').read()
+                mults = {}
+                for r in parse_mults(txt):
+                    if r['pimult'] is not None:
+                        mults[r['wname']] = mults.get(r['wname'], 1.0) * r['pimult']
+                calls.append((label, restart))
+                return rsm_multi(case, mults)
+        b = al.AutoBatch(self.data, self.work, R(), gd, self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0, max_iter=8), restart=None)
+        st = b.run()
+        self.assertEqual(st['status'], 'done', st)
+        self.assertEqual(len(st['dates']), 1)                                                    # одна сквозная запись на обе даты
+        item = st['dates'][0]
+        self.assertTrue(item['multi'] and item['span'] == ['2014-01-14', '2014-01-20'])
+        self.assertEqual(sorted(item['results']), ['W1', 'W2'])
+        for w, m in TRUE_M.items():
+            self.assertAlmostEqual(item['results'][w]['inc'], m, delta=0.05 * m)
+        self.assertTrue(all(c[1] == 5 for c in calls))                                           # рестарт всегда с последнего шага исходной модели
+        self.assertGreaterEqual(len(calls), 3)
