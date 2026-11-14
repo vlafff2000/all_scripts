@@ -52,7 +52,7 @@ class Job:
         self.status, self.error, self.returncode = 'idle', '', None
         self.started = self.finished = 0.0
         self.step = 0
-        self.log_path = os.path.join(cwd, f'{self.id}.log')
+        self.log_path = os.path.join(cwd, 'tnav_run.log')       # один журнал на рабочую папку, перезаписывается: прогоны не копят файлы
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
         self._cancel = False

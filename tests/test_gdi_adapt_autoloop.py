@@ -157,3 +157,103 @@ class TestLoop(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestBatch(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.src = os.path.join(self.tmp.name, 'model')
+        make_model(self.src)
+        with open(os.path.join(self.src, 'sch_b.inc'), 'w', encoding='utf-8') as f:     # вторая дата ГДИ внутри того же include
+            f.write("DATES\n 10 JAN 2014 /\n 14 JAN 2014 /\n 20 JAN 2014 /\n 30 JAN 2014 /\n/\n")
+        self.data = os.path.join(self.src, 'BASE.DATA')
+        self.work = os.path.join(self.tmp.name, 'work')
+        self.cfg = Config.load(None, gdi_file='x', wbp_units='bar', bhp_units='bar', q_units='m3/day', from_date='01.01.1900')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def gdis(self):
+        g = make_gdi()
+        g[1].date = datetime(2014, 1, 20)
+        return g
+
+    def test_dates_in_order_one_run_at_a_time_and_resume(self):
+        calls = []
+
+        class R(FakeRunner):
+            def run(s, case, restart, label, cancel):
+                t0 = float((case['steps'][0].end - MODEL_START).days) - 1
+                calls.append((label, restart))
+                rsm = rsm_for_date(case, t0)
+                return rsm
+        b = al.AutoBatch(self.data, self.work, R(), self.gdis(), self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0, max_iter=6), restart=7)
+        st = b.run()
+        self.assertEqual(st['status'], 'done', st)
+        self.assertEqual([x['date'] for x in st['dates']], ['2014-01-20', '2014-01-14'])          # от поздних дат к ранним
+        self.assertTrue(all(x['status'] == 'done' for x in st['dates']))
+        # шаг рестарта: первая (поздняя) дата - ручной, ранняя - из RSM поздней (индекс времени в списке шагов)
+        self.assertEqual(calls[0][1], 7)
+        later = [c for c in calls if c[1] != 7]
+        self.assertTrue(later and all(isinstance(c[1], int) for c in later))          # ранняя дата: шаг из RSM поздней, а не ручной
+        n = len(calls)
+        # продолжение: всё выполнено - новых прогонов нет
+        b2 = al.AutoBatch(self.data, self.work, R(), self.gdis(), self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0), restart=7)
+        b2.run()
+        self.assertEqual(len(calls), n)
+
+    def test_missing_restart_for_first_date_is_clear_error(self):
+        b = al.AutoBatch(self.data, self.work, FakeRunner(), self.gdis(), self.cfg, pvt())
+        st = b.run()
+        self.assertEqual(st['status'], 'failed')
+        self.assertIn('шаг рестарта', st['stop_reason'])
+
+    def test_formula_accepts_without_model_run(self):
+        calls = []
+
+        class R(FakeRunner):
+            def run(s, case, restart, label, cancel):
+                calls.append(label)
+                return FakeRunner.run(s, case, restart, label, cancel)
+        # снимки от «комплекта»: формула ГДМ предсказывает депрессию; порог 1e6 % принимает всё без прогонов
+        from schedule_pxg.gdi_adapt import regime_run as rr
+        from schedule_pxg.gdi_adapt.rsm import parse_rsm
+        fr = FakeRunner()
+        gd = make_gdi()
+        case = cb_case(self)
+        rsm_for(case, {})
+        series = parse_rsm(os.path.join(self.work, 'BASE.RSM'))
+        t0 = float((START - MODEL_START).days)
+        snaps = {w: rr.snapshot_from_rsm(series, w, t0) for w in ('W1', 'W2')}
+        g = [x for x in gd]
+        b = al.AutoBatch(self.data, self.work, R(), g, self.cfg, pvt(), al.LoopSettings(threshold_pct=1e6), restart=7, snapshots=snaps,
+                         accept_formula=True, journal=MultJournal(os.path.join(self.tmp.name, 'j.json')))
+        st = b.run()
+        self.assertEqual(st['status'], 'done', st)
+        self.assertEqual(calls, [])
+        self.assertEqual(st['dates'][0]['status'], 'accepted')
+        self.assertIn('по формуле', st['dates'][0]['results']['W1']['source'])
+        self.assertGreater(b.journal.total('W1'), 0)
+
+
+def cb_case(t):
+    from schedule_pxg.gdi_adapt import case_build as cb
+    return cb.build_case(t.data, t.work, START, {'W1': [1.0], 'W2': [1.0]}, name='z')
+
+
+def rsm_for_date(case, t0):
+    """RSM подставного симулятора для произвольной даты ГДИ: как rsm_for, но t0 берётся из шагов режимов."""
+    import schedule_pxg.gdi_adapt.case_build as cb
+    mults = {}
+    txt = open(case['include'], encoding='utf-8').read()
+    for r in parse_mults(txt):
+        if r['pimult'] is not None:
+            mults[r['wname']] = mults.get(r['wname'], 1.0) * r['pimult']
+    global START
+    old = START
+    START = case['steps'][0].end.replace(day=case['steps'][0].end.day - 1)
+    try:
+        rsm_for(case, mults)
+    finally:
+        START = old
+    return os.path.join(os.path.dirname(case['data']), 'BASE.RSM')

@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+import json
 import os
 import threading
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from .gdi_adapt import autoloop, case_build, tnav_run
+from .gdi_adapt import autoloop, case_build, runs as gdi_runs, tnav_run
+from .gdi_adapt.snapshot import load_snapshots
 from .gdi_adapt.config import Config
 from .gdi_adapt.data_patch import _keywords
 from .gdi_adapt.mults import MultJournal
@@ -22,7 +24,7 @@ from .gdi_adapt.selection import chosen_for_kit
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOOPS: Dict[str, dict] = {}
 _ids = itertools.count(1)
-KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells')
+KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula')
 
 
 def info(p) -> dict:
@@ -33,6 +35,8 @@ def info(p) -> dict:
 
 def _brief(v: dict) -> dict:
     s = v['loop'].state
+    if v.get('batch'):
+        return {'status': s['status'], 'date': '', 'wells': [], 'iterations': len(s['dates']), 'batch': True}
     return {'status': s['status'], 'date': s['date'], 'wells': s['wells'], 'iterations': len(s['iterations'])}
 
 
@@ -61,11 +65,12 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         raise ValueError('Не выбрано ни одной скважины: выполните шаг 4.')
     only = set(str(w) for w in (opts.get('wells') or []))
     gdis = [dataclasses.replace(g, wname=name) for name, g in chosen if not only or name in only]
+    batch = bool(opts.get('batch'))
     dates = sorted({g.date for g in gdis})
     want = str(opts.get('date') or '')
     date = next((d for d in dates if d.strftime('%Y-%m-%d') == want), dates[-1])
-    group = [g for g in gdis if g.date == date]
-    skipped = [g.wname for g in gdis if g.date != date]
+    group = gdis if batch else [g for g in gdis if g.date == date]
+    skipped = [] if batch else [g.wname for g in gdis if g.date != date]
     well_thr = {}
     for g in group:
         metric, thr = cfg.dep_criterion_for(g.wname)
@@ -79,8 +84,15 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
     lid = 'loop%d' % next(_ids)
     entry = {'jobs': []}
     runner = autoloop.TnavRunner(exe, work, on_job=lambda j: entry['jobs'].append(j))
-    loop = autoloop.AutoLoop(model, work, runner, group, cfg, pvt, st, restart, journal)
-    loop.state['skipped_dates'] = skipped
+    snaps = None
+    if opts.get('snapshots'):
+        snaps = load_snapshots(gdi_runs.find_snapshots(str(opts['snapshots']).strip().strip('"')))
+    if batch:
+        loop = autoloop.AutoBatch(model, work, runner, group, cfg, pvt, st, restart, journal, snaps, bool(opts.get('accept_formula')))
+        entry['batch'] = True
+    else:
+        loop = autoloop.AutoLoop(model, work, runner, group, cfg, pvt, st, restart, journal, snapshots=snaps)
+        loop.state['skipped_dates'] = skipped
     entry['loop'] = loop
 
     def go():
@@ -105,8 +117,21 @@ def _get(lid: str) -> dict:
     return LOOPS[lid]
 
 
-def status(lid: str) -> dict:
+def status(lid: str, date: str = '') -> dict:
     e = _get(lid)
+    if e.get('batch') and date:                         # состояние цикла одной даты очереди: идущий - из памяти, прошедшие - из файла
+        loop = getattr(e['loop'], 'loop', None)
+        if loop is not None and loop.state.get('date') == date:
+            s = dict(loop.state)
+        else:
+            path = os.path.join(e['loop'].workdir, 'loop_%s.json' % date)
+            if not os.path.exists(path):
+                raise ValueError('Для даты %s прогонов ещё не было.' % date)
+            with open(path, encoding='utf-8') as f:
+                s = json.load(f)
+        s['id'] = lid
+        s['job'] = None
+        return s
     s = dict(e['loop'].state)
     s['job'] = e['jobs'][-1].view() if e['jobs'] else None
     s['id'] = lid
@@ -125,6 +150,21 @@ def write_include(lid: str, k: int, out_dir: str) -> dict:
     """include с мультами итерации k (откат на любую итерацию) на дату ГДИ; в журнал записывается выбранная итерация."""
     e = _get(lid)
     loop = e['loop']
+    if e.get('batch'):                                  # очередь: один include на все даты с лучшими итогами по скважинам
+        lines = ['-- Мульты очереди ГДМ (итоговые от базовой модели, лучшая итерация каждой скважины)']
+        n = 0
+        for item in loop.state['dates']:
+            rows = [(w, r['inc'], r.get('d')) for w, r in sorted(item['results'].items())]
+            if rows:
+                lines += _keywords(datetime.strptime(item['date'], '%Y-%m-%d'), rows, True)
+                n += len(rows)
+        if not n:
+            raise ValueError('В очереди пока нет результатов.')
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, 'wpimult_wdfac_batch.inc')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(chr(10).join(lines))
+        return {'path': path, 'wells': n}
     m = loop.rollback(int(k))
     if not m:
         raise ValueError('На итерации %s мультов нет (это базовый прогон).' % k)

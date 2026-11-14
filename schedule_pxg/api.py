@@ -1342,7 +1342,7 @@ async def adapt_loop_start(request: Request):
 
 async def adapt_loop_status(request: Request):
     try:
-        return JSONResponse(await run_in_threadpool(adapt_loop.status, _clean(request.query_params.get("id"))))
+        return JSONResponse(await run_in_threadpool(adapt_loop.status, _clean(request.query_params.get("id")), _clean(request.query_params.get("date"))))
     except ValueError as e:
         return _err(str(e))
 

@@ -88,6 +88,22 @@ class TestCase(unittest.TestCase):
         with self.assertRaises(cb.CaseError):
             cb.build_case(self.data, os.path.join(self.tmp.name, 'w'), datetime(2020, 1, 1), {'W1': [1.0]})
 
+    def test_restart_step_from_job_log_ru_and_en(self):
+        with tempfile.TemporaryDirectory() as d:
+            ru = os.path.join(d, 'a.log')
+            with open(ru, 'w', encoding='utf-8') as f:
+                f.write('###### ОТЧЁТ N 10 ДЕНЬ  100 ДАТА 1 ЯНВ 2014 ######' + chr(10) + '###### ОТЧЁТ N 11 ДЕНЬ  103 ДАТА 4 ЯНВ 2014 ######' + chr(10))
+            en = os.path.join(d, 'b.log')
+            with open(en, 'w', encoding='cp1251') as f:
+                f.write('####### FINISH REPORT N 10 FOR DAY  100 ON 01.01.2014 #######' + chr(10) + '####### FINISH REPORT N 11 FOR DAY  103 ON 04.01.2014 #######' + chr(10))
+            for p in (ru, en):
+                steps = cb.steps_from_job_log(p)
+                self.assertEqual(steps, [(10, 100.0), (11, 103.0)])
+                self.assertEqual(cb.restart_step_from_log(steps, 102.0), 10)        # последний шаг не позже начала даты
+                self.assertEqual(cb.restart_step_from_log(steps, 103.0), 11)
+            with self.assertRaises(cb.CaseError):
+                cb.restart_step_from_log([(10, 100.0)], 5.0)
+
     def test_restart_step_from_times(self):
         self.assertEqual(cb.restart_step_from_times([0, 3, 187, 278], 187), 2)
         self.assertEqual(cb.restart_step_from_times([0, 3, 187, 278], 200), 2)
