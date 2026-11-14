@@ -82,7 +82,7 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
         <label><input type="checkbox" checked={!!o.batch} onChange={e => upd('batch', e.target.checked)} /> Все даты по очереди</label>
         <label title="Нужны снимки модели: скважины, у которых формула уже обещает ошибку в пределах порога, принимаются без прогона"><input type="checkbox" checked={!!o.accept_formula} disabled={!o.batch} onChange={e => upd('accept_formula', e.target.checked)} /> Принять по формуле без прогона</label>
       </div>
-      <p className="muted small">Шаг рестарта — номер шага результатов модели перед датой ГДИ (в tNavigator он виден в списке шагов расчёта). Один прогон занимает минуты, а не часы. Прогоны идут строго по одному. В очереди шаг рестарта нужен только для первой даты, дальше он берётся из результатов модели в рабочей папке. Порог по скважине можно задать в настройках критерия депрессии, он приоритетнее общего.</p>
+      <p className="muted small">Шаг рестарта — номер шага результатов модели перед датой ГДИ (в tNavigator он виден в списке шагов расчёта). Один прогон занимает минуты, а не часы. Прогоны идут строго по одному. Шаг рестарта обычно вводить не нужно: он берётся из журнала расчёта модели (RESULTS/*.job.log), вручную нужен только если журнала нет. Очередь идёт от поздних дат к ранним: рестарт с ранней даты перезаписывает шаги, нужные для поздних. Порог по скважине можно задать в настройках критерия депрессии, он приоритетнее общего.</p>
       <div className="row">
         <button className="primary" onClick={start} disabled={busy || running || !o.exe || !o.model || !o.workdir || !wells.length}>Запустить автоцикл</button>
         <button onClick={stop} disabled={!running}>Остановить</button>
