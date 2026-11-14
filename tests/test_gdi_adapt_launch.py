@@ -104,6 +104,10 @@ class TestCase(unittest.TestCase):
             with self.assertRaises(cb.CaseError):
                 cb.restart_step_from_log([(10, 100.0)], 5.0)
 
+    def test_available_wells_by_history_on_date(self):
+        got = cb.available_wells(self.data, START, ['W1', 'W2', 'Z'])
+        self.assertEqual(got, {'W1': 300000.0, 'W2': 250000.0})                 # Z нет в расписании: на дату ГДИ его не собрать
+
     def test_restart_step_from_times(self):
         self.assertEqual(cb.restart_step_from_times([0, 3, 187, 278], 187), 2)
         self.assertEqual(cb.restart_step_from_times([0, 3, 187, 278], 200), 2)

@@ -202,6 +202,17 @@ class TestBatch(unittest.TestCase):
         b2.run()
         self.assertEqual(len(calls), n)
 
+    def test_wells_without_history_are_skipped_and_empty_date_is_skipped(self):
+        g = make_gdi()                                                           # обе скважины на дату START (14.01)
+        extra = GDI('Z', datetime(2014, 1, 14), np.full(3, 80.0), np.full(3, 79.0), np.array([1.0, 2.0, 3.0]) * 1e5, float('nan'), float('nan'))
+        lonely = GDI('Y', datetime(2014, 1, 10), np.full(3, 80.0), np.full(3, 79.0), np.array([1.0, 2.0, 3.0]) * 1e5, float('nan'), float('nan'))
+        b = al.AutoBatch(self.data, self.work, FakeRunner(), g + [extra, lonely], self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0), restart=7)
+        st = b.run()
+        by = {x['date']: x for x in st['dates']}
+        self.assertEqual(by['2014-01-14']['skipped'], ['Z'])                      # скважины нет в расписании
+        self.assertEqual(by['2014-01-10']['status'], 'skipped')                  # на эту дату нет ни одной скважины с историей
+        self.assertIn('W1', by['2014-01-14']['results'])
+
     def test_missing_restart_for_first_date_is_clear_error(self):
         b = al.AutoBatch(self.data, self.work, FakeRunner(), self.gdis(), self.cfg, pvt())
         st = b.run()

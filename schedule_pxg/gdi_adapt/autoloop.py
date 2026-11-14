@@ -313,7 +313,7 @@ class AutoBatch:
                 old = json.load(f)
         except (OSError, ValueError):
             return
-        done = {x['date']: x for x in old.get('dates', []) if x.get('status') in ('done', 'accepted')}
+        done = {x['date']: x for x in old.get('dates', []) if x.get('status') in ('done', 'accepted', 'skipped')}
         for i, x in enumerate(self.state['dates']):
             if x['date'] in done and done[x['date']].get('wells') == x['wells']:
                 self.state['dates'][i] = done[x['date']]
@@ -389,11 +389,19 @@ class AutoBatch:
         try:
             for d, group in self.groups.items():
                 item = next(x for x in self.state['dates'] if x['date'] == d.strftime('%Y-%m-%d'))
-                if item['status'] in ('done', 'accepted'):
+                if item['status'] in ('done', 'accepted', 'skipped'):
                     continue
                 if self.cancel.is_set():
                     raise Cancelled()
                 self._push(message=f'дата {item["date"]} ({self.state["dates"].index(item) + 1} из {len(self.groups)})')
+                avail = cb.available_wells(self.model_data, d, [g.wname for g in group])
+                item['skipped'] = [g.wname for g in group if g.wname not in avail]      # на дату ГДИ нет дебита истории: тест не собрать
+                group = [g for g in group if g.wname in avail]
+                if not group:
+                    item['status'] = 'skipped'
+                    item['message'] = 'на эту дату в модели нет ни одной скважины с историей'
+                    self._push()
+                    continue
                 run_group = group
                 if self.accept_formula and self.snapshots:
                     acc, run_group = self._accepted_by_formula(group)

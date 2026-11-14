@@ -432,7 +432,7 @@ export interface LoopState {
 export interface LoopInfo { saved: Partial<LoopOpts>; candidates: string[]; loops: { id: string; status: string; date: string; wells: string[]; iterations: number }[] }
 export const getLoopInfo = () => call<LoopInfo>('/api/adapt/loop')
 export const startLoop = (b: AdaptRequest, loop: Partial<LoopOpts>) => call<{ id: string }>('/api/adapt/loop/start', post({ ...b, loop }))
-export interface BatchDate { date: string; wells: string[]; status: 'queued' | 'running' | 'done' | 'accepted' | 'failed'; runs: number; message?: string
+export interface BatchDate { date: string; wells: string[]; status: 'queued' | 'running' | 'done' | 'accepted' | 'skipped' | 'failed'; runs: number; message?: string; skipped?: string[]
   results: Record<string, { err: number | null; inc: number; d: number | null; k: number; source: string }> }
 export interface BatchState { id: string; status: LoopState['status']; message: string; stop_reason: string; dates: BatchDate[] }
 export const getLoopStatus = (id: string, date = '') => call<LoopState & Partial<BatchState>>('/api/adapt/loop/status?' + new URLSearchParams(date ? { id, date } : { id }))

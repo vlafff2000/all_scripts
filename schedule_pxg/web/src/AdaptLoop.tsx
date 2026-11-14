@@ -95,9 +95,9 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
       {st?.skipped && Object.entries(st.skipped).map(([w, r]) => <p key={w} className="muted small">Скв. {w}: {r}</p>)}
 
       {bs && <>
-        <h3>Очередь по датам ({bs.dates.filter(d => d.status === 'done' || d.status === 'accepted').length} из {bs.dates.length})</h3>
+        <h3>Очередь по датам ({bs.dates.filter(d => d.status === 'done' || d.status === 'accepted' || d.status === 'skipped').length} из {bs.dates.length})</h3>
         <Tables scope="adapt-batch" tables={[tableOf('adapt-batch', 'Очередь', [['Дата ГДИ', 'text'], ['Скважин', 'number', 0], ['Статус', 'text'], ['Прогонов', 'number', 0], ['Макс. ошибка, %', 'number', 1], ['Примечание', 'text']],
-          bs.dates.map(d => [d.date, d.wells.length, { queued: 'в очереди', running: 'идёт', done: 'готово', accepted: 'принято по формуле', failed: 'ошибка' }[d.status], d.runs,
+          bs.dates.map(d => [d.date, d.wells.length, { queued: 'в очереди', running: 'идёт', done: 'готово', accepted: 'принято по формуле', skipped: 'пропущено', failed: 'ошибка' }[d.status], d.runs,
             Object.values(d.results).reduce((m, r) => (r.err === null ? m : Math.max(m, r.err)), 0) || null, d.message || '']))]}
           onRow={(_t, i) => { setSelDate(bs.dates[i].date); setWell('') }} />
         <p className="muted small">Нажмите на строку, чтобы открыть дашборд этой даты. «Записать include» для очереди собирает один файл по всем датам.</p>

@@ -142,6 +142,28 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
             'hist_rates': rep['hist_rates'], 'notes': notes}
 
 
+def available_wells(src_data: str, start: datetime, wells: Sequence[str]) -> Dict[str, float]:
+    """Скважины, у которых к дате ГДИ в расписании модели есть дебит истории (WCONHIST GRAT): {скважина: дебит}. Остальных
+    (ещё не пробурены или задаются иначе) тестовый прогон на эту дату собрать не может."""
+    src_data = os.path.abspath(src_data)
+    src_dir = os.path.dirname(src_data)
+    text, _ = _read(src_data)
+    lines = text.replace(chr(13), '').split(chr(10))
+    sched, end = _split_sections(lines)
+    prior: List[str] = []
+    for _i, _j, nm in include_records(lines[sched + 1:end]):
+        path = _abs(nm, src_dir)
+        if not os.path.isfile(path):
+            raise CaseError('нет файла расписания «%s»' % path)
+        t, _e = _read(path)
+        lns = t.replace(chr(13), '').split(chr(10))
+        if any(d >= start for b in scan_dates(lns) for _, d in b['items']):
+            prior += rr.cut_schedule(t, start)
+            break
+        prior += lns
+    return rr.last_hist_gas_rates(prior, list(wells))
+
+
 def ensure_results(src_dir: str, workdir: str, progress: Optional[Callable[[int, int], None]] = None, min_free_gb: float = 20.0) -> str:
     """Копия папки RESULTS (restart-файлы модели) в workdir; уже есть - не копируется. Нужен запас свободного места."""
     src = os.path.join(src_dir, 'RESULTS')
