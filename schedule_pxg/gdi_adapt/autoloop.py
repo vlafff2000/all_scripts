@@ -102,17 +102,18 @@ def secant_step(hist: List[tuple], limit: float, bounds: tuple) -> float:
 class AutoLoop:
     def __init__(self, model_data: str, workdir: str, runner: Runner, gdis: Sequence[GDI], cfg, pvt, settings: Optional[LoopSettings] = None,
                  restart: Optional[int] = None, journal: Optional[MultJournal] = None, on_update: Optional[Callable[[dict], None]] = None,
-                 snapshots: Optional[dict] = None, tag: str = ''):
+                 snapshots: Optional[dict] = None, tag: str = '', multi: bool = False):
         dates = {g.date for g in gdis}
-        if len(dates) != 1:
+        if len(dates) != 1 and not multi:
             raise ValueError('один цикл ведётся по одной дате ГДИ: сгруппируйте исследования по датам')
-        self.start = next(iter(dates))
+        self.start = min(dates)
+        self.multi = multi                       # сквозной прогон по многим датам (pass_run): для дат после последнего шага модели
         self.model_data, self.workdir, self.runner = model_data, workdir, runner
         self.gdis = {g.wname: g for g in gdis}
         self.cfg, self.pvt, self.st = cfg, pvt, settings or LoopSettings()
         self.restart, self.journal, self.on_update = restart, journal, on_update
         self.cancel = threading.Event()
-        self.state = {'status': 'idle', 'message': '', 'iterations': [], 'wells': list(self.gdis), 'date': self.start.strftime('%Y-%m-%d'),
+        self.state = {'status': 'idle', 'message': '', 'iterations': [], 'wells': list(self.gdis), 'date': max(dates).strftime('%Y-%m-%d'),
                       'stop_reason': '', 'started': 0.0,
                       'thresholds': {w: self.st.thr(w) for w in self.gdis}, 'metric': self.st.metric}
         self.snapshots: dict = dict(snapshots or {})
@@ -142,14 +143,24 @@ class AutoLoop:
     def _iteration(self, k: int, mults: Optional[Dict[str, dict]], label: str) -> dict:
         regimes = {w: [float(x) for x in g.q] for w, g in self.gdis.items()}
         rows = [(w, m['inc'], m.get('d')) for w, m in (mults or {}).items()] or None
-        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days)
+        if self.multi:
+            studies = [{'well': w, 'date': g.date, 'q': [float(x) for x in g.q]} for w, g in self.gdis.items()]
+            mm = {(w, self.gdis[w].date.strftime('%Y-%m-%d')): (m['inc'], m.get('d')) for w, m in (mults or {}).items()}
+            case = cb.build_pass_case(self.model_data, self.workdir, studies, mm or None, name='test', step_days=self.st.step_days,
+                                      with_conn=(k == 0 and not self.preset))
+            if case['skipped']:
+                self.state.setdefault('skipped', {}).update(case['skipped'])
+        else:
+            case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days)
         rsm = self.runner.run(case, self.restart() if callable(self.restart) else self.restart, label, self.cancel)
         series = parse_rsm(rsm)
         msd = case['model_start']
-        t0 = float((self.start - msd).days)
+        t0s = {w: float((g.date - msd).days) for w, g in self.gdis.items()}
         mr = rr.model_regimes(series, case['steps'], msd)
         wells = {}
         for w, g in self.gdis.items():
+            if w not in mr:                                   # скважина пропущена при сборке (нет истории на дату)
+                continue
             c = rr.compare_with_gdi(mr[w], g.wbp, g.bhp)
             err = c['err_dep_pct'] if self.st.metric == 'regimes' else c['err_dp2_pct']
             wells[w] = {'err': _f(err), 'err_dep': _f(c['err_dep_pct']), 'err_dp2': _f(c['err_dp2_pct']), 'p_res_gap': _f(c['p_res_gap']),
@@ -157,9 +168,9 @@ class AutoLoop:
                         'q': [float(x) for x in g.q], 'e': _f(_log_ratio(c['dep_model'], c['dep_gdi'])),
                         'a_model': _f(c['a_model']), 'b_model': _f(c['b_model']), 'a_gdi': _f(g.a), 'b_gdi': _f(g.b)}
         if k == 0:
-            for w in self.gdis:
+            for w in wells:
                 try:
-                    self.snapshots[w] = rr.snapshot_from_rsm(series, w, t0)
+                    self.snapshots[w] = rr.snapshot_from_rsm(series, w, t0s[w])
                 except ValueError as e:
                     wells[w]['snapshot_error'] = str(e)
         return {'k': k, 'label': label, 'mults': {w: dict(m) for w, m in (mults or {}).items()}, 'wells': wells, 'rsm': rsm,
@@ -297,10 +308,24 @@ class AutoBatch:
         self.accept_formula, self.on_update = accept_formula, on_update
         # от поздних дат к ранним: рестарт с шага D перезаписывает результаты рабочей копии ПОСЛЕ D, ранние шаги целы
         self.groups = dict(sorted(group_by_date(gdis).items(), reverse=True))
+        # даты позже последнего посчитанного шага модели: рестарт «с рестарта» tNavigator 21.3 не читает, они идут одним сквозным прогоном
+        self.late_group: List[GDI] = []
+        last_day = self._last_log_day()
+        if last_day is not None:
+            try:
+                msd = cb.model_start(cb._read(model_data)[0])
+                for d in [d for d in self.groups if (d - msd).days > last_day]:
+                    self.late_group += self.groups.pop(d)
+            except (OSError, cb.CaseError):
+                pass
         self.cancel = threading.Event()
         self.loop: Optional[AutoLoop] = None
-        self.state = {'status': 'idle', 'message': '', 'stop_reason': '', 'started': 0.0, 'dates': [
-            {'date': d.strftime('%Y-%m-%d'), 'wells': [g.wname for g in gs], 'status': 'queued', 'runs': 0, 'results': {}} for d, gs in self.groups.items()]}
+        dates = [{'date': d.strftime('%Y-%m-%d'), 'wells': [g.wname for g in gs], 'status': 'queued', 'runs': 0, 'results': {}} for d, gs in self.groups.items()]
+        if self.late_group:
+            ds = sorted({g.date for g in self.late_group})
+            dates.insert(0, {'date': ds[-1].strftime('%Y-%m-%d'), 'wells': [g.wname for g in self.late_group], 'status': 'queued', 'runs': 0,
+                             'results': {}, 'multi': True, 'span': [ds[0].strftime('%Y-%m-%d'), ds[-1].strftime('%Y-%m-%d')]})
+        self.state = {'status': 'idle', 'message': '', 'stop_reason': '', 'started': 0.0, 'dates': dates}
         self._load()
 
     # --- состояние на диске ---
@@ -335,18 +360,11 @@ class AutoBatch:
             self.loop.stop()
 
     # --- шаг рестарта ---
-    def restart_for(self, date: datetime) -> Optional[int]:
-        """Шаг рестарта на начало даты ГДИ. Источники шагов: журнал расчёта исходной модели (RESULTS/<имя>.job.log или
-        RESULTS/<имя>/result.log: «ОТЧЁТ N … ДЕНЬ …»), RSM рабочей папки (после прогонов покрывает и продлённые шаги), иначе ручной.
-        Дата позже последнего посчитанного шага модели: рестарт с последнего шага, и первый прогон сам досчитывает модель до этой даты
-        (долго, один раз), последующие рестартуют уже с продлённых шагов."""
-        from .rsm import rsm_times
+    def _log_steps(self) -> List[tuple]:
+        """Шаги отчёта исходной модели (номер, день) из журналов результатов: RESULTS/<имя>.job.log, RESULTS/<имя>/result.log(.old);
+        берётся самый полный (журнал .job.log перезаписывается, когда результаты открывают в окне tNavigator)."""
         src_dir = os.path.dirname(os.path.abspath(self.model_data))
         base = os.path.splitext(os.path.basename(self.model_data))[0]
-        try:
-            t0 = float((date - cb.model_start(cb._read(self.model_data)[0])).days)
-        except (OSError, cb.CaseError):
-            return self.restart
         steps: List[tuple] = []
         for log in (os.path.join(src_dir, 'RESULTS', base + '.job.log'), os.path.join(src_dir, 'RESULTS', base, 'result.log'),
                     os.path.join(src_dir, 'RESULTS', base, 'result.log.old')):
@@ -356,11 +374,27 @@ class AutoBatch:
                 got = []
             if len(got) > len(steps):
                 steps = got
+        return steps
+
+    def _last_log_day(self) -> Optional[float]:
+        steps = self._log_steps() if getattr(self, 'model_data', None) else []
+        return max(d for _n, d in steps) if steps else None
+
+    def restart_for(self, date: datetime, use_rsm: bool = True) -> Optional[int]:
+        """Шаг рестарта на начало даты ГДИ: из журналов результатов модели, затем (use_rsm) из RSM рабочей папки, иначе ручной.
+        Дата позже последнего шага: рестарт с последнего шага исходной модели (сквозной прогон досчитывает модель до нужных дат)."""
+        from .rsm import rsm_times
+        base = os.path.splitext(os.path.basename(self.model_data))[0]
+        try:
+            t0 = float((date - cb.model_start(cb._read(self.model_data)[0])).days)
+        except (OSError, cb.CaseError):
+            return self.restart
+        steps = self._log_steps()
         rsm = os.path.join(self.workdir, base + '.RSM')
-        if os.path.exists(rsm):                               # продлённые прогонами шаги: после даты последнего шага журнала
+        if use_rsm and os.path.exists(rsm):
             try:
                 times = rsm_times(rsm)
-                if times and t0 <= times[-1] and (not steps or t0 > steps[-1][1]):
+                if times and t0 <= times[-1] and (not steps or t0 > max(d for _n, d in steps)):
                     return cb.restart_step_from_times(times, t0)
             except (OSError, ValueError, cb.CaseError):
                 pass
@@ -370,6 +404,37 @@ class AutoBatch:
             except cb.CaseError:
                 pass
         return self.restart
+
+    def _run_late(self) -> None:
+        """Сквозной прогон по всем датам после последнего шага модели: одна копия расписания, мульты и режимы на каждой дате."""
+        item = self.state['dates'][0]
+        if item['status'] in ('done', 'accepted', 'skipped'):
+            return
+        first = min(g.date for g in self.late_group)
+        item['status'] = 'running'
+        self._push(message='сквозной прогон по датам после последнего шага модели (%s ... %s): модель досчитывается, это часы' % tuple(item['span']))
+        snaps = {g.wname: self.snapshots[g.wname] for g in self.late_group if self.snapshots and g.wname in self.snapshots}
+        self.loop = AutoLoop(self.model_data, self.workdir, self.runner, self.late_group, self.cfg, self.pvt, self.st,
+                             (lambda: self.restart_for(first, use_rsm=False)), self.journal, snapshots=snaps or None,
+                             tag='_' + item['date'], multi=True)
+        self.loop.cancel = self.cancel
+        st = self.loop.run()
+        item['runs'] = len(st['iterations'])
+        item['skipped'] = sorted(st.get('skipped', {}))
+        for g in self.late_group:
+            b = self.loop.best(g.wname)
+            if b:
+                m = b['mults'][g.wname]
+                item['results'][g.wname] = {'err': b['wells'][g.wname]['err'], 'inc': m['inc'], 'd': m.get('d'), 'k': b['k'], 'source': m.get('source', ''),
+                                            'date': g.date.strftime('%Y-%m-%d')}
+        if st['status'] == 'cancelled':
+            item['status'] = 'queued'
+            raise Cancelled()
+        item['status'] = 'done' if st['status'] == 'done' else 'failed'
+        item['message'] = st.get('stop_reason', '')
+        self._push()
+        if item['status'] == 'failed':
+            raise RuntimeError('сквозной прогон: ' + item['message'])
 
     # --- формула без прогона ---
     def _accepted_by_formula(self, group: Sequence[GDI]):
@@ -397,8 +462,10 @@ class AutoBatch:
         self.state['started'] = time.time()
         self._push(status='running', message='очередь запущена')
         try:
+            if self.late_group:
+                self._run_late()
             for d, group in self.groups.items():
-                item = next(x for x in self.state['dates'] if x['date'] == d.strftime('%Y-%m-%d'))
+                item = next(x for x in self.state['dates'] if x['date'] == d.strftime('%Y-%m-%d') and not x.get('multi'))
                 if item['status'] in ('done', 'accepted', 'skipped'):
                     continue
                 if self.cancel.is_set():
