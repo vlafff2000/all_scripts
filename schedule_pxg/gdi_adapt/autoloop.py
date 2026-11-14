@@ -54,7 +54,7 @@ class Runner:
 
 
 class TnavRunner(Runner):
-    def __init__(self, exe: str, workdir: str, extra: Sequence[str] = (), timeout: float = 4 * 3600.0, on_job: Optional[Callable] = None):
+    def __init__(self, exe: str, workdir: str, extra: Sequence[str] = (), timeout: float = 24 * 3600.0, on_job: Optional[Callable] = None):
         self.exe, self.workdir, self.extra, self.timeout, self.on_job = exe, workdir, tuple(extra), timeout, on_job
 
     def run(self, case, restart, label, cancel):
@@ -143,7 +143,7 @@ class AutoLoop:
         regimes = {w: [float(x) for x in g.q] for w, g in self.gdis.items()}
         rows = [(w, m['inc'], m.get('d')) for w, m in (mults or {}).items()] or None
         case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days)
-        rsm = self.runner.run(case, self.restart, label, self.cancel)
+        rsm = self.runner.run(case, self.restart() if callable(self.restart) else self.restart, label, self.cancel)
         series = parse_rsm(rsm)
         msd = case['model_start']
         t0 = float((self.start - msd).days)
@@ -336,8 +336,10 @@ class AutoBatch:
 
     # --- шаг рестарта ---
     def restart_for(self, date: datetime) -> Optional[int]:
-        """Шаг рестарта на начало даты ГДИ: из журнала расчёта исходной модели (RESULTS/<имя>.job.log, только чтение), иначе из RSM
-        рабочей папки (годится для дат раньше уже посчитанных), иначе заданный вручную."""
+        """Шаг рестарта на начало даты ГДИ. Источники шагов: журнал расчёта исходной модели (RESULTS/<имя>.job.log или
+        RESULTS/<имя>/result.log: «ОТЧЁТ N … ДЕНЬ …»), RSM рабочей папки (после прогонов покрывает и продлённые шаги), иначе ручной.
+        Дата позже последнего посчитанного шага модели: рестарт с последнего шага, и первый прогон сам досчитывает модель до этой даты
+        (долго, один раз), последующие рестартуют уже с продлённых шагов."""
         from .rsm import rsm_times
         src_dir = os.path.dirname(os.path.abspath(self.model_data))
         base = os.path.splitext(os.path.basename(self.model_data))[0]
@@ -345,19 +347,27 @@ class AutoBatch:
             t0 = float((date - cb.model_start(cb._read(self.model_data)[0])).days)
         except (OSError, cb.CaseError):
             return self.restart
-        log = os.path.join(src_dir, 'RESULTS', base + '.job.log')
-        if os.path.exists(log):
+        steps: List[tuple] = []
+        for log in (os.path.join(src_dir, 'RESULTS', base + '.job.log'), os.path.join(src_dir, 'RESULTS', base, 'result.log'),
+                    os.path.join(src_dir, 'RESULTS', base, 'result.log.old')):
             try:
-                return cb.restart_step_from_log(cb.steps_from_job_log(log), t0)
-            except (OSError, cb.CaseError):
-                pass
+                got = cb.steps_from_job_log(log) if os.path.exists(log) else []
+            except OSError:
+                got = []
+            if len(got) > len(steps):
+                steps = got
         rsm = os.path.join(self.workdir, base + '.RSM')
-        if os.path.exists(rsm):
+        if os.path.exists(rsm):                               # продлённые прогонами шаги: после даты последнего шага журнала
             try:
                 times = rsm_times(rsm)
-                if times and t0 <= times[-1]:
+                if times and t0 <= times[-1] and (not steps or t0 > steps[-1][1]):
                     return cb.restart_step_from_times(times, t0)
             except (OSError, ValueError, cb.CaseError):
+                pass
+        if steps:
+            try:
+                return cb.restart_step_from_log(steps, t0)
+            except cb.CaseError:
                 pass
         return self.restart
 
@@ -419,7 +429,7 @@ class AutoBatch:
                 item['status'] = 'running'
                 self._push()
                 snaps = {g.wname: self.snapshots[g.wname] for g in run_group if self.snapshots and g.wname in self.snapshots}
-                self.loop = AutoLoop(self.model_data, self.workdir, self.runner, run_group, self.cfg, self.pvt, self.st, restart, self.journal,
+                self.loop = AutoLoop(self.model_data, self.workdir, self.runner, run_group, self.cfg, self.pvt, self.st, (lambda d=d: self.restart_for(d)), self.journal,
                                      snapshots=snaps or None, tag='_' + item['date'])
                 self.loop.cancel = self.cancel
                 st = self.loop.run()
