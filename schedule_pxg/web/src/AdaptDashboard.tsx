@@ -23,7 +23,7 @@ export default function AdaptDashboard({ st, well, setWell, write, busy }: { st:
   const thr = (w: string) => st.thresholds[w] ?? 10
   const rows = useMemo(() => st.wells.map(w => {
     const b = bestIter(its, w)
-    return { w, base: its[0]?.wells[w]?.err ?? null, best: b, err: b ? (b.wells[w].err as number) : null }
+    return { w, base: its.find(i => i.k === 0)?.wells[w]?.err ?? null, best: b, err: b ? (b.wells[w].err as number) : null }
   }), [st, its])
 
   const sum = useMemo(() => {
@@ -66,7 +66,7 @@ export default function AdaptDashboard({ st, well, setWell, write, busy }: { st:
     const ser = [mkSeries({ name: 'ГДИ', kind: 'points', slot: 3, x: ref.q.map(q => q / 1000), y: ref.dep_gdi.map(v => v ?? NaN) })]
     its.forEach((it, i) => {
       const w = it.wells[well]
-      if (w) ser.push(mkSeries({ name: it.k === 0 ? 'модель без мультов' : 'итерация ' + it.k, slot: i === 0 ? 5 : i - 1, dashed: i === 0, x: w.q.map(q => q / 1000), y: w.dep_model.map(v => v ?? NaN) }))
+      if (w) ser.push(mkSeries({ name: it.k === 0 ? 'модель без мультов' : 'итерация ' + it.k, slot: it.k === 0 ? 5 : i - 1, dashed: it.k === 0, x: w.q.map(q => q / 1000), y: w.dep_model.map(v => v ?? NaN) }))
     })
     return mkChart('loop-dep', 'Депрессия по режимам ГДИ, скв. ' + well, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('Pпл − Pзаб', 'бар', 'value', { from_zero: true }), ser)
   }, [its, well])
@@ -83,7 +83,7 @@ export default function AdaptDashboard({ st, well, setWell, write, busy }: { st:
     its.forEach((it, i) => {
       const w = it.wells[well]
       const y = w && line(w.a_model, w.b_model)
-      if (y) ser.push(mkSeries({ name: it.k === 0 ? 'модель без мультов' : 'итерация ' + it.k, slot: i === 0 ? 5 : i - 1, dashed: i === 0, x: xs, y }))
+      if (y) ser.push(mkSeries({ name: it.k === 0 ? 'модель без мультов' : 'итерация ' + it.k, slot: it.k === 0 ? 5 : i - 1, dashed: it.k === 0, x: xs, y }))
     })
     return ser.length ? mkChart('loop-ip', 'Индикаторная кривая ΔP² = A·Q + B·Q², скв. ' + well, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('ΔP²', 'бар²', 'value', { from_zero: true }), ser) : null
   }, [its, well])

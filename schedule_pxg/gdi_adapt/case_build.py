@@ -76,8 +76,8 @@ def _split_sections(lines: List[str]) -> Tuple[int, int]:
 
 
 def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, Sequence[float]], mults: Optional[list] = None,
-               wells: Optional[Sequence[str]] = None, name: str = 'T', step_days: int = 1, extra_lines: Sequence[str] = ()
-               ) -> dict:
+               wells: Optional[Sequence[str]] = None, name: str = 'T', step_days: int = 1, extra_lines: Sequence[str] = (),
+               light_output: bool = False) -> dict:
     """Пишет в workdir копию модели под тестовый прогон. Возвращает {data, include, steps, model_start, hist_rates, notes}."""
     src_data = os.path.abspath(src_data)
     src_dir = os.path.dirname(src_data)
@@ -124,6 +124,8 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
     i, j, nm, t, e = cut
     inc_name = f'sch_{name}.inc'
     prior_text = nl.join(prior)
+    if light_output:                       # тестовому участку не нужны файлы рестарта и карт: меньше вес и время прогона
+        extra_lines = list(extra_lines) + ['RPTRST', "'BASIC=0' /"]
     sched_text, steps, rep = rr.build_test_schedule(t, start, regimes, mults, step_days, extra_lines, prior_text=prior_text)
     os.makedirs(workdir, exist_ok=True)
     with open(os.path.join(workdir, inc_name), 'w', encoding=e if e != 'utf-8-sig' else 'utf-8', newline='') as f:
@@ -177,3 +179,31 @@ def restart_step_from_times(times: Sequence[float], t: float) -> int:
     if not before:
         raise CaseError('время расчёта раньше первого шага')
     return before[-1]
+
+
+_LOG_STEP = re.compile(r'(?:ОТЧ[ЕЁ]Т N|FINISH REPORT N)\s+(\d+)\s+(?:ДЕНЬ|FOR DAY)\s+([0-9.]+)')
+
+
+def steps_from_job_log(path: str) -> List[Tuple[int, float]]:
+    """Шаги отчёта и время (дни от START) из журнала расчёта модели (<имя>.job.log в RESULTS; русская и английская версии tNavigator)."""
+    out: List[Tuple[int, float]] = []
+    with open(path, 'rb') as f:
+        raw = f.read()
+    for enc in ('utf-8', 'cp1251'):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            text = ''
+    for m in _LOG_STEP.finditer(text or raw.decode('latin-1')):
+        out.append((int(m.group(1)), float(m.group(2))))
+    return out
+
+
+def restart_step_from_log(steps: Sequence[Tuple[int, float]], t: float) -> int:
+    """Наибольший номер шага отчёта, время которого не позже t (состояние модели на начало даты ГДИ); tNavigator сам откатится
+    к ближайшему шагу, с которого возможен рестарт."""
+    before = [n for n, d in steps if d <= t]
+    if not before:
+        raise CaseError('в журнале расчёта нет шага не позже даты ГДИ')
+    return max(before)

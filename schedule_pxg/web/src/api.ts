@@ -415,6 +415,7 @@ export const histModelXlsx = (b: HmBody) => download('/api/results/histmodel/xls
 /** Автоцикл подбора мультов по тестовому прогону модели (шаг 7 вкладки «Адаптация по ГДИ»). */
 export interface LoopOpts {
   exe: string; model: string; workdir: string; restart: string; date: string; threshold_pct: number; max_iter: number; metric: 'regimes' | 'dp2'; wells: string[]
+  batch: boolean; snapshots: string; accept_formula: boolean
 }
 export interface LoopWell {
   err: number | null; err_dep: number | null; err_dp2: number | null; p_res_gap: number | null; e: number | null
@@ -431,6 +432,9 @@ export interface LoopState {
 export interface LoopInfo { saved: Partial<LoopOpts>; candidates: string[]; loops: { id: string; status: string; date: string; wells: string[]; iterations: number }[] }
 export const getLoopInfo = () => call<LoopInfo>('/api/adapt/loop')
 export const startLoop = (b: AdaptRequest, loop: Partial<LoopOpts>) => call<{ id: string }>('/api/adapt/loop/start', post({ ...b, loop }))
-export const getLoopStatus = (id: string) => call<LoopState>('/api/adapt/loop/status?' + new URLSearchParams({ id }))
+export interface BatchDate { date: string; wells: string[]; status: 'queued' | 'running' | 'done' | 'accepted' | 'failed'; runs: number; message?: string
+  results: Record<string, { err: number | null; inc: number; d: number | null; k: number; source: string }> }
+export interface BatchState { id: string; status: LoopState['status']; message: string; stop_reason: string; dates: BatchDate[] }
+export const getLoopStatus = (id: string, date = '') => call<LoopState & Partial<BatchState>>('/api/adapt/loop/status?' + new URLSearchParams(date ? { id, date } : { id }))
 export const stopLoop = (id: string) => call<{ ok: boolean }>('/api/adapt/loop/stop', post({ id }))
 export const loopInclude = (id: string, k: number, out: string) => call<{ path: string; wells: number }>('/api/adapt/loop/include', post({ id, k, out }))

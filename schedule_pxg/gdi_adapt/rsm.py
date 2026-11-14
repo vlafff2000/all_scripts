@@ -77,3 +77,26 @@ def value_at(series: Tuple[np.ndarray, np.ndarray], t: float, tol: float = 1e-6)
     ts, vs = series
     j = int(np.searchsorted(ts, t - tol))
     return float(vs[j]) if j < len(ts) and abs(ts[j] - t) <= tol else float('nan')
+
+
+def rsm_times(path: str) -> List[float]:
+    """Отчётные времена (дни от START) из первого блока RSM: номер шага рестарта = индекс времени (0 - начало расчёта)."""
+    out: List[float] = []
+    seps = 0
+    with open(path, encoding='latin-1') as f:
+        for ln in f:
+            s = ln.strip()
+            if s.startswith('-----'):
+                seps += 1
+                if seps == 4:
+                    break
+            elif seps == 3:
+                if not s or s == '1':                  # конец блока данных (пустая строка, затем «1» - следующий блок)
+                    break
+                try:
+                    t = float(s.split()[0])
+                except ValueError:
+                    break
+                if not out or t != out[-1]:        # повтор времени (рестарт) - один шаг
+                    out.append(t)
+    return out

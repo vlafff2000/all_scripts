@@ -101,7 +101,8 @@ def secant_step(hist: List[tuple], limit: float, bounds: tuple) -> float:
 
 class AutoLoop:
     def __init__(self, model_data: str, workdir: str, runner: Runner, gdis: Sequence[GDI], cfg, pvt, settings: Optional[LoopSettings] = None,
-                 restart: Optional[int] = None, journal: Optional[MultJournal] = None, on_update: Optional[Callable[[dict], None]] = None):
+                 restart: Optional[int] = None, journal: Optional[MultJournal] = None, on_update: Optional[Callable[[dict], None]] = None,
+                 snapshots: Optional[dict] = None, tag: str = '', light_output: bool = False):
         dates = {g.date for g in gdis}
         if len(dates) != 1:
             raise ValueError('один цикл ведётся по одной дате ГДИ: сгруппируйте исследования по датам')
@@ -114,7 +115,10 @@ class AutoLoop:
         self.state = {'status': 'idle', 'message': '', 'iterations': [], 'wells': list(self.gdis), 'date': self.start.strftime('%Y-%m-%d'),
                       'stop_reason': '', 'started': 0.0,
                       'thresholds': {w: self.st.thr(w) for w in self.gdis}, 'metric': self.st.metric}
-        self.snapshots: dict = {}
+        self.snapshots: dict = dict(snapshots or {})
+        self.preset = bool(snapshots)            # снимки уже есть (комплект): базовый прогон не нужен, экономим один запуск на дату
+        self.tag = tag
+        self.light = light_output
 
     # ---------- служебное ----------
     def _push(self, **kw) -> None:
@@ -123,7 +127,7 @@ class AutoLoop:
             self.on_update(self.state)
         try:
             os.makedirs(self.workdir, exist_ok=True)
-            with open(os.path.join(self.workdir, 'loop.json'), 'w', encoding='utf-8') as f:
+            with open(os.path.join(self.workdir, f'loop{self.tag}.json'), 'w', encoding='utf-8') as f:
                 json.dump(self.state, f, ensure_ascii=False, indent=1, default=float)
         except OSError:
             pass
@@ -139,7 +143,7 @@ class AutoLoop:
     def _iteration(self, k: int, mults: Optional[Dict[str, dict]], label: str) -> dict:
         regimes = {w: [float(x) for x in g.q] for w, g in self.gdis.items()}
         rows = [(w, m['inc'], m.get('d')) for w, m in (mults or {}).items()] or None
-        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name=f'it{k}', step_days=self.st.step_days)
+        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days, light_output=self.light)
         rsm = self.runner.run(case, self.restart, label, self.cancel)
         series = parse_rsm(rsm)
         msd = case['model_start']
@@ -179,13 +183,14 @@ class AutoLoop:
     # ---------- цикл ----------
     def run(self) -> dict:
         self.state['started'] = time.time()
-        self._push(status='running', message='итерация 0: базовый прогон без мультов')
+        self._push(status='running', message='итерация 1: мульты по формуле' if self.preset else 'итерация 0: базовый прогон без мультов')
         its: List[dict] = self.state['iterations']
         hist: Dict[str, List[tuple]] = {}
         done: set = set()
         try:
-            its.append(self._iteration(0, None, 'базовый (без мультов)'))
-            self._push()
+            if not self.preset:
+                its.append(self._iteration(0, None, 'базовый (без мультов)'))
+                self._push()
             mults = self._initial_mults()
             for w, m in mults.items():
                 hist.setdefault(w, [])
@@ -273,3 +278,163 @@ def group_by_date(gdis: Sequence[GDI]) -> Dict[datetime, List[GDI]]:
     for g in gdis:
         out.setdefault(g.date, []).append(g)
     return dict(sorted(out.items()))
+
+
+class AutoBatch:
+    """Очередь циклов по датам ГДИ, строго по одному прогону модели (параллельные запуски не делаем: ПК не вывозит нагрузку).
+
+    Исследования группируются по дате, даты идут от поздних к ранним (иначе рестарт с ранней даты перезапишет шаги, нужные для поздних). Для даты шаг рестарта берётся из журнала расчёта исходной модели
+    (RESULTS/<имя>.job.log: шаги отчёта и дни), если журнала нет - из RSM рабочей папки, иначе нужен ручной шаг.
+    Состояние пишется в batch.json после каждой даты: после остановки или сбоя очередь продолжается с первой невыполненной.
+    Если даны снимки модели (комплект, один запуск калькулятора на все скважины), базовый прогон на дату не нужен, а скважины,
+    для которых формула ГДМ уже обещает ошибку в пределах порога, при accept_formula принимаются без прогона модели
+    (в журнале помечены «по формуле»): это основной способ сократить число прогонов при сотнях исследований."""
+
+    def __init__(self, model_data: str, workdir: str, runner: Runner, gdis: Sequence[GDI], cfg, pvt, settings: Optional[LoopSettings] = None,
+                 restart: Optional[int] = None, journal: Optional[MultJournal] = None, snapshots: Optional[dict] = None,
+                 accept_formula: bool = False, on_update: Optional[Callable[[dict], None]] = None, light_output: bool = False):
+        self.light_output = light_output
+        self.model_data, self.workdir, self.runner, self.cfg, self.pvt = model_data, workdir, runner, cfg, pvt
+        self.st, self.restart, self.journal, self.snapshots = settings or LoopSettings(), restart, journal, snapshots
+        self.accept_formula, self.on_update = accept_formula, on_update
+        # от поздних дат к ранним: рестарт с шага D перезаписывает результаты рабочей копии ПОСЛЕ D, ранние шаги целы
+        self.groups = dict(sorted(group_by_date(gdis).items(), reverse=True))
+        self.cancel = threading.Event()
+        self.loop: Optional[AutoLoop] = None
+        self.state = {'status': 'idle', 'message': '', 'stop_reason': '', 'started': 0.0, 'dates': [
+            {'date': d.strftime('%Y-%m-%d'), 'wells': [g.wname for g in gs], 'status': 'queued', 'runs': 0, 'results': {}} for d, gs in self.groups.items()]}
+        self._load()
+
+    # --- состояние на диске ---
+    def _path(self) -> str:
+        return os.path.join(self.workdir, 'batch.json')
+
+    def _load(self) -> None:
+        try:
+            with open(self._path(), encoding='utf-8') as f:
+                old = json.load(f)
+        except (OSError, ValueError):
+            return
+        done = {x['date']: x for x in old.get('dates', []) if x.get('status') in ('done', 'accepted')}
+        for i, x in enumerate(self.state['dates']):
+            if x['date'] in done and done[x['date']].get('wells') == x['wells']:
+                self.state['dates'][i] = done[x['date']]
+
+    def _push(self, **kw) -> None:
+        self.state.update(kw)
+        if self.on_update:
+            self.on_update(self.state)
+        try:
+            os.makedirs(self.workdir, exist_ok=True)
+            with open(self._path(), 'w', encoding='utf-8') as f:
+                json.dump(self.state, f, ensure_ascii=False, indent=1, default=float)
+        except OSError:
+            pass
+
+    def stop(self) -> None:
+        self.cancel.set()
+        if self.loop:
+            self.loop.stop()
+
+    # --- шаг рестарта ---
+    def restart_for(self, date: datetime) -> Optional[int]:
+        """Шаг рестарта на начало даты ГДИ: из журнала расчёта исходной модели (RESULTS/<имя>.job.log, только чтение), иначе из RSM
+        рабочей папки (годится для дат раньше уже посчитанных), иначе заданный вручную."""
+        from .rsm import rsm_times
+        src_dir = os.path.dirname(os.path.abspath(self.model_data))
+        base = os.path.splitext(os.path.basename(self.model_data))[0]
+        try:
+            t0 = float((date - cb.model_start(cb._read(self.model_data)[0])).days)
+        except (OSError, cb.CaseError):
+            return self.restart
+        log = os.path.join(src_dir, 'RESULTS', base + '.job.log')
+        if os.path.exists(log):
+            try:
+                return cb.restart_step_from_log(cb.steps_from_job_log(log), t0)
+            except (OSError, cb.CaseError):
+                pass
+        rsm = os.path.join(self.workdir, base + '.RSM')
+        if os.path.exists(rsm):
+            try:
+                times = rsm_times(rsm)
+                if times and t0 <= times[-1]:
+                    return cb.restart_step_from_times(times, t0)
+            except (OSError, ValueError, cb.CaseError):
+                pass
+        return self.restart
+
+    # --- формула без прогона ---
+    def _accepted_by_formula(self, group: Sequence[GDI]):
+        """(принятые без прогона {скв: мульт}, остальные GDI) по предсказанной формулой ошибке депрессии."""
+        acc, rest = {}, []
+        for g in group:
+            snap = (self.snapshots or {}).get(g.wname)
+            if snap is None:
+                rest.append(g)
+                continue
+            try:
+                r = adapt_well(g, snap, self.pvt, self.cfg)
+            except AdaptError:
+                rest.append(g)
+                continue
+            err = r.dep_errs_after.get('regimes' if self.st.metric == 'regimes' else 'dp2')
+            if r.ok and err is not None and err == err and err <= self.st.thr(g.wname):
+                acc[g.wname] = {'inc': float(r.pi_mult), 'd': float(r.d), 'err': float(err), 'source': 'по формуле, без прогона модели'}
+            else:
+                rest.append(g)
+        return acc, rest
+
+    # --- очередь ---
+    def run(self) -> dict:
+        self.state['started'] = time.time()
+        self._push(status='running', message='очередь запущена')
+        try:
+            for d, group in self.groups.items():
+                item = next(x for x in self.state['dates'] if x['date'] == d.strftime('%Y-%m-%d'))
+                if item['status'] in ('done', 'accepted'):
+                    continue
+                if self.cancel.is_set():
+                    raise Cancelled()
+                self._push(message=f'дата {item["date"]} ({self.state["dates"].index(item) + 1} из {len(self.groups)})')
+                run_group = group
+                if self.accept_formula and self.snapshots:
+                    acc, run_group = self._accepted_by_formula(group)
+                    for w, m in acc.items():
+                        item['results'][w] = {'err': m['err'], 'inc': m['inc'], 'd': m['d'], 'k': 0, 'source': m['source']}
+                        if self.journal is not None:
+                            self.journal.add(SimpleNamespace(wname=w, date=d, pi_mult=m['inc'], d=m['d']), state='base', note='по формуле, без прогона модели')
+                if not run_group:
+                    item['status'] = 'accepted'
+                    self._push()
+                    continue
+                restart = self.restart_for(d)
+                if restart is None:
+                    raise ValueError(f'для даты {item["date"]} неизвестен шаг рестарта: укажите его для первой даты (дальше он берётся из RSM)')
+                item['status'] = 'running'
+                self._push()
+                snaps = {g.wname: self.snapshots[g.wname] for g in run_group if self.snapshots and g.wname in self.snapshots}
+                self.loop = AutoLoop(self.model_data, self.workdir, self.runner, run_group, self.cfg, self.pvt, self.st, restart, self.journal,
+                                     snapshots=snaps or None, tag='_' + item['date'], light_output=self.light_output)
+                self.loop.cancel = self.cancel
+                st = self.loop.run()
+                item['runs'] = len([i for i in st['iterations']])
+                for g in run_group:
+                    b = self.loop.best(g.wname)
+                    if b:
+                        m = b['mults'][g.wname]
+                        item['results'][g.wname] = {'err': b['wells'][g.wname]['err'], 'inc': m['inc'], 'd': m.get('d'), 'k': b['k'], 'source': m.get('source', '')}
+                if st['status'] == 'cancelled':
+                    item['status'] = 'queued'
+                    raise Cancelled()
+                item['status'] = 'done' if st['status'] == 'done' else 'failed'
+                item['message'] = st.get('stop_reason', '')
+                self._push()
+                if item['status'] == 'failed':
+                    self._push(status='failed', stop_reason=f'дата {item["date"]}: {item["message"]}', message='очередь остановлена на ошибке: после исправления запуск продолжит с этой даты')
+                    return self.state
+            self._push(status='done', stop_reason='очередь выполнена', message='готово')
+        except Cancelled:
+            self._push(status='cancelled', stop_reason='остановлено инженером', message='остановлено: запуск продолжит с первой невыполненной даты')
+        except Exception as e:
+            self._push(status='failed', stop_reason=f'{type(e).__name__}: {e}', message='ошибка')
+        return self.state

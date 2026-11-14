@@ -115,6 +115,10 @@ class TestResults(unittest.TestCase):
         only = parse_rsm(self.rsm, vectors=['WBHP'], wells=['295'])
         self.assertEqual(list(only), [('WBHP', '295')])
 
+    def test_rsm_times_only_first_block(self):
+        from schedule_pxg.gdi_adapt.rsm import rsm_times
+        self.assertEqual(rsm_times(self.rsm), [0.0, 13076.0, 13077.0])          # время следующего блока («1») в список не попадает
+
     def test_snapshot_restores_inflow_denominator(self):
         snap = rr.snapshot_from_rsm(self.s, '295', 13076.0)
         self.assertEqual(snap.n_perf, 2)

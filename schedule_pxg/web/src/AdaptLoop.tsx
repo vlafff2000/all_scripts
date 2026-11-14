@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import AdaptDashboard from './AdaptDashboard'
-import { AdaptRequest, LoopInfo, LoopOpts, LoopState, getLoopInfo, getLoopStatus, loopInclude, pickFile, pickFolder, startLoop, stopLoop } from './api'
+import { Tables } from '../../../pxg_core/web-ui/table/Tables'
+import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
+import { AdaptRequest, BatchState, LoopInfo, LoopOpts, LoopState, getLoopInfo, getLoopStatus, loopInclude, pickFile, pickFolder, startLoop, stopLoop } from './api'
 
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const STATUS: Record<string, string> = { idle: 'не запущен', running: 'идёт', done: 'завершён', failed: 'ошибка', cancelled: 'остановлен' }
@@ -12,6 +14,8 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
   const [o, setO] = useState<Partial<LoopOpts>>({ threshold_pct: 10, max_iter: 6, metric: 'regimes', restart: '' })
   const [id, setId] = useState('')
   const [st, setSt] = useState<LoopState | null>(null)
+  const [bs, setBs] = useState<BatchState | null>(null)
+  const [selDate, setSelDate] = useState('')
   const [well, setWell] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -23,20 +27,27 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
   useEffect(() => {
     window.clearInterval(timer.current)
     if (!id) return
-    const tick = () => getLoopStatus(id).then(s => { setSt(s); if (s.status !== 'running') window.clearInterval(timer.current) }).catch(e => setMsg((e as Error).message))
+    const tick = () => getLoopStatus(id).then(async s => {
+      if (s.dates) {                                    // очередь по датам: состояние цикла выбранной даты запрашивается отдельно
+        setBs(s as BatchState)
+        const d = selDate || (s.dates.find(x => x.status === 'running') || s.dates[s.dates.length - 1])?.date
+        if (d) { try { setSt(await getLoopStatus(id, d)) } catch { setSt(null) } }
+      } else { setBs(null); setSt(s) }
+      if (s.status !== 'running') window.clearInterval(timer.current)
+    }).catch(e => setMsg((e as Error).message))
     tick()
     timer.current = window.setInterval(tick, 2500)
     return () => window.clearInterval(timer.current)
-  }, [id])
+  }, [id, selDate])
   useEffect(() => { if (st && !well) setWell(st.wells[0] || '') }, [st, well])
 
-  const start = () => guard(async () => { const r = await startLoop(req(), { ...o, threshold_pct: Number(o.threshold_pct), max_iter: Number(o.max_iter), wells }); setSt(null); setWell(''); setId(r.id) })
+  const start = () => guard(async () => { const r = await startLoop(req(), { ...o, threshold_pct: Number(o.threshold_pct), max_iter: Number(o.max_iter), wells }); setSt(null); setBs(null); setSelDate(''); setWell(''); setId(r.id) })
   const stop = () => guard(async () => { await stopLoop(id) })
   const write = (k: number) => guard(async () => {
     const r = await loopInclude(id, k, o.workdir || kit)
     setMsg('Итерация ' + k + ': include записан в ' + r.path + ' (' + r.wells + ' скв.). Вставьте его в модель вручную или через копию .data; журнал мультов обновлён.')
   })
-  const running = st?.status === 'running'
+  const running = (bs?.status ?? st?.status) === 'running'
   return (
     <section className="card">
       <div className="step-head"><span className="step-n">7</span><h2>Подбор по модели (автоцикл)</h2></div>
@@ -65,7 +76,13 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
         <label>Порог, %<input style={{ width: 70 }} value={o.threshold_pct ?? ''} onChange={e => upd('threshold_pct', e.target.value as unknown as number)} /></label>
         <label>Макс. итераций<input style={{ width: 70 }} value={o.max_iter ?? ''} onChange={e => upd('max_iter', e.target.value as unknown as number)} /></label>
       </div>
-      <p className="muted small">Шаг рестарта — номер шага результатов модели перед датой ГДИ (в tNavigator он виден в списке шагов расчёта). Один прогон занимает минуты, а не часы. Порог по скважине можно задать в настройках критерия депрессии, он приоритетнее общего.</p>
+      <div className="row">
+        <label className="grow">Снимки модели (папка запуска или snapshots.pkl из шага 5), необязательно: тогда базовый прогон на дату не нужен
+          <input value={o.snapshots || ''} onChange={e => upd('snapshots', e.target.value)} placeholder="Путь к snapshots.pkl или папке runs" /></label>
+        <label><input type="checkbox" checked={!!o.batch} onChange={e => upd('batch', e.target.checked)} /> Все даты по очереди</label>
+        <label title="Нужны снимки модели: скважины, у которых формула уже обещает ошибку в пределах порога, принимаются без прогона"><input type="checkbox" checked={!!o.accept_formula} disabled={!o.batch} onChange={e => upd('accept_formula', e.target.checked)} /> Принять по формуле без прогона</label>
+      </div>
+      <p className="muted small">Шаг рестарта — номер шага результатов модели перед датой ГДИ (в tNavigator он виден в списке шагов расчёта). Один прогон занимает минуты, а не часы. Прогоны идут строго по одному. Шаг рестарта обычно вводить не нужно: он берётся из журнала расчёта модели (RESULTS/*.job.log), вручную нужен только если журнала нет. Очередь идёт от поздних дат к ранним: рестарт с ранней даты перезаписывает шаги, нужные для поздних. Порог по скважине можно задать в настройках критерия депрессии, он приоритетнее общего.</p>
       <div className="row">
         <button className="primary" onClick={start} disabled={busy || running || !o.exe || !o.model || !o.workdir || !wells.length}>Запустить автоцикл</button>
         <button onClick={stop} disabled={!running}>Остановить</button>
@@ -77,6 +94,15 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
       {st?.skipped_dates && st.skipped_dates.length > 0 && <p className="muted small">Один цикл ведётся по одной дате ГДИ: скважины с другой датой ({st.skipped_dates.join(', ')}) пропущены; запустите цикл для их даты отдельно.</p>}
       {st?.skipped && Object.entries(st.skipped).map(([w, r]) => <p key={w} className="muted small">Скв. {w}: {r}</p>)}
 
+      {bs && <>
+        <h3>Очередь по датам ({bs.dates.filter(d => d.status === 'done' || d.status === 'accepted').length} из {bs.dates.length})</h3>
+        <Tables scope="adapt-batch" tables={[tableOf('adapt-batch', 'Очередь', [['Дата ГДИ', 'text'], ['Скважин', 'number', 0], ['Статус', 'text'], ['Прогонов', 'number', 0], ['Макс. ошибка, %', 'number', 1], ['Примечание', 'text']],
+          bs.dates.map(d => [d.date, d.wells.length, { queued: 'в очереди', running: 'идёт', done: 'готово', accepted: 'принято по формуле', failed: 'ошибка' }[d.status], d.runs,
+            Object.values(d.results).reduce((m, r) => (r.err === null ? m : Math.max(m, r.err)), 0) || null, d.message || '']))]}
+          onRow={(_t, i) => { setSelDate(bs.dates[i].date); setWell('') }} />
+        <p className="muted small">Нажмите на строку, чтобы открыть дашборд этой даты. «Записать include» для очереди собирает один файл по всем датам.</p>
+        <div className="row"><button disabled={busy} onClick={() => write(0)}>Записать include очереди (все даты)</button></div>
+      </>}
       {st && st.iterations.length > 0 && <AdaptDashboard st={st} well={well} setWell={setWell} write={write} busy={busy} />}
     </section>
   )
