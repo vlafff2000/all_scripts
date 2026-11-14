@@ -55,7 +55,7 @@ PXG_BASE_MODULES = {
 # Эталон: Python-модули пакетов Карт ГСП и Скедула (без __init__ и __main__).
 GSP_MAPS_MODULES = {'api', 'atlas_seasons', 'atlas_source', 'gdi_source', 'gis_source', 'inputs', 'model_gwc', 'models', 'observers', 'polygons', 'project', 'roof', 'store', 'wellmap'}
 SCHEDULE_MODULES = {
-    'adapt_view', 'api', 'averaging', 'avg_view', 'charts', 'checks', 'control', 'daily', 'dataquality', 'forecast',
+    'adapt_loop', 'adapt_view', 'api', 'averaging', 'avg_view', 'charts', 'checks', 'control', 'daily', 'dataquality', 'forecast',
     'atlas_data', 'gwc_compare', 'histmodel', 'history', 'historymode', 'model_compare', 'outages', 'planshet', 'project', 'results', 'scenarios', 'sources', 'strategy',
     'strategy_ops', 'techmap', 'totals', 'wizard',
 }
