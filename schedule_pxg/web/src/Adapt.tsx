@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import PageHead from './PageHead'
 import AdaptResults from './AdaptResults'
+import AdaptLoop from './AdaptLoop'
 import {
   AdaptColCheck, AdaptColumns, AdaptConfig, adaptCheckColumns, adaptCode, AdaptRequest, AdaptSelection, AdaptSettings, AdaptState, adaptKit, adaptSelect, getAdapt, getAdaptColumns, pickFile, pickFolder,
 } from './api'
@@ -229,6 +230,7 @@ export default function Adapt() {
         {code && <textarea readOnly rows={8} value={code} onFocus={e => e.currentTarget.select()} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }} />}
       </section>
       <AdaptResults kit={kit} config={cfg} />
+      <AdaptLoop req={req} wells={(sel?.rows || []).filter(r => r.include).map(r => r.model)} kit={kit} />
     </main>
   )
 }

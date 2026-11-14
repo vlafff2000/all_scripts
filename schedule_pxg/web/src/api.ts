@@ -411,3 +411,26 @@ export interface HmResult { seasons: HmSeason[]; notes: string[]; settings: HmSe
 export interface HmBody { model: string; settings?: Partial<HmSettings>; seasons?: { name: string; kind: string; start: string; end: string }[]; excluded?: string[]; unit_k?: number | null; schedule_path?: string; atlas_project?: string; hist_unit?: string }
 export const histModel = (b: HmBody) => call<HmResult>('/api/results/histmodel', post(b))
 export const histModelXlsx = (b: HmBody) => download('/api/results/histmodel/xlsx', b, 'История_и_модель.xlsx')
+
+/** Автоцикл подбора мультов по тестовому прогону модели (шаг 7 вкладки «Адаптация по ГДИ»). */
+export interface LoopOpts {
+  exe: string; model: string; workdir: string; restart: string; date: string; threshold_pct: number; max_iter: number; metric: 'regimes' | 'dp2'; wells: string[]
+}
+export interface LoopWell {
+  err: number | null; err_dep: number | null; err_dp2: number | null; p_res_gap: number | null; e: number | null
+  dep_model: (number | null)[]; dep_gdi: (number | null)[]; q: number[]; a_model: number | null; b_model: number | null; a_gdi: number | null; b_gdi: number | null
+  snapshot_error?: string
+}
+export interface LoopMult { inc: number; d: number | null; source?: string; problems?: string[] }
+export interface LoopIter { k: number; label: string; mults: Record<string, LoopMult>; wells: Record<string, LoopWell>; at: string }
+export interface LoopState {
+  id: string; status: 'idle' | 'running' | 'done' | 'failed' | 'cancelled'; message: string; stop_reason: string; date: string; wells: string[]
+  iterations: LoopIter[]; thresholds: Record<string, number>; metric: string; skipped?: Record<string, string>; skipped_dates?: string[]
+  job: { status: string; step: number; seconds: number; error: string; log_tail: string } | null
+}
+export interface LoopInfo { saved: Partial<LoopOpts>; candidates: string[]; loops: { id: string; status: string; date: string; wells: string[]; iterations: number }[] }
+export const getLoopInfo = () => call<LoopInfo>('/api/adapt/loop')
+export const startLoop = (b: AdaptRequest, loop: Partial<LoopOpts>) => call<{ id: string }>('/api/adapt/loop/start', post({ ...b, loop }))
+export const getLoopStatus = (id: string) => call<LoopState>('/api/adapt/loop/status?' + new URLSearchParams({ id }))
+export const stopLoop = (id: string) => call<{ ok: boolean }>('/api/adapt/loop/stop', post({ id }))
+export const loopInclude = (id: string, k: number, out: string) => call<{ path: string; wells: number }>('/api/adapt/loop/include', post({ id, k, out }))

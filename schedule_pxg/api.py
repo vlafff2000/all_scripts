@@ -25,7 +25,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from pxg_base.window import second_window_route
-from . import adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, histmodel, historymode, model_compare, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
+from . import adapt_loop, adapt_view, avg_view, charts, checks, control, dataquality, forecast, history, histmodel, historymode, model_compare, planshet, results, scenarios, sources, strategy, strategy_ops, techmap, wizard
 from .gdi_adapt import export_charts
 from .project import Project
 
@@ -1325,6 +1325,44 @@ async def adapt_recompute(request: Request):
     return JSONResponse(v)
 
 
+async def adapt_loop_info(request: Request):
+    return JSONResponse(await run_in_threadpool(lambda: adapt_loop.info(_project())))
+
+
+async def adapt_loop_start(request: Request):
+    body = await request.json()
+    try:
+        def go():
+            p, sel, _cols, cfg = _adapt_select(body)
+            return adapt_loop.start(p, FOLDER, body.get("loop") or {}, sel, cfg)
+        return JSONResponse(await run_in_threadpool(go))
+    except (ValueError, OSError, KeyError) as e:
+        return _err(str(e))
+
+
+async def adapt_loop_status(request: Request):
+    try:
+        return JSONResponse(await run_in_threadpool(adapt_loop.status, _clean(request.query_params.get("id"))))
+    except ValueError as e:
+        return _err(str(e))
+
+
+async def adapt_loop_stop(request: Request):
+    body = await request.json()
+    try:
+        return JSONResponse(await run_in_threadpool(adapt_loop.stop, str(body.get("id") or "")))
+    except ValueError as e:
+        return _err(str(e))
+
+
+async def adapt_loop_include(request: Request):
+    body = await request.json()
+    try:
+        return JSONResponse(await run_in_threadpool(adapt_loop.write_include, str(body.get("id") or ""), int(body.get("k")), _clean(body.get("out"))))
+    except (ValueError, OSError, TypeError) as e:
+        return _err(str(e))
+
+
 async def adapt_code(request: Request):
     """Код для python-секции тНавигатора (путь к комплекту вписан)."""
     kit_dir = _clean(request.query_params.get("kit"))
@@ -1565,6 +1603,11 @@ def build_app() -> Starlette:
         Route("/api/adapt/kit", adapt_kit, methods=["POST"]),
         Route("/api/adapt/recompute", adapt_recompute, methods=["POST"]),
         Route("/api/adapt/code", adapt_code),
+        Route("/api/adapt/loop", adapt_loop_info),
+        Route("/api/adapt/loop/start", adapt_loop_start, methods=["POST"]),
+        Route("/api/adapt/loop/status", adapt_loop_status),
+        Route("/api/adapt/loop/stop", adapt_loop_stop, methods=["POST"]),
+        Route("/api/adapt/loop/include", adapt_loop_include, methods=["POST"]),
         Route("/api/adapt/columns/check", adapt_columns_check, methods=["POST"]),
         Route("/api/adapt/runs", adapt_runs),
         Route("/api/adapt/run", adapt_run),
