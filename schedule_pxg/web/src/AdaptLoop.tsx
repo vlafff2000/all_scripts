@@ -1,17 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
-import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
-import { AdaptRequest, LoopInfo, LoopIter, LoopOpts, LoopState, getLoopInfo, getLoopStatus, loopInclude, pickFile, pickFolder, startLoop, stopLoop } from './api'
+import { useEffect, useRef, useState } from 'react'
+import AdaptDashboard from './AdaptDashboard'
+import { AdaptRequest, LoopInfo, LoopOpts, LoopState, getLoopInfo, getLoopStatus, loopInclude, pickFile, pickFolder, startLoop, stopLoop } from './api'
 
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const STATUS: Record<string, string> = { idle: 'не запущен', running: 'идёт', done: 'завершён', failed: 'ошибка', cancelled: 'остановлен' }
 const METRIC: Record<string, string> = { regimes: 'депрессия по режимам ГДИ', dp2: 'ΔP² (A и B)' }
-
-/** Лучшая итерация скважины с мультами (наименьшая ошибка). */
-export const bestIter = (its: LoopIter[], w: string): LoopIter | undefined => {
-  const c = its.filter(i => i.k > 0 && i.mults[w] && i.wells[w]?.err !== null && i.wells[w]?.err !== undefined)
-  return c.length ? c.reduce((a, b) => ((b.wells[w].err as number) < (a.wells[w].err as number) ? b : a)) : undefined
-}
 
 /** Шаг 7 вкладки «Адаптация по ГДИ»: автоцикл по тестовому прогону модели (подбор → прогон tNavigator → чтение → порог). Решение за инженером. */
 export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest; wells: string[]; kit: string }) {
@@ -44,38 +37,6 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
     setMsg('Итерация ' + k + ': include записан в ' + r.path + ' (' + r.wells + ' скв.). Вставьте его в модель вручную или через копию .data; журнал мультов обновлён.')
   })
   const running = st?.status === 'running'
-  const its = st?.iterations || []
-  const last = its[its.length - 1]
-  const rows = useMemo(() => (st?.wells || []).map(w => {
-    const b = bestIter(its, w)
-    const base = its[0]?.wells[w]?.err ?? null
-    const cur = last?.wells[w]?.err ?? null
-    const thr = st?.thresholds[w] ?? 10
-    const ok = b ? (b.wells[w].err as number) <= thr : null
-    return { w, base, cur, best: b, thr, ok }
-  }), [st, its, last])
-
-  const chart = useMemo(() => {
-    if (!well || !its.length) return null
-    const ref = its[0].wells[well]
-    if (!ref) return null
-    const ser = [mkSeries({ name: 'ГДИ', kind: 'points', slot: 3, x: ref.q.map(q => q / 1000), y: ref.dep_gdi.map(v => v ?? NaN) })]
-    its.forEach((it, i) => {
-      const w = it.wells[well]
-      if (w) ser.push(mkSeries({ name: it.k === 0 ? 'модель без мультов' : 'итерация ' + it.k, slot: i === 0 ? 5 : i - 1, dashed: i === 0, x: w.q.map(q => q / 1000), y: w.dep_model.map(v => v ?? NaN) }))
-    })
-    return mkChart('loop-dep', 'Депрессия по режимам ГДИ, скв. ' + well, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('Pпл − Pзаб', 'бар', 'value', { from_zero: true }), ser)
-  }, [its, well])
-  const errChart = useMemo(() => {
-    if (!well || its.length < 2) return null
-    const pts = its.filter(i => i.wells[well]?.err !== null && i.wells[well]?.err !== undefined)
-    const thr = st?.thresholds[well]
-    return mkChart('loop-err', 'Ошибка по итерациям, скв. ' + well, mkAxis('Итерация'), mkAxis(METRIC[st?.metric || 'regimes'], '%', 'value', { from_zero: true }), [
-      mkSeries({ name: 'ошибка', kind: 'points', slot: 0, x: pts.map(i => i.k), y: pts.map(i => i.wells[well].err as number) }),
-      { ...mkSeries({ name: 'линия', slot: 0, x: pts.map(i => i.k), y: pts.map(i => i.wells[well].err as number) }), legend: false },
-      ...(thr === undefined ? [] : [mkSeries({ name: 'порог', slot: 5, dashed: true, x: pts.map(i => i.k), y: pts.map(() => thr) })])])
-  }, [its, well, st])
-
   return (
     <section className="card">
       <div className="step-head"><span className="step-n">7</span><h2>Подбор по модели (автоцикл)</h2></div>
@@ -116,35 +77,7 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
       {st?.skipped_dates && st.skipped_dates.length > 0 && <p className="muted small">Один цикл ведётся по одной дате ГДИ: скважины с другой датой ({st.skipped_dates.join(', ')}) пропущены; запустите цикл для их даты отдельно.</p>}
       {st?.skipped && Object.entries(st.skipped).map(([w, r]) => <p key={w} className="muted small">Скв. {w}: {r}</p>)}
 
-      {st && rows.length > 0 && <>
-        <h3>Сводка по скважинам ({st.date})</h3>
-        <div className="scroll" style={{ maxHeight: 320 }}><table className="data-grid dense pick"><thead><tr>
-          <th>Скв.</th><th>Ошибка до, %</th><th>Ошибка сейчас, %</th><th>Лучшая итерация</th><th>WPIMULT (итого)</th><th>D-фактор</th><th>Порог, %</th><th>Вывод</th></tr></thead>
-          <tbody>{rows.map(r => {
-            const m = r.best?.mults[r.w]
-            return <tr key={r.w} className={r.w === well ? 'sel' : ''} onClick={() => setWell(r.w)} style={{ cursor: 'pointer' }}>
-              <td>{r.w}</td><td>{fmt(r.base, 1)}</td><td>{fmt(r.cur, 1)}</td><td>{r.best ? r.best.k : '—'}</td>
-              <td>{fmt(m?.inc, 4)}</td><td>{m?.d === null || m?.d === undefined ? '—' : m.d.toExponential(2)}</td><td>{fmt(r.thr, 1)}</td>
-              <td className={r.ok === null ? '' : r.ok ? 'ok' : 'bad'}>{r.ok === null ? '' : r.ok ? 'в пределах порога' : 'выше порога'}</td></tr>
-          })}</tbody></table></div>
-      </>}
-
-      {st && well && its.length > 0 && <>
-        <h3>Скважина {well}</h3>
-        <div className="scroll" style={{ maxHeight: 300 }}><table className="data-grid dense"><thead><tr>
-          <th>Итерация</th><th>Мульт WPIMULT</th><th>D-фактор</th><th>Ошибка, %</th><th>по dP², %</th><th>Pпл модели − ГДИ, бар</th><th>Источник</th><th /></tr></thead>
-          <tbody>{its.map(it => {
-            const w = it.wells[well], m = it.mults[well]
-            return <tr key={it.k}><td>{it.k === 0 ? '0 (без мультов)' : it.k}</td><td>{fmt(m?.inc, 4)}</td><td>{m?.d === null || m?.d === undefined ? '—' : m.d.toExponential(2)}</td>
-              <td>{fmt(w?.err, 1)}</td><td>{fmt(w?.err_dp2, 1)}</td><td>{fmt(w?.p_res_gap, 1)}</td><td className="muted small">{m?.source || ''}</td>
-              <td>{it.k > 0 && m && <button disabled={busy} onClick={() => write(it.k)}>Записать include этой итерации</button>}</td></tr>
-          })}</tbody></table></div>
-        <p className="muted small">«Записать include» делает откат на выбранную итерацию: файл wpimult_wdfac_loop.inc кладётся в рабочую папку, в журнал мультов пишется выбранное значение. Историю итераций это не стирает.</p>
-        <div className="grid2">
-          {chart && <div><ChartView chart={chart} excludeMode={false} onExclude={() => {}} /></div>}
-          {errChart && <div><ChartView chart={errChart} excludeMode={false} onExclude={() => {}} /></div>}
-        </div>
-      </>}
+      {st && st.iterations.length > 0 && <AdaptDashboard st={st} well={well} setWell={setWell} write={write} busy={busy} />}
     </section>
   )
 }
