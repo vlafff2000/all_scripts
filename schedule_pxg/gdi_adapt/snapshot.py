@@ -5,37 +5,44 @@
 Снимки сохраняются в snapshots.pkl, и дальше адаптацию можно перезапускать с другими настройками
 (стратегия, границы, цель, пороги) вне тНавигатора за секунды: python run_offline.py --snapshots ...
 """
-from __future__ import annotations
-
 import pickle
-from dataclasses import dataclass, field
 from typing import Dict, List
 
 import numpy as np
 
 
-@dataclass
-class WellSnapshot:
-    wname: str
-    t_name: str                  # имя шага модели, по которому читались данные
-    t_requested: str             # шаг на дату ГДИ (отличается, если скважина на нём стояла)
-    substituted: bool            # True - использован ближайший работающий шаг
-    # по открытым перфорациям (массивы одной длины)
-    cbp: np.ndarray              # давление в блоке
-    cdrd: np.ndarray             # депрессия на перфорации
-    cgpr: np.ndarray             # дебит газа перфорации
-    cdfac: np.ndarray            # D-фактор перфорации
-    cekh: np.ndarray             # эффективный KH
-    cdiam: np.ndarray            # диаметр скважины
-    cefr: np.ndarray             # эквивалентный радиус
-    ctfac: np.ndarray            # коэффициент проводимости (для расчёта старого D скважины)
-    # по скважине
-    wbp: float                   # модельное пластовое давление
-    wgpr: float                  # модельный дебит газа
-    wbhp: float                  # модельное забойное давление
-    # необязательные (старые pickle их не содержат - читать через getattr с умолчанием)
-    shift_days: float = 0.0      # сдвиг шага модели от даты ГДИ, дни со знаком (шаг - ГДИ); 0 - если даты шагов неизвестны
-    t_date: str = ''             # дата использованного шага модели (ДД.ММ.ГГГГ), пусто - неизвестна
+class WellSnapshot(object):
+    """Обычный класс, не dataclass: код снимков исполняется внутри tNavigator 21.3, где Python 3.6 (нет dataclasses и
+    `from __future__ import annotations`). Поля те же; новые необязательные - со значениями по умолчанию."""
+
+    shift_days = 0.0         # значения по умолчанию на уровне класса: старые pickle без этих полей читаются как раньше
+    t_date = ''
+
+    def __init__(self, wname, t_name, t_requested, substituted, cbp, cdrd, cgpr, cdfac, cekh, cdiam, cefr, ctfac,
+                 wbp, wgpr, wbhp, shift_days=0.0, t_date=''):
+        self.wname = wname                  # имя скважины
+        self.t_name = t_name                # имя шага модели, по которому читались данные
+        self.t_requested = t_requested      # шаг на дату ГДИ (отличается, если скважина на нём стояла)
+        self.substituted = substituted      # True - использован ближайший работающий шаг
+        # по открытым перфорациям (массивы одной длины)
+        self.cbp = cbp                      # давление в блоке
+        self.cdrd = cdrd                    # депрессия на перфорации
+        self.cgpr = cgpr                    # дебит газа перфорации
+        self.cdfac = cdfac                  # D-фактор перфорации
+        self.cekh = cekh                    # эффективный KH
+        self.cdiam = cdiam                  # диаметр скважины
+        self.cefr = cefr                    # эквивалентный радиус
+        self.ctfac = ctfac                  # коэффициент проводимости (для расчёта старого D скважины)
+        # по скважине
+        self.wbp = wbp                      # модельное пластовое давление
+        self.wgpr = wgpr                    # модельный дебит газа
+        self.wbhp = wbhp                    # модельное забойное давление
+        # необязательные (старые pickle их не содержат - читать через getattr с умолчанием)
+        self.shift_days = shift_days        # сдвиг шага модели от даты ГДИ, дни со знаком (шаг - ГДИ); 0 - даты шагов неизвестны
+        self.t_date = t_date                # дата использованного шага модели (ДД.ММ.ГГГГ), пусто - неизвестна
+
+    def __repr__(self):
+        return 'WellSnapshot(%r, %s, %d перф.)' % (self.wname, self.t_name, self.n_perf)
 
     @property
     def n_perf(self) -> int:

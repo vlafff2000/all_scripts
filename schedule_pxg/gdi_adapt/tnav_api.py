@@ -4,8 +4,6 @@
 В python-секции тНавигатора функции и графики (get_well_by_name, cbp, wgpr, ...) живут в глобальном
 пространстве скрипта, поэтому code.py передаёт их сюда: tnav_api.bind(globals()).
 """
-from __future__ import annotations
-
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 

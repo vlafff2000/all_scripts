@@ -292,6 +292,7 @@ def test_check_columns_manual_and_comma_decimals(tmp_path):
 
 def test_snapshots_foreign_class_path_and_garbage(tmp_path, monkeypatch):
     import dataclasses
+    import inspect
     import pickle
     import sys
     import types
@@ -299,8 +300,8 @@ def test_snapshots_foreign_class_path_and_garbage(tmp_path, monkeypatch):
     from schedule_pxg.gdi_adapt.snapshot import WellSnapshot, load_snapshots
     mod = types.ModuleType("foreign_snapshot")      # класс в другом модуле, как в комплекте тНавигатора
     # старый формат без полей shift_days/t_date (старые снимки); новые поля с умолчанием читаются как значения по умолчанию
-    foreign = dataclasses.make_dataclass("WellSnapshot", [(f.name, object) for f in dataclasses.fields(WellSnapshot)
-                                                          if f.name not in ("shift_days", "t_date")])
+    foreign = dataclasses.make_dataclass("WellSnapshot", [(n, object) for n in inspect.signature(WellSnapshot.__init__).parameters
+                                                          if n not in ("self", "shift_days", "t_date")])
     foreign.__module__ = "foreign_snapshot"
     mod.WellSnapshot = foreign
     monkeypatch.setitem(sys.modules, "foreign_snapshot", mod)
