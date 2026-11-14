@@ -97,6 +97,7 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
 
     def go():
         try:
+            loop.state['tnav_version'] = tnav_run.probe(exe)['version']       # версия tNavigator видна в итогах и в журнале
             loop._push(status='running', message='копирую RESULTS модели (один раз, десятки ГБ)')
             case_build.ensure_results(os.path.dirname(os.path.abspath(model)), work)
         except Exception as e:

@@ -35,6 +35,7 @@ def log(s):
 
 
 try:
+    log('Python %s' % sys.version.split()[0])       # в tNavigator 19 - 3.5, в 21.3 - 3.6, в новых версиях выше; код комплекта рассчитан на 3.5+
     with open(os.path.join(PROJECT_DIR, 'studies.json'), encoding='utf-8') as f:
         studies = json.load(f)
     tnav_api.bind(globals(), 0)

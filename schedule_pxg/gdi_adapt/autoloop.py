@@ -60,7 +60,7 @@ class TnavRunner(Runner):
     def run(self, case, restart, label, cancel):
         from . import tnav_run as tr
         base = os.path.splitext(os.path.basename(case['data']))[0]
-        job = tr.Job(tr.command(self.exe, case['data'], restart, self.extra), self.workdir, label, self.timeout, expect=base + '.RSM')
+        job = tr.Job(tr.command(self.exe, case['data'], restart, self.extra, tr.probe(self.exe)['flags']), self.workdir, label, self.timeout, expect=base + '.RSM')
         if self.on_job:
             self.on_job(job)
         job.start()
@@ -102,7 +102,7 @@ def secant_step(hist: List[tuple], limit: float, bounds: tuple) -> float:
 class AutoLoop:
     def __init__(self, model_data: str, workdir: str, runner: Runner, gdis: Sequence[GDI], cfg, pvt, settings: Optional[LoopSettings] = None,
                  restart: Optional[int] = None, journal: Optional[MultJournal] = None, on_update: Optional[Callable[[dict], None]] = None,
-                 snapshots: Optional[dict] = None, tag: str = '', light_output: bool = False):
+                 snapshots: Optional[dict] = None, tag: str = ''):
         dates = {g.date for g in gdis}
         if len(dates) != 1:
             raise ValueError('один цикл ведётся по одной дате ГДИ: сгруппируйте исследования по датам')
@@ -118,7 +118,6 @@ class AutoLoop:
         self.snapshots: dict = dict(snapshots or {})
         self.preset = bool(snapshots)            # снимки уже есть (комплект): базовый прогон не нужен, экономим один запуск на дату
         self.tag = tag
-        self.light = light_output
 
     # ---------- служебное ----------
     def _push(self, **kw) -> None:
@@ -143,7 +142,7 @@ class AutoLoop:
     def _iteration(self, k: int, mults: Optional[Dict[str, dict]], label: str) -> dict:
         regimes = {w: [float(x) for x in g.q] for w, g in self.gdis.items()}
         rows = [(w, m['inc'], m.get('d')) for w, m in (mults or {}).items()] or None
-        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days, light_output=self.light)
+        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days)
         rsm = self.runner.run(case, self.restart, label, self.cancel)
         series = parse_rsm(rsm)
         msd = case['model_start']
@@ -292,8 +291,7 @@ class AutoBatch:
 
     def __init__(self, model_data: str, workdir: str, runner: Runner, gdis: Sequence[GDI], cfg, pvt, settings: Optional[LoopSettings] = None,
                  restart: Optional[int] = None, journal: Optional[MultJournal] = None, snapshots: Optional[dict] = None,
-                 accept_formula: bool = False, on_update: Optional[Callable[[dict], None]] = None, light_output: bool = False):
-        self.light_output = light_output
+                 accept_formula: bool = False, on_update: Optional[Callable[[dict], None]] = None):
         self.model_data, self.workdir, self.runner, self.cfg, self.pvt = model_data, workdir, runner, cfg, pvt
         self.st, self.restart, self.journal, self.snapshots = settings or LoopSettings(), restart, journal, snapshots
         self.accept_formula, self.on_update = accept_formula, on_update
@@ -414,7 +412,7 @@ class AutoBatch:
                 self._push()
                 snaps = {g.wname: self.snapshots[g.wname] for g in run_group if self.snapshots and g.wname in self.snapshots}
                 self.loop = AutoLoop(self.model_data, self.workdir, self.runner, run_group, self.cfg, self.pvt, self.st, restart, self.journal,
-                                     snapshots=snaps or None, tag='_' + item['date'], light_output=self.light_output)
+                                     snapshots=snaps or None, tag='_' + item['date'])
                 self.loop.cancel = self.cancel
                 st = self.loop.run()
                 item['runs'] = len([i for i in st['iterations']])

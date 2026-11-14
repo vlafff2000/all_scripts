@@ -35,20 +35,59 @@ def find_exe(hint: str = '') -> List[str]:
     return out
 
 
-def command(exe: str, data: str, restart: Optional[int] = None, extra: Sequence[str] = ()) -> List[str]:
-    cmd = [exe, os.path.basename(data), '--no-gui', '--auto-run', '--auto-exit', '--ignore-lock']
+REQUIRED_FLAGS = ('--no-gui', '--auto-run', '--auto-exit', '--ecl-rsm')       # без них пакетный расчёт с RSM невозможен
+OPTIONAL_FLAGS = ('--ignore-lock', '--ecl-root')                              # ставятся, только если версия их знает
+_PROBE: Dict[str, dict] = {}
+
+
+def probe(exe: str, timeout: float = 90.0) -> dict:
+    """Что умеет эта версия tNavigator: {'version': строка, 'flags': {'--no-gui', ...}} по её же `--help` и `--full-help`
+    (работает без лицензии). Версии 19.1 и 21.3 проверены; для новых версий (до 26.x) набор флагов определяется так же, без правок кода."""
+    key = os.path.abspath(exe)
+    if key in _PROBE:
+        return _PROBE[key]
+    flags, version = set(), ''
+    for args in (['--version'], ['--help'], ['--full-help']):
+        try:
+            r = subprocess.run([exe] + args, capture_output=True, timeout=timeout)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        text = (r.stdout or b'').decode('utf-8', 'replace') + (r.stderr or b'').decode('utf-8', 'replace')
+        if not version:
+            version = next((ln.strip() for ln in text.splitlines() if re.search(r'v?\d+\.\d+', ln) and 'tNavigator' in ln), '')
+        flags |= set(re.findall(r'--[a-z][a-z0-9-]+', text))
+    _PROBE[key] = {'version': version, 'flags': flags}
+    return _PROBE[key]
+
+
+def command(exe: str, data: str, restart: Optional[int] = None, extra: Sequence[str] = (), flags: Optional[set] = None) -> List[str]:
+    """Командная строка пакетного расчёта. flags (из probe) - что поддерживает именно эта версия: необязательные флаги, которых
+    в ней нет, не ставятся, а при нехватке обязательных - понятная ошибка вместо запуска окна, которое зависнет."""
+    if flags:
+        miss = [f for f in REQUIRED_FLAGS + (('--restart',) if restart is not None else ()) if f not in flags]
+        if miss:
+            raise ValueError('Эта версия tNavigator не поддерживает ключи %s: пакетный расчёт невозможен.' % ', '.join(miss))
+    use = lambda f: flags is None or not flags or f in flags
+    cmd = [exe, os.path.basename(data), '--no-gui', '--auto-run', '--auto-exit']
+    if use('--ignore-lock'):
+        cmd.append('--ignore-lock')
     if restart is not None:
-        cmd.append(f'--restart={int(restart)}')
-    return cmd + ['--ecl-rsm', '--ecl-root'] + list(extra)    # --ecl-root: RSM рядом с .data, а не в RESULTS/<имя>/
+        cmd.append('--restart=%d' % int(restart))
+    cmd.append('--ecl-rsm')
+    if use('--ecl-root'):
+        cmd.append('--ecl-root')                           # RSM рядом с .data, а не в RESULTS/<имя>/
+    return cmd + list(extra)
 
 
 class Job:
     """Один запуск tNavigator в фоне. status: idle | running | done | failed | cancelled."""
 
-    def __init__(self, cmd: Sequence[str], cwd: str, label: str = '', timeout: float = 4 * 3600.0, expect: str = ''):
+    def __init__(self, cmd: Sequence[str], cwd: str, label: str = '', timeout: float = 4 * 3600.0, expect: str = '', restart_check_s: float = 60.0):
         self.id = f'job{next(_ids)}'
         self.cmd, self.cwd, self.label, self.timeout = list(cmd), cwd, label, timeout
         self.expect = expect                        # файл, который должен появиться (BASE.RSM)
+        self.restart_requested = any(str(c).startswith('--restart=') for c in cmd)
+        self.restart_check_s = restart_check_s      # через сколько секунд проверять, что рестарт прочитан, а не считается вся модель
         self.status, self.error, self.returncode = 'idle', '', None
         self.started = self.finished = 0.0
         self.step = 0
@@ -98,6 +137,10 @@ class Job:
                         break
                     except subprocess.TimeoutExpired:
                         self.step = self._last_step() or self.step
+                        if self.restart_requested and not self.error and time.time() - t0 > self.restart_check_s and self._restart_ignored():
+                            self.error = ('tNavigator не прочитал рестарт и считает модель с начала (это часы): прогон остановлен. '
+                                          'Результаты в рабочей папке повреждены или шаг рестарта недоступен: удалите рабочую папку и скопируйте RESULTS заново.')
+                            self.cancel()
                         if time.time() - t0 > self.timeout:
                             self.error = f'превышено время ожидания {self.timeout / 3600:.1f} ч'
                             self.cancel()
@@ -113,6 +156,15 @@ class Job:
             self.status, self.error = 'failed', f'{type(e).__name__}: {e}'
         finally:
             self.finished = time.time()
+
+    def _restart_ignored(self) -> bool:
+        """В журнале есть «SIMULATION STARTED FROM DATE» (расчёт идёт с начала), но нет чтения шага рестарта."""
+        try:
+            with open(self.log_path, 'rb') as f:
+                text = f.read().decode('latin-1')
+        except OSError:
+            return False
+        return 'SIMULATION STARTED FROM DATE' in text and 'Reading data for step' not in text
 
     def _last_step(self) -> int:
         try:

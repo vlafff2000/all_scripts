@@ -18,7 +18,7 @@ PERF_GRAPHS = ('cbp', 'cdrd', 'cgpr', 'cdfac', 'cekh', 'cdiam', 'cefr', 'ctfac')
 # графики по перфорациям, которые должны быть посчитаны (конечны) на шаге, чтобы шаг считался пригодным
 PERF_REQUIRED = ('cbp', 'cdrd', 'cgpr', 'cekh', 'cdiam', 'cefr')
 
-_A: Dict[str, object] = {}
+_A = {}  # type: Dict[str, object]
 
 
 def bind(g: dict, model_index: int = 0) -> None:
@@ -29,27 +29,53 @@ def bind(g: dict, model_index: int = 0) -> None:
                 'Вставляйте код в «калькулятор графиков» (модуль «Шаблоны графиков») в том же шаблоне, где раньше работал скрипт адаптации.'
                 if any(n.startswith('w') for n in have) else 'Код нужно запускать в python-секции тНавигатора.')
         names = sorted(k for k in g if not k.startswith('_') and k not in ('os', 'sys', 'json', 'time', 'traceback', 'datetime'))
-        raise RuntimeError(f'В глобальном пространстве нет объектов тНавигатора: {missing}. {hint}\n'
-                           f'Какие имена в этом окне есть (пришлите этот список разработчику): {", ".join(names[:150])}')
+        raise RuntimeError('В глобальном пространстве нет объектов тНавигатора: %s. %s\n'
+                           'Какие имена в этом окне есть (пришлите этот список разработчику): %s' % (missing, hint, ', '.join(names[:150])))
     _A.clear()
     _A.update({n: g[n] for n in FUNCS + GRAPHS})
     _A['MODEL'] = g['get_all_models']()[model_index]
 
 
 def _timestep(date):
+    """Шаг модели на дату. Разные версии tNavigator по-разному принимают mode: пробуем с ним, без него, затем ищем шаг сами."""
+    getter = _A['get_timestep_from_datetime']
+    err = None
+    for kw in ({'mode': 'nearest_after'}, {}):
+        try:
+            return getter(date, **kw)
+        except TypeError as e:          # этот аргумент в данной версии не поддерживается
+            err = e
+        except Exception as e:
+            err = e
+            break
     try:
-        return _A['get_timestep_from_datetime'](date, mode='nearest_after')
+        target = _to_dt(date)
+        steps = [(st, _to_dt(getattr(st, 'date', None))) for st in _A['get_all_timesteps']()]
+        after = [(d, st) for st, d in steps if d is not None and target is not None and d >= target]
+        if after:
+            return min(after, key=lambda x: x[0])[1]
     except Exception as e:
-        raise ModelDataError(f'нет шага модели на дату {date:%d.%m.%Y}: {e}')
+        err = e
+    raise ModelDataError('нет шага модели на дату %s: %s' % (date.strftime('%d.%m.%Y'), err))
 
 
 def _well_pok(well, t, name):
     return float(_A[name][_A['MODEL'], well, t])
 
 
+def _is_opened(c, M, t):
+    """Перфорация открыта на шаге. В разных версиях is_opened - метод или свойство; если не прочитать, считаем открытой
+    (закрытые всё равно отсеются проверкой графиков на конечность)."""
+    try:
+        f = c.is_opened
+        return bool((f() if callable(f) else f)[M, t])
+    except Exception:
+        return True
+
+
 def _perf_pok(well, t, name):
     M = _A['MODEL']
-    return np.array([float(_A[name][M, c, t]) for c in well.connections if c.is_opened()[M, t]], dtype=float)
+    return np.array([float(_A[name][M, c, t]) for c in well.connections if _is_opened(c, M, t)], dtype=float)
 
 
 def _to_dt(x) -> Optional[datetime]:
@@ -102,23 +128,23 @@ def _pick_step(well, t_req, gdi_dt: Optional[datetime]) -> Tuple[object, dict, b
     steps = list(_A['get_all_timesteps']())
     names = [s.name for s in steps]
     if t_req.name not in names:
-        raise ModelDataError(f'шаг {t_req.name} не найден в списке шагов модели')
+        raise ModelDataError('шаг %s не найден в списке шагов модели' % t_req.name)
     idx = names.index(t_req.name)
     for j in _search_order(steps, idx, gdi_dt):
         data = _read_step(well, steps[j])
         if data is not None:
             return steps[j], data, True
-    raise WellNotWorkingError(f'скважина не работает (или перфорации не посчитаны) ни на одном шаге модели '
-                              f'(искали от {t_req.name})')
+    raise WellNotWorkingError('скважина не работает (или перфорации не посчитаны) ни на одном шаге модели '
+                              '(искали от %s)' % t_req.name)
 
 
 def extract_snapshot(wname: str, date) -> WellSnapshot:
     try:
         well = _A['get_well_by_name'](wname)
     except Exception as e:
-        raise ModelDataError(f'скважина {wname} не найдена в модели: {e}')
+        raise ModelDataError('скважина %s не найдена в модели: %s' % (wname, e))
     if well is None:
-        raise ModelDataError(f'скважина {wname} не найдена в модели')
+        raise ModelDataError('скважина %s не найдена в модели' % wname)
     t_req = _timestep(date)
     gdi_dt = _to_dt(date)
     t, data, substituted = _pick_step(well, t_req, gdi_dt)
@@ -150,4 +176,4 @@ class SnapshotProvider:
         for k in (gdi.key, gdi.wname):      # wname - старый формат снимков (одна дата на скважину)
             if k in self.snaps:
                 return self.snaps[k]
-        raise ModelDataError(f'в файле снимков нет скважины {gdi.wname} на {gdi.date:%d.%m.%Y}')
+        raise ModelDataError('в файле снимков нет скважины %s на %s' % (gdi.wname, gdi.date.strftime('%d.%m.%Y')))
