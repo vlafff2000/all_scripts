@@ -137,5 +137,48 @@ class TestJob(unittest.TestCase):
             self.assertEqual(j.wait(30), 'cancelled')
 
 
+
+class TestVersions(unittest.TestCase):
+    """Набор ключей определяется по `--help` самой версии (проверено на tNavigator 19.1 и 21.3), для новых версий - так же."""
+
+    def fake_exe(self, d, help_text, version='tNavigator v26.2-1-gabc'):
+        nl = chr(10)
+        if os.name == 'nt':
+            path = os.path.join(d, 'tnav.cmd')
+            lines = ['@echo off', 'if "%1"=="--version" (echo ' + version + ' & exit /b 0)']
+            lines += ['echo ' + ln for ln in help_text.splitlines()]
+            open(path, 'w').write(nl.join(lines) + nl)
+        else:
+            path = os.path.join(d, 'tnav.sh')
+            body = ['#!/bin/sh', 'if [ "$1" = "--version" ]; then echo "' + version + '"; exit 0; fi', 'cat <<EOF', help_text, 'EOF']
+            open(path, 'w').write(nl.join(body) + nl)
+            os.chmod(path, 0o755)
+        return path
+
+    def test_probe_reads_version_and_flags_and_command_adapts(self):
+        with tempfile.TemporaryDirectory() as d:
+            full = '--no-gui --auto-run --auto-exit --ecl-rsm --ecl-root --restart=INT --ignore-lock'
+            exe = self.fake_exe(d, full)
+            p = tr.probe(exe)
+            self.assertIn('v26.2', p['version'])
+            self.assertTrue({'--no-gui', '--restart', '--ecl-root'} <= p['flags'])
+            self.assertIn('--ecl-root', tr.command(exe, 'B.DATA', 5, flags=p['flags']))
+            old = tr.command(exe, 'B.DATA', 5, flags={'--no-gui', '--auto-run', '--auto-exit', '--ecl-rsm', '--restart'})
+            self.assertNotIn('--ecl-root', old)                       # версия без этого ключа: не ставим
+            self.assertNotIn('--ignore-lock', old)
+            with self.assertRaises(ValueError) as cm:
+                tr.command(exe, 'B.DATA', 5, flags={'--no-gui', '--restart'})
+            self.assertIn('--auto-run', str(cm.exception))
+
+    def test_restart_ignored_is_stopped_fast(self):
+        with tempfile.TemporaryDirectory() as d:
+            code = "print('SIMULATION STARTED FROM DATE 28.03.1978', flush=True); import time; time.sleep(60)"
+            j = tr.Job([sys.executable, '-c', code, '--restart=7'], d, restart_check_s=0.5)
+            j.start()
+            self.assertEqual(j.wait(40), 'failed')
+            self.assertIn('не прочитал рестарт', j.error)
+
+
 if __name__ == '__main__':
     unittest.main()
+
