@@ -77,7 +77,7 @@ class RegimeStep:
 
 
 def build_test_schedule(text: str, start: datetime, regimes: Dict[str, Sequence[float]], mults: Optional[list] = None,
-                        step_days: int = 1, extra_lines: Sequence[str] = ()) -> Tuple[str, List[RegimeStep], dict]:
+                        step_days: int = 1, extra_lines: Sequence[str] = (), prior_text: str = '') -> Tuple[str, List[RegimeStep], dict]:
     """Расписание тестового прогона. regimes: {скважина: [дебиты режимов, ст. м³/сут]}; mults: [(скважина, приращение WPIMULT, D|None)]
     на дату start; extra_lines - дополнительные ключевые слова на дату start (например COMPDAT для проверки смены интервала).
     Возвращает (текст, шаги режимов, отчёт). Режим k скважины идёт с start+k*step_days по start+(k+1)*step_days;
@@ -85,7 +85,7 @@ def build_test_schedule(text: str, start: datetime, regimes: Dict[str, Sequence[
     nl = '\r\n' if '\r\n' in text else '\n'
     base = cut_schedule(text, start)
     wells = list(regimes)
-    hist = last_hist_gas_rates(base, wells)
+    hist = last_hist_gas_rates(prior_text.splitlines() + base, wells)       # prior_text - расписание из предыдущих include
     miss = [w for w in wells if w not in hist]
     if miss:
         raise ValueError('нет дебита истории (WCONHIST GRAT) в расписании до даты ГДИ у скважин: ' + ', '.join(miss))
