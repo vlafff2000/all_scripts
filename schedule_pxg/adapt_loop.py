@@ -9,6 +9,7 @@ import dataclasses
 import itertools
 import json
 import os
+import shutil
 import threading
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -27,9 +28,74 @@ _ids = itertools.count(1)
 KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula')
 
 
-def info(p) -> dict:
+def _find_data(path: str) -> str:
+    """Файл модели .data рядом с результатами расчёта: в папке результатов или в трёх папках выше."""
+    if not path:
+        return ''
+    stem = os.path.splitext(os.path.basename(path.rstrip(chr(92) + '/')))[0].lower()
+    d = path if os.path.isdir(path) else os.path.dirname(path)
+    for _ in range(4):
+        try:
+            files = [f for f in os.listdir(d) if f.lower().endswith('.data')]
+        except OSError:
+            files = []
+        if files:
+            files.sort(key=lambda f: (os.path.splitext(f)[0].lower() != stem, f.lower()))
+            return os.path.join(d, files[0])
+        nd = os.path.dirname(d)
+        if nd == d:
+            break
+        d = nd
+    return ''
+
+
+def _dir_gb(path: str, cap: int = 5000) -> float:
+    total, n = 0, 0
+    for root, _d, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+            n += 1
+            if n > cap:
+                return total / 2 ** 30
+    return total / 2 ** 30
+
+
+def defaults(p, folder: str) -> dict:
+    """Всё, что можно определить само, чтобы инженеру оставалась одна кнопка «Запустить»: модель, tNavigator, рабочая папка,
+    снимки комплекта. Сохранённые настройки приоритетнее найденного; решение всегда за инженером (любое значение можно изменить)."""
+    a = p.adapt or {}
+    saved = dict(a.get('tnav') or {})
+    res = (p.results or {}).get(a.get('scenario') or '') or next(iter((p.results or {}).values()), '')
+    model = str(saved.get('model') or '') or _find_data(res)
+    exe = str(saved.get('exe') or '') or next(iter(tnav_run.find_exe()), '')
+    work = str(saved.get('workdir') or '') or os.path.join(folder, 'adapt_work')
+    snaps = ''
+    if a.get('kit'):
+        try:
+            snaps = gdi_runs.find_snapshots(a['kit'])
+        except ValueError:
+            snaps = ''
+    probe = work
+    while probe and not os.path.exists(probe):
+        nxt = os.path.dirname(probe)
+        if nxt == probe:
+            break
+        probe = nxt
+    try:
+        free = shutil.disk_usage(probe).free / 2 ** 30
+    except OSError:
+        free = None
+    res_gb = _dir_gb(os.path.join(os.path.dirname(model), 'RESULTS')) if model else None
+    return {'model': model, 'exe': exe, 'workdir': work, 'snapshots': snaps, 'free_gb': free, 'results_gb': res_gb,
+            'work_exists': os.path.isdir(os.path.join(work, 'RESULTS'))}
+
+
+def info(p, folder: str = '') -> dict:
     saved = dict((p.adapt or {}).get('tnav') or {})
-    return {'saved': saved, 'candidates': tnav_run.find_exe(saved.get('exe', '')),
+    return {'saved': saved, 'candidates': tnav_run.find_exe(saved.get('exe', '')), 'defaults': defaults(p, folder),
             'loops': [dict(id=i, **_brief(v)) for i, v in LOOPS.items()]}
 
 
@@ -49,9 +115,14 @@ def _num(x, cast=float, default=None):
 
 def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
     """Запускает цикл по выбранным исследованиям одной даты ГДИ. opts - поля KEYS из экрана."""
-    exe = str(opts.get('exe') or '').strip().strip('"')
-    model = str(opts.get('model') or '').strip().strip('"')
-    work = str(opts.get('workdir') or '').strip().strip('"')
+    auto = defaults(p, folder)
+    exe = str(opts.get('exe') or auto['exe'] or '').strip().strip('"')
+    model = str(opts.get('model') or auto['model'] or '').strip().strip('"')
+    work = str(opts.get('workdir') or auto['workdir'] or '').strip().strip('"')
+    if opts.get('snapshots') in (None, ''):
+        opts = dict(opts, snapshots=auto['snapshots'])
+    if 'batch' not in opts:
+        opts = dict(opts, batch=True)                  # по умолчанию все даты по очереди
     if not exe or not os.path.isfile(exe):
         raise ValueError('Не нашёл программу tNavigator «%s». Укажите путь к tNavigator*.exe (Windows) или tNavigator-con (РЕД ОС).' % exe)
     if not model or not os.path.isfile(model):

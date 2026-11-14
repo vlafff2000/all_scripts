@@ -429,7 +429,8 @@ export interface LoopState {
   iterations: LoopIter[]; thresholds: Record<string, number>; metric: string; skipped?: Record<string, string>; skipped_dates?: string[]
   job: { status: string; step: number; seconds: number; error: string; log_tail: string } | null
 }
-export interface LoopInfo { saved: Partial<LoopOpts>; candidates: string[]; loops: { id: string; status: string; date: string; wells: string[]; iterations: number }[] }
+export interface LoopDefaults { model: string; exe: string; workdir: string; snapshots: string; free_gb: number | null; results_gb: number | null; work_exists: boolean }
+export interface LoopInfo { saved: Partial<LoopOpts>; candidates: string[]; defaults: LoopDefaults; loops: { id: string; status: string; date: string; wells: string[]; iterations: number }[] }
 export const getLoopInfo = () => call<LoopInfo>('/api/adapt/loop')
 export const startLoop = (b: AdaptRequest, loop: Partial<LoopOpts>) => call<{ id: string }>('/api/adapt/loop/start', post({ ...b, loop }))
 export interface BatchDate { date: string; wells: string[]; status: 'queued' | 'running' | 'done' | 'accepted' | 'failed'; runs: number; message?: string

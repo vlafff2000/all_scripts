@@ -1326,7 +1326,7 @@ async def adapt_recompute(request: Request):
 
 
 async def adapt_loop_info(request: Request):
-    return JSONResponse(await run_in_threadpool(lambda: adapt_loop.info(_project())))
+    return JSONResponse(await run_in_threadpool(lambda: adapt_loop.info(_project(), FOLDER)))
 
 
 async def adapt_loop_start(request: Request):

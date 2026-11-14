@@ -217,8 +217,11 @@ export default function Adapt() {
           })}</tbody></table></div>
         {sel.model_only.length > 0 && <p className="muted small">В модели есть, а исследований нет: {sel.model_only.slice(0, 60).join(', ')}{sel.model_only.length > 60 ? ' …' : ''}</p>}
       </section>}
+      <AdaptLoop req={req} wells={(sel?.rows || []).filter(r => r.include).map(r => r.model)} kit={kit} />
+      <details className="card">
+        <summary className="muted">Дополнительно: расчёт по формуле без прогона модели (через калькулятор графиков тНавигатора)</summary>
       <section className="card">
-        <div className="step-head"><span className="step-n">5</span><h2>Запуск в тНавигаторе</h2></div>
+        <div className="step-head"><span className="step-n">+</span><h2>Расчёт по формуле через калькулятор тНавигатора</h2></div>
         <p className="lead">Один раз читаем данные модели по отобранным скважинам. Править код не нужно: путь к комплекту уже вписан.</p>
         <ol className="steps">
           <li>Нажмите «Копировать код».</li>
@@ -230,7 +233,7 @@ export default function Adapt() {
         {code && <textarea readOnly rows={8} value={code} onFocus={e => e.currentTarget.select()} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }} />}
       </section>
       <AdaptResults kit={kit} config={cfg} />
-      <AdaptLoop req={req} wells={(sel?.rows || []).filter(r => r.include).map(r => r.model)} kit={kit} />
+      </details>
     </main>
   )
 }
