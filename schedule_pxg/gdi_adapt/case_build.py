@@ -146,8 +146,33 @@ def ensure_results(src_dir: str, workdir: str, progress: Optional[Callable[[int,
     """Копия папки RESULTS (restart-файлы модели) в workdir; уже есть - не копируется. Нужен запас свободного места."""
     src = os.path.join(src_dir, 'RESULTS')
     dst = os.path.join(workdir, 'RESULTS')
-    if os.path.isdir(dst):
+    if not os.path.isdir(src):
+        if os.path.isdir(dst):
+            return dst
+        raise CaseError(f'нет папки результатов модели «{src}»: рестарт невозможен')
+    # копия уже есть - сверяем с оригиналом: её могли сделать, пока модель ещё считалась, тогда в ней нет поздних шагов рестарта
+    files = [os.path.join(r, f) for r, _, fs in os.walk(src) for f in fs]
+    todo = []
+    for f in files:
+        d = os.path.join(dst, os.path.relpath(f, src))
+        if not os.path.exists(d) or os.path.getsize(d) != os.path.getsize(f):
+            todo.append(f)
+    if not todo:
         return dst
+    total = sum(os.path.getsize(f) for f in todo)
+    os.makedirs(workdir, exist_ok=True)
+    free = shutil.disk_usage(workdir).free
+    if free < total + min_free_gb * 2 ** 30:
+        raise CaseError(f'мало места: для копии RESULTS нужно {total / 2**30:.0f} ГБ и запас {min_free_gb:g} ГБ, свободно {free / 2**30:.0f} ГБ')
+    done = 0
+    for f in todo:
+        d = os.path.join(dst, os.path.relpath(f, src))
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        shutil.copy2(f, d)
+        done += os.path.getsize(f)
+        if progress:
+            progress(done, total)
+    return dst
     if not os.path.isdir(src):
         raise CaseError(f'нет папки результатов модели «{src}»: рестарт невозможен')
     files = [os.path.join(r, f) for r, _, fs in os.walk(src) for f in fs]

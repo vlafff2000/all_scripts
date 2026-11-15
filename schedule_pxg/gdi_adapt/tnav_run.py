@@ -177,6 +177,8 @@ class Job:
                             self.error = ('tNavigator не прочитал рестарт и считает модель с начала (это часы): прогон остановлен. '
                                           'Результаты в рабочей папке повреждены или шаг рестарта недоступен: удалите рабочую папку и скопируйте RESULTS заново.')
                             self.cancel()
+                        if self.restart_requested and not self.error and time.time() - t0 > self.restart_check_s and self._restart_downgraded():
+                            self.cancel()
                         if time.time() - t0 > self.timeout:
                             self.error = f'превышено время ожидания {self.timeout / 3600:.1f} ч'
                             self.cancel()
@@ -192,6 +194,23 @@ class Job:
             self.status, self.error = 'failed', f'не удалось запустить «{self.cmd[0]}»: {type(e).__name__}: {e}'
         finally:
             self.finished = time.time()
+
+    def _restart_downgraded(self) -> bool:
+        """tNavigator пишет «Рестарт с шага N невозможен. Будет проделан рестарт с шага M»: нужного шага в копии RESULTS нет, и модель
+        считалась бы с M (часы лишнего счёта). Прогон останавливается с понятной причиной: копия RESULTS неполная или от другой версии."""
+        try:
+            with open(self.log_path, 'rb') as f:
+                text = f.read().decode('utf-8', 'replace')
+        except OSError:
+            return False
+        m = re.search(r'Рестарт с шага (\d+) невозможен\. Будет проделан рестарт с шага (\d+)', text) or \
+            re.search(r'[Rr]estart from step (\d+) is (?:impossible|not possible).{0,40}?step (\d+)', text)
+        if not m:
+            return False
+        self.error = (f'рестарт с шага {m.group(1)} невозможен: в копии RESULTS доступны шаги только до {m.group(2)}. '
+                      'Копия неполная (сделана, пока модель ещё считалась) или посчитана другой версией tNavigator: '
+                      'пересчитайте копию RESULTS и запускайте той же версией, что считала модель.')
+        return True
 
     def _restart_ignored(self) -> bool:
         """В журнале есть «SIMULATION STARTED FROM DATE» (расчёт идёт с начала), но нет чтения шага рестарта."""
