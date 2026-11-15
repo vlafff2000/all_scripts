@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from . import gis, qc, word_doc, word_tables as wt
+from . import gis, gis_tech_state as gts, qc, word_doc, word_tables as wt
 
 NUM = r"-?\d+(?:[.,]\d+)?"
 HIGH, MID, LOW = "высокая", "средняя", "низкая"
@@ -97,6 +97,8 @@ class Report:
     tables: List[dict] = field(default_factory=list)           # что за таблица найдена (для проверки глазами)
     issues: List[dict] = field(default_factory=list)
     annotations: List[dict] = field(default_factory=list)      # пометки для Атласа: почему нет ГВК или Кг, недоход, «скоплений газа не отмечено»
+    tech: List[dict] = field(default_factory=list)             # техсостояние из текста: скопления газа (за колонной, покрышка), перетоки, дефекты, толщины, насыщение
+    walls: List[dict] = field(default_factory=list)            # толщина стенки по трубам (приложения МИД)
 
     def issue(self, level: str, code: str, msg: str, where: str = "") -> None:
         self.issues.append({"Уровень": level, "Код": code, "Файл": self.file, "Скважина": self.well, "Где": where, "Сообщение": msg})
@@ -708,8 +710,15 @@ def read_filling_indicators(rep: Report, tbl: wt.Table) -> bool:
     return n > 0
 
 
+def _value_row(row: wt.TRow) -> bool:
+    """Строка значений: в какой-нибудь ячейке первая строка — число или интервал («0-780,2» над «с гл. 780,2»). Шапка такой не бывает."""
+    return any(re.fullmatch(NUM + r"(?:\s*[-–—]\s*" + NUM + r")?", c.text.strip().split("\n")[0].strip()) for c in row.cells if c.text.strip())
+
+
 def read_filling_table(rep: Report, tbl: wt.Table) -> bool:
     nh = header_rows(tbl)
+    while nh > 1 and _value_row(tbl.rows[nh - 1]):
+        nh -= 1                                   # многострочные ячейки значений header_rows принимает за шапку
     n = 0
     if tbl.rows and tbl.rows[0].cells and low(tbl.rows[0].cells[0].text).startswith("показател") and not re.search(r"тип|режим", low(" ".join(c.text for c in tbl.rows[0].cells))):
         return read_filling_indicators(rep, tbl)
@@ -723,6 +732,23 @@ def read_filling_table(rep: Report, tbl: wt.Table) -> bool:
                     by[key] = c.text
                     break
         if not by.get("type") and not by.get("interval"):
+            continue
+        t_lines = [x.strip() for x in by.get("type", "").split("\n") if x.strip()]
+        i_lines = [x.strip() for x in by.get("interval", "").split("\n") if x.strip()]
+        if len(t_lines) > 1 and len(t_lines) == len(i_lines):       # «газ / уплотненный осадок» и «0-780,2 / с гл. 780,2»: по записи на строку ячейки
+            d_lines = [x.strip() for x in by.get("dens", "").split("\n") if x.strip()]
+            lv = nums(by.get("level", ""))
+            for k, (typ, ivt) in enumerate(zip(t_lines, i_lines)):
+                iv = nums(ivt)
+                dens = nums(d_lines[k]) if len(d_lines) == len(t_lines) else []
+                rep.filling.append(OrderedDict([
+                    ("Скважина", rep.well), ("Дата", rep.date), ("Режим исследования", by.get("mode", "")), ("От, м", iv[0] if iv else None),
+                    ("До, м", iv[1] if len(iv) > 1 else None), ("Плотность от, г/см³", min(dens) if dens else None), ("Плотность до, г/см³", max(dens) if dens else None),
+                    ("Заполнение (как в отчёте)", typ), ("Заполнение", fill_kind(typ)),
+                    ("Уровень жидкости, м", lv[0] if lv and k == 0 else None), ("Уровень (как в отчёте)", re.sub(r"\s+", " ", by.get("level", "")).strip() if k == 0 else ""),
+                    ("Откуда", "таблица фазового заполнения"), ("Файл", rep.file), ("Источник", _src(tbl, i)), ("Уверенность", HIGH),
+                    ("Основание", "строка %d из %d в ячейке «%s»" % (k + 1, len(t_lines), ivt))]))
+                n += 1
             continue
         iv = nums(by.get("interval", ""))
         dens = nums(by.get("dens", ""))
@@ -1668,13 +1694,15 @@ def read_summaries(rep: Report, blocks: List[wt.Block]) -> None:
 
 KIND_EPB = "ГИС при ЭПБ"
 KIND_NAMES = {"complex": "комплекс ГИС", "gvk_history": "ГВК по датам", "thermo": "термобарика", "filling": "заполнение ствола",
-              "intervals": "интервалы насыщения"}
+              "intervals": "интервалы насыщения", "walls": "толщина стенок по трубам (МИД)"}
 
 
 def table_kind(tbl: wt.Table) -> Tuple[str, int]:
     nh = header_rows(tbl)
     hdr = low(" ".join(c.text for r in tbl.rows[:max(nh, 1)] for c in r.cells))
     first = [low(r.cells[0].text) if r.cells else "" for r in tbl.rows]
+    if gts.is_wall_table(tbl):
+        return "walls", 1
     if re.search(r"вид\s*исследовани", hdr):          # OCR склеивает слова шапки: «Видисследований»
         return "complex", nh
     if re.search(r"гвк", hdr) and "дата" in hdr and re.search(r"режим|δh|рпл", hdr):
@@ -1748,6 +1776,8 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
                 rep.issue("warn", "thermo_empty", "Таблица термобарики найдена, но значений не извлечено", "таблица %d" % (b.index + 1))
         elif kind == "filling":
             read_filling_table(rep, b)
+        elif kind == "walls":
+            rep.walls += gts.read_walls(rep, b, last_title)
         elif kind == "gvk_history":
             read_gvk_history(rep, b, nh, mapping)
         elif kind == "simple_intervals":
@@ -1767,6 +1797,7 @@ def parse_blocks(blocks: List[wt.Block], file: str, mapping: Optional[Dict[str, 
     read_interval_text(rep, blocks)          # сначала интервалы из текста: к ним привязывается ГВК из предложения
     read_gvk_text(rep, blocks)
     read_annotations(rep, blocks)
+    rep.tech = gts.read(rep, blocks)
     check_report(rep)
     return rep
 
@@ -2307,6 +2338,8 @@ def build(reports: List[Report], mapping: Optional[Dict[str, str]] = None, kg_mi
         "Итоги пачек": _frame(summ_rows),
         "ГВК по датам": _frame([x for rep in good for x in rep.gvk_history]),
         "Выводы (текст)": _frame([x for rep in good for x in rep.summary]),
+        "Техсостояние": _frame([x for rep in good for x in rep.tech], gts.COLUMNS),
+        "Толщина стенок": _frame([x for rep in good for x in rep.walls], gts.WALL_COLUMNS),
         "Заголовки пачек": pack_titles_frame(good, mapping),
         "Таблицы в отчётах": pd.DataFrame([t for rep in reports for t in rep.tables]),
         "Отчёты": reports_frame(reports),
@@ -2367,6 +2400,12 @@ EN = {
                         "ГВК а.о., м": "gvk_abs_m", "Полностью газонасыщена": "fully_gas", "Δh по стволу, м": "delta_h_m", "Уровень воды/жидкости, м": "level_m",
                         "Рпл, кгс/см²": "p_res_kgs", "ГВК (как в отчёте)": "gvk_raw", "Файл": "file", "Источник": "source", "Уверенность": "confidence", "Основание": "basis"},
 }
+EN["gis_tech_state"] = {"Скважина": "well", "Дата": "date", "Вид": "kind", "Есть": "present", "Где": "where", "От, м": "from_m", "До, м": "to_m",
+                        "Интервалы": "intervals", "Нг, м": "h_gas_m", "Кг (как в отчёте)": "kg_raw", "Насыщение": "saturation", "Колонна": "string",
+                        "Толщина мин, мм": "wall_min_mm", "Толщина макс, мм": "wall_max_mm", "Метод": "method", "Текст": "text", "Файл": "file",
+                        "Источник": "source", "Уверенность": "confidence"}
+EN["gis_wall_thickness"] = {"Скважина": "well", "Дата": "date", "Колонна": "string", "№ трубы": "pipe_no", "Кровля, м": "top_m", "Подошва, м": "bottom_m",
+                            "Длина, м": "length_m", "Толщина, мм": "wall_mm", "Примечание": "note", "Файл": "file", "Источник": "source"}
 FORMAT_NAME, FORMAT_VERSION = "gis_report_db", 1
 TEMPLATING_FORMAT = "templating_db"
 
@@ -2387,7 +2426,7 @@ def _write_pair(table: pd.DataFrame, out_dir: str, name: str) -> List[str]:
 
 
 SHEET_ORDER = ("Свод", "Замеры", "Интервалы", "Комплекс ГИС", "Доход шаблона", "Термобарика", "Пластовое давление", "Заполнение ствола", "ГВК", "Итоги пачек", "ГВК по датам",
-               "Выводы (текст)", "Заголовки пачек", "Таблицы в отчётах", "Сверка", "Отчёты", "Проверка", "Строки БД")
+               "Выводы (текст)", "Техсостояние", "Толщина стенок", "Заголовки пачек", "Таблицы в отчётах", "Сверка", "Отчёты", "Проверка", "Строки БД")
 PERCENT = ("Кг", "Пористость", "Кг мин", "Кг макс", "Кг ср.взв", "Кг ср.взв (весь замер)")
 
 
@@ -2439,7 +2478,7 @@ def export(reports: List[Report], out_dir: str, mapping: Optional[Dict[str, str]
     files += gis_export.write_tables(atlas, out_dir, source, bottom)
     extra = {"gis_complex": frames["Комплекс ГИС"], "gis_thermobaric": frames["Термобарика"], "gis_filling": frames["Заполнение ствола"],
              "gis_pressure_rpl": frames["Пластовое давление"], "gis_gvk_history": frames["ГВК по датам"], "gis_templating": frames["_шаблонировки"],
-             "gis_annotations": frames["Аннотации"]}
+             "gis_annotations": frames["Аннотации"], "gis_tech_state": frames["Техсостояние"], "gis_wall_thickness": frames["Толщина стенок"]}
     meta_path = os.path.join(out_dir, "gis_report_meta.json")
     meta = {"format": FORMAT_NAME, "version": FORMAT_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"), "source": source,
             "reports": int(len(reports)), "wells": int(len({r.well for r in reports if r.well})), "tables": {}}
