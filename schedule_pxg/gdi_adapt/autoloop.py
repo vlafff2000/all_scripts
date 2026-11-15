@@ -102,11 +102,13 @@ def secant_step(hist: List[tuple], limit: float, bounds: tuple) -> float:
 class AutoLoop:
     def __init__(self, model_data: str, workdir: str, runner: Runner, gdis: Sequence[GDI], cfg, pvt, settings: Optional[LoopSettings] = None,
                  restart: Optional[int] = None, journal: Optional[MultJournal] = None, on_update: Optional[Callable[[dict], None]] = None,
-                 snapshots: Optional[dict] = None, tag: str = '', multi: bool = False):
+                 snapshots: Optional[dict] = None, tag: str = '', multi: bool = False,
+                 before_run: Optional[Callable[[], None]] = None):
         dates = {g.date for g in gdis}
         if len(dates) != 1 and not multi:
             raise ValueError('один цикл ведётся по одной дате ГДИ: сгруппируйте исследования по датам')
         self.start = min(dates)
+        self.before_run = before_run             # вызывается перед каждым прогоном модели (например, вернуть RESULTS в исходное состояние)
         self.multi = multi                       # сквозной прогон по многим датам (pass_run): для дат после последнего шага модели
         self.model_data, self.workdir, self.runner = model_data, workdir, runner
         self.gdis = {g.wname: g for g in gdis}
@@ -152,6 +154,8 @@ class AutoLoop:
                 self.state.setdefault('skipped', {}).update(case['skipped'])
         else:
             case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days)
+        if self.before_run:
+            self.before_run()
         rsm = self.runner.run(case, self.restart() if callable(self.restart) else self.restart, label, self.cancel)
         series = parse_rsm(rsm)
         msd = case['model_start']
@@ -408,6 +412,11 @@ class AutoBatch:
                 pass
         return self.restart
 
+    def _reset_results(self) -> None:
+        """RESULTS рабочей папки обратно в исходное состояние: после сквозного прогона (досчёт модели) рестарт уже не читается."""
+        self._push(message='возвращаю результаты модели в исходное состояние (копия RESULTS)')
+        cb.reset_results(os.path.dirname(os.path.abspath(self.model_data)), self.workdir)
+
     def _run_late(self) -> None:
         """Сквозной прогон по всем датам после последнего шага модели: одна копия расписания, мульты и режимы на каждой дате."""
         item = self.state['dates'][0]
@@ -419,7 +428,7 @@ class AutoBatch:
         snaps = {g.wname: self.snapshots[g.wname] for g in self.late_group if self.snapshots and g.wname in self.snapshots}
         self.loop = AutoLoop(self.model_data, self.workdir, self.runner, self.late_group, self.cfg, self.pvt, self.st,
                              (lambda: self.restart_for(first, use_rsm=False)), self.journal, snapshots=snaps or None,
-                             tag='_' + item['date'], multi=True)
+                             tag='_' + item['date'], multi=True, before_run=self._reset_results)
         self.loop.cancel = self.cancel
         st = self.loop.run()
         item['runs'] = len(st['iterations'])
@@ -466,7 +475,11 @@ class AutoBatch:
         self._push(status='running', message='очередь запущена')
         try:
             if self.late_group:
+                late_item = self.state['dates'][0]
+                was_pending = late_item['status'] not in ('done', 'accepted', 'skipped')
                 self._run_late()
+                if was_pending:                      # ранние даты идут от исходных шагов: после досчёта модели результаты возвращаются в исходное состояние
+                    self._reset_results()
             for d, group in self.groups.items():
                 item = next(x for x in self.state['dates'] if x['date'] == d.strftime('%Y-%m-%d') and not x.get('multi'))
                 if item['status'] in ('done', 'accepted', 'skipped'):

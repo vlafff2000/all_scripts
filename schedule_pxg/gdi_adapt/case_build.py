@@ -190,6 +190,15 @@ def ensure_results(src_dir: str, workdir: str, progress: Optional[Callable[[int,
     return dst
 
 
+def reset_results(src_dir: str, workdir: str, progress: Optional[Callable[[int, int], None]] = None) -> str:
+    """Возвращает RESULTS рабочей папки в исходное состояние (заново копирует из модели). Нужно после прогона, досчитавшего модель за
+    последний шаг: tNavigator 21.3 после такого продолжения не читает рестарт (access violation), а исходные шаги нужны целыми."""
+    dst = os.path.join(os.path.abspath(workdir), 'RESULTS')
+    if os.path.isdir(dst):
+        shutil.rmtree(dst)
+    return ensure_results(src_dir, workdir, progress)
+
+
 def restart_step_from_times(times: Sequence[float], t: float) -> int:
     """Номер шага рестарта для отчётного времени t (дни от START): индекс t в списке времён отчёта (с нуля, строка t=0 - шаг 0)."""
     ts = list(times)

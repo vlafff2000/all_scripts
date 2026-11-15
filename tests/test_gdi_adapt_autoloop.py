@@ -405,3 +405,30 @@ class TestLatePass(unittest.TestCase):
             self.assertAlmostEqual(item['results'][w]['inc'], m, delta=0.05 * m)
         self.assertTrue(all(c[1] == 5 for c in calls))                                           # рестарт всегда с последнего шага исходной модели
         self.assertGreaterEqual(len(calls), 3)
+
+
+class TestResetAfterExtension(TestLatePass):
+    def test_results_are_reset_before_every_pass_run_and_once_after(self):
+        resets = []
+        orig = al.cb.reset_results
+        al.cb.reset_results = lambda src, work, progress=None: resets.append(src)
+        try:
+            gd = make_gdi()
+            gd[1].date = datetime(2014, 1, 20)
+            runs = []
+
+            class R(FakeRunner):
+                def run(s, case, restart, label, cancel):
+                    runs.append(len(resets))
+                    txt = open(case['include'], encoding='utf-8').read()
+                    mults = {}
+                    for r in parse_mults(txt):
+                        if r['pimult'] is not None:
+                            mults[r['wname']] = mults.get(r['wname'], 1.0) * r['pimult']
+                    return rsm_multi(case, mults)
+            b = al.AutoBatch(self.data, self.work, R(), gd, self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0, max_iter=8))
+            b.run()
+        finally:
+            al.cb.reset_results = orig
+        self.assertEqual(runs, list(range(1, len(runs) + 1)))                                    # перед каждым прогоном свой сброс
+        self.assertEqual(len(resets), len(runs) + 1)                                             # плюс один после сквозного прогона (ранние даты)
