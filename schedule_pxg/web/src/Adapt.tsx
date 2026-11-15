@@ -217,7 +217,8 @@ export default function Adapt() {
           })}</tbody></table></div>
         {sel.model_only.length > 0 && <p className="muted small">В модели есть, а исследований нет: {sel.model_only.slice(0, 60).join(', ')}{sel.model_only.length > 60 ? ' …' : ''}</p>}
       </section>}
-      <AdaptLoop req={req} wells={(sel?.rows || []).filter(r => r.include).map(r => r.model)} kit={kit} />
+      <AdaptLoop req={req} wells={(sel?.rows || []).filter(r => r.include).map(r => r.model)} kit={kit}
+        studyDates={[...new Set((sel?.rows || []).filter(r => r.include && r.date).map(r => r.date))].sort()} />
       <details className="card">
         <summary className="muted">Дополнительно: расчёт по формуле без прогона модели (через калькулятор графиков тНавигатора)</summary>
       <section className="card">

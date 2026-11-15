@@ -9,7 +9,7 @@ const STATUS: Record<string, string> = { idle: 'не запущен', running: '
 const METRIC: Record<string, string> = { regimes: 'депрессия по режимам ГДИ', dp2: 'ΔP² (A и B)' }
 
 /** Шаг 7 вкладки «Адаптация по ГДИ»: автоцикл по тестовому прогону модели (подбор → прогон tNavigator → чтение → порог). Решение за инженером. */
-export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest; wells: string[]; kit: string }) {
+export default function AdaptLoop({ req, wells, kit, studyDates }: { req: () => AdaptRequest; wells: string[]; kit: string; studyDates: string[] }) {
   const [info, setInfo] = useState<LoopInfo | null>(null)
   const [o, setO] = useState<Partial<LoopOpts>>({ threshold_pct: 10, max_iter: 6, metric: 'regimes' })
   const [id, setId] = useState('')
@@ -54,7 +54,7 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
     setMsg('Include записан в ' + r.path + ' (' + r.wells + ' скв.). Вставьте его в модель: журнал мультов обновлён.')
   })
   const running = (bs?.status ?? st?.status) === 'running'
-  const missing = [!wells.length && 'Отберите скважины на шаге 4', !eff.model && 'не найден файл модели .data: укажите его в «Дополнительно»', !eff.exe && 'не найден tNavigator: укажите его в «Дополнительно»'].filter(Boolean) as string[]
+  const missing = [!wells.length && 'Отберите скважины на шаге 4', !eff.model && 'не найден файл модели .data: укажите его выше', !eff.exe && 'не найден tNavigator: укажите его в «Дополнительно»'].filter(Boolean) as string[]
   const finished = !!bs && !running && bs.dates.length > 0 && bs.dates.every(x => x.status === 'done' || x.status === 'accepted')
   const results = bs ? bs.dates.flatMap(x => Object.values(x.results)) : []
   const doneDates = bs ? bs.dates.filter(x => x.status === 'done' || x.status === 'accepted').length : 0
@@ -67,8 +67,21 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
         <li>Модель: <b>{eff.model || 'не найдена'}</b>{!o.model && d?.model ? ' (определена по результатам сценария)' : ''}</li>
         <li>tNavigator: <b>{eff.exe || 'не найден'}</b></li>
         <li>Рабочая папка: <b>{eff.workdir}</b>{d?.work_exists ? ' (копия результатов уже есть)' : d?.results_gb ? ' (один раз скопируются результаты модели ≈ ' + fmt(d.results_gb, 0) + ' ГБ' + (d.free_gb !== null && d.free_gb !== undefined ? ', свободно ' + fmt(d.free_gb, 0) + ' ГБ' : '') + ')' : ''}</li>
-        <li>Даты ГДИ: все по очереди, от поздних к ранним; шаг рестарта определяется сам. Порог ошибки: {fmt(Number(o.threshold_pct), 1)} %</li>
+        <li>Порог ошибки: {fmt(Number(o.threshold_pct), 1)} %; шаг рестарта для каждой даты определяется сам</li>
       </ul>
+      <div className="row">
+        <label className="grow">Модель (.data), оригинал только читается
+          <input value={o.model || ''} onChange={e => upd('model', e.target.value)} placeholder={d?.model || 'Путь к файлу .data модели'} /></label>
+        <button disabled={busy} onClick={() => guard(async () => { const r = await pickFile(eff.model); if (r.path) upd('model', r.path) })}>Выбрать…</button>
+      </div>
+      <div className="row">
+        <label>Какие даты адаптировать<select value={o.dates_mode || 'all'} onChange={e => upd('dates_mode', e.target.value as 'all' | 'last' | 'range')}>
+          <option value="all">все ({studyDates.length})</option><option value="last">только последние N</option><option value="range">период</option></select></label>
+        {o.dates_mode === 'last' && <label>N<input style={{ width: 70 }} value={o.last_n ?? ''} onChange={e => upd('last_n', e.target.value as unknown as number)} /></label>}
+        {o.dates_mode === 'range' && <><label>с<input style={{ width: 120 }} value={o.date_from || ''} onChange={e => upd('date_from', e.target.value)} placeholder="ГГГГ-ММ-ДД" /></label>
+          <label>по<input style={{ width: 120 }} value={o.date_to || ''} onChange={e => upd('date_to', e.target.value)} placeholder="ГГГГ-ММ-ДД" /></label></>}
+        <span className="muted small">Всего в отборе: {wells.length} скв., {studyDates.length} дат ГДИ</span>
+      </div>
       <div className="row">
         <button className="primary" onClick={start} disabled={busy || running || missing.length > 0}>Запустить адаптацию</button>
         <button onClick={stop} disabled={!running}>Остановить</button>
@@ -88,11 +101,6 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
           <button disabled={busy} onClick={() => guard(async () => { const r = await pickFile(eff.exe); if (r.path) upd('exe', r.path) })}>Выбрать…</button>
         </div>
         <div className="row">
-          <label className="grow">Модель (.data), оригинал только читается
-            <input value={o.model || ''} onChange={e => upd('model', e.target.value)} placeholder={d?.model || 'Путь к файлу .data модели'} /></label>
-          <button disabled={busy} onClick={() => guard(async () => { const r = await pickFile(eff.model); if (r.path) upd('model', r.path) })}>Выбрать…</button>
-        </div>
-        <div className="row">
           <label className="grow">Рабочая папка (копия результатов модели, нужно столько места, сколько занимает RESULTS)
             <input value={o.workdir || ''} onChange={e => upd('workdir', e.target.value)} placeholder={d?.workdir || 'Папка на диске с запасом места'} /></label>
           <button disabled={busy} onClick={() => guard(async () => { const f = await pickFolder(eff.workdir); if (f) upd('workdir', f) })}>Выбрать папку…</button>
@@ -102,7 +110,6 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
           <label>Макс. итераций на дату<input style={{ width: 70 }} value={o.max_iter ?? ''} onChange={e => upd('max_iter', e.target.value as unknown as number)} /></label>
           <label>Мера<select value={o.metric} onChange={e => upd('metric', e.target.value as 'regimes' | 'dp2')}>
             {Object.entries(METRIC).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-          <label>Одна дата (пусто — все)<input style={{ width: 130 }} value={o.date || ''} onChange={e => { upd('date', e.target.value); upd('batch', !e.target.value) }} placeholder="ГГГГ-ММ-ДД" /></label>
           <label>Шаг рестарта вручную<input style={{ width: 90 }} value={o.restart || ''} onChange={e => upd('restart', e.target.value)} placeholder="авто" /></label>
         </div>
         <div className="row">
@@ -117,15 +124,20 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
       {st?.skipped_dates && st.skipped_dates.length > 0 && <p className="muted small">Один цикл ведётся по одной дате ГДИ: скважины с другой датой ({st.skipped_dates.join(', ')}) пропущены; запустите цикл для их даты отдельно.</p>}
       {st?.skipped && Object.entries(st.skipped).map(([w, r]) => <p key={w} className="muted small">Скв. {w}: {r}</p>)}
 
-      {bs && <>
+      {bs && (() => {
+        // на экране очередь идёт от старой даты к свежей; считается в обратном порядке (рестарт с ранней даты стирает шаги поздних), это внутреннее дело программы
+        const sorted = [...bs.dates].sort((x, y) => ((x as { span?: string[] }).span?.[0] ?? x.date).localeCompare((y as { span?: string[] }).span?.[0] ?? y.date))
+        const label = (d: typeof bs.dates[number]) => { const sp = (d as { span?: string[] }).span; return sp ? sp[0] + ' … ' + sp[1] + ' (сквозной прогон)' : d.date }
+        return <>
         <h3>Очередь по датам ({bs.dates.filter(d => d.status === 'done' || d.status === 'accepted' || d.status === 'skipped').length} из {bs.dates.length})</h3>
         <Tables scope="adapt-batch" tables={[tableOf('adapt-batch', 'Очередь', [['Дата ГДИ', 'text'], ['Скважин', 'number', 0], ['Статус', 'text'], ['Прогонов', 'number', 0], ['Макс. ошибка, %', 'number', 1], ['Примечание', 'text']],
-          bs.dates.map(d => [d.date, d.wells.length, { queued: 'в очереди', running: 'идёт', done: 'готово', accepted: 'принято по формуле', skipped: 'пропущено', failed: 'ошибка' }[d.status], d.runs,
+          sorted.map(d => [label(d), d.wells.length, { queued: 'в очереди', running: 'идёт', done: 'готово', accepted: 'принято по формуле', skipped: 'пропущено', failed: 'ошибка' }[d.status], d.runs,
             Object.values(d.results).reduce((m, r) => (r.err === null ? m : Math.max(m, r.err)), 0) || null, d.message || '']))]}
-          onRow={(_t, i) => { setSelDate(bs.dates[i].date); setWell('') }} />
+          onRow={(_t, i) => { setSelDate(sorted[i].date); setWell('') }} />
         <p className="muted small">Нажмите на строку, чтобы открыть дашборд этой даты. «Записать include» для очереди собирает один файл по всем датам.</p>
         <div className="row"><button disabled={busy} onClick={() => write(0)}>Записать include очереди (все даты)</button></div>
-      </>}
+        </>
+      })()}
       {st && st.iterations.length > 0 && <AdaptDashboard st={st} well={well} setWell={setWell} write={write} busy={busy} />}
     </section>
   )

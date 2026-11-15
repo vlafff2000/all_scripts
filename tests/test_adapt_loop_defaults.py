@@ -45,3 +45,51 @@ def test_start_requires_something_clear_when_nothing_found():
     p = SimpleNamespace(adapt={}, results={})
     with pytest.raises(ValueError, match='tNavigator|модели'):
         adapt_loop.start(p, tempfile.gettempdir(), {}, SimpleNamespace(), None)
+
+
+def _fake_sel(tmp, dates):
+    """Выбор исследований: скважины 1..n на разных датах (для проверки отбора дат до запуска)."""
+    from datetime import datetime
+    import numpy as np
+    from schedule_pxg.gdi_adapt.gdi import GDI
+    gd = [GDI(str(i + 1), datetime.strptime(d, '%Y-%m-%d'), np.full(2, 80.0), np.full(2, 79.0), np.array([1e5, 2e5]), float('nan'), float('nan'))
+          for i, d in enumerate(dates)]
+    rows = [SimpleNamespace(include=True, model=g.wname) for g in gd]
+    return SimpleNamespace(rows=rows, chosen={g.wname: g for g in gd}, history={})
+
+
+def test_dates_selection_last_n_range_and_errors(monkeypatch):
+    import pytest
+    with tempfile.TemporaryDirectory() as d:
+        model = os.path.join(d, 'BASE.DATA')
+        open(model, 'w').write('x')
+        exe = os.path.join(d, 'tnav.exe')
+        open(exe, 'w').write('x')
+        started = {}
+
+        class FakeBatch:
+            def __init__(self, model_data, work, runner, group, *a, **k):
+                started['dates'] = sorted({g.date.strftime('%Y-%m-%d') for g in group})
+                self.state = {'status': 'idle', 'dates': []}
+                self.workdir = work
+
+            def run(self):
+                return self.state
+
+        monkeypatch.setattr(adapt_loop.autoloop, 'AutoBatch', FakeBatch)
+        monkeypatch.setattr(adapt_loop.PVT, 'from_csv', staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(adapt_loop.threading, 'Thread', lambda target, daemon: SimpleNamespace(start=lambda: None))
+        sel = _fake_sel(d, ['2014-01-01', '2015-01-01', '2016-01-01', '2017-01-01'])
+        cfg = SimpleNamespace(dep_criterion_for=lambda w: ('regimes', None))
+        p = SimpleNamespace(adapt={}, results={}, save=lambda folder: None)
+        base = {'exe': exe, 'model': model, 'workdir': os.path.join(d, 'w')}
+        adapt_loop.start(p, d, dict(base), sel, cfg)
+        assert len(started['dates']) == 4                                              # по умолчанию все даты
+        adapt_loop.start(p, d, dict(base, dates_mode='last', last_n=2), sel, cfg)
+        assert started['dates'] == ['2016-01-01', '2017-01-01']
+        adapt_loop.start(p, d, dict(base, dates_mode='range', date_from='2015-01-01', date_to='2016-06-01'), sel, cfg)
+        assert started['dates'] == ['2015-01-01', '2016-01-01']
+        with pytest.raises(ValueError, match='последних'):
+            adapt_loop.start(p, d, dict(base, dates_mode='last', last_n=0), sel, cfg)
+        with pytest.raises(ValueError, match='ни одной даты'):
+            adapt_loop.start(p, d, dict(base, dates_mode='range', date_from='2030-01-01'), sel, cfg)

@@ -573,3 +573,23 @@ class TestStepSelection(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestDpForRateRobust(unittest.TestCase):
+    """Тест: f(a) и f(b) одного знака (NaN или нулевая депрессия) не роняет расчёт скважины, а даёт NaN или ~0."""
+
+    def _stub(self, rate_fn):
+        from types import SimpleNamespace
+        from schedule_pxg.gdi_adapt.physics import Inflow
+        stub = SimpleNamespace(dp_max=10.0, rate=rate_fn)
+        return lambda q: Inflow.dp_for_rate(stub, q)
+
+    def test_nan_rate_gives_nan_not_exception(self):
+        import numpy as np
+        f = self._stub(lambda dp, mult=1.0, d=None: np.array([float('nan')]))
+        self.assertTrue(np.isnan(f([5.0])[0]))
+
+    def test_rate_already_above_target_at_zero_depression(self):
+        import numpy as np
+        f = self._stub(lambda dp, mult=1.0, d=None: np.array([100.0]))                  # при любой депрессии дебит 100 > 5
+        self.assertAlmostEqual(f([5.0])[0], 1e-9)

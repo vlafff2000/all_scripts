@@ -416,6 +416,7 @@ export const histModelXlsx = (b: HmBody) => download('/api/results/histmodel/xls
 export interface LoopOpts {
   exe: string; model: string; workdir: string; restart: string; date: string; threshold_pct: number; max_iter: number; metric: 'regimes' | 'dp2'; wells: string[]
   batch: boolean; snapshots: string; accept_formula: boolean
+  dates_mode: 'all' | 'last' | 'range'; last_n: number; date_from: string; date_to: string
 }
 export interface LoopWell {
   err: number | null; err_dep: number | null; err_dp2: number | null; p_res_gap: number | null; e: number | null

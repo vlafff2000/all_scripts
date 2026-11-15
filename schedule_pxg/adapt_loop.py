@@ -25,7 +25,7 @@ from .gdi_adapt.selection import chosen_for_kit
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOOPS: Dict[str, dict] = {}
 _ids = itertools.count(1)
-KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula')
+KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula', 'dates_mode', 'last_n', 'date_from', 'date_to')
 
 
 def _find_data(path: str) -> str:
@@ -136,6 +136,23 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         raise ValueError('Не выбрано ни одной скважины: выполните шаг 4.')
     only = set(str(w) for w in (opts.get('wells') or []))
     gdis = [dataclasses.replace(g, wname=name) for name, g in chosen if not only or name in only]
+    mode = str(opts.get('dates_mode') or 'all')
+    all_dates = sorted({g.date for g in gdis})
+    if mode == 'last':
+        n = _num(opts.get('last_n'), int, 0)
+        if n <= 0:
+            raise ValueError('Укажите, сколько последних дат адаптировать (число больше нуля).')
+        keep = set(all_dates[-n:])
+        gdis = [g for g in gdis if g.date in keep]
+    elif mode == 'range':
+        try:
+            lo = datetime.strptime(str(opts.get('date_from') or '1900-01-01'), '%Y-%m-%d')
+            hi = datetime.strptime(str(opts.get('date_to') or '2999-12-31'), '%Y-%m-%d')
+        except ValueError:
+            raise ValueError('Период дат задайте как ГГГГ-ММ-ДД (например 2023-01-01).')
+        gdis = [g for g in gdis if lo <= g.date <= hi]
+    if not gdis:
+        raise ValueError('В выбранном наборе нет ни одной даты ГДИ.')
     batch = bool(opts.get('batch'))
     dates = sorted({g.date for g in gdis})
     want = str(opts.get('date') or '')

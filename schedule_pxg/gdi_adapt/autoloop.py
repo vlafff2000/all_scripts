@@ -187,6 +187,9 @@ class AutoLoop:
             except AdaptError as e:
                 self.state.setdefault('skipped', {})[w] = str(e)
                 continue
+            except Exception as e:                      # одна скважина с плохими данными не должна останавливать очередь на сотни скважин
+                self.state.setdefault('skipped', {})[w] = 'расчёт по формуле не удался: %s: %s' % (type(e).__name__, e)
+                continue
             out[w] = {'inc': float(r.pi_mult), 'd': float(r.d), 'source': 'ГДМ (формула)', 'problems': list(r.problems)}
         return out
 
@@ -447,7 +450,7 @@ class AutoBatch:
                 continue
             try:
                 r = adapt_well(g, snap, self.pvt, self.cfg)
-            except AdaptError:
+            except Exception:                           # AdaptError и любые сбои расчёта одной скважины: она идёт в прогон модели
                 rest.append(g)
                 continue
             err = r.dep_errs_after.get('regimes' if self.st.metric == 'regimes' else 'dp2')
@@ -492,7 +495,7 @@ class AutoBatch:
                     continue
                 restart = self.restart_for(d)
                 if restart is None:
-                    raise ValueError(f'для даты {item["date"]} неизвестен шаг рестарта: укажите его для первой даты (дальше он берётся из RSM)')
+                    raise ValueError('для даты %s не удалось определить шаг рестарта: рядом с моделью нет журнала расчёта (RESULTS/*.job.log или RESULTS/*/result.log). Проверьте, что результаты модели лежат рядом с .data, или введите шаг рестарта в «Дополнительно».' % item['date'])
                 item['status'] = 'running'
                 self._push()
                 snaps = {g.wname: self.snapshots[g.wname] for g in run_group if self.snapshots and g.wname in self.snapshots}

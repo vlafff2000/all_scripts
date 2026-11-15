@@ -107,7 +107,14 @@ class Inflow:
 
             def f(dp):
                 return float(self.rate(dp, mult, d_well)[0]) - qi
-            if f(self.dp_max) < 0:
+            fb = f(self.dp_max)
+            if not np.isfinite(fb) or fb < 0:           # модель не даёт такого дебита (или значение не посчиталось): NaN
+                continue
+            fa = f(1e-9)
+            if not np.isfinite(fa):
+                continue
+            if fa >= 0:                                 # уже при нулевой депрессии дебит не меньше нужного: депрессия около нуля
+                out[i] = 1e-9
                 continue
             out[i] = brentq(f, 1e-9, self.dp_max, xtol=1e-10)
         return out
