@@ -661,13 +661,14 @@ def build(reports, shift: bool = True) -> Dict[str, pd.DataFrame]:
                     src = "ГИС" if (variant == "gis" and nm == "Забой" and meta["cur_gis"] is not None) else "исходные данные"
                     comm = ""
                     if variant == "gis" and nm == "Искусственный забой":
-                        # ИЗ по мерам = низ нижнего элемента компоновки: если этот элемент сдвинут по привязке, сдвигается и ИЗ (подсказка)
+                        # ИЗ — фиксированная глубина (решение инженера): не сдвигается. Если по мерам ИЗ = низ компоновки, а компоновку сдвинули
+                        # по привязке к ГИС, расхождение показывается словами (комментарий и «Проверка»), глубина не меняется
                         low = [e for e in elements if id(e) in moves and e.get("pr_bot") is not None and abs(e["pr_bot"] - val) <= 0.05]
-                        if low:
+                        if low and moves[id(low[0])][0] > 0.05:
                             mv = moves[id(low[0])]
-                            comm = "по мерам %s (низ «%s»)" % (_ru(val), low[0]["name"])
-                            src = "меры со сдвигом %s%s м по привязке к «%s» (меры %s, ГИС %s) — подсказка" % ("+" if mv[0] > 0 else "", _ru(mv[0]), mv[1], _ru(mv[2]), _ru(mv[3]))
-                            val = round(val + mv[0], 2)
+                            comm = "по мерам ИЗ = низ «%s»; со сдвигом по привязке к «%s» компоновка ниже ИЗ на %s м — проверить" % (low[0]["name"], mv[1], _ru(mv[0]))
+                            check_rows.append([well, rep.date, rep.file, "warn", "ИЗ %s м (по мерам, не сдвигается) выше низа компоновки %s м после привязки к ГИС: проверить ИЗ или привязку"
+                                               % (_ru(val), _ru(round(low[0]["pr_bot"] + mv[0], 2)))])
                     cons[variant].append([well, rep.date, nm, val, val, None, None, comm, None, src, rep.file])
     frames = {v: pd.DataFrame(cons[v], columns=COLUMNS) for v, _t in VARIANTS}
     frames["Скважины"] = pd.DataFrame(wells_rows, columns=WELL_COLUMNS)
