@@ -266,6 +266,11 @@ def read_table(tbl):
             elif low.startswith("искусственный"):
                 if nums:
                     meta["artificial"] = nums[0]
+                # отчёты 2023–2024: строки «Текущий забой» нет, доход приборов стоит в графе ГИС строки «Искусственный забой» («771,4 (доход приборов)»)
+                gnum = re.match(r"^\s*(" + NUM + r")\s*(?:м\s*)?\(\s*доход", clean(gi or ""), re.I)
+                if gnum and meta["cur_gis"] is None:
+                    meta["cur_gis"] = f(gnum.group(1))
+                    meta["cur_gis_text"] = clean((gi or "").replace("\n", " "))
             else:
                 if nums:
                     meta["cur_pr"] = nums[0]
@@ -489,14 +494,14 @@ def text_elements(blocks) -> List[dict]:
                 continue
             name = classify(what)[1]
             if re.match(r"^пакер", what.lower()):
-                name = "Пакер на ЭК" if re.search(r"ЭК|э/к|колонн|за\s+эк", what, re.I) else "Пакер"     # «пакерное оборудование за ЭК» — не пакер НКТ
+                name = "Пакер на ЭК" if re.search(r"\bЭК\b|э/к|колонн|за\s+эк", what, re.I) else "Пакер"     # «пакерное оборудование за ЭК» — не пакер НКТ
             if name is None:
                 if re.search(r"элемент\w*\s+конструкци", what, re.I):
                     name = "Элемент конструкции %s (не отмечен в мерах)" % ("ЭК" if re.search(r"\bЭК\b|эксплуатац", what) else "").strip() if re.search(r"не\s*отмеч", what, re.I) \
                         else "Элемент конструкции"
                     name = name.replace("  ", " ")
                     inner = re.search(r"\(([^)]{3,40})\)", what)
-                    if inner and not re.search(r"мм|м", inner.group(1)):
+                    if inner and not re.search(r"мм|м\b", inner.group(1)):
                         name += " (%s)" % inner.group(1)              # «элемент конструкции (клапан-отсекатель)»
                 else:
                     name = what[:1].upper() + what[1:]
