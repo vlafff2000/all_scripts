@@ -5,6 +5,11 @@
   «ГИС»      — глубины из графы «по данным ГИС» (где ГИС элемент не определил — «не идентифицируется», «исследованиями не охвачен» —
                берётся исходное значение, это отмечено в столбце «Источник глубины»).
 Формат листа «Конструкция» — шаблон конструкции Атласа (+ «Толщина стенки» убрана, «Источник глубины» и «Отчёт» добавлены).
+Вариант «ГИС» (глубины по ГИС главнее; ничего не исправляется молча, причина — в «Источнике глубины», исходное значение — в «Комментарии»):
+  объединённая по вертикали ячейка ГИС («пакерная группа 751,8-752,7» на пакер и переводник) действует на все свои строки;
+  элементы из текста «уточнено расположение элементов конструкции» добавляются, если их нет в таблице (перфорированный патрубок,
+  «элемент конструкции ЭК, неотмеченный в мерах»), расхождения текста и таблицы — в «Проверке»;
+  элементы компоновки, которые ГИС не охватил (ниже фильтра), — по мерам со сдвигом на разницу мер и ГИС соседнего элемента («подсказка»).
 Значения, склеенные при OCR («802,068.94 / -» = 802,06 + 8,94), разбираются по правдоподобной толщине стенки 3–25 мм; такие строки стоит сверить с оригиналом.
 """
 from __future__ import annotations
@@ -128,7 +133,7 @@ GENERIC = [(r"^интервал расширения|^расширка|^расш
            (r"^фрезерование", "Фрезерование эксплуатационной колонны"), (r"^перфопатрубок|^перфорированный патрубок", "Перфопатрубок"),
            (r"^пакер", "Пакер"), (r"^фильтр", "Фильтр"), (r"^перф\.? ?хвостовик|^перфорированный хвостовик", "Хвостовик перфорированный"),
            (r"^левый-правый переводник|^лево-правый переводник", "Лево-правый переводник"), (r"^клапанная система", "Клапанная система"),
-           (r"^клапан кольцевой", "Клапан кольцевой"), (r"^надфильтровые трубы|^трубы затворные", "Надфильтровые трубы"),
+           (r"^клапан кольцевой", "Клапан кольцевой"), (r"^(?:надфильтровые трубы|трубы надфильтровые|трубы затворные|затво\w*\s+труб)", "Надфильтровые трубы"),
            (r"^патрубок подгоночный", "Патрубок подгоночный"), (r"^зумпфовая труба|^зумфовая труба", "Зумпфовая труба"),
            (r"^цементный мост", "Цементный мост"), (r"^открытый ствол", "Открытый ствол")]
 SKIP_ROWS = re.compile(r"^(конструкция\s*скважины|условия исследований|объект хранения|стратиграфия|скважина заполнена|тип$|плотность)", re.I)
@@ -221,6 +226,7 @@ def read_table(tbl):
     cond = OrderedDict()
     meta = {"drilled": None, "artificial": None, "cur_pr": None, "cur_gis": None, "cur_gis_text": ""}
     in_cond = False
+    shared = ("", "")                     # графа ГИС: (текст, подпись строки) последней непустой ячейки — для объединённых по вертикали ячеек
     for r in tbl.rows[(header_index(tbl) or 0) + 1:]:
         cells = r.cells
         if not cells:
@@ -235,6 +241,11 @@ def read_table(tbl):
             continue
         pr = cells[ip].text if ip < len(cells) else ""
         gi = cells[ig].text if ig < len(cells) else ""
+        g_shared = ""
+        if ig < len(cells) and getattr(cells[ig], "vcont", False) and shared[0]:
+            gi, g_shared = shared                 # ячейка ГИС объединена с ячейкой строки выше («пакерная группа» на пакер и переводник)
+        elif ig < len(cells):
+            shared = (gi, label)
         if in_cond:
             val = clean((pr or "").replace("\n", " "))
             if len(cells) >= 2 and val:
@@ -266,7 +277,7 @@ def read_table(tbl):
         kind, name = classify(label)
         if name is None and (SKIP_ROWS.match(low) or NOT_EQUIP.search(low)):
             continue
-        element = {"kind": kind, "name": name or re.sub(r"\s*Ø.*$", "", label).strip(), "label": label, "diam": diameter(label_raw)}
+        element = {"kind": kind, "name": name or re.sub(r"\s*Ø.*$", "", label).strip(), "label": label, "diam": diameter(label_raw), "g_shared": g_shared}
         if kind == "string":
             top, bottom, wall, inner = parse_pr_string(pr or "")
             element.update(pr_top=top, pr_bot=bottom, wall=wall, inner=inner, pr_text=clean((pr or "").replace("\n", " ")))
@@ -422,6 +433,138 @@ def read_legacy(lg):
     return elements, cond, meta
 
 
+TEXT_START = re.compile(r"расположени\w*\s+(?:конструктивных\s+)?элемент\w*\s+конструкц", re.I)
+TEXT_SHOE = [(r"эксплуатационн", "Эксплуатационная колонна"), (r"насосно|нкт", "НКТ"), (r"техническ", "Техническая колонна"), (r"кондуктор", "Кондуктор"),
+             (r"направлени", "Направление"), (r"потайн|хвостовик", "Потайная колонна")]
+TEXT_EQUIP = re.compile(r"труб|патруб|пакер|клапан|переводник|лпп|муфт|фильтр|ниппел|хвостовик|цилиндр|разъединител|центратор|компенсатор|воронк|"
+                        r"отсекател|элемент\w*\s+(?:конструкц|кпо)|оборудован|перфорац|нкт|колонн|зумпф|башмак|отстойник", re.I)
+TEXT_NOT_EQUIP = re.compile(r"намагнич|магнитн|дефект|нарушени|скоплени|толщин|газонас|насыщ|переток|заколон|негерметич|коррози", re.I)
+TEXT_VERB = re.compile(r"\s*(?:четко\s+|чётко\s+)?(?:не\s+)?(?:отбива\w*|отмеча\w*|выделя\w*|определя\w*|фиксиру\w*)\b", re.I)
+
+
+def text_elements(blocks) -> List[dict]:
+    """Элементы конструкции из текста отчёта («По результатам МИД и ЛМ уточнено расположение элементов конструкции:» и список ниже).
+    В тексте бывает то, чего нет в таблице: перфорированный патрубок, «элемент конструкции ЭК, неотмеченный в мерах». Повтор в выводах — один раз."""
+    out, seen = [], set()
+    paras = [clean(b.text) for b in blocks if isinstance(b, wt.Para)]
+    for i, head in enumerate(paras):
+        if not TEXT_START.search(head):
+            continue
+        for t in paras[i + 1:i + 25]:
+            low = t.lower()
+            m_int = re.search(r"(?:в\s+)?интервал\w*\s*(" + NUM + r")\s*" + DASH + r"\s*(" + NUM + r")\s*м", t, re.I)
+            m_dep = re.search(r"на\s+глубин\w*\s*(" + NUM + r")\s*м", t, re.I)
+            if not m_int and not m_dep and not low.startswith("башмак"):
+                break                                          # конец списка («По данным МИД:»)
+            if re.match(r"^(измерен|по данным|нарушени|толщин)", low):
+                break
+            note = "; ".join(x.strip() for x in re.findall(r"\(([^)]*(?:доход|по\s+[ЛМ]|ЛМ|МИД)[^)]*)\)", t))
+            if low.startswith("башмак"):
+                if not m_dep:
+                    continue                                   # «четко не отбивается» — значения нет
+                name = next((nm for rx, nm in TEXT_SHOE if re.search(rx, low)), None)
+                if name:
+                    key = ("shoe", name, f(m_dep.group(1)))
+                    if key not in seen:
+                        seen.add(key)
+                        out.append({"kind": "shoe", "name": name, "top": None, "bot": f(m_dep.group(1)), "text": t, "note": note})
+                continue
+            if not m_int:
+                continue
+            a, b = sorted((f(m_int.group(1)), f(m_int.group(2))))
+            if re.match(r"^в\s+интервал", low):               # «В интервале 751,0 – 755,7 м отбивается элемент конструкции ЭК, неотмеченный в мерах.»
+                what = TEXT_VERB.sub("", t[m_int.end():], count=1).strip(" ;.,")
+            else:
+                what = TEXT_VERB.split(t[:m_int.start()])[0].strip(" ;.,")
+                what = re.sub(r"\s*(?:в|на)\s*$", "", what).strip()
+            what = re.sub(r"\s+", " ", what)
+            if not TEXT_EQUIP.search(what) or TEXT_NOT_EQUIP.search(what) or len(what) > 90:
+                continue                                       # не элемент конструкции («намагниченность ЭК», «скопления газа»)
+            string = next((nm for rx, nm in TEXT_SHOE if re.search(rx, what.lower())), None)
+            if string and a < 0.5 and not re.search(r"патруб|перфор|фильтр|пакер|клапан", what.lower()):
+                key = ("shoe", string, b)                      # «насосно-компрессорные трубы отмечаются в интервале 0,0 – 736,9 м» = башмак НКТ
+                if key not in seen:
+                    seen.add(key)
+                    out.append({"kind": "shoe", "name": string, "top": None, "bot": b, "text": t, "note": note})
+                continue
+            name = classify(what)[1]
+            if re.match(r"^пакер", what.lower()):
+                name = "Пакер на ЭК" if re.search(r"ЭК|э/к|колонн|за\s+эк", what, re.I) else "Пакер"     # «пакерное оборудование за ЭК» — не пакер НКТ
+            if name is None:
+                if re.search(r"элемент\w*\s+конструкци", what, re.I):
+                    name = "Элемент конструкции %s (не отмечен в мерах)" % ("ЭК" if re.search(r"\bЭК\b|эксплуатац", what) else "").strip() if re.search(r"не\s*отмеч", what, re.I) \
+                        else "Элемент конструкции"
+                    name = name.replace("  ", " ")
+                    inner = re.search(r"\(([^)]{3,40})\)", what)
+                    if inner and not re.search(r"мм|м", inner.group(1)):
+                        name += " (%s)" % inner.group(1)              # «элемент конструкции (клапан-отсекатель)»
+                else:
+                    name = what[:1].upper() + what[1:]
+            key = ("interval", name, a, b)
+            if key not in seen and name:
+                seen.add(key)
+                out.append({"kind": "interval", "name": name, "top": a, "bot": b, "text": t, "note": note})
+    return out
+
+
+def _merge_text(elements, items, check, well, rep):
+    """Элементы из текста отчёта → в элементы таблицы (вариант «ГИС»): заполняет пустую графу ГИС, добавляет недостающие, расхождения — в «Проверку»."""
+    for it in items:
+        same = [e for e in elements if e["name"] == it["name"]]
+        if it["kind"] == "shoe":
+            same = [e for e in same if e["kind"] == "string"]
+            for e in same:
+                if e.get("g_bot") is None:
+                    e.update(g_top=0.0, g_bot=it["bot"], g_text=it["text"], g_status="ok", g_from_text=True)
+                elif abs(e["g_bot"] - it["bot"]) > 0.05:
+                    check.append([well, rep.date, rep.file, "warn", "«%s»: башмак по таблице ГИС %g м, по тексту %g м" % (it["name"], e["g_bot"], it["bot"])])
+            continue
+        inside = [e for e in elements if e.get("g_bot") is not None and e.get("g_top") is not None and e["g_top"] >= it["top"] - 0.05
+                  and e["g_bot"] <= it["bot"] + 0.05 and e["g_bot"] > e["g_top"]]
+        exact = any(abs(e["g_top"] - it["top"]) <= 0.05 and abs(e["g_bot"] - it["bot"]) <= 0.05 for e in inside)
+        union = inside and abs(min(e["g_top"] for e in inside) - it["top"]) <= 0.05 and abs(max(e["g_bot"] for e in inside) - it["bot"]) <= 0.05
+        hit = exact or (union and it["name"] in {e["name"] for e in inside})        # «пакерная группа» = пакер + ниппель/переводник по таблице
+        if hit:
+            continue                                           # тот же интервал уже есть в таблице (название может отличаться: «Затворные трубы»)
+        empty = [e for e in same if e.get("g_bot") is None]
+        if empty:
+            empty[0].update(g_top=it["top"], g_bot=it["bot"], g_text=it["text"], g_status="ok", g_from_text=True)
+            continue
+        if same:
+            check.append([well, rep.date, rep.file, "info", "«%s»: по таблице ГИС %s, в тексте %g–%g м: добавлен как отдельная строка"
+                          % (it["name"], "; ".join("%g–%g" % (e["g_top"], e["g_bot"]) for e in same), it["top"], it["bot"])])
+        elements.append({"kind": "interval", "name": it["name"], "label": it["name"], "diam": None, "pr_top": None, "pr_bot": None, "wall": None, "inner": None,
+                         "pr_text": "", "g_top": it["top"], "g_bot": it["bot"], "g_text": it["text"], "g_status": "ok", "g_from_text": True, "g_shared": "", "text_only": True})
+
+
+SHIFT_MAX_M = 15.0          # привязка мер к ГИС: не дальше и не больше этого (иначе это не сдвиг, а другая компоновка)
+NOT_ASSEMBLY = re.compile(r"расшир|открыт|фрезер|вырез|перфорац|цементн|мост|каверн|подзабой|пласт|ствол", re.I)   # интервалы ствола, а не трубы компоновки
+
+
+def _shift(elements):
+    """Сдвиг мер для элементов без глубины ГИС: по ближайшему элементу той же компоновки, у которого есть и меры, и ГИС (интервалы).
+    Возвращает {id(элемента): (сдвиг, название опорного элемента, меры, ГИС)}."""
+    anchors = [e for e in elements if e["kind"] == "interval" and e.get("pr_bot") is not None and e.get("g_bot") is not None
+               and not e.get("g_shared") and not e.get("g_from_text") and not NOT_ASSEMBLY.search(e["name"] + " " + e["label"])]
+    out = {}
+    for e in elements:
+        if e["kind"] != "interval" or e.get("g_bot") is not None or e.get("pr_bot") is None or e.get("pr_top") is None                 or NOT_ASSEMBLY.search(e["name"] + " " + e["label"]):
+            continue
+        best = None
+        for a in anchors:
+            dist = min(abs(e["pr_top"] - a["pr_bot"]), abs(a["pr_top"] - e["pr_bot"]), abs(e["pr_top"] - a["pr_top"]))
+            off = a["g_bot"] - a["pr_bot"]
+            if dist <= SHIFT_MAX_M and abs(off) <= SHIFT_MAX_M and (best is None or dist < best[0]):
+                best = (dist, off, a)
+        if best and abs(best[1]) > 0.05:
+            out[id(e)] = (round(best[1], 2), best[2]["name"], best[2]["pr_bot"], best[2]["g_bot"])
+    return out
+
+
+def _ru(v) -> str:
+    return ("%g" % v).replace(".", ",")
+
+
 def read_any(tbl):
     return read_legacy(tbl) if isinstance(tbl, Legacy) else read_table(tbl)
 
@@ -438,6 +581,7 @@ def read_files(files: List[str]):
             notes.append("%s: %s" % (os.path.basename(p), e))
             continue
         tbl = find_cons_table(blocks)
+        rep.cons_text = text_elements(blocks)         # элементы из текста «уточнено расположение элементов конструкции»
         if not re.fullmatch(r"\d+", str(rep.well or "")):
             mm = re.match(r"\s*0*(\d+)", os.path.basename(p))
             if mm:
@@ -447,8 +591,11 @@ def read_files(files: List[str]):
     return reports, notes
 
 
-def build(reports) -> Dict[str, pd.DataFrame]:
-    """Таблицы двух вариантов (`initial`, `gis`: лист «Конструкция» и пр.) и общие листы."""
+def build(reports, shift: bool = True) -> Dict[str, pd.DataFrame]:
+    """Таблицы двух вариантов (`initial`, `gis`: лист «Конструкция» и пр.) и общие листы.
+    Вариант «ГИС»: глубины по данным ГИС главнее; объединённая ячейка ГИС действует на все свои строки; элементы из текста отчёта добавляются;
+    ``shift`` — элементам, которые ГИС не охватил, глубина по мерам сдвигается на разницу мер и ГИС ближайшего элемента той же компоновки
+    (подсказка с причиной в «Источнике глубины»; исходная глубина — в «Комментарии»)."""
     per_well = defaultdict(list)
     for rep, tbl, p in reports:
         if tbl is not None and rep.well:
@@ -470,6 +617,9 @@ def build(reports) -> Dict[str, pd.DataFrame]:
             check_rows.append([well, rep.date, rep.file, "warn", "таблица конструкции найдена, но элементов не разобрано"])
         if not elements:
             continue
+        initial_elements = [dict(e) for e in elements]
+        _merge_text(elements, getattr(rep, "cons_text", None) or [], check_rows, well, rep)
+        moves = _shift(elements) if shift else {}
         n_g = sum(1 for e in elements if e.get("g_bot") is not None)
         wells_rows.append([well, rep.date, rep.file, len(lst), len(elements), n_g, meta["drilled"], meta["artificial"], meta["cur_pr"], meta["cur_gis"],
                            meta["cur_gis_text"], cond.get("Заполнение скважины", ""), next((v for k, v in cond.items() if k.lower().startswith("давлен")), ""),
@@ -478,10 +628,11 @@ def build(reports) -> Dict[str, pd.DataFrame]:
         for k, v in cond.items():
             cond_rows.append([well, rep.date, k, v, rep.file])
         for variant, _t in VARIANTS:
-            for e in elements:
+            for e in (elements if variant == "gis" else initial_elements):
                 use_g = variant == "gis" and e.get("g_bot") is not None
                 top = e["g_top"] if use_g else e["pr_top"]
                 bot = e["g_bot"] if use_g else e["pr_bot"]
+                move = moves.get(id(e)) if variant == "gis" else None
                 if bot is None and top is None:
                     if variant == "initial":
                         check_rows.append([well, rep.date, rep.file, "warn", "«%s»: нет глубины по исходным данным («%s»)" % (e["label"][:50], e["pr_text"][:40])])
@@ -492,12 +643,32 @@ def build(reports) -> Dict[str, pd.DataFrame]:
                     bot = top
                 src = "ГИС" if use_g else ("исходные данные" if variant == "initial" else "исходные данные (ГИС: %s)" % STATUS_RU.get(e["g_status"], e["g_status"]))
                 comm = e["pr_text"] if variant == "initial" else (e["g_text"] if use_g else e["pr_text"])
+                if use_g and e.get("g_from_text"):
+                    src = "ГИС (текст отчёта)"
+                elif use_g and e.get("g_shared"):
+                    src = "ГИС (общая ячейка с «%s»)" % e["g_shared"][:60]
+                if move:
+                    comm = "по мерам: %s" % comm if comm else "по мерам %s-%s" % (_ru(e["pr_top"]), _ru(e["pr_bot"]))
+                    top, bot = round(top + move[0], 2), round(bot + move[0], 2)
+                    src = "меры со сдвигом %s%s м по привязке к «%s» (меры %s, ГИС %s; ГИС: %s) — подсказка" % (
+                        "+" if move[0] > 0 else "", _ru(move[0]), move[1], _ru(move[2]), _ru(move[3]), STATUS_RU.get(e["g_status"], e["g_status"]))
+                if variant == "gis" and e.get("label") and e["label"] != e["name"] and not e.get("text_only"):
+                    comm = "%s; в отчёте: «%s»" % (comm, e["label"][:80]) if comm else "в отчёте: «%s»" % e["label"][:80]
                 cons[variant].append([well, rep.date, e["name"], top, bot, e["diam"], e["inner"], comm, e["wall"], src, rep.file])
             for nm, val in (("Забой", meta["cur_pr"] if variant == "initial" else (meta["cur_gis"] if meta["cur_gis"] is not None else meta["cur_pr"])),
                             ("Искусственный забой", meta["artificial"])):
                 if val is not None:
                     src = "ГИС" if (variant == "gis" and nm == "Забой" and meta["cur_gis"] is not None) else "исходные данные"
-                    cons[variant].append([well, rep.date, nm, val, val, None, None, "", None, src, rep.file])
+                    comm = ""
+                    if variant == "gis" and nm == "Искусственный забой":
+                        # ИЗ по мерам = низ нижнего элемента компоновки: если этот элемент сдвинут по привязке, сдвигается и ИЗ (подсказка)
+                        low = [e for e in elements if id(e) in moves and e.get("pr_bot") is not None and abs(e["pr_bot"] - val) <= 0.05]
+                        if low:
+                            mv = moves[id(low[0])]
+                            comm = "по мерам %s (низ «%s»)" % (_ru(val), low[0]["name"])
+                            src = "меры со сдвигом %s%s м по привязке к «%s» (меры %s, ГИС %s) — подсказка" % ("+" if mv[0] > 0 else "", _ru(mv[0]), mv[1], _ru(mv[2]), _ru(mv[3]))
+                            val = round(val + mv[0], 2)
+                    cons[variant].append([well, rep.date, nm, val, val, None, None, comm, None, src, rep.file])
     frames = {v: pd.DataFrame(cons[v], columns=COLUMNS) for v, _t in VARIANTS}
     frames["Скважины"] = pd.DataFrame(wells_rows, columns=WELL_COLUMNS)
     frames["Замеры забоя"] = pd.DataFrame(bottom_rows, columns=BOTTOM_COLUMNS)

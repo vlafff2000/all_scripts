@@ -5,7 +5,8 @@
   «Конструкции_из_ГИС_по_данным_ГИС.xlsx» — глубины из графы «по данным ГИС» (положение НКТ, фильтра, расширки и т. п.); где ГИС элемент не определил, берётся
   исходное значение, это видно в столбце «Источник глубины».
 Листы: «Скважины», «Замеры забоя», «Условия», «Отчёты с конструкцией», «Проверка». Разбор — `pxg_core.gis_construction`; последнее слово за инженером.
-Параметры: --files (файлы .doc/.docx, вывод OCR *.ocr.md, папки, архивы; по одному в строке). Результаты — в текущую папку.
+Параметры: --files (файлы .doc/.docx, вывод OCR *.ocr.md, папки, архивы; по одному в строке), --shift (1/0: сдвигать меры элементов, которые ГИС не охватил,
+по привязке к соседнему элементу; по умолчанию 1, это подсказка с причиной). Результаты — в текущую папку.
 """
 from __future__ import annotations
 
@@ -21,7 +22,8 @@ def _paths(value: str) -> list:
 def main(argv=None):
     args = параметры.parse(
         "БД конструкций из отчётов ГИС", argv,
-        files="отчёты ГИС (.doc/.docx, вывод OCR *.ocr.md), папки и архивы (ZIP, TAR, RAR), по одному пути в строке")
+        files="отчёты ГИС (.doc/.docx, вывод OCR *.ocr.md), папки и архивы (ZIP, TAR, RAR), по одному пути в строке",
+        shift="1/0: элементы, которые ГИС не охватил, — по мерам со сдвигом по привязке к соседнему элементу (по умолчанию 1)")
     paths = _paths(args.files)
     if not paths:
         one = параметры.ask_path("Отчёты ГИС: файл, папка или архив", args.files if args.files is not None else None, "folder")
@@ -38,7 +40,7 @@ def main(argv=None):
         reports, bad = gc.read_files(files)
         for b in bad:
             print("❌ %s" % b)
-        frames = gc.build(reports)
+        frames = gc.build(reports, shift=параметры.yes(args.shift) if args.shift is not None else True)
         wells = len(frames["Скважины"])
         with_table = sum(1 for _r, t, _p in reports if t is not None)
         print("📊 Отчётов %d, с таблицей конструкции %d, скважин %d; строк конструкции: %d (исходные) и %d (ГИС)" % (
