@@ -262,6 +262,30 @@ class TestRestartCopy(unittest.TestCase):
             self.assertEqual(os.path.getsize(os.path.join(work, 'RESULTS', 'BASE', 'maps.res')), 1000)
             self.assertEqual(os.path.getsize(os.path.join(work, 'RESULTS', 'BASE', 'limits')), 10)
 
+    def test_interrupted_copy_leaves_no_short_file_under_final_name(self):
+        # копирование оборвали (перезапуск программы, нет места): недокопированный файл не должен остаться под своим именем,
+        # иначе следующий запуск примет его за готовый
+        with tempfile.TemporaryDirectory() as d:
+            src, work = os.path.join(d, 'model'), os.path.join(d, 'work')
+            os.makedirs(os.path.join(src, 'RESULTS', 'BASE'))
+            with open(os.path.join(src, 'RESULTS', 'BASE', 'maps.res'), 'wb') as f:
+                f.write(bytes(1000))
+            real = cb.shutil.copyfile
+
+            def broken(a, b, *x, **k):
+                with open(b, 'wb') as f:
+                    f.write(bytes(300))
+                raise OSError('прервано')
+            cb.shutil.copyfile = broken
+            try:
+                with self.assertRaises(OSError):
+                    cb.ensure_results(src, work)
+            finally:
+                cb.shutil.copyfile = real
+            self.assertFalse(os.path.exists(os.path.join(work, 'RESULTS', 'BASE', 'maps.res')))
+            cb.ensure_results(src, work)
+            self.assertEqual(os.path.getsize(os.path.join(work, 'RESULTS', 'BASE', 'maps.res')), 1000)
+
     def test_job_stops_when_restart_step_is_not_available(self):
         # tNavigator сам откатывает недоступный шаг рестарта (часы лишнего счёта): прогон останавливается с понятной причиной
         code = "import time;print('Рестарт с шага 3526 невозможен. Будет проделан рестарт с шага 104.', flush=True);time.sleep(60)"

@@ -168,7 +168,17 @@ def ensure_results(src_dir: str, workdir: str, progress: Optional[Callable[[int,
     for f in todo:
         d = os.path.join(dst, os.path.relpath(f, src))
         os.makedirs(os.path.dirname(d), exist_ok=True)
-        shutil.copy2(f, d)
+        part = d + '.part'                                  # под своим именем файл появляется только целым: обрыв не оставит «готовую» обрезанную копию
+        try:
+            shutil.copyfile(f, part)
+            shutil.copystat(f, part)
+            if os.path.getsize(part) != os.path.getsize(f):
+                raise OSError(f'копия «{os.path.basename(f)}» неполная')
+            os.replace(part, d)
+        except BaseException:
+            if os.path.exists(part):
+                os.remove(part)
+            raise
         done += os.path.getsize(f)
         if progress:
             progress(done, total)
