@@ -125,6 +125,9 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         opts = dict(opts, batch=True)                  # по умолчанию все даты по очереди
     if not exe or not os.path.isfile(exe):
         raise ValueError('Не нашёл программу tNavigator «%s». Укажите путь к tNavigator*.exe (Windows) или tNavigator-con (РЕД ОС).' % exe)
+    bad = tnav_run.exe_problem(exe)
+    if bad:
+        raise ValueError('Путь к tNavigator: %s.' % bad)
     if not model or not os.path.isfile(model):
         raise ValueError('Не нашёл файл модели .data «%s».' % model)
     if not work:

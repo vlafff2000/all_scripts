@@ -182,3 +182,22 @@ class TestVersions(unittest.TestCase):
 if __name__ == '__main__':
     unittest.main()
 
+
+class TestExeCheck(unittest.TestCase):
+    def test_non_program_file_is_explained_on_windows(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = os.path.join(d, 'tNavigator.exe')
+            with open(fake, 'wb') as f:
+                f.write(b'START' + bytes(10))                # не программа: заголовок не MZ
+            good = os.path.join(d, 'ok.exe')
+            with open(good, 'wb') as f:
+                f.write(b'MZ' + bytes(10))
+            real_name = tr.os.name
+            try:
+                tr.os.name = 'nt'
+                self.assertIn('не программа Windows', tr.exe_problem(fake))
+                self.assertEqual(tr.exe_problem(good), '')
+            finally:
+                tr.os.name = real_name
+            self.assertIn('не найден', tr.exe_problem(os.path.join(d, 'none.exe')))
+
