@@ -108,3 +108,13 @@ def test_wall_thickness_table_is_not_taken_for_bottom_measurements():
     """gis_wall_thickness.csv с колонками well/date/bottom_m импорт Атласа принял за «Замеры забоя» (скв. 58: «забой» 387,8 м = низ трубы НКТ № 44)."""
     cols = set(gr.EN["gis_wall_thickness"].values())
     assert not cols & {"bottom_m", "top_m", "depth_m"} and {"pipe_top_m", "pipe_bottom_m", "wall_mm"} <= cols
+
+
+def test_w32_cavity_under_shoe_and_clay_cap_are_two_records_and_two_saturation_intervals():
+    paras = ["Пласт-коллектор щигровского горизонта газонасыщен в интервалах 762,0-764,0 м, 764,8-767,3м (уровень уплотненного осадка).",
+             "Скопления газа отмечаются в каверне под башмаком эксплуатационной колонны (757,8-758,7 м) и в интервале расширения открытого ствола скважины: 758,7-762,0 м (глинистая покрышка)."]
+    rows = ts.read(_rep(), [wt.Para(t) for t in paras])
+    got = [(r["Вид"], r["Интервалы"]) for r in rows]
+    assert ("Скопление газа: под башмаком колонны", "757.8–758.7") in got and ("Скопление газа: глинистая покрышка", "758.7–762") in got
+    ann = [(a["Вид"], a["От, м"], a["До, м"]) for a in ts.as_annotations(rows) if a["Вид"] == "Насыщение пласта-коллектора"]
+    assert ann == [("Насыщение пласта-коллектора", 762.0, 764.0), ("Насыщение пласта-коллектора", 764.8, 767.3)]

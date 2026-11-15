@@ -39,6 +39,7 @@ METHOD = (("2НГК", re.compile(r"2\s*НГК|двухзондов", re.I)), ("�
 SKIP = re.compile(r"^\s*(?:\d+(?:\.\d+)*\.?\s*)?(?:решаемые\s+задачи|#|поиск\w*\s|выявлени\w*\s|определени\w*\s|выделени\w*\s|контрол\w*\s|обработк|оценк\w*\s|"
                   r"диагностик|задач)", re.I)     # заголовки разделов и задачи отчёта, а не результат
 HEAD = re.compile(r"[:]\s*$")
+CLAUSE = re.compile(r"(?<=[)м])\s+и\s+(?=в\s+интервал)", re.I)     # «…в каверне под башмаком (757,8-758,7 м) и в интервале расширения …: 758,7-762,0 м (глинистая покрышка)»: две записи
 COLUMNS = ["Скважина", "Дата", "Вид", "Есть", "Где", "От, м", "До, м", "Интервалы", "Нг, м", "Кг (как в отчёте)", "Насыщение", "Колонна",
            "Толщина мин, мм", "Толщина макс, мм", "Метод", "Текст", "Файл", "Источник", "Уверенность"]
 WALL_COLUMNS = ["Скважина", "Дата", "Колонна", "№ трубы", "Кровля, м", "Подошва, м", "Длина, м", "Толщина, мм", "Примечание", "Файл", "Источник"]
@@ -98,6 +99,17 @@ def classify(sent: str) -> Optional[Tuple[str, bool, str]]:
     return None
 
 
+def _clauses(sent: str) -> List[str]:
+    """«Скопления газа отмечаются в каверне под башмаком (…) и в интервале расширения …: … (глинистая покрышка)» → две фразы; вторая
+    получает подлежащее первой («Скопления газа отмечаются»), иначе в ней нет слова «газ»."""
+    parts = CLAUSE.split(sent)
+    if len(parts) < 2:
+        return parts
+    m = re.match(r"^(.*?отмеча\w+)\s", parts[0], re.I)
+    head = m.group(1) if m else ""
+    return [parts[0]] + [(head + " " + p) if head else p for p in parts[1:]]
+
+
 def read(rep, blocks: List[wt.Block]) -> List[dict]:
     """Записи техсостояния из абзацев отчёта; ``rep`` — gis_report.Report (скважина, дата, файл)."""
     out, seen = [], {}
@@ -114,7 +126,7 @@ def read(rep, blocks: List[wt.Block]) -> List[dict]:
             text = ctx + " " + text                     # «Скопления газа отмечаются:» и список «в проницаемом прослое … в интервале …» ниже
         else:
             ctx = ""
-        for sent in [x for part in SENT.split(text) for x in REST.split(part)]:
+        for sent in [x for part in SENT.split(text) for r in REST.split(part) for x in _clauses(r)]:
             if HEAD.search(sent) and GAS.search(sent) and not RANGE.search(sent):
                 ctx = sent.rstrip(": ")                  # подпись списка: сама записью не становится
                 continue
