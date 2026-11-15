@@ -345,12 +345,14 @@ class AutoBatch:
             t0 = float((date - cb.model_start(cb._read(self.model_data)[0])).days)
         except (OSError, cb.CaseError):
             return self.restart
-        log = os.path.join(src_dir, 'RESULTS', base + '.job.log')
-        if os.path.exists(log):
-            try:
-                return cb.restart_step_from_log(cb.steps_from_job_log(log), t0)
-            except (OSError, cb.CaseError):
-                pass
+        # строки «ОТЧЁТ N … ДЕНЬ …» лежат в RESULTS/<имя>/result.log (в tNavigator 21.3 job.log - журнал запуска без шагов отчёта);
+        # job.log оставлен запасным вариантом для версий, где шаги пишутся в него
+        for log in (os.path.join(src_dir, 'RESULTS', base, 'result.log'), os.path.join(src_dir, 'RESULTS', base + '.job.log')):
+            if os.path.exists(log):
+                try:
+                    return cb.restart_step_from_log(cb.steps_from_job_log(log), t0)
+                except (OSError, cb.CaseError):
+                    continue
         rsm = os.path.join(self.workdir, base + '.RSM')
         if os.path.exists(rsm):
             try:

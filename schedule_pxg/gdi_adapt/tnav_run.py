@@ -35,6 +35,23 @@ def find_exe(hint: str = '') -> List[str]:
     return out
 
 
+def exe_problem(exe: str) -> str:
+    """Почему файл нельзя запустить как tNavigator (пусто - можно). На Windows файл должен быть программой (заголовок MZ):
+    иначе Popen падает с невнятным «WinError 193 не является приложением Win32» уже на запуске очереди."""
+    if not exe or not os.path.isfile(exe):
+        return 'файл «%s» не найден' % exe
+    if os.name == 'nt':
+        try:
+            with open(exe, 'rb') as f:
+                head = f.read(2)
+        except OSError as e:
+            return 'файл «%s» не читается: %s' % (exe, e)
+        if head != b'MZ':
+            return ('«%s» не программа Windows (%s): укажите tNavigator*.exe, а не .data, ярлык, скрипт или архив'
+                    % (exe, os.path.splitext(exe)[1] or 'без расширения'))
+    return ''
+
+
 REQUIRED_FLAGS = ('--no-gui', '--auto-run', '--auto-exit', '--ecl-rsm')       # без них пакетный расчёт с RSM невозможен
 OPTIONAL_FLAGS = ('--ignore-lock', '--ecl-root')                              # ставятся, только если версия их знает
 _PROBE: Dict[str, dict] = {}
@@ -153,7 +170,7 @@ class Job:
             else:
                 self.status = 'done'
         except Exception as e:
-            self.status, self.error = 'failed', f'{type(e).__name__}: {e}'
+            self.status, self.error = 'failed', f'не удалось запустить «{self.cmd[0]}»: {type(e).__name__}: {e}'
         finally:
             self.finished = time.time()
 
