@@ -2405,8 +2405,9 @@ EN["gis_tech_state"] = {"Скважина": "well", "Дата": "date", "Вид"
                         "Интервалы": "intervals", "Нг, м": "h_gas_m", "Кг (как в отчёте)": "kg_raw", "Насыщение": "saturation", "Колонна": "string",
                         "Толщина мин, мм": "wall_min_mm", "Толщина макс, мм": "wall_max_mm", "Метод": "method", "Текст": "text", "Файл": "file",
                         "Источник": "source", "Уверенность": "confidence"}
-EN["gis_wall_thickness"] = {"Скважина": "well", "Дата": "date", "Колонна": "string", "№ трубы": "pipe_no", "Кровля, м": "top_m", "Подошва, м": "bottom_m",
-                            "Длина, м": "length_m", "Толщина, мм": "wall_mm", "Примечание": "note", "Файл": "file", "Источник": "source"}
+# толщина по трубам — не «Замеры забоя»: свои имена глубин (pipe_top_m / pipe_bottom_m), иначе импорт Атласа принимает таблицу за забой (well, date, bottom_m)
+EN["gis_wall_thickness"] = {"Скважина": "well", "Дата": "date", "Колонна": "string", "№ трубы": "pipe_no", "Кровля, м": "pipe_top_m", "Подошва, м": "pipe_bottom_m",
+                            "Длина, м": "pipe_length_m", "Толщина, мм": "wall_mm", "Примечание": "note", "Файл": "file", "Источник": "source"}
 FORMAT_NAME, FORMAT_VERSION = "gis_report_db", 1
 TEMPLATING_FORMAT = "templating_db"
 

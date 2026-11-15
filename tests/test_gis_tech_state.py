@@ -102,3 +102,9 @@ def test_tech_state_goes_to_annotations_for_atlas():
     rep.tech = rows
     frame = gr.annotations_frame([rep])
     assert "Скопление газа: за колонной" in set(frame["Вид"]) and len(frame) == len(ann)
+
+
+def test_wall_thickness_table_is_not_taken_for_bottom_measurements():
+    """gis_wall_thickness.csv с колонками well/date/bottom_m импорт Атласа принял за «Замеры забоя» (скв. 58: «забой» 387,8 м = низ трубы НКТ № 44)."""
+    cols = set(gr.EN["gis_wall_thickness"].values())
+    assert not cols & {"bottom_m", "top_m", "depth_m"} and {"pipe_top_m", "pipe_bottom_m", "wall_mm"} <= cols
