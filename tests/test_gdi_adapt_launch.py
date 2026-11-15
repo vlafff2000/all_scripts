@@ -76,6 +76,29 @@ class TestCase(unittest.TestCase):
         after = {n: open(os.path.join(self.src, n), encoding='utf-8').read() for n in os.listdir(self.src)}
         self.assertEqual(before, after)                                                             # оригинал не тронут
 
+    def test_report_steps_of_original_are_added_to_work_schedule(self):
+        # tNavigator сам вставляет отчётные шаги между DATES; номера шагов рестарта считаются вместе с ними,
+        # поэтому рабочее расписание обязано содержать те же даты (иначе «рестарт с шага N невозможен»)
+        with open(os.path.join(self.src, 'sch_a.inc'), 'w', encoding='utf-8') as f:
+            f.write(SCH_A.replace(' 1 JAN 2014 /\n', ' 1 JAN 2014 /\n 8 JAN 2014 /\n'))
+        res_dir = os.path.join(self.src, 'RESULTS', 'BASE')
+        os.makedirs(res_dir)
+        days = ((1, 0), (4, 3), (8, 7), (10, 9), (12, 11), (14, 13), (20, 19))     # 4 и 12 янв. - лишние, 20 янв. после даты ГДИ
+        with open(os.path.join(res_dir, 'result.log'), 'w', encoding='utf-8') as f:
+            f.write(chr(10).join('########### ОТЧЁТ N %d ДЕНЬ %d ДАТА %d ЯНВ 2014 00:00:00 ###########' % (n + 1, dy, d)
+                                 for n, (d, dy) in enumerate(days)))
+        work = os.path.join(self.tmp.name, 'work')
+        res = cb.build_case(self.data, work, START, {'W1': [1.0]}, name='x')
+        inc = open(res['include'], encoding='utf-8').read()
+        self.assertIn('12 JAN 2014', inc)
+        self.assertNotIn('20 JAN 2014', inc)
+        a = open(os.path.join(work, 'sch_k0.inc'), encoding='utf-8').read()
+        self.assertIn('04 JAN 2014', a)
+        self.assertEqual(open(os.path.join(self.src, 'sch_a.inc'), encoding='utf-8').read().count('JAN'), 2)  # оригинал не тронут
+        data = open(res['data'], encoding='utf-8').read()
+        self.assertIn('sch_k0.inc', data)
+        self.assertNotIn(os.path.join(self.src, 'sch_a.inc').replace(chr(92), '/'), data)
+
     def test_hist_rate_from_earlier_include(self):
         with open(os.path.join(self.src, 'sch_b.inc'), 'w', encoding='utf-8') as f:
             f.write("DATES\n 10 JAN 2014 /\n 14 JAN 2014 /\n/\n")
