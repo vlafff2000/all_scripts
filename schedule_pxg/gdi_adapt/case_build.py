@@ -17,6 +17,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import regime_run as rr
 from .data_patch import _clean, _date, _read, scan_dates
+from .outputs import MONTHS
 
 _START_RE = re.compile(r'^\s*START\b', re.I)
 _SECTIONS = ('RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS', 'SOLUTION', 'SUMMARY', 'SCHEDULE')
@@ -75,6 +76,54 @@ def _split_sections(lines: List[str]) -> Tuple[int, int]:
     return sched, end
 
 
+_RU_MONTHS = {'ЯНВ': 1, 'ФЕВ': 2, 'МАР': 3, 'АПР': 4, 'МАЙ': 5, 'ИЮН': 6, 'ИЮЛ': 7, 'АВГ': 8, 'СЕН': 9, 'ОКТ': 10, 'НОЯ': 11, 'ДЕК': 12,
+              'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6, 'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+_REPORT_DATE = re.compile(r'(?:ОТЧ[ЕЁ]Т N|FINISH REPORT N)\s+\d+\s+(?:ДЕНЬ|FOR DAY)\s+[0-9.]+\s+(?:ДАТА|ON)\s+(\d{1,2})\s+([A-Za-zА-Яа-я]{3})\w*\s+(\d{4})')
+
+
+def report_dates(path: str) -> List[datetime]:
+    """Даты всех отчётных шагов расчёта модели (result.log): tNavigator сам вставляет шаги между DATES, и номера шагов рестарта
+    считаются вместе с ними."""
+    try:
+        with open(path, 'rb') as f:
+            raw = f.read()
+    except OSError:
+        return []
+    text = raw.decode('utf-8', 'replace')
+    out: List[datetime] = []
+    for m in _REPORT_DATE.finditer(text):
+        mon = _RU_MONTHS.get(m.group(2).upper())
+        if mon:
+            try:
+                out.append(datetime(int(m.group(3)), mon, int(m.group(1))))
+            except ValueError:
+                pass
+    return out
+
+
+def add_report_dates(files: Sequence[List[str]], extra: Sequence[datetime]) -> Tuple[List[List[str]], int]:
+    """Вставляет в расписание (список файлов по порядку, строки) записи DATES на даты отчётных шагов, которых там нет, перед первой
+    более поздней датой. Файлы без вставок возвращаются тем же объектом. Возвращает (файлы, число вставок)."""
+    files = [list(f) for f in files]
+    items = []
+    for fi, lines in enumerate(files):
+        for b in scan_dates(lines):
+            items += [(fi, i, d) for i, d in b['items']]
+    have = {d for _, _, d in items}
+    todo = sorted(d for d in set(extra) if d not in have)
+    ins: Dict[Tuple[int, int], List[datetime]] = {}
+    n = 0
+    for d in todo:
+        nxt = next(((fi, i) for fi, i, x in items if x > d), None)
+        if nxt is None or not any(x < d for _, _, x in items):
+            continue                                                  # до первой или после последней даты расписания - не трогаем
+        ins.setdefault(nxt, []).append(d)
+        n += 1
+    for (fi, i), ds in sorted(ins.items(), key=lambda kv: (kv[0][0], -kv[0][1])):
+        files[fi][i:i] = [f'{d.day:02d} {MONTHS[d.month - 1]} {d.year}\t/' for d in ds]
+    return files, n
+
+
 def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, Sequence[float]], mults: Optional[list] = None,
                wells: Optional[Sequence[str]] = None, name: str = 'T', step_days: int = 1, extra_lines: Sequence[str] = ()) -> dict:
     """Пишет в workdir копию модели под тестовый прогон. Возвращает {data, include, steps, model_start, hist_rates, notes}."""
@@ -106,6 +155,7 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
         raise CaseError('в секции SCHEDULE нет INCLUDE: расписание прямо в .data пока не поддерживается')
     prior: List[str] = []
     kept: List[Tuple[int, int, str]] = []
+    kept_files: List[Tuple[List[str], str]] = []
     cut = None
     for i, j, nm in recs:
         path = _abs(nm, src_dir)
@@ -117,10 +167,29 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
             cut = (i, j, nm, t, e)
             break
         kept.append((i, j, nm))
+        kept_files.append((lns, e))
         prior += lns
     if cut is None:
         raise CaseError(f'в расписании нет дат не раньше {start:%d.%m.%Y}: на дату ГДИ модель не считана')
     i, j, nm, t, e = cut
+    # отчётные шаги, которые tNavigator добавил при расчёте оригинала: в рабочем расписании они нужны, иначе номера шагов расходятся
+    # с картами рестарта оригинала («рестарт с шага N невозможен»)
+    kept_names = {k: _abs(n, src_dir) for k, (_, _, n) in enumerate(kept)}
+    base = os.path.splitext(os.path.basename(src_data))[0]
+    extra = [d for d in report_dates(os.path.join(src_dir, 'RESULTS', base, 'result.log')) if d < start]
+    if extra:
+        cut_lines = [ln.rstrip('\r') for ln in t.split('\n')]
+        patched, n_extra = add_report_dates([f for f, _ in kept_files] + [cut_lines], extra)
+        if n_extra:
+            os.makedirs(workdir, exist_ok=True)
+            for k, (lns, enc_k) in enumerate(kept_files):
+                if patched[k] != lns:
+                    name_k = f'sch_k{k}.inc'
+                    with open(os.path.join(workdir, name_k), 'w', encoding=enc_k if enc_k != 'utf-8-sig' else 'utf-8', newline='') as f:
+                        f.write(nl.join(patched[k]))
+                    kept_names[k] = name_k
+            t = nl.join(patched[-1])
+            notes.append(f'в расписание добавлено отчётных шагов оригинала: {n_extra} (номера шагов рестарта совпадут с картами модели)')
     inc_name = f'sch_{name}.inc'
     prior_text = nl.join(prior)
     sched_text, steps, rep = rr.build_test_schedule(t, start, regimes, mults, step_days, extra_lines, prior_text=prior_text)
@@ -128,8 +197,8 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
     with open(os.path.join(workdir, inc_name), 'w', encoding=e if e != 'utf-8-sig' else 'utf-8', newline='') as f:
         f.write(sched_text)
     new_body = body[:j + 1]
-    for ii, jj, nn in kept:
-        new_body[jj] = _rewrite_include(new_body[jj], _abs(nn, src_dir))
+    for k, (ii, jj, nn) in enumerate(kept):
+        new_body[jj] = _rewrite_include(new_body[jj], kept_names[k])
     new_body[j] = _rewrite_include(new_body[j], inc_name)
     data_name = os.path.basename(src_data)
     data_text = head_text + nl + nl.join(new_body + ['', 'END', ''])
