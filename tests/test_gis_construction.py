@@ -200,6 +200,11 @@ def test_w58_gis_priority_merged_cell_text_elements_and_shift_hint():
 
 def test_w32_perforated_pipe_is_not_perforation_interval_and_reaming_excludes_perforation():
     """Скв. 32: «Перфорированный труба» (элемент НКТ) нельзя принимать за интервал перфорации; расширка и перфорация вместе — подсказка в «Проверке»."""
+
+
+def test_w34_bottom_dohod_from_gis_cell_of_artificial_bottom_row():
+    """Скв. 34 и ещё 160 отчётов 2023–2024: строки «Текущий забой» нет, доход приборов — в графе ГИС строки «Искусственный забой»
+    («771,4 (доход приборов)»); раньше он терялся, и ИЗ 776,4 выглядел текущим забоем."""
     import datetime as dt
     from pxg_core import gis_report as gr
     tbl = _t([["Конструкция скважины и подземного оборудования"],
@@ -219,3 +224,14 @@ def test_w32_perforated_pipe_is_not_perforation_interval_and_reaming_excludes_pe
                ["Интервал перфорации", "750,0-760,0", ""], ["Расширка открытого ствола", "758,7-768,8", ""]])
     frames = gc.build([(rep, tbl2, "32_test.docx")])
     assert any("расширка" in m and "перфорации" in m for m in frames["Проверка"]["Сообщение"])
+
+
+              ["Пробуренный забой", "776,4", ""], ["Искусственный забой", "776,4", "771,4 (доход приборов)"],
+              ["Эксплуатационная колонна Ø 168 мм\nтолщина стенки/внутренний диаметр, мм", "760,1\n8,0/152,0", "759,0"],
+              ["Фильтр ФСК - 89 (3 секции)", "766,92 – 774,40", "767,9 – 770,9 (доход по МИД)"]])
+    rep = gr.Report(file="34_test.docx", well="34", date=dt.date(2024, 6, 20))
+    frames = gc.build([(rep, tbl, "34_test.docx")])
+    g = frames["gis"].set_index("Элемент")
+    assert g.loc["Забой", "Верх интервала, м"] == 771.4 and g.loc["Забой", "Источник глубины"] == "ГИС"
+    assert g.loc["Искусственный забой", "Верх интервала, м"] == 776.4          # ИЗ не меняется
+    assert frames["Замеры забоя"].iloc[0]["Текущий забой (ГИС), м"] == 771.4
