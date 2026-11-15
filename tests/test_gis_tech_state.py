@@ -90,3 +90,15 @@ def test_filling_table_with_two_lines_in_cells():
     assert gr.read_filling_table(rep, tbl)
     got = [(x["От, м"], x["До, м"], x["Заполнение"], x["Плотность от, г/см³"], x["Уровень жидкости, м"]) for x in rep.filling]
     assert got == [(0.0, 780.2, "газ", 0.07, 751.2), (780.2, None, "осадок", 1.4, None)]
+
+
+def test_tech_state_goes_to_annotations_for_atlas():
+    rows = ts.read(_rep(), [wt.Para(t) for t in W58])
+    ann = {(a["Вид"], a["От, м"], a["До, м"]) for a in ts.as_annotations(rows)}
+    assert ("Скопление газа: за колонной", 5.1, 7.7) in ann
+    assert ("Заколонный переток — не выявлено", None, None) in ann and ("Дефекты НКТ и ЭК — не выявлено", None, None) in ann
+    assert ("Толщина стенки ЭК (МИД): 7–8,6 мм", 0.0, 768.4) in ann
+    rep = _rep()
+    rep.tech = rows
+    frame = gr.annotations_frame([rep])
+    assert "Скопление газа: за колонной" in set(frame["Вид"]) and len(frame) == len(ann)
