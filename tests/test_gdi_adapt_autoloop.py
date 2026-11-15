@@ -208,6 +208,17 @@ class TestBatch(unittest.TestCase):
         self.assertEqual(st['status'], 'failed')
         self.assertIn('шаг рестарта', st['stop_reason'])
 
+    def test_restart_step_from_result_log_of_base_model(self):
+        # tNavigator 21.3: RESULTS/BASE.job.log - журнал запуска без шагов отчёта, шаги лежат в RESULTS/BASE/result.log
+        res = os.path.join(self.src, 'RESULTS')
+        os.makedirs(os.path.join(res, 'BASE'))
+        with open(os.path.join(res, 'BASE.job.log'), 'w', encoding='utf-8') as f:
+            f.write('потоки: 8' + chr(10) + 'количество шагов отчёта : 3' + chr(10))
+        with open(os.path.join(res, 'BASE', 'result.log'), 'w', encoding='utf-8') as f:
+            f.write(chr(10).join('########### ОТЧЁТ N %d ДЕНЬ %d ДАТА x ###########' % (n, d) for n, d in ((0, 0), (1, 5), (2, 13), (3, 30))))
+        b = al.AutoBatch(self.data, self.work, FakeRunner(), self.gdis(), self.cfg, pvt())
+        self.assertEqual(b.restart_for(datetime(2014, 1, 14)), 2)         # START модели + 13 дн. = 14.01.2014, последний шаг не позже даты
+
     def test_formula_accepts_without_model_run(self):
         calls = []
 
