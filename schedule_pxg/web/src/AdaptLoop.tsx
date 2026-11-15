@@ -108,6 +108,7 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
         <div className="row">
           <label className="grow">Снимки модели (папка запуска или snapshots.pkl из калькулятора), необязательно: тогда базовый прогон на дату не нужен
             <input value={o.snapshots || ''} onChange={e => upd('snapshots', e.target.value)} placeholder={d?.snapshots || 'не заданы: базовый прогон делается сам'} /></label>
+          <label title="Ускорение расчёта на видеокарте NVIDIA (ключ --use-gpu). Если видеокарты или ключа нет, расчёт идёт на CPU и в журнале написана причина"><input type="checkbox" checked={o.gpu !== false} onChange={e => upd('gpu', e.target.checked)} /> Считать на GPU</label>
           <label title="Нужны снимки модели: скважины, у которых формула уже обещает ошибку в пределах порога, принимаются без прогона"><input type="checkbox" checked={!!o.accept_formula} onChange={e => upd('accept_formula', e.target.checked)} /> Принять по формуле без прогона</label>
         </div>
         <p className="muted small">Шаг рестарта берётся из журнала расчёта модели (RESULTS/*.job.log); вручную нужен только если журнала нет. Прогоны идут строго по одному, от поздних дат к ранним (рестарт с ранней даты перезаписывает шаги, нужные для поздних). Порог по скважине задаётся в настройках критерия депрессии и приоритетнее общего.</p>

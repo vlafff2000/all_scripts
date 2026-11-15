@@ -54,13 +54,14 @@ class Runner:
 
 
 class TnavRunner(Runner):
-    def __init__(self, exe: str, workdir: str, extra: Sequence[str] = (), timeout: float = 4 * 3600.0, on_job: Optional[Callable] = None):
-        self.exe, self.workdir, self.extra, self.timeout, self.on_job = exe, workdir, tuple(extra), timeout, on_job
+    def __init__(self, exe: str, workdir: str, extra: Sequence[str] = (), timeout: float = 4 * 3600.0, on_job: Optional[Callable] = None,
+                 gpu: bool = False):
+        self.exe, self.workdir, self.extra, self.timeout, self.on_job, self.gpu = exe, workdir, tuple(extra), timeout, on_job, gpu
 
     def run(self, case, restart, label, cancel):
         from . import tnav_run as tr
         base = os.path.splitext(os.path.basename(case['data']))[0]
-        job = tr.Job(tr.command(self.exe, case['data'], restart, self.extra, tr.probe(self.exe)['flags']), self.workdir, label, self.timeout, expect=base + '.RSM')
+        job = tr.Job(tr.command(self.exe, case['data'], restart, self.extra, tr.probe(self.exe)['flags'], gpu=self.gpu), self.workdir, label, self.timeout, expect=base + '.RSM')
         if self.on_job:
             self.on_job(job)
         job.start()

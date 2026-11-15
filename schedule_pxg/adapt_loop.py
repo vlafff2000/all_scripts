@@ -25,7 +25,7 @@ from .gdi_adapt.selection import chosen_for_kit
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOOPS: Dict[str, dict] = {}
 _ids = itertools.count(1)
-KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula')
+KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula', 'gpu')
 
 
 def _find_data(path: str) -> str:
@@ -157,7 +157,8 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
     journal = MultJournal(os.path.join(work, 'mult_journal.json'))
     lid = 'loop%d' % next(_ids)
     entry = {'jobs': []}
-    runner = autoloop.TnavRunner(exe, work, on_job=lambda j: entry['jobs'].append(j))
+    gpu = tnav_run.gpu_plan(exe, opts.get('gpu') is not False)          # по умолчанию GPU включён, при отсутствии - откат на CPU с причиной
+    runner = autoloop.TnavRunner(exe, work, on_job=lambda j: entry['jobs'].append(j), gpu=gpu['use'])
     snaps = None
     if opts.get('snapshots'):
         snaps = load_snapshots(gdi_runs.find_snapshots(str(opts['snapshots']).strip().strip('"')))
@@ -168,6 +169,7 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         loop = autoloop.AutoLoop(model, work, runner, group, cfg, pvt, st, restart, journal, snapshots=snaps)
         loop.state['skipped_dates'] = skipped
     entry['loop'] = loop
+    loop.state['gpu_note'] = gpu['note']
 
     def go():
         try:

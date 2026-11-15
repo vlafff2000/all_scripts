@@ -201,3 +201,19 @@ class TestExeCheck(unittest.TestCase):
                 tr.os.name = real_name
             self.assertIn('не найден', tr.exe_problem(os.path.join(d, 'none.exe')))
 
+
+class TestGpuFlag(unittest.TestCase):
+    def test_use_gpu_added_only_when_requested_and_supported(self):
+        self.assertNotIn('--use-gpu', tr.command('t.exe', 'B.DATA', 5))                          # по умолчанию команда прежняя
+        self.assertIn('--use-gpu', tr.command('t.exe', 'B.DATA', 5, gpu=True))
+        flags = {'--no-gui', '--auto-run', '--auto-exit', '--ecl-rsm', '--restart'}
+        self.assertNotIn('--use-gpu', tr.command('t.exe', 'B.DATA', 5, flags=flags, gpu=True))      # версия не знает ключ - на CPU
+        self.assertIn('--use-gpu', tr.command('t.exe', 'B.DATA', 5, flags=flags | {'--use-gpu'}, gpu=True))
+
+    def test_gpu_plan_falls_back_to_cpu_with_reason(self):
+        self.assertFalse(tr.gpu_plan('t.exe', want=False)['use'])
+        tr._PROBE[os.path.abspath('t_nogpu.exe')] = {'version': '', 'flags': {'--no-gui'}}
+        plan = tr.gpu_plan('t_nogpu.exe')
+        self.assertFalse(plan['use'])
+        self.assertIn('--use-gpu', plan['note'])
+

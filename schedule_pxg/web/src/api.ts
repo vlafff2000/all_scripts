@@ -415,7 +415,7 @@ export const histModelXlsx = (b: HmBody) => download('/api/results/histmodel/xls
 /** Автоцикл подбора мультов по тестовому прогону модели (шаг 7 вкладки «Адаптация по ГДИ»). */
 export interface LoopOpts {
   exe: string; model: string; workdir: string; restart: string; date: string; threshold_pct: number; max_iter: number; metric: 'regimes' | 'dp2'; wells: string[]
-  batch: boolean; snapshots: string; accept_formula: boolean
+  batch: boolean; snapshots: string; accept_formula: boolean; gpu: boolean
 }
 export interface LoopWell {
   err: number | null; err_dep: number | null; err_dp2: number | null; p_res_gap: number | null; e: number | null
