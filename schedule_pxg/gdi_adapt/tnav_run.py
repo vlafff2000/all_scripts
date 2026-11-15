@@ -22,17 +22,37 @@ JOBS: Dict[str, 'Job'] = {}
 _STEP = re.compile(r'(?:Reading data for step|At step)\s+(\d+)')
 
 
+def _ver_key(path: str):
+    """Версия для сортировки: из имени папки (…/22.3/…), иначе из имени файла (tNavigator222.exe -> 22.2, tNavigator191.exe -> 19.1)."""
+    for part in reversed(os.path.dirname(path).replace('\', '/').split('/')):
+        m = re.search(r'(?<!\d)(\d{2})\.(\d)(?!\d)', part)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    m = re.search(r'(?<!\d)(\d{2})\.?(\d)(?!\d)', os.path.basename(path))
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
 def find_exe(hint: str = '') -> List[str]:
-    """Кандидаты исполняемого файла tNavigator (для подсказки в интерфейсе): указанный, переменная TNAV_EXE, типичные каталоги."""
+    """Кандидаты исполняемого файла tNavigator (для подсказки в интерфейсе, новые версии первыми): указанный, переменная TNAV_EXE,
+    типичные каталоги и два уровня папок на каждом диске. Решает инженер: ГДМ ничего не запускает без его кнопки."""
     out: List[str] = []
     for c in [hint, os.environ.get('TNAV_EXE', '')]:
-        if c and os.path.isfile(c):
+        if c and os.path.isfile(c) and os.path.abspath(c) not in out:
             out.append(os.path.abspath(c))
-    pats = (['C:/Program Files/*/tNavigator*/tNavigator*.exe', 'C:/RFD/*/tNavigator*.exe', 'D:/*/tNavigator*.exe', 'E:/*/tNavigator*.exe']
-            if os.name == 'nt' else ['/opt/*/tNavigator*', '/opt/tNavigator*/tNavigator-con', os.path.expanduser('~/tNavigator*/tNavigator*')])
+    found: List[str] = []
+    if os.name == 'nt':
+        roots = ['%s:/' % c for c in 'CDEFGHIJKLMNOPQRSTUVWXYZ' if os.path.isdir('%s:/' % c)]
+        pats = []
+        for r in roots:
+            pats += [r + '*/tNavigator*.exe', r + '*/*/tNavigator*.exe', r + '*/*/*/tNavigator*.exe', r + 'Program Files/*/tNavigator*/tNavigator*.exe']
+    else:
+        pats = ['/opt/*/tNavigator*', '/opt/tNavigator*/tNavigator-con', os.path.expanduser('~/tNavigator*/tNavigator*'), os.path.expanduser('~/*/tNavigator*/tNavigator*')]
     for p in pats:
-        out += [x for x in sorted(glob.glob(p), reverse=True) if os.path.isfile(x) and x not in out]
-    return out
+        for x in glob.glob(p):
+            x = os.path.abspath(x)
+            if os.path.isfile(x) and os.path.basename(x).lower().startswith('tnavigator') and x not in out and x not in found and '$recycle' not in x.lower():
+                found.append(x)
+    return out + sorted(found, key=lambda x: (_ver_key(x), x), reverse=True)
 
 
 REQUIRED_FLAGS = ('--no-gui', '--auto-run', '--auto-exit', '--ecl-rsm')       # без них пакетный расчёт с RSM невозможен
