@@ -52,6 +52,23 @@ def exe_problem(exe: str) -> str:
     return ''
 
 
+def gpu_plan(exe: str, want: bool = True) -> dict:
+    """Использовать ли GPU в этом запуске: {'use': bool, 'note': пояснение для журнала и экрана}. GPU включается, если его просят,
+    эта версия tNavigator знает --use-gpu и в системе виден драйвер NVIDIA (nvidia-smi); иначе откат на CPU с причиной."""
+    if not want:
+        return {'use': False, 'note': 'GPU выключен в настройках: расчёт на CPU'}
+    if '--use-gpu' not in probe(exe)['flags']:
+        return {'use': False, 'note': 'эта версия tNavigator не знает ключ --use-gpu: расчёт на CPU'}
+    try:
+        r = subprocess.run(['nvidia-smi', '-L'], capture_output=True, timeout=30)
+        names = [ln for ln in (r.stdout or b'').decode('utf-8', 'replace').splitlines() if ln.strip().startswith('GPU')]
+    except (OSError, subprocess.SubprocessError):
+        names = []
+    if not names:
+        return {'use': False, 'note': 'видеокарта NVIDIA или её драйвер не найдены (nvidia-smi): расчёт на CPU'}
+    return {'use': True, 'note': 'расчёт на GPU (--use-gpu), видеокарт: %d; если лицензия или модель GPU не поддерживает, tNavigator сам считает на CPU' % len(names)}
+
+
 REQUIRED_FLAGS = ('--no-gui', '--auto-run', '--auto-exit', '--ecl-rsm')       # без них пакетный расчёт с RSM невозможен
 OPTIONAL_FLAGS = ('--ignore-lock', '--ecl-root')                              # ставятся, только если версия их знает
 _PROBE: Dict[str, dict] = {}
@@ -77,7 +94,7 @@ def probe(exe: str, timeout: float = 90.0) -> dict:
     return _PROBE[key]
 
 
-def command(exe: str, data: str, restart: Optional[int] = None, extra: Sequence[str] = (), flags: Optional[set] = None) -> List[str]:
+def command(exe: str, data: str, restart: Optional[int] = None, extra: Sequence[str] = (), flags: Optional[set] = None, gpu: bool = False) -> List[str]:
     """Командная строка пакетного расчёта. flags (из probe) - что поддерживает именно эта версия: необязательные флаги, которых
     в ней нет, не ставятся, а при нехватке обязательных - понятная ошибка вместо запуска окна, которое зависнет."""
     if flags:
@@ -91,6 +108,8 @@ def command(exe: str, data: str, restart: Optional[int] = None, extra: Sequence[
     if restart is not None:
         cmd.append('--restart=%d' % int(restart))
     cmd.append('--ecl-rsm')
+    if gpu and (not flags or '--use-gpu' in flags):
+        cmd.append('--use-gpu')                            # ускорение на видеокарте; без неё tNavigator считает на CPU
     if use('--ecl-root'):
         cmd.append('--ecl-root')                           # RSM рядом с .data, а не в RESULTS/<имя>/
     return cmd + list(extra)

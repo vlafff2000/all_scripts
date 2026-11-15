@@ -201,3 +201,46 @@ class TestExeCheck(unittest.TestCase):
                 tr.os.name = real_name
             self.assertIn('не найден', tr.exe_problem(os.path.join(d, 'none.exe')))
 
+
+class TestGpuFlag(unittest.TestCase):
+    def test_use_gpu_added_only_when_requested_and_supported(self):
+        self.assertNotIn('--use-gpu', tr.command('t.exe', 'B.DATA', 5))                          # по умолчанию команда прежняя
+        self.assertIn('--use-gpu', tr.command('t.exe', 'B.DATA', 5, gpu=True))
+        flags = {'--no-gui', '--auto-run', '--auto-exit', '--ecl-rsm', '--restart'}
+        self.assertNotIn('--use-gpu', tr.command('t.exe', 'B.DATA', 5, flags=flags, gpu=True))      # версия не знает ключ - на CPU
+        self.assertIn('--use-gpu', tr.command('t.exe', 'B.DATA', 5, flags=flags | {'--use-gpu'}, gpu=True))
+
+    def test_gpu_plan_falls_back_to_cpu_with_reason(self):
+        self.assertFalse(tr.gpu_plan('t.exe', want=False)['use'])
+        tr._PROBE[os.path.abspath('t_nogpu.exe')] = {'version': '', 'flags': {'--no-gui'}}
+        plan = tr.gpu_plan('t_nogpu.exe')
+        self.assertFalse(plan['use'])
+        self.assertIn('--use-gpu', plan['note'])
+
+    def test_runner_retries_on_cpu_after_gpu_failure(self):
+        import threading
+        from schedule_pxg.gdi_adapt import autoloop as al
+        cmds = []
+
+        class FakeJob:
+            def __init__(s, cmd, cwd, label, timeout, expect=''):
+                s.cmd, s.status, s.error = cmd, 'running', ''
+                cmds.append(cmd)
+
+            def start(s):
+                gpu = '--use-gpu' in s.cmd
+                s.status, s.error = ('failed', 'код 256') if gpu else ('done', '')
+
+            def wait(s, t=None):
+                return s.status
+        real_job, real_probe = tr.Job, tr.probe
+        tr.Job, tr.probe = FakeJob, lambda exe: {'version': '', 'flags': set()}
+        try:
+            r = al.TnavRunner('t.exe', 'w', gpu=True)
+            r.run({'data': 'B.DATA'}, 5, 'x', threading.Event())
+            r.run({'data': 'B.DATA'}, 6, 'y', threading.Event())
+        finally:
+            tr.Job, tr.probe = real_job, real_probe
+        self.assertEqual(['--use-gpu' in c for c in cmds], [True, False, False])         # сбой на GPU -> повтор на CPU, дальше без GPU
+        self.assertIn('CPU', r.gpu_fallback)
+
