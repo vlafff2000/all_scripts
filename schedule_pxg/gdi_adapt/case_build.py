@@ -203,6 +203,52 @@ def restart_step_from_times(times: Sequence[float], t: float) -> int:
     return before[-1]
 
 
+_META_DATE = re.compile(r'(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})[./](\d{1,2})[./](\d{4})')
+
+
+def restart_steps_from_meta(path: str) -> List[Tuple[int, datetime]]:
+    """Шаги, на которых tNavigator сохранил карты рестарта: секция [timesteps] файла RESULTS/<имя>/outsol_ts_maps.meta,
+    записи «дата = номер шага» (в 21.3-22.3 карты пишутся не на каждом отчётном шаге, рестарт возможен только с них)."""
+    with open(path, 'rb') as f:
+        raw = f.read()
+    text = ''
+    for enc in ('utf-8', 'cp1251'):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    out: List[Tuple[int, datetime]] = []
+    inside = False
+    for ln in text.splitlines():
+        t = ln.strip()
+        if t.startswith('['):
+            inside = t.lower().startswith('[timesteps')
+            continue
+        if not inside or '=' not in t:
+            continue
+        left, right = (x.strip() for x in t.split('=', 1))
+        for date_s, step_s in ((left, right), (right, left)):
+            m = _META_DATE.search(date_s)
+            if m and step_s.split()[:1] and step_s.split()[0].isdigit():
+                g = m.groups()
+                try:
+                    d = datetime(int(g[0]), int(g[1]), int(g[2])) if g[0] else datetime(int(g[5]), int(g[4]), int(g[3]))
+                except ValueError:
+                    break
+                out.append((int(step_s.split()[0]), d))
+                break
+    return out
+
+
+def restart_step_from_meta(steps: Sequence[Tuple[int, datetime]], when: datetime) -> int:
+    """Наибольший сохранённый шаг рестарта, дата которого не позже начала даты ГДИ."""
+    before = [n for n, d in steps if d <= when]
+    if not before:
+        raise CaseError('среди сохранённых карт рестарта нет шага не позже даты ГДИ')
+    return max(before)
+
+
 _LOG_STEP = re.compile(r'(?:ОТЧ[ЕЁ]Т N|FINISH REPORT N)\s+(\d+)\s+(?:ДЕНЬ|FOR DAY)\s+([0-9.]+)')
 
 
