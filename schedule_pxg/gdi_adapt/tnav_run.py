@@ -24,7 +24,7 @@ _STEP = re.compile(r'(?:Reading data for step|At step)\s+(\d+)')
 
 def _ver_key(path: str):
     """Версия для сортировки: из имени папки (…/22.3/…), иначе из имени файла (tNavigator222.exe -> 22.2, tNavigator191.exe -> 19.1)."""
-    for part in reversed(os.path.dirname(path).replace('\', '/').split('/')):
+    for part in reversed(os.path.dirname(path).replace(chr(92), '/').split('/')):
         m = re.search(r'(?<!\d)(\d{2})\.(\d)(?!\d)', part)
         if m:
             return int(m.group(1)), int(m.group(2))
