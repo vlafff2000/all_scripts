@@ -219,6 +219,17 @@ class TestBatch(unittest.TestCase):
         b = al.AutoBatch(self.data, self.work, FakeRunner(), self.gdis(), self.cfg, pvt())
         self.assertEqual(b.restart_for(datetime(2014, 1, 14)), 2)         # START модели + 13 дн. = 14.01.2014, последний шаг не позже даты
 
+    def test_restart_step_from_saved_maps_meta(self):
+        # карты рестарта сохранены не на каждом шаге: берём наибольший сохранённый шаг не позже даты ГДИ, а не отчётный из result.log
+        res = os.path.join(self.src, 'RESULTS', 'BASE')
+        os.makedirs(res)
+        with open(os.path.join(res, 'outsol_ts_maps.meta'), 'w', encoding='ascii', newline='') as f:
+            f.write('[properties]\r\n  a = 1\r\n\r\n[timesteps]\r\n  28.03.1978 = 0\r\n  01.01.2026 = 3480\r\n  01.02.2026 = 3508\r\n  01.03.2026 = 3536\r\n\r\n[units]\r\n  x = 1\r\n')
+        with open(os.path.join(res, 'result.log'), 'w', encoding='utf-8') as f:
+            f.write('########### ОТЧЁТ N 3526 ДЕНЬ 17000 ДАТА x ###########')
+        b = al.AutoBatch(self.data, self.work, FakeRunner(), self.gdis(), self.cfg, pvt())
+        self.assertEqual(b.restart_for(datetime(2026, 2, 19)), 3508)
+
     def test_formula_accepts_without_model_run(self):
         calls = []
 

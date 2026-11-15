@@ -357,6 +357,16 @@ class AutoBatch:
             t0 = float((date - cb.model_start(cb._read(self.model_data)[0])).days)
         except (OSError, cb.CaseError):
             return self.restart
+        # tNavigator стартует рестарт только с шагов, где сохранены карты (RESULTS/<имя>/outsol_ts_maps.meta, секция [timesteps]):
+        # любой другой номер он молча откатывает на старый шаг и считает часы. Поэтому сначала берётся сохранённый шаг
+        meta = os.path.join(src_dir, 'RESULTS', base, 'outsol_ts_maps.meta')
+        if os.path.exists(meta):
+            try:
+                steps = cb.restart_steps_from_meta(meta)
+                if steps:
+                    return cb.restart_step_from_meta(steps, date)
+            except (OSError, cb.CaseError):
+                pass
         # строки «ОТЧЁТ N … ДЕНЬ …» лежат в RESULTS/<имя>/result.log (в tNavigator 21.3 job.log - журнал запуска без шагов отчёта);
         # job.log оставлен запасным вариантом для версий, где шаги пишутся в него
         for log in (os.path.join(src_dir, 'RESULTS', base, 'result.log'), os.path.join(src_dir, 'RESULTS', base + '.job.log')):
