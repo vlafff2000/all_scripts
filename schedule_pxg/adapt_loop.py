@@ -169,6 +169,7 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         loop = autoloop.AutoLoop(model, work, runner, group, cfg, pvt, st, restart, journal, snapshots=snaps)
         loop.state['skipped_dates'] = skipped
     entry['loop'] = loop
+    entry['runner'] = runner
     loop.state['gpu_note'] = gpu['note']
 
     def go():
@@ -210,6 +211,8 @@ def status(lid: str, date: str = '') -> dict:
         s['job'] = None
         return s
     s = dict(e['loop'].state)
+    if getattr(e.get('runner'), 'gpu_fallback', ''):
+        s['gpu_note'] = e['runner'].gpu_fallback
     s['job'] = e['jobs'][-1].view() if e['jobs'] else None
     s['id'] = lid
     return s

@@ -217,3 +217,30 @@ class TestGpuFlag(unittest.TestCase):
         self.assertFalse(plan['use'])
         self.assertIn('--use-gpu', plan['note'])
 
+    def test_runner_retries_on_cpu_after_gpu_failure(self):
+        import threading
+        from schedule_pxg.gdi_adapt import autoloop as al
+        cmds = []
+
+        class FakeJob:
+            def __init__(s, cmd, cwd, label, timeout, expect=''):
+                s.cmd, s.status, s.error = cmd, 'running', ''
+                cmds.append(cmd)
+
+            def start(s):
+                gpu = '--use-gpu' in s.cmd
+                s.status, s.error = ('failed', 'код 256') if gpu else ('done', '')
+
+            def wait(s, t=None):
+                return s.status
+        real_job, real_probe = tr.Job, tr.probe
+        tr.Job, tr.probe = FakeJob, lambda exe: {'version': '', 'flags': set()}
+        try:
+            r = al.TnavRunner('t.exe', 'w', gpu=True)
+            r.run({'data': 'B.DATA'}, 5, 'x', threading.Event())
+            r.run({'data': 'B.DATA'}, 6, 'y', threading.Event())
+        finally:
+            tr.Job, tr.probe = real_job, real_probe
+        self.assertEqual(['--use-gpu' in c for c in cmds], [True, False, False])         # сбой на GPU -> повтор на CPU, дальше без GPU
+        self.assertIn('CPU', r.gpu_fallback)
+
