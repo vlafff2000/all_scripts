@@ -244,3 +244,30 @@ class TestGpuFlag(unittest.TestCase):
         self.assertEqual(['--use-gpu' in c for c in cmds], [True, False, False])         # сбой на GPU -> повтор на CPU, дальше без GPU
         self.assertIn('CPU', r.gpu_fallback)
 
+
+class TestRestartCopy(unittest.TestCase):
+    def test_truncated_results_copy_is_resynced(self):
+        # копия RESULTS была сделана, пока исходная модель ещё считалась: файл короче исходного, одного файла нет вовсе
+        with tempfile.TemporaryDirectory() as d:
+            src, work = os.path.join(d, 'model'), os.path.join(d, 'work')
+            os.makedirs(os.path.join(src, 'RESULTS', 'BASE'))
+            os.makedirs(os.path.join(work, 'RESULTS', 'BASE'))
+            with open(os.path.join(src, 'RESULTS', 'BASE', 'maps.res'), 'wb') as f:
+                f.write(bytes(1000))
+            with open(os.path.join(src, 'RESULTS', 'BASE', 'limits'), 'wb') as f:
+                f.write(bytes(10))
+            with open(os.path.join(work, 'RESULTS', 'BASE', 'maps.res'), 'wb') as f:
+                f.write(bytes(300))
+            cb.ensure_results(src, work)
+            self.assertEqual(os.path.getsize(os.path.join(work, 'RESULTS', 'BASE', 'maps.res')), 1000)
+            self.assertEqual(os.path.getsize(os.path.join(work, 'RESULTS', 'BASE', 'limits')), 10)
+
+    def test_job_stops_when_restart_step_is_not_available(self):
+        # tNavigator сам откатывает недоступный шаг рестарта (часы лишнего счёта): прогон останавливается с понятной причиной
+        code = "import time;print('Рестарт с шага 3526 невозможен. Будет проделан рестарт с шага 104.', flush=True);time.sleep(60)"
+        with tempfile.TemporaryDirectory() as d:
+            job = tr.Job([sys.executable, '-X', 'utf8', '-c', code, '--restart=3526'], d, restart_check_s=0.5).start()
+            self.assertEqual(job.wait(30), 'failed')
+            self.assertIn('3526', job.error)
+            self.assertIn('104', job.error)
+
