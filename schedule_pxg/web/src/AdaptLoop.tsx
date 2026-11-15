@@ -33,7 +33,7 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
         const d = selDate || (s.dates.find(x => x.status === 'running') || s.dates[s.dates.length - 1])?.date
         if (d) { try { setSt(await getLoopStatus(id, d)) } catch { setSt(null) } }
       } else { setBs(null); setSt(s) }
-      if (s.status !== 'running') window.clearInterval(timer.current)
+      if (s.status !== 'running' && s.status !== 'idle') window.clearInterval(timer.current)     // idle: очередь только создана и готовится (проверка tNavigator, копия RESULTS), опрос нужен
     }).catch(e => setMsg((e as Error).message))
     tick()
     timer.current = window.setInterval(tick, 2500)
