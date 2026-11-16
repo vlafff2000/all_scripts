@@ -11,7 +11,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from .gdi_adapt import kit, runs, selection
+from . import atlas_data
+from .gdi_adapt import date_fix, kit, runs, selection
 from .gdi_adapt.config import Config
 from .project import Project
 
@@ -37,6 +38,10 @@ def _merge_settings(raw: Optional[dict]) -> selection.Settings:
     clean = {k: v for k, v in (raw or {}).items() if k in _SETTINGS and v not in (None, "")}
     if "max_age_years" in clean:
         clean["max_age_years"] = float(clean["max_age_years"])
+    if "date_fix" in clean:
+        clean["date_fix"] = bool(clean["date_fix"])
+    if "date_keep" in clean:
+        clean["date_keep"] = [str(x) for x in (clean["date_keep"] or [])]
     st = selection.Settings(**clean)
     st.validate()
     return st
@@ -75,6 +80,21 @@ def model_wells_for(p: Project, scenario: str) -> Tuple[Optional[List[str]], str
     return None, ""
 
 
+_wbp_cache: Dict[tuple, dict] = {}
+
+
+def model_pressure(path: str, wells: List[str]) -> Dict[str, list]:
+    """Давление в ячейке скважины (WBP, бар) по времени из результатов исходной модели; {скважина: [(дата, бар)]}."""
+    from . import results
+    f = results.find_files(path)
+    key = (os.path.abspath(path), os.path.getmtime(f["UNSMRY"]) if f.get("UNSMRY") else 0)
+    if key not in _wbp_cache:
+        if len(_wbp_cache) > 1:
+            _wbp_cache.pop(next(iter(_wbp_cache)))
+        _wbp_cache[key] = results.series(results.load_summary(path), "WBP")
+    return {w: _wbp_cache[key][w] for w in wells if w in _wbp_cache[key]}
+
+
 def _study_overrides(raw) -> Dict[str, bool]:
     """Ручные решения по исследованиям; пустое значение (null) - вернуть решение программе."""
     return {str(k): bool(v) for k, v in (raw or {}).items() if v is not None}
@@ -91,10 +111,25 @@ def run_selection(p: Project, body: dict) -> Tuple[selection.Selection, dict, Co
     cfg = _config(body.get("config"))
     studies, notes = _studies(path, str(body.get("sheet") or ""), cols, st)
     model, src = model_wells_for(p, str(body.get("scenario") or ""))
+    fixes: list = []
+    res_path = (p.results or {}).get(str(body.get("scenario") or ""), "")
+    if st.date_fix and res_path:
+        try:
+            saved = p.histmodel or {}
+            try:
+                obj = atlas_data.object_pressure(str(saved.get("atlas_storage") or ""), str(saved.get("atlas_project") or ""))
+            except (OSError, ValueError, KeyError, ImportError) as e:
+                obj = []
+                notes = notes + ["Давление объекта из Атласа не прочитано (%s): даты сверяются только с моделью" % e]
+            studies, fixes = date_fix.apply(studies, model_pressure(res_path, sorted({g.wname for g in studies})), obj or None,
+                                            window_days=int(st.date_fix_window), tol_bar=float(st.date_fix_tol), keep=st.date_keep)
+        except (ValueError, OSError) as e:
+            notes = notes + ["Подбор даты ГДИ по давлению пропущен: %s" % e]
     overrides = {str(k): bool(v) for k, v in (body.get("overrides") or {}).items()}
     study_overrides = _study_overrides(body.get("study_overrides"))
     sel = selection.select(studies, cfg, st, model=model, resolve=p.resolve if p.wells else None, overrides=overrides,
                            study_overrides=study_overrides)
+    sel.date_fixes = fixes
     sel.notes = notes + ([("Скважины модели взяты из: %s" % src)] if src else ["Скважины модели неизвестны: привяжите результаты расчёта к сценарию — тогда отбор сверится с моделью."])
     return sel, cols, cfg, st
 
@@ -106,7 +141,11 @@ def selection_view(sel: selection.Selection) -> dict:
                   all_bad=sum(1 for r in sel.rows if r.note.startswith("все ГДИ забракованы")),
                   old=sum(1 for r in sel.rows if "старше" in r.note), model_only=len(sel.model_only), manual=sel.manual)
     studies = [x.to_dict() for x in sel.studies]
-    return {"rows": rows, "counts": counts, "model_only": sel.model_only, "notes": sel.notes, "studies": studies}
+    fx = [dict(well=f.wname, date=f.date.strftime("%Y-%m-%d"), status=f.status, new_date=f.new_date.strftime("%Y-%m-%d") if f.new_date else "",
+               shift_days=f.shift_days, p_gdi=round(f.p_gdi, 2), p_model=None if f.p_model != f.p_model else round(f.p_model, 2), reason=f.reason)
+          for f in sel.date_fixes if f.status in ("fixed", "ambiguous", "none")]
+    counts["date_fixed"] = sum(1 for f in sel.date_fixes if f.status == "fixed")
+    return {"rows": rows, "counts": counts, "model_only": sel.model_only, "notes": sel.notes, "studies": studies, "date_fixes": fx}
 
 
 def save_state(p: Project, folder: str, body: dict, cols: dict) -> None:

@@ -67,6 +67,10 @@ class Settings:
     max_age_years: Optional[float] = None  # ГДИ старше исключаются; None - не ограничивать
     from_date: Optional[str] = None        # ГДИ раньше даты (ГГГГ-ММ-ДД) игнорируются
     ab_q_units: str = "10^3 m3/day"
+    date_fix: bool = True                  # подбор даты ГДИ по давлению (костыль на ошибки ручного ввода даты; можно отключить)
+    date_fix_window: int = 120             # окно поиска даты, ±суток
+    date_fix_tol: float = 3.0              # допуск расхождения Pпл ГДИ и давления модели, бар
+    date_keep: List[str] = field(default_factory=list)   # «скважина@ГГГГ-ММ-ДД» исходных дат, которые инженер велел не трогать
 
     def validate(self) -> None:
         if self.p_units not in P_UNITS:
@@ -75,6 +79,10 @@ class Settings:
             raise ValueError("Единицы дебита: %s" % ", ".join(Q_UNITS))
         if self.min_status not in ("good", "fair"):
             raise ValueError("Минимальный статус: good или fair")
+        if not (1 <= int(self.date_fix_window) <= 730):
+            raise ValueError("Окно подбора даты ГДИ: от 1 до 730 суток")
+        if not (0 < float(self.date_fix_tol) <= 50):
+            raise ValueError("Допуск подбора даты ГДИ: от 0 до 50 бар")
 
 
 def read_db(path: str, sheet=None) -> pd.DataFrame:
@@ -219,6 +227,7 @@ class Selection:
     model_only: List[str] = field(default_factory=list)       # скважины модели без ГДИ
     studies: List[StudyRow] = field(default_factory=list)     # все исследования БД с решениями
     manual: int = 0                                           # ручных решений всего: по исследованиям и по скважинам
+    date_fixes: list = field(default_factory=list)            # проверка дат ГДИ по давлению (gdi_adapt/date_fix.DateFix)
 
 
 def study_key(well: str, date: dt.datetime) -> str:
