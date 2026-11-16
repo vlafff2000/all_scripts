@@ -436,6 +436,15 @@ class TestInverseAndQC(unittest.TestCase):
         dp = fl.dp_for_rate(q)
         np.testing.assert_allclose(fl.rate(dp), q, rtol=1e-6)
 
+    def test_dp_for_rate_when_rate_exceeds_target_at_zero_depression(self):
+        # мульт так велик, что модель даёт заданный дебит уже при ничтожной депрессии: раньше brentq падал с «f(a) and f(b) must have different signs»
+        from schedule_pxg.gdi_adapt.physics import Inflow
+        pvt = PVT.from_csv(PVT_FILE)
+        fl = Inflow(synthetic_snapshot(), pvt, 'p-p')
+        dp = fl.dp_for_rate(np.array([1.0, 1e5]), mult=1e12)
+        self.assertTrue(np.all(np.isfinite(dp)))
+        self.assertLess(dp[0], 1e-6)
+
     def test_dp_domain_fields(self):
         pvt = PVT.from_csv(PVT_FILE)
         gdi = GDI('1', pd.Timestamp('2022-01-01').to_pydatetime(), np.array([85.0] * 3), np.array([84.0, 83.0, 82.0]),
