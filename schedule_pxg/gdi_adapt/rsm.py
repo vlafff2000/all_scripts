@@ -79,6 +79,17 @@ def value_at(series: Tuple[np.ndarray, np.ndarray], t: float, tol: float = 1e-6)
     return float(vs[j]) if j < len(ts) and abs(ts[j] - t) <= tol else float('nan')
 
 
+def value_near(series: Tuple[np.ndarray, np.ndarray], t: float, tol: float = 0.0075) -> float:
+    """Значение ряда на ближайшем отчётном шаге к t (дни от START), если он не дальше tol дней; иначе NaN.
+    RSM пишет время с 7 значащими цифрами (13076.04 вместо 13076.0417): для шагов в доли суток (часовые режимы ГДИ)
+    точного совпадения нет, допуск 0.0075 сут (≈11 мин) меньше половины самого короткого интервала (30 мин)."""
+    ts, vs = series
+    if not len(ts):
+        return float('nan')
+    j = int(np.argmin(np.abs(ts - t)))
+    return float(vs[j]) if abs(ts[j] - t) <= tol else float('nan')
+
+
 def rsm_times(path: str) -> List[float]:
     """Отчётные времена (дни от START) из первого блока RSM: номер шага рестарта = индекс времени (0 - начало расчёта)."""
     out: List[float] = []

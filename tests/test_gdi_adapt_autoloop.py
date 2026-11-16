@@ -22,6 +22,12 @@ TRUE_M = {'W1': 2.5, 'W2': 0.5}
 K = 0.012                         # бар на (м³/сут)/1000 при мульте 1
 
 
+def case_day(case):
+    """Дата ГДИ тестового прогона: конец первого режима (часы работы) в пределах той же даты."""
+    e = case['steps'][0].end
+    return datetime(e.year, e.month, e.day)
+
+
 def rsm_for(case, mults):
     """RSM подставного симулятора: депрессия = K*q/мульт (q в тыс. м³/сут), Pпл 80; на t0 - соединения для снимка."""
     def row(*v):
@@ -29,11 +35,13 @@ def rsm_for(case, mults):
     sep = ' ' + '-' * 100
     t0 = float((START - MODEL_START).days)
     wells = sorted({s.well for s in case['steps']})
-    times = [0.0, t0] + sorted({float((s.end - MODEL_START).days) for s in case['steps']})
+    def tt(s):                              # RSM пишет время с 7 значащими цифрами
+        return float(format((s.end - MODEL_START).total_seconds() / 86400.0, '.7g'))
+    times = [0.0, t0] + sorted({tt(s) for s in case['steps']})
     cols, vals = [], []
     for w in wells:
         m = mults.get(w, 1.0)
-        ends = {float((s.end - MODEL_START).days): s.q for s in case['steps'] if s.well == w}
+        ends = {tt(s): s.q for s in case['steps'] if s.well == w}
         cols += [('WBHP', w), ('WBP', w)]
         vals.append([80.0 - K * ends[t] / 1000.0 / m if t in ends else 78.0 for t in times])
         vals.append([80.0] * len(times))
@@ -189,7 +197,7 @@ class TestBatch(unittest.TestCase):
 
         class R(FakeRunner):
             def run(s, case, restart, label, cancel):
-                t0 = float((case['steps'][0].end - MODEL_START).days) - 1
+                t0 = float((case_day(case) - MODEL_START).days)
                 return rsm_for_date(case, t0)
         al.AutoLoop._initial_mults = initial
         try:
@@ -207,7 +215,7 @@ class TestBatch(unittest.TestCase):
 
         class R(FakeRunner):
             def run(s, case, restart, label, cancel):
-                t0 = float((case['steps'][0].end - MODEL_START).days) - 1
+                t0 = float((case_day(case) - MODEL_START).days)
                 calls.append((label, restart))
                 rsm = rsm_for_date(case, t0)
                 return rsm
@@ -297,7 +305,7 @@ def rsm_for_date(case, t0):
             mults[r['wname']] = mults.get(r['wname'], 1.0) * r['pimult']
     global START
     old = START
-    START = case['steps'][0].end.replace(day=case['steps'][0].end.day - 1)
+    START = case_day(case)
     try:
         rsm_for(case, mults)
     finally:

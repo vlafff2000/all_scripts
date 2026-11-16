@@ -128,7 +128,7 @@ def assess(gdi: GDI, cfg) -> QC:
         bad.append(f'разброс Pпл между режимами {pres_spread:.2f} бар сопоставим с депрессией {dp_med:.2f} бар')
     if dropped_frac > cfg.qc_max_dropped_frac:
         bad.append(f'отброшено режимов {gdi.n_dropped} из {n_total} (Pзаб >= Pпл или Q <= 0)')
-    if b_negative(gdi.a, gdi.b, float(np.max(gdi.q)), cfg.ab_q_units):
+    if b_negative(a_raw, b_raw, float(np.max(gdi.q)), cfg.ab_q_units):
         bad.append('коэффициент b < 0 (физически невозможно)')
 
     # ---------------- ПРЕДУПРЕЖДЕНИЯ ----------------

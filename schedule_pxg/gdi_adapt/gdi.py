@@ -71,6 +71,28 @@ def fit_ab_dp2(q_m3d, dp2, ab_q_units: str = '10^3 m3/day') -> Tuple[float, floa
     return float(coef[0]), float(coef[1])
 
 
+A_ZERO_TOL = 1e-4     # A в [-1e-4, 0) - шум около нуля: считаем A = 0 (правило инженера); меньше -1e-4 оставляем как есть
+
+
+def physical_ab(q_m3d, dp2, ab_q_units: str = '10^3 m3/day', a_zero_tol: float = A_ZERO_TOL) -> Tuple[float, float]:
+    """A, B индикаторной кривой dP^2 = A*Q + B*Q^2 по правилам инженера: B никогда не отрицательно (если свободный МНК даёт
+    B < 0 - B = 0, A пересчитывается без B); A может быть отрицательным, но -a_zero_tol <= A < 0 - это ноль.
+    Меньше 2 различных дебитов - (NaN, NaN)."""
+    a, b = fit_ab_dp2(q_m3d, dp2, ab_q_units)
+    if not (np.isfinite(a) and np.isfinite(b)):
+        return a, b
+    if b < 0:
+        q = np.asarray(q_m3d, dtype=float) / CONVERSION['flow_rate'][ab_q_units]
+        y = np.asarray(dp2, dtype=float)
+        ok = np.isfinite(q) & np.isfinite(y)
+        q, y = q[ok], y[ok]
+        b = 0.0
+        a = float(np.sum(q * y) / np.sum(q * q))
+    if -a_zero_tol * (1.0 + 1e-6) <= a < 0:
+        a = 0.0
+    return float(a), float(b)
+
+
 B_NEG_TOL = 0.01      # B<0 считается нарушением, если квадратичный член на максимальном дебите отрицателен и больше 1% линейного
 
 
@@ -85,6 +107,11 @@ def b_negative(a: float, b: float, q_max_m3d: float, ab_q_units: str = '10^3 m3/
 def fit_ab(q_m3d, wbp, bhp, ab_q_units: str = '10^3 m3/day') -> Tuple[float, float]:
     """МНК: Pпл^2 - Pз^2 = A*Q + B*Q^2 (без свободного члена). Нужно >= 2 различных дебитов."""
     return fit_ab_dp2(q_m3d, np.asarray(wbp, dtype=float) ** 2 - np.asarray(bhp, dtype=float) ** 2, ab_q_units)
+
+
+def fit_ab_physical(q_m3d, wbp, bhp, ab_q_units: str = '10^3 m3/day') -> Tuple[float, float]:
+    """Как fit_ab, но с правилами инженера для A и B (physical_ab)."""
+    return physical_ab(q_m3d, np.asarray(wbp, dtype=float) ** 2 - np.asarray(bhp, dtype=float) ** 2, ab_q_units)
 
 
 def _clean_name(x) -> str:
@@ -163,6 +190,6 @@ def _one(out, skipped, cfg, w, g, last, has_ab) -> None:
     if has_ab and g[cfg.a_col].notna().any() and g[cfg.b_col].notna().any():
         a, b = float(g[cfg.a_col].dropna().iloc[0]), float(g[cfg.b_col].dropna().iloc[0])
     else:
-        a, b = fit_ab(q, wbp, bhp, cfg.ab_q_units)
+        a, b = fit_ab_physical(q, wbp, bhp, cfg.ab_q_units)
     out.append(GDI(wname=w, date=last.to_pydatetime(), wbp=wbp, bhp=bhp, q=q, a=a, b=b, notes=notes,
                    n_dropped=int((~ok).sum()), multi=bool(getattr(cfg, 'all_dates', False))))

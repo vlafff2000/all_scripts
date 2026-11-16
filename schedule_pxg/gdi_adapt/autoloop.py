@@ -40,7 +40,10 @@ class LoopSettings:
     step_limit: float = 4.0                     # мульт за итерацию меняется не более чем в столько раз
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки) - стоп по «нет улучшения»
     metric: str = 'regimes'                     # 'regimes' (депрессия по режимам) | 'dp2'
-    step_days: int = 1
+    step_days: int = 1                          # прежняя схема (режим = сутки), если work_hours не задан
+    work_hours: Optional[float] = 1.0           # режим ГДИ в модели: час работы (TSTEP) ...
+    shut_hours: float = 0.5                     # ... и полчаса остановки скважины (WELOPEN SHUT) между режимами
+    next_step_days: float = 0.01                # NEXTSTEP после смены дебита, сут (0 - не писать)
 
     def thr(self, w: str) -> float:
         return float(self.well_threshold.get(w, self.threshold_pct))
@@ -154,7 +157,8 @@ class AutoLoop:
     def _iteration(self, k: int, mults: Optional[Dict[str, dict]], label: str) -> dict:
         regimes = {w: [float(x) for x in g.q] for w, g in self.gdis.items()}
         rows = [(w, m['inc'], m.get('d')) for w, m in (mults or {}).items()] or None
-        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days)
+        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days,
+                             work_hours=self.st.work_hours, shut_hours=self.st.shut_hours, next_step_days=self.st.next_step_days)
         rsm = self.runner.run(case, self.restart, label, self.cancel)
         series = parse_rsm(rsm)
         msd = case['model_start']

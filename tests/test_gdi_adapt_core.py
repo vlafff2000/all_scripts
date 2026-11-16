@@ -284,10 +284,10 @@ class TestNegativeB(unittest.TestCase):
         self.assertTrue(real.ok, real.problems)
         with mock.patch('schedule_pxg.gdi_adapt.adapt.fit_ab_dp2', return_value=(2.0, -3e-4)):
             r = adapt_well(gdi, snap, self.pvt, cfg)
-        self.assertIn('b модели < 0', r.problems)
+        self.assertTrue(any(p.startswith('b модели < 0') for p in r.problems), r.problems)
         self.assertFalse(r.ok)
         d = result_dict(r)
-        self.assertLess(d['b_model'], 0)
+        self.assertGreaterEqual(d['b_model'], 0)                  # B модели по правилу инженера не отрицательно
         self.assertIn('b_gdi', d)
         self.assertFalse(d['ok'])
         self.assertIn('pi_mult', d)                        # старые ключи на месте
