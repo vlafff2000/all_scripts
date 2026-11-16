@@ -168,10 +168,12 @@ def selection_view(sel: selection.Selection) -> dict:
 
 
 def save_state(p: Project, folder: str, body: dict, cols: dict) -> None:
-    p.adapt = {"db": str(body.get("db") or "").strip().strip('"'), "sheet": str(body.get("sheet") or ""), "cols": cols,
-               "settings": body.get("settings") or {}, "config": body.get("config") or {},
-               "overrides": body.get("overrides") or {}, "study_overrides": _study_overrides(body.get("study_overrides")),
-               "scenario": str(body.get("scenario") or ""), "kit": (p.adapt or {}).get("kit", "")}
+    a = dict(p.adapt or {})        # блоки запуска (tnav: exe, модель, рабочая папка) и прочее сохраняются
+    a.update({"db": str(body.get("db") or "").strip().strip('"'), "sheet": str(body.get("sheet") or ""), "cols": cols,
+              "settings": body.get("settings") or {}, "config": body.get("config") or {},
+              "overrides": body.get("overrides") or {}, "study_overrides": _study_overrides(body.get("study_overrides")),
+              "scenario": str(body.get("scenario") or ""), "kit": a.get("kit", "")})
+    p.adapt = a
     p.save(folder)
 
 

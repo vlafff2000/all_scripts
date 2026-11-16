@@ -87,7 +87,7 @@ def suggest(wname: str, date: dt.datetime, p_gdi: float, model: Optional[Series]
         fx.status, fx.reason = 'ok', 'Pпл ГДИ согласуется с давлением модели на дату'
         return fx
     ok = np.isfinite(res) & (res <= tol_bar)
-    runs = _runs(ok)
+    runs = [r for r in _runs(ok) if r[0] > 0 and r[1] < len(days) - 1]    # совпадение, упёршееся в границу окна, - не пересечение уровня (плато)
     if not runs:
         fx.status = 'none'
         fx.reason = 'Pпл ГДИ %.1f бар, модель на дату %.1f: в окне ±%d сут. подходящей даты нет' % (p_gdi, fx.p_model, window_days)
