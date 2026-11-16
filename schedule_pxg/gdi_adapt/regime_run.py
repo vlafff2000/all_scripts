@@ -202,12 +202,22 @@ def snapshot_from_rsm(series: dict, well: str, t: float, t_name: str = '') -> We
 
 
 def _value_near(series, t: float, tol: float) -> float:
-    """Значение на отчётном шаге, ближайшем к t (дни от START), если он не дальше tol; иначе NaN."""
+    """Значение на отчётном шаге, ближайшем к t (дни от START), если он не дальше tol; иначе NaN.
+    Дробное время RSM печатает с двумя знаками и ОКРУГЛЯЕТ ВНИЗ (17488.2292 -> 17488.22), поэтому для дробных суток окно
+    несимметрично: строка может быть ниже ожидаемого времени до 0.0125 сут и выше не более чем на 0.0025 сут."""
     ts, vs = series
+    ts = np.asarray(ts, float)
     if len(ts) == 0:
         return float('nan')
-    j = int(np.argmin(np.abs(np.asarray(ts, float) - t)))
-    return float(vs[j]) if abs(ts[j] - t) <= tol else float('nan')
+    if tol <= 1e-6:
+        j = int(np.argmin(np.abs(ts - t)))
+        return float(vs[j]) if abs(ts[j] - t) <= tol else float('nan')
+    d = t - ts                                            # > 0: строка раньше ожидаемого времени
+    ok = np.where((d >= -0.0025) & (d <= 0.0125))[0]
+    if not len(ok):
+        return float('nan')
+    j = int(ok[np.argmin(np.abs(d[ok]))])
+    return float(vs[j])
 
 
 def model_regimes(series: dict, steps: Sequence[RegimeStep], model_start: datetime) -> Dict[str, List[dict]]:
@@ -215,9 +225,8 @@ def model_regimes(series: dict, steps: Sequence[RegimeStep], model_start: dateti
     out: Dict[str, List[dict]] = {}
     for st in steps:
         t = (st.end - model_start).total_seconds() / 86400.0
-        # дробные сутки (TSTEP): RSM печатает время с 7 значащими цифрами (13076.04 вместо 13076.0417), поэтому берётся ближайший
-        # отчётный шаг в пределах 0.0075 сут (шаги 1 ч и 30 мин отстоят друг от друга не менее чем на 0.02 сут)
-        tol = 1e-6 if t == int(t) else 0.0075
+        # дробные сутки (TSTEP): RSM пишет время с двумя знаками, округляя вниз; шаги 1 ч и 30 мин отстоят не менее чем на 0.02 сут
+        tol = 1e-6 if t == int(t) else 0.0125
         bhp = _value_near(series[('WBHP', st.well)], t, tol)
         bp = _value_near(series[('WBP', st.well)], t, tol)
         out.setdefault(st.well, []).append({'k': st.k, 'q': st.q, 't': t, 'wbhp': bhp, 'wbp': bp, 'dep': bp - bhp})
