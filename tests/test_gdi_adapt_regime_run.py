@@ -79,7 +79,7 @@ class TestSchedule(unittest.TestCase):
         ms = datetime(2014, 1, 1)
         steps = [rr.RegimeStep('A', 0, 1.0, datetime(2014, 1, 14, 1, 0)), rr.RegimeStep('A', 1, 2.0, datetime(2014, 1, 14, 2, 30))]
         t0 = 13.0
-        ts = np.array([t0, t0 + 0.041667, t0 + 0.104167])
+        ts = np.array([t0, t0 + 0.04, t0 + 0.10])       # RSM пишет 7 значащих цифр: 13.0417 -> 13.04, 13.1042 -> 13.10
         series = {('WBHP', 'A'): (ts, np.array([80.0, 70.0, 60.0])), ('WBP', 'A'): (ts, np.array([90.0, 90.0, 90.0]))}
         mr = rr.model_regimes(series, steps, ms)
         self.assertEqual([round(r['dep'], 6) for r in mr['A']], [20.0, 30.0])
