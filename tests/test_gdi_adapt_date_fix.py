@@ -60,6 +60,31 @@ class TestSuggest(unittest.TestCase):
         self.assertTrue(-40 <= fx.shift_days <= -25, fx.shift_days)
 
 
+class TestSaveStateKeepsRunSettings(unittest.TestCase):
+    def test_save_state_does_not_erase_tnav_block(self):
+        # регресс: «Подобрать исследования» затирал adapt.json без блока tnav (exe, модель, рабочая папка), и запуск адаптации пропадал
+        import tempfile
+        from schedule_pxg import adapt_view
+        from schedule_pxg.project import Project
+        with tempfile.TemporaryDirectory() as d:
+            p = Project()
+            p.adapt = {'db': 'a.xlsx', 'kit': 'k', 'tnav': {'exe': 'x.exe', 'model': 'm.data', 'workdir': 'w', 'work_min': 60}}
+            adapt_view.save_state(p, d, {'db': 'b.xlsx', 'settings': {'date_fix': True}}, {'well': 'A'})
+            q = Project.load(d)
+        self.assertEqual(q.adapt['db'], 'b.xlsx')
+        self.assertEqual(q.adapt['tnav']['model'], 'm.data')
+        self.assertEqual(q.adapt['kit'], 'k')
+
+
+class TestWindowEdge(unittest.TestCase):
+    def test_match_at_window_edge_is_not_a_crossing(self):
+        # давление на плато: совпадение, упирающееся в границу окна, не считается найденной датой (ложное срабатывание)
+        s = [(D0 + timedelta(days=i), 90.0 - 0.45 * i if i < 120 else 36.0) for i in range(0, 200)]
+        s = [(d, 70.0 if i < 100 else 70.0 - 0.45 * (i - 100)) for i, (d, _) in enumerate(s)]    # плато 70 до 100-х суток
+        fx = df.suggest('1', D0 + timedelta(days=190), 70.0, s, window_days=90, tol_bar=3.0)
+        self.assertNotEqual(fx.status, 'fixed')
+
+
 class TestNearest(unittest.TestCase):
     def test_nearest_of_two_matches_is_taken_when_other_is_much_farther(self):
         # спад зимой и подъём весной проходят один уровень: скв. 187 (17.02): январь −31 сут, май +92 сут -> берём январь
