@@ -1355,6 +1355,15 @@ async def adapt_loop_stop(request: Request):
         return _err(str(e))
 
 
+async def adapt_verify(request: Request):
+    """Подтверждение по каждому исследованию ГДИ: прогнано на модели или нет, настроилась ли скважина (+ книга Excel в рабочей папке)."""
+    body = await request.json()
+    try:
+        return JSONResponse(await run_in_threadpool(adapt_view.verification, _project(), FOLDER, body))
+    except (ValueError, OSError) as e:
+        return _err(str(e))
+
+
 async def adapt_loop_include(request: Request):
     body = await request.json()
     try:
@@ -1608,6 +1617,7 @@ def build_app() -> Starlette:
         Route("/api/adapt/loop/status", adapt_loop_status),
         Route("/api/adapt/loop/stop", adapt_loop_stop, methods=["POST"]),
         Route("/api/adapt/loop/include", adapt_loop_include, methods=["POST"]),
+        Route("/api/adapt/verify", adapt_verify, methods=["POST"]),
         Route("/api/adapt/columns/check", adapt_columns_check, methods=["POST"]),
         Route("/api/adapt/runs", adapt_runs),
         Route("/api/adapt/run", adapt_run),
