@@ -273,6 +273,14 @@ export interface AdaptRequest {
 export const getAdapt = () => call<AdaptState>('/api/adapt')
 export const getAdaptColumns = (path: string, sheet = '') => call<AdaptColumns>('/api/adapt/columns?' + new URLSearchParams({ path, sheet }))
 export const adaptSelect = (b: AdaptRequest) => call<AdaptSelection>('/api/adapt/select', post(b))
+/** Подтверждение по исследованию ГДИ: прогнано ли на модели и настроилась ли скважина. */
+export interface AdaptVerifyRow {
+  well: string; date: string; date_orig: string; ran_on_model: boolean; status: string; reason: string; err_pct: number | null
+  threshold_pct: number | null; iteration: number | null; pi_mult: number | null
+  regimes: { q: number | null; dep_gdi: number | null; dep_model: number | null; err_pct: number | null; modeled: boolean }[]
+}
+export interface AdaptVerify { rows: AdaptVerifyRow[]; summary: Record<string, number>; xlsx: string; workdir: string }
+export const adaptVerify = (b: AdaptRequest) => call<AdaptVerify>('/api/adapt/verify', post(b))
 export const adaptKit = (b: AdaptRequest & { out: string }) => call<{ folder: string; wells: string[]; files: string[]; code: string }>('/api/adapt/kit', post(b))
 
 export interface AdaptResultRow {

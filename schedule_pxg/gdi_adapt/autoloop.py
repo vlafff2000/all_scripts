@@ -190,7 +190,9 @@ class AutoLoop:
             try:
                 r = adapt_well(g, snap, self.pvt, self.cfg)
             except AdaptError as e:
-                self.state.setdefault('skipped', {})[w] = str(e)
+                # формула мульт не нашла: скважину всё равно настраиваем на модели, начиная с мульта 1,0 (секущая по ошибке дальше)
+                self.state.setdefault('skipped', {})[w] = 'формула не нашла мульт (%s): подбор на модели с мульта 1,0' % e
+                out[w] = {'inc': 1.0, 'd': None, 'source': 'старт с мульта 1,0 (формула не нашла мульт)', 'problems': [str(e)]}
                 continue
             out[w] = {'inc': float(r.pi_mult), 'd': float(r.d), 'source': 'ГДМ (формула)', 'problems': list(r.problems)}
         return out

@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from . import atlas_data
-from .gdi_adapt import date_fix, kit, runs, selection
+from .gdi_adapt import date_fix, kit, runs, selection, verify
 from .gdi_adapt.config import Config
 from .project import Project
 
@@ -245,3 +245,20 @@ def run_file(run_dir: str, kind: str) -> str:
     if not name or not os.path.isfile(path):
         raise ValueError("В «%s» нет файла %s." % (run_dir, name or kind))
     return path
+
+
+def verification(p: Project, folder: str, body: dict) -> dict:
+    """Подтверждение по каждому исследованию ГДИ (gdi_adapt/verify): прогнано ли на модели и настроилась ли скважина.
+    Исследования выбора, не попавшие в очередь (отбракованы, нет в модели), показываются с причиной."""
+    from . import adapt_loop
+    work = str(body.get("workdir") or "").strip().strip('"') or adapt_loop.defaults(p, folder)["workdir"]
+    if not os.path.isdir(work):
+        raise ValueError("Рабочая папка адаптации «%s» не найдена: прогонов ещё не было." % work)
+    sel, _cols, _cfg, _st = run_selection(p, body)
+    date_orig = {"%s@%s" % (f.wname, f.new_date.strftime("%Y-%m-%d")): f.date.strftime("%Y-%m-%d") for f in sel.date_fixes if f.status == "fixed" and f.new_date}
+    expected = [{"well": s.well, "date": s.date, "reason": s.reasons or "не выбрано для адаптации"} for s in sel.studies if not s.use]
+    rows = verify.build(work, date_orig, expected)
+    xlsx = ""
+    if rows:
+        xlsx = verify.to_excel(rows, os.path.join(work, "Подтверждение_по_исследованиям.xlsx"))
+    return {"rows": rows, "summary": verify.summary(rows), "xlsx": xlsx, "workdir": work}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import AdaptDashboard from './AdaptDashboard'
 import { Tables } from '../../../pxg_core/web-ui/table/Tables'
 import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
-import { AdaptRequest, BatchState, LoopInfo, LoopOpts, LoopState, getLoopInfo, getLoopStatus, loopInclude, pickFile, pickFolder, startLoop, stopLoop } from './api'
+import { AdaptRequest, AdaptVerify, BatchState, adaptVerify, LoopInfo, LoopOpts, LoopState, getLoopInfo, getLoopStatus, loopInclude, pickFile, pickFolder, startLoop, stopLoop } from './api'
 
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const STATUS: Record<string, string> = { idle: 'не запущен', running: 'идёт', done: 'завершён', failed: 'ошибка', cancelled: 'остановлен' }
@@ -11,13 +11,14 @@ const METRIC: Record<string, string> = { regimes: 'депрессия по ре�
 /** Шаг 7 вкладки «Адаптация по ГДИ»: автоцикл по тестовому прогону модели (подбор → прогон tNavigator → чтение → порог). Решение за инженером. */
 export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest; wells: string[]; kit: string }) {
   const [info, setInfo] = useState<LoopInfo | null>(null)
-  const [o, setO] = useState<Partial<LoopOpts>>({ threshold_pct: 10, max_iter: 6, metric: 'regimes' })
+  const [o, setO] = useState<Partial<LoopOpts>>({ threshold_pct: 10, max_iter: 6, metric: 'dp2' })
   const [id, setId] = useState('')
   const [st, setSt] = useState<LoopState | null>(null)
   const [bs, setBs] = useState<BatchState | null>(null)
   const [selDate, setSelDate] = useState('')
   const [well, setWell] = useState('')
   const [msg, setMsg] = useState('')
+  const [ver, setVer] = useState<AdaptVerify | null>(null)
   const [busy, setBusy] = useState(false)
   const timer = useRef<number | undefined>(undefined)
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
@@ -126,6 +127,17 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
           onRow={(_t, i) => { setSelDate(bs.dates[i].date); setWell('') }} />
         <p className="muted small">Нажмите на строку, чтобы открыть дашборд этой даты. «Записать include» для очереди собирает один файл по всем датам.</p>
         <div className="row"><button disabled={busy} onClick={() => write(0)}>Записать include очереди (все даты)</button></div>
+      </>}
+      <h3>Подтверждение по каждому исследованию ГДИ</h3>
+      <p className="muted small">По каждому исследованию: прогнано ли оно на модели, настроилась ли скважина (ошибка по режимам не выше порога) или нет, а если не прогонялось, то почему. Читается из файлов очереди, поэтому работает и во время расчёта.</p>
+      <div className="row"><button disabled={busy} onClick={() => guard(async () => setVer(await adaptVerify(req())))}>Показать подтверждение</button>
+        {ver?.xlsx && <span className="muted small">Книга Excel: {ver.xlsx}</span>}</div>
+      {ver && <>
+        <p className="lead">Всего исследований: <b>{ver.summary.total}</b>; прогнано на модели: <b>{ver.summary.ran_on_model}</b>; настроены: <b>{ver.summary['настроена']}</b>; не настроены: <b>{ver.summary['не настроена']}</b>;
+          приняты по формуле без прогона: {ver.summary['принята по формуле, без прогона']}; не прогонялись: <b>{ver.summary['не прогонялась']}</b>.</p>
+        <Tables scope="adapt-verify" tables={[tableOf('adapt-verify', 'Подтверждение', [['Скважина', 'text'], ['Дата ГДИ', 'text'], ['Дата в БД (исправлена)', 'text'], ['Прогнано на модели', 'text'], ['Статус', 'text'],
+          ['Ошибка, %', 'number', 1], ['Порог, %', 'number', 1], ['Итерация', 'number', 0], ['Мульт', 'number', 3], ['Режимов', 'number', 0], ['Причина', 'text']],
+          ver.rows.map(r => [r.well, r.date, r.date_orig, r.ran_on_model ? 'да' : 'нет', r.status, r.err_pct, r.threshold_pct, r.iteration, r.pi_mult, r.regimes.length || null, r.reason]))]} />
       </>}
       {st && st.iterations.length > 0 && <AdaptDashboard st={st} well={well} setWell={setWell} write={write} busy={busy} />}
     </section>

@@ -129,6 +129,27 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(st['metric'], 'dp2')
         self.assertEqual(w['err'], w['err_dp2'])
 
+    def test_well_without_formula_mult_is_still_tuned_on_the_model(self):
+        # формула не нашла мульт (AdaptError): скважина не остаётся без попыток, а подбирается прогонами с мульта 1,0
+        orig = al.adapt_well
+
+        def fake(g, snap, pvt_, cfg):
+            if g.wname == 'W2':
+                raise al.AdaptError('нет решения')
+            return orig(g, snap, pvt_, cfg)
+        al.adapt_well = fake
+        try:
+            st = self.loop(threshold_pct=2.0, max_iter=8).run()
+        finally:
+            al.adapt_well = orig
+        first = st['iterations'][1]['mults']['W2']
+        self.assertEqual(first['inc'], 1.0)
+        self.assertIn('старт с мульта 1,0', first['source'])
+        last = st['iterations'][-1]
+        self.assertGreater(len(st['iterations']), 2)                                             # были уточняющие прогоны на модели
+        self.assertLessEqual(last['wells']['W2']['err'], 2.0)
+        self.assertAlmostEqual(last['mults']['W2']['inc'], TRUE_M['W2'], delta=0.05 * TRUE_M['W2'])
+
     def test_iteration_limit_and_rollback(self):
         lp = self.loop(threshold_pct=0.0001, max_iter=2, min_gain_pct=-1e9)
         st = lp.run()
