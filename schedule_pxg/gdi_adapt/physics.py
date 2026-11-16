@@ -109,6 +109,9 @@ class Inflow:
                 return float(self.rate(dp, mult, d_well)[0]) - qi
             if f(self.dp_max) < 0:
                 continue
+            if f(1e-9) >= 0:                    # дебит q достигается уже при ничтожной депрессии (слишком большой мульт): предел - нулевая депрессия
+                out[i] = 1e-9
+                continue
             out[i] = brentq(f, 1e-9, self.dp_max, xtol=1e-10)
         return out
 
