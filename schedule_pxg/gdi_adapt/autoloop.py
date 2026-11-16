@@ -39,7 +39,7 @@ class LoopSettings:
     max_iter: int = 6                           # лимит прогонов после базового
     step_limit: float = 4.0                     # мульт за итерацию меняется не более чем в столько раз
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки) - стоп по «нет улучшения»
-    metric: str = 'regimes'                     # 'regimes' (депрессия по режимам) | 'dp2'
+    metric: str = 'dp2'                         # 'dp2' (индикаторная кривая ΔP², по умолчанию) | 'regimes' (депрессия по режимам)
     step_days: int = 1
     work_min: float = 0.0                       # > 0: режимы ГДИ через TSTEP: минут работы на режиме (0 - режим сутки)
     rest_min: float = 30.0                      # минут остановки скважины между режимами (при work_min > 0)
@@ -167,9 +167,10 @@ class AutoLoop:
         for w, g in self.gdis.items():
             c = rr.compare_with_gdi(mr[w], g.wbp, g.bhp)
             err = c['err_dep_pct'] if self.st.metric == 'regimes' else c['err_dp2_pct']
+            ref_m, ref_g = (c['dep_model'], c['dep_gdi']) if self.st.metric == 'regimes' else (c['dp2_model'], c['dp2_gdi'])
             wells[w] = {'err': _f(err), 'err_dep': _f(c['err_dep_pct']), 'err_dp2': _f(c['err_dp2_pct']), 'p_res_gap': _f(c['p_res_gap']),
                         'dep_model': [_f(x) for x in c['dep_model']], 'dep_gdi': [_f(x) for x in c['dep_gdi']],
-                        'q': [float(x) for x in g.q], 'e': _f(_log_ratio(c['dep_model'], c['dep_gdi'])),
+                        'q': [float(x) for x in g.q], 'e': _f(_log_ratio(ref_m, ref_g)),
                         'a_model': _f(c['a_model']), 'b_model': _f(c['b_model']), 'a_gdi': _f(g.a), 'b_gdi': _f(g.b)}
         if k == 0:
             for w in self.gdis:

@@ -240,11 +240,8 @@ def compare_with_gdi(model_rows: List[dict], p_res_gdi, bhp_gdi, ab_q_units: str
     dep_g = np.asarray(p_res_gdi, float) - np.asarray(bhp_gdi, float)
     wbp = np.array([r['wbp'] for r in model_rows], float)
     wbhp = np.array([r['wbhp'] for r in model_rows], float)
-    pg = np.asarray(p_res_gdi, float)
-    # ΔP² модели берётся при пластовом давлении ГДИ: мульты PIMULT/D меняют депрессию, а не Pпл поля модели; иначе при сошедшейся
-    # депрессии кривая ΔP² расходилась бы на (2·ΔPпл·dep). Разрыв Pпл не скрывается: он остаётся в p_res_gap и предупреждении.
-    dp2_m = pg ** 2 - (pg - dep_m) ** 2
-    dp2_g = pg ** 2 - np.asarray(bhp_gdi, float) ** 2
+    dp2_m = wbp ** 2 - wbhp ** 2
+    dp2_g = np.asarray(p_res_gdi, float) ** 2 - np.asarray(bhp_gdi, float) ** 2
     q_m = np.array([r['q'] for r in model_rows], float)
     a_m, b_m = fit_ab_dp2(q_m, dp2_m, ab_q_units, nonneg_b=True) if len(q_m) >= 2 else (float('nan'), float('nan'))
     return {'dep_model': dep_m, 'dep_gdi': dep_g, 'dp2_model': dp2_m, 'dp2_gdi': dp2_g,
