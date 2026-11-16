@@ -120,6 +120,29 @@ class TestLoop(unittest.TestCase):
         self.assertAlmostEqual(lp.journal.total('W1'), TRUE_M['W1'], delta=0.15)                # журнал: лучший итог
         self.assertTrue(os.path.exists(os.path.join(self.tmp.name, 'work', 'loop.json')))
 
+    def test_dp2_metric_matches_dp2_curve_when_model_pressure_is_lower(self):
+        # Pпл модели 80, Pпл ГДИ 95: одинаковая депрессия даёт в модели меньшее dP^2 (dP^2 = dep*(2*Pпл-dep)). Цель - совпадение
+        # dP^2 ГДИ (график индикаторной кривой): мульт ведётся по dP^2, а не по депрессии, иначе dP^2 модели занижен на ~19 %.
+        q = np.array([300000.0, 400000.0, 500000.0])
+        dep_g = K * q / 1000.0 / 2.5
+        gdi = GDI('W1', START, np.full(3, 95.0), 95.0 - dep_g, q, float('nan'), float('nan'))
+        dp2_g = 95.0 ** 2 - (95.0 - dep_g) ** 2
+        dep_m_needed = 80.0 - np.sqrt(80.0 ** 2 - dp2_g)                      # депрессия модели, при которой dP^2 равен dP^2 ГДИ
+        mult_needed = float(np.exp(np.mean(np.log(K * q / 1000.0 / dep_m_needed))))
+        lp = al.AutoLoop(self.data, os.path.join(self.tmp.name, 'work'), FakeRunner(), [gdi], self.cfg, pvt(),
+                         al.LoopSettings(threshold_pct=2.0, max_iter=8, metric='dp2'), restart=7,
+                         journal=MultJournal(os.path.join(self.tmp.name, 'j.json')))
+        st = lp.run()
+        last = st['iterations'][-1]
+        self.assertEqual(st['status'], 'done', st)
+        self.assertLessEqual(last['wells']['W1']['err_dp2'], 2.0)
+        self.assertAlmostEqual(last['mults']['W1']['inc'], mult_needed, delta=0.03 * mult_needed)
+        self.assertGreater(last['wells']['W1']['err_dep'], 5.0)               # депрессия при этом выше, чем у ГДИ: так и должно быть
+        self.assertEqual(last['wells']['W1']['err'], last['wells']['W1']['err_dp2'])
+
+    def test_default_metric_is_dp2(self):
+        self.assertEqual(al.LoopSettings().metric, 'dp2')
+
     def test_iteration_limit_and_rollback(self):
         lp = self.loop(threshold_pct=0.0001, max_iter=2, min_gain_pct=-1e9)
         st = lp.run()

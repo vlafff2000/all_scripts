@@ -39,7 +39,7 @@ class LoopSettings:
     max_iter: int = 6                           # лимит прогонов после базового
     step_limit: float = 4.0                     # мульт за итерацию меняется не более чем в столько раз
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки) - стоп по «нет улучшения»
-    metric: str = 'regimes'                     # 'regimes' (депрессия по режимам) | 'dp2'
+    metric: str = 'dp2'                         # 'dp2' (по умолчанию: dP² = Pпл²−Pз², график индикаторной кривой) | 'regimes' (депрессия по режимам)
     step_days: int = 1
     work_min: float = 0.0                       # > 0: режимы ГДИ через TSTEP: минут работы на режиме (0 - режим сутки)
     rest_min: float = 30.0                      # минут остановки скважины между режимами (при work_min > 0)
@@ -96,6 +96,17 @@ def _log_ratio(dep_model, dep_gdi) -> float:
     m, g = np.asarray(dep_model, float), np.asarray(dep_gdi, float)
     ok = np.isfinite(m) & np.isfinite(g) & (m > 0) & (g > 0)
     return float(np.mean(np.log(m[ok] / g[ok]))) if ok.any() else float('nan')
+
+
+def _target_log_ratio(c: dict, metric: str) -> float:
+    """e - то, что мульт гонит к нулю: при metric='dp2' log(dP² модели / dP² ГДИ) (индикаторная диаграмма), иначе
+    log(депрессия модели / ГДИ). Если dP² не определён ни в одной точке (модель вышла за физичные давления при совсем
+    неудачном мульте) - временно берётся депрессия, чтобы шаг по мульту всё равно был направленным."""
+    if metric == 'dp2':
+        e = _log_ratio(c['dp2_model'], c['dp2_gdi'])
+        if np.isfinite(e):
+            return e
+    return _log_ratio(c['dep_model'], c['dep_gdi'])
 
 
 def secant_step(hist: List[tuple], limit: float, bounds: tuple) -> float:
@@ -169,7 +180,9 @@ class AutoLoop:
             err = c['err_dep_pct'] if self.st.metric == 'regimes' else c['err_dp2_pct']
             wells[w] = {'err': _f(err), 'err_dep': _f(c['err_dep_pct']), 'err_dp2': _f(c['err_dp2_pct']), 'p_res_gap': _f(c['p_res_gap']),
                         'dep_model': [_f(x) for x in c['dep_model']], 'dep_gdi': [_f(x) for x in c['dep_gdi']],
-                        'q': [float(x) for x in g.q], 'e': _f(_log_ratio(c['dep_model'], c['dep_gdi'])),
+                        'q': [float(x) for x in g.q],
+                        # e - то, что мульт гонит к нулю: при metric='dp2' log(dP² модели / dP² ГДИ), иначе log(депрессия модели / ГДИ)
+                        'e': _f(_target_log_ratio(c, self.st.metric)),
                         'a_model': _f(c['a_model']), 'b_model': _f(c['b_model']), 'a_gdi': _f(g.a), 'b_gdi': _f(g.b)}
         if k == 0:
             for w in self.gdis:
