@@ -178,6 +178,30 @@ class TestBatch(unittest.TestCase):
         g[1].date = datetime(2014, 1, 20)
         return g
 
+    def test_date_without_fit_does_not_stop_queue(self):
+        # на дате ни для одной скважины не подобрались мульты: дата помечается и очередь идёт дальше (ночной запуск не встаёт на одной дате)
+        orig = al.AutoLoop._initial_mults
+        seen = []
+
+        def initial(s):
+            seen.append(s.tag)
+            return {} if len(seen) == 1 else orig(s)
+
+        class R(FakeRunner):
+            def run(s, case, restart, label, cancel):
+                t0 = float((case['steps'][0].end - MODEL_START).days) - 1
+                return rsm_for_date(case, t0)
+        al.AutoLoop._initial_mults = initial
+        try:
+            b = al.AutoBatch(self.data, self.work, R(), self.gdis(), self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0, max_iter=6), restart=7)
+            st = b.run()
+        finally:
+            al.AutoLoop._initial_mults = orig
+        self.assertEqual(len(seen), 2, seen)                                                     # вторая дата считалась
+        self.assertEqual(st['status'], 'done', st)
+        self.assertEqual([x['status'] for x in st['dates']], ['failed', 'done'])
+        self.assertIn('нет скважин', st['dates'][0]['message'])
+
     def test_dates_in_order_one_run_at_a_time_and_resume(self):
         calls = []
 

@@ -206,6 +206,7 @@ class AutoLoop:
             for w, m in mults.items():
                 hist.setdefault(w, [])
             if not mults:
+                self.state['no_mults'] = True
                 self._push(status='failed', stop_reason='нет скважин, для которых удалось подобрать мульты', message=str(self.state.get('skipped', '')))
                 return self.state
             for k in range(1, self.st.max_iter + 1):
@@ -451,10 +452,13 @@ class AutoBatch:
                 item['status'] = 'done' if st['status'] == 'done' else 'failed'
                 item['message'] = st.get('stop_reason', '')
                 self._push()
+                if item['status'] == 'failed' and st.get('no_mults'):
+                    continue                                    # на дате нечего подбирать: помечена, очередь идёт дальше
                 if item['status'] == 'failed':
                     self._push(status='failed', stop_reason=f'дата {item["date"]}: {item["message"]}', message='очередь остановлена на ошибке: после исправления запуск продолжит с этой даты')
                     return self.state
-            self._push(status='done', stop_reason='очередь выполнена', message='готово')
+            nof = len([x for x in self.state['dates'] if x['status'] == 'failed'])
+            self._push(status='done', stop_reason='очередь выполнена' + (f'; дат без подобранных мультов: {nof}' if nof else ''), message='готово')
         except Cancelled:
             self._push(status='cancelled', stop_reason='остановлено инженером', message='остановлено: запуск продолжит с первой невыполненной даты')
         except Exception as e:
