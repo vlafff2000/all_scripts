@@ -141,6 +141,8 @@ export default function Adapt() {
             onChange={e => setSettings(s => ({ ...s, max_age_years: num(e.target.value) ?? null }))} /></label>
           <label className="check"><input type="checkbox" checked={set.date_fix !== false} onChange={e => setSettings(s => ({ ...s, date_fix: e.target.checked }))} />
             Подбирать дату ГДИ по давлению</label>
+          {set.date_fix !== false && <label className="grow">Файл давления объекта (если нет в Атласе)<input value={set.date_fix_ref ?? ''} placeholder="Kasim.gasatlas.zip, object_pressure.parquet, .csv или .xlsx"
+            onChange={e => setSettings(s => ({ ...s, date_fix_ref: e.target.value }))} /></label>}
         </div>
         <p className="muted small">Подбор даты — временная мера на случай ошибок ручного ввода даты в БД ГДИ: если Pпл ГДИ расходится с давлением модели и средним по объекту, программа ищет в окне ±{set.date_fix_window ?? 120} сут дату, где давление совпадает. Каждое исправление показано ниже с причиной; отключить можно целиком или оставить исходную дату по скважине.</p>
         <p className="muted small">По каждой скважине проверяется качество всех исследований; берётся самое свежее из прошедших проверку. Модель задаёт, какие скважины вообще можно адаптировать.</p>

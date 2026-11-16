@@ -94,6 +94,45 @@ class TestFixDatesWithoutScenario(unittest.TestCase):
         self.assertEqual(fixes, [])                                # отключено полностью
 
 
+class TestReferenceFile(unittest.TestCase):
+    def test_reads_object_pressure_from_backup_zip_and_converts_kgf_to_bar(self):
+        try:
+            import pyarrow  # noqa: F401
+        except ImportError:
+            self.skipTest('нет pyarrow в окружении (на рабочих ПК он есть)')
+        import io
+        import tempfile
+        import zipfile
+        import pandas as pd
+        from schedule_pxg import atlas_data
+        df = pd.DataFrame({'date': ['2026-01-17', '2026-01-17', '2026-02-17'], 'pressure': [60.0, 62.0, 40.0], 'horizon': ['a', 'b', 'a']})
+        buf = io.BytesIO()
+        df.to_parquet(buf)
+        with tempfile.TemporaryDirectory() as d:
+            z = os.path.join(d, 'Kasim.gasatlas.zip')
+            with zipfile.ZipFile(z, 'w') as zf:
+                zf.writestr('data/object_pressure.parquet', buf.getvalue())
+            ser = atlas_data.object_pressure_file(z)
+        self.assertEqual([x[0].date() for x in ser], [datetime(2026, 1, 17).date(), datetime(2026, 2, 17).date()])
+        self.assertAlmostEqual(ser[0][1], 61.0 * 0.980665)          # среднее за день, кгс/см² -> бар
+
+    def test_reference_file_setting_overrides_atlas(self):
+        import tempfile
+        import pandas as pd
+        from unittest import mock
+        from schedule_pxg import adapt_view
+        from schedule_pxg.gdi_adapt.selection import Settings
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, 'obj.csv')
+            pd.DataFrame({'Дата': [(D0 + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(0, 90, 7)],
+                          'Давление_бар': [90.0 - 0.45 * i for i in range(0, 90, 7)]}).to_csv(f, index=False)
+            p = mock.Mock(results={}, histmodel={})
+            a = gdi('83', datetime(2026, 2, 17), 82.8)
+            with mock.patch.object(adapt_view.atlas_data, 'object_pressure', side_effect=AssertionError('Атлас не должен читаться')):
+                studies, fixes, notes = adapt_view.fix_dates(p, '', [a], Settings(date_fix_ref=f), [])
+        self.assertEqual(fixes[0].status, 'fixed')
+
+
 class TestApply(unittest.TestCase):
     def test_apply_changes_date_and_notes_and_keep_option(self):
         a = gdi('187', datetime(2026, 2, 17), 82.8)

@@ -244,7 +244,7 @@ export interface AdaptConfig {
   [k: string]: unknown
 }
 export interface AdaptSettings { p_units: string; q_units: string; min_status: string; max_age_years: number | null; from_date: string | null
-  date_fix: boolean; date_fix_window: number; date_fix_tol: number; date_keep: string[] }
+  date_fix: boolean; date_fix_window: number; date_fix_tol: number; date_fix_ref: string; date_keep: string[] }
 export interface AdaptState {
   config: AdaptConfig; settings: AdaptSettings; p_units: string[]; q_units: string[]
   db: string; sheet: string; cols: Record<string, string>; saved_settings: Partial<AdaptSettings>; saved_config: Partial<AdaptConfig>
