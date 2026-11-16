@@ -58,7 +58,7 @@ class GDI:
         return f'ГДИ скв. {self.wname} от {self.date:%d.%m.%Y}, режимов: {self.n_points}'
 
 
-def fit_ab_dp2(q_m3d, dp2, ab_q_units: str = '10^3 m3/day') -> Tuple[float, float]:
+def fit_ab_dp2(q_m3d, dp2, ab_q_units: str = '10^3 m3/day', nonneg_b: bool = False) -> Tuple[float, float]:
     """МНК: dP^2 = A*Q + B*Q^2 (без свободного члена) по готовым dP^2 (бар^2); точки с NaN пропускаются.
     Нужно >= 2 различных дебитов. Общая часть для ГДИ (fit_ab) и для модельной кривой после адаптации."""
     q = np.asarray(q_m3d, dtype=float) / CONVERSION['flow_rate'][ab_q_units]
@@ -68,14 +68,24 @@ def fit_ab_dp2(q_m3d, dp2, ab_q_units: str = '10^3 m3/day') -> Tuple[float, floa
     if len(np.unique(np.round(q, 9))) < 2:
         return float('nan'), float('nan')
     coef, *_ = np.linalg.lstsq(np.vstack((q, q ** 2)).T, dp2, rcond=None)
-    return float(coef[0]), float(coef[1])
+    a, b = float(coef[0]), float(coef[1])
+    if nonneg_b and b < 0:                              # B >= 0: фиксируем B = 0 и пересчитываем A по линейной части
+        b = 0.0
+        a = float(np.sum(q * dp2) / np.sum(q * q))
+    if -A_ZERO_TOL <= a < 0:     # правило инженера: A в пределах (-1e-4, 0) пренебрегаем, меньшее оставляем как есть
+        a = 0.0
+    return a, b
 
 
-B_NEG_TOL = 0.01      # B<0 считается нарушением, если квадратичный член на максимальном дебите отрицателен и больше 1% линейного
+A_ZERO_TOL = 1e-4     # отрицательный A с модулем не больше этого считается нулём (шум)
 
 
-def b_negative(a: float, b: float, q_max_m3d: float, ab_q_units: str = '10^3 m3/day') -> bool:
-    """Коэффициент B физически не может быть отрицательным. Допуск: |B|*Qmax больше B_NEG_TOL*|A| (шум вокруг нуля не в счёт)."""
+B_NEG_TOL = 1e-6      # допуск только на численный шум: вклад B на максимальном дебите меньше 1e-6 от вклада A не считается отрицательным
+
+
+def b_negative(a: float, b: float, q_max_m3d: float = 0.0, ab_q_units: str = '10^3 m3/day') -> bool:
+    """Коэффициент B физически не может быть отрицательным: любое заметное b < 0 - нарушение (решение инженера: допуска 1 % больше нет,
+    остаётся лишь допуск на численный шум около нуля)."""
     if not (np.isfinite(a) and np.isfinite(b)) or b >= 0:
         return False
     qm = float(q_max_m3d) / CONVERSION['flow_rate'][ab_q_units]

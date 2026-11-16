@@ -196,7 +196,7 @@ def compare_with_gdi(model_rows: List[dict], p_res_gdi, bhp_gdi, ab_q_units: str
     dp2_m = wbp ** 2 - wbhp ** 2
     dp2_g = np.asarray(p_res_gdi, float) ** 2 - np.asarray(bhp_gdi, float) ** 2
     q_m = np.array([r['q'] for r in model_rows], float)
-    a_m, b_m = fit_ab_dp2(q_m, dp2_m, ab_q_units) if len(q_m) >= 2 else (float('nan'), float('nan'))
+    a_m, b_m = fit_ab_dp2(q_m, dp2_m, ab_q_units, nonneg_b=True) if len(q_m) >= 2 else (float('nan'), float('nan'))
     return {'dep_model': dep_m, 'dep_gdi': dep_g, 'dp2_model': dp2_m, 'dp2_gdi': dp2_g,
             'err_dep_pct': dpm.rel_err_pct(dep_m, dep_g), 'err_dp2_pct': dpm.rel_err_pct(dp2_m, dp2_g),
             'p_res_gap': dpm.p_res_gap(float(wbp.mean()), p_res_gdi), 'a_model': a_m, 'b_model': b_m}

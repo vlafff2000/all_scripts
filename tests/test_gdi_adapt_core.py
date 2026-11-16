@@ -254,6 +254,22 @@ class TestNegativeB(unittest.TestCase):
         self.assertEqual(qc.status, 'bad')
         self.assertIn(self.REASON, qc.reasons)
 
+    def test_any_negative_b_is_violation_and_tiny_negative_a_is_zero(self):
+        # правило инженера: b < 0 недопустим в любой величине; a в пределах (-1e-4, 0) считается нулём, меньшее оставляем как есть
+        from schedule_pxg.gdi_adapt.gdi import b_negative, fit_ab_dp2
+        self.assertTrue(b_negative(1.0, -1e-4, 1e5))                   # вклад 1e-2 от A: раньше прощалось (до 1 %), теперь нет
+        self.assertFalse(b_negative(1.0, -1e-12, 1e5))                 # численный шум около нуля не в счёт
+        self.assertFalse(b_negative(1.0, 0.0, 1e5))
+        q = np.array([1e4, 2e4, 3e4])                                  # м3/сут: 10, 20, 30 тыс.м3/сут
+        qu = q / 1000.0
+        a, b = fit_ab_dp2(q, -3e-6 * qu + 0.5 * qu ** 2)
+        self.assertEqual(a, 0.0)
+        a3, b3 = fit_ab_dp2(q, 2.0 * qu - 0.01 * qu ** 2, nonneg_b=True)      # модельная кривая: B >= 0, B=0 и A пересчитан
+        self.assertEqual(b3, 0.0)
+        self.assertGreater(a3, 0)
+        a2, _ = fit_ab_dp2(q, -2e-3 * qu + 0.5 * qu ** 2)
+        self.assertAlmostEqual(a2, -2e-3, places=6)
+
     def test_b_from_file_negative_is_bad(self):
         from schedule_pxg.gdi_adapt.quality import assess
         g = self._gdi(b_file=-1e-3)           # данные нормальные, но в файле отрицательный B
