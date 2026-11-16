@@ -167,7 +167,7 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         loop = autoloop.AutoBatch(model, work, runner, group, cfg, pvt, st, restart, journal, snaps, bool(opts.get('accept_formula')))
         entry['batch'] = True
     else:
-        loop = autoloop.AutoLoop(model, work, runner, group, cfg, pvt, st, restart, journal, snapshots=snaps)
+        loop = autoloop.AutoLoop(model, work, runner, group, cfg, pvt, st, restart, journal, snapshots=autoloop.snapshots_for(snaps, group))
         loop.state['skipped_dates'] = skipped
     entry['loop'] = loop
     entry['runner'] = runner

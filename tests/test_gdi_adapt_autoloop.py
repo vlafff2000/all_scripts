@@ -254,6 +254,15 @@ class TestBatch(unittest.TestCase):
         b = al.AutoBatch(self.data, self.work, FakeRunner(), self.gdis(), self.cfg, pvt())
         self.assertEqual(b.restart_for(datetime(2026, 2, 19)), 3508)
 
+    def test_snapshots_for_single_date_uses_well_at_date_keys(self):
+        # комплект хранит снимки под ключами «скважина@дата»; цикл одной даты искал их по имени скважины и падал («нет скважин...»)
+        g = make_gdi()
+        snaps = {'W1@2014-01-14': 'snapW1', 'W2@2013-12-01': 'old'}
+        got = al.snapshots_for(snaps, g)
+        self.assertEqual(got, {'W1': 'snapW1'})                       # W2: снимок на другую дату не подходит
+        self.assertIsNone(al.snapshots_for({'W2@2013-12-01': 'old'}, g))
+        self.assertIsNone(al.snapshots_for(None, g))
+
     def test_formula_accepts_without_model_run(self):
         calls = []
 
