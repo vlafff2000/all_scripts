@@ -201,14 +201,25 @@ def snapshot_from_rsm(series: dict, well: str, t: float, t_name: str = '') -> We
                         wbp=value_at(series[('WBP', well)], t), wgpr=value_at(series[('WGPR', well)], t), wbhp=wbhp)
 
 
+def _value_near(series, t: float, tol: float) -> float:
+    """Значение на отчётном шаге, ближайшем к t (дни от START), если он не дальше tol; иначе NaN."""
+    ts, vs = series
+    if len(ts) == 0:
+        return float('nan')
+    j = int(np.argmin(np.abs(np.asarray(ts, float) - t)))
+    return float(vs[j]) if abs(ts[j] - t) <= tol else float('nan')
+
+
 def model_regimes(series: dict, steps: Sequence[RegimeStep], model_start: datetime) -> Dict[str, List[dict]]:
     """По режимам: {скважина: [{k, q, t, wbhp, wbp, dep}]}; dep = Pпл - Pзаб модели на конце режима, бар (давления абсолютные)."""
     out: Dict[str, List[dict]] = {}
     for st in steps:
         t = (st.end - model_start).total_seconds() / 86400.0
-        tol = 1e-6 if t == int(t) else 3e-5               # дробные сутки (TSTEP): RSM печатает время с округлением
-        bhp = value_at(series[('WBHP', st.well)], t, tol)
-        bp = value_at(series[('WBP', st.well)], t, tol)
+        # дробные сутки (TSTEP): RSM печатает время с 7 значащими цифрами (13076.04 вместо 13076.0417), поэтому берётся ближайший
+        # отчётный шаг в пределах 0.0075 сут (шаги 1 ч и 30 мин отстоят друг от друга не менее чем на 0.02 сут)
+        tol = 1e-6 if t == int(t) else 0.0075
+        bhp = _value_near(series[('WBHP', st.well)], t, tol)
+        bp = _value_near(series[('WBP', st.well)], t, tol)
         out.setdefault(st.well, []).append({'k': st.k, 'q': st.q, 't': t, 'wbhp': bhp, 'wbp': bp, 'dep': bp - bhp})
     return out
 
