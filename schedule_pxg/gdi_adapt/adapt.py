@@ -248,7 +248,7 @@ def adapt_well(gdi: GDI, snap, pvt, cfg) -> AdaptResult:
     dep_status, dep_reason, _ = dpm.verdict(dep_metric, errs_a, dep_thr)
 
     # A, B модели - из её собственной кривой dP^2(Q) после адаптации (та же МНК-процедура, что для ГДИ)
-    a_mod, b_mod = fit_ab_dp2(grid, curve_a, cfg.ab_q_units)
+    a_mod, b_mod = fit_ab_dp2(grid, curve_a, cfg.ab_q_units, nonneg_b=True)
     if b_negative(a_mod, b_mod, float(np.max(grid)), cfg.ab_q_units):
         problems.append('b модели < 0')
 
