@@ -2178,6 +2178,48 @@ def fill_gaps(reports: List[Report], chosen: Dict[Tuple[str, dt.date], str]) -> 
     return out
 
 
+def _empty_value(x: dict) -> bool:
+    """Строка интервала с совсем пустой ячейкой Кг: нет числа, нет текста («-», «заглинизирован», «водонасыщен» — это значения, пустая ячейка — нет)."""
+    txt = x.get("Кг (как в отчёте)")
+    return x.get("Кг") is None and (txt is None or (isinstance(txt, float) and txt != txt) or not str(txt).strip()) and not x.get("Насыщение") and not x.get("Водонасыщенный")
+
+
+def fill_empty_values(reports: List[Report], chosen: Dict[Tuple[str, dt.date], str]) -> int:
+    """Скв. 447, замер 23.10.2023: самый свежий отчёт (15.10.2024) содержит столбец этого замера, но ячейки Кг в нём пустые, а в собственном отчёте
+    замера (23.10.2023) и в отчёте 04.04.2024 стоят 0,50 / 0,55 / 0,35. Пустая ячейка — не интерпретация: значение берётся из другого отчёта того же замера
+    для интервала с теми же границами (±0,15 м); ближайший по дате отчёт — первым. Непустые значения свежего отчёта («-», текст, число) не трогаются.
+    Строка получает пометку и среднюю уверенность; в «Проверку» отчёта — предупреждение. Возвращает число заполненных строк."""
+    byfile = {(r.path or r.file): r for r in reports}
+    n = 0
+    for (well, d), fkey in chosen.items():
+        base = byfile.get(fkey)
+        if base is None:
+            continue
+        empties = [x for x in base.intervals if x["Дата замера"] == d and _empty_value(x)]
+        if not empties:
+            continue
+        others = [rp for rp in reports if rp is not base and rp.well == well and any(x["Дата замера"] == d for x in rp.intervals)]
+        others.sort(key=lambda rp: (abs(((rp.date or dt.date.min) - d).days), (rp.path or rp.file).lower().endswith((".md", ".json")), -(rp.date or dt.date.min).toordinal()))
+        for x in empties:
+            for rp in others:
+                src = next((y for y in rp.intervals if y["Дата замера"] == d and y.get("Пачка") == x.get("Пачка") and abs(y["От, м"] - x["От, м"]) <= 0.15
+                            and abs(y["До, м"] - x["До, м"]) <= 0.15 and not _empty_value(y)), None)
+                if src is None:
+                    continue
+                for k in ("Кг", "Кг мин", "Кг макс", "Кг (как в отчёте)", "Насыщение", "Водонасыщенный", "Нг по отчёту, м", "Нобщ по отчёту, м"):
+                    if k in src:
+                        x[k] = src[k]
+                if x.get("Пористость") is None and src.get("Пористость") is not None:
+                    x["Пористость"], x["Пористость (как в отчёте)"] = src["Пористость"], src.get("Пористость (как в отчёте)", "")
+                x["Уверенность"] = MID
+                x["Основание"] = "; ".join(v for v in (x.get("Основание", ""), "ячейка Кг пуста в отчёте %s (самый свежий): значение из отчёта %s — сверить" % (base.file, rp.file)) if v)
+                base.issue("warn", "empty_value_filled", "Замер %s, интервал %g–%g: ячейка Кг пуста в этом отчёте — значение взято из %s, сверить" % (
+                    d.strftime("%m.%Y"), x["От, м"], x["До, м"], rp.file), x.get("Источник", ""))
+                n += 1
+                break
+    return n
+
+
 def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gis.SheetResult], pd.DataFrame]:
     """Отчёты → `gis.SheetResult` по скважине (замер = дата) и таблица «Интервалы (все)» с отметкой, какой замер вошёл в БД."""
     resolve_dates(reports)
@@ -2185,6 +2227,7 @@ def to_results(reports: List[Report], kg_min: float = 0.0) -> Tuple[Dict[str, gi
     resolve_gvk(reports)
     chosen = pick_measurements(reports)
     _flag_measurement_differences(reports, chosen)
+    fill_empty_values(reports, chosen)
     gaps = fill_gaps(reports, chosen)
     by_well: Dict[str, Dict[dt.date, List[Tuple[Report, dict]]]] = defaultdict(lambda: defaultdict(list))
     allrows = []

@@ -1476,3 +1476,20 @@ def test_water_note_with_space_or_hyphen_is_water():
         gr.read_intervals(rep, t, 2, None, "Скопления газа", "РЕЗУЛЬТАТЫ ГИС")
         rows = [r for r in rep.intervals if (r["От, м"], r["До, м"]) == (803.0, 811.8)]
         assert len(rows) == 3 and all(r["Водонасыщенный"] and r["Кг"] is None and r["Кг (как в отчёте)"] == word for r in rows), word
+
+
+def test_empty_kg_cell_in_latest_report_is_filled_from_other_report_of_same_measurement():
+    """Скв. 447, замер 23.10.2023: в самом свежем отчёте (15.10.2024) столбец этого замера есть, ячейки Кг пустые; в отчёте замера стоят 0,50 / 0,55.
+    Пустая ячейка заполняется значением другого отчёта (с пометкой); «-» и текст свежего отчёта не трогаются."""
+    d = dt.date(2022, 10, 1)
+    own = _mrep("own_231023", dt.date(2023, 10, 23), 0.50)
+    later = _mrep("later_151024", dt.date(2024, 10, 15), 0.0)
+    for x in later.intervals:
+        x["Кг"], x["Кг мин"], x["Кг макс"], x["Кг (как в отчёте)"] = None, None, None, None
+    dash = later.intervals[1]
+    dash["Кг (как в отчёте)"] = "-"             # «-» — значение отчёта, остаётся
+    assert gr.pick_measurements([own, later])[("113", d)] == "later_151024"
+    _res, allrows = gr.to_results([own, later])
+    got = allrows[allrows["В БД"] == "да"].sort_values("От, м")
+    assert list(got["Кг"].iloc[:1]) == [0.50] and got["Кг"].iloc[1] != got["Кг"].iloc[1] and got["Кг (как в отчёте)"].iloc[1] == "-"
+    assert any(i["Код"] == "empty_value_filled" for i in later.issues) and "own_231023" in got["Основание"].iloc[0]
