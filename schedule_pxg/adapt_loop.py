@@ -113,6 +113,21 @@ def _num(x, cast=float, default=None):
         raise ValueError('Не удалось прочитать число «%s».' % x)
 
 
+def _snapshots_for(group, snaps):
+    """Снимки скважин группы одной даты из snapshots.pkl: ключ «скв@дата» (мультидата) или просто «скв»; нет подходящих - None
+    (тогда нужен базовый прогон, а не «снимочный» режим без мультов: иначе цикл падал с «нет скважин, для которых удалось
+    подобрать мульты»)."""
+    if not snaps:
+        return None
+    out = {}
+    for g in group:
+        for key in (f'{g.wname}@{g.date:%Y-%m-%d}', g.wname):
+            if key in snaps:
+                out[g.wname] = snaps[key]
+                break
+    return out or None
+
+
 def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
     """Запускает цикл по выбранным исследованиям одной даты ГДИ. opts - поля KEYS из экрана."""
     auto = defaults(p, folder)
@@ -167,7 +182,7 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         loop = autoloop.AutoBatch(model, work, runner, group, cfg, pvt, st, restart, journal, snaps, bool(opts.get('accept_formula')))
         entry['batch'] = True
     else:
-        loop = autoloop.AutoLoop(model, work, runner, group, cfg, pvt, st, restart, journal, snapshots=snaps)
+        loop = autoloop.AutoLoop(model, work, runner, group, cfg, pvt, st, restart, journal, snapshots=_snapshots_for(group, snaps))
         loop.state['skipped_dates'] = skipped
     entry['loop'] = loop
     entry['runner'] = runner

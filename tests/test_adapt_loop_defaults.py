@@ -45,3 +45,17 @@ def test_start_requires_something_clear_when_nothing_found():
     p = SimpleNamespace(adapt={}, results={})
     with pytest.raises(ValueError, match='tNavigator|модели'):
         adapt_loop.start(p, tempfile.gettempdir(), {}, SimpleNamespace(), None)
+
+
+def test_snapshots_for_single_date_keeps_only_group_wells():
+    # snapshots.pkl хранит ключи «скв@дата» (мультидата): в одиночном режиме снимок берётся по «скв@дата» группы,
+    # а если подходящих нет - None (базовый прогон нужен, а не пустой «снимочный» режим без мультов)
+    group = [SimpleNamespace(wname='92', date=__import__('datetime').datetime(2026, 2, 12)),
+             SimpleNamespace(wname='94', date=__import__('datetime').datetime(2026, 2, 12))]
+    snaps = {'92@2026-02-12': 'S92', '31@2013-12-02': 'S31'}
+    got = adapt_loop._snapshots_for(group, snaps)
+    assert got == {'92': 'S92'}
+    assert adapt_loop._snapshots_for(group, {'31@2013-12-02': 'S31'}) is None
+    assert adapt_loop._snapshots_for(group, None) is None
+    # одиночные ключи (имя скважины без даты) тоже подходят
+    assert adapt_loop._snapshots_for(group, {'94': 'S94'}) == {'94': 'S94'}

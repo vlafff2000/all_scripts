@@ -3,7 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 
@@ -83,6 +83,30 @@ class TestSchedule(unittest.TestCase):
         series = {('WBHP', 'A'): (ts, np.array([80.0, 70.0, 60.0])), ('WBP', 'A'): (ts, np.array([90.0, 90.0, 90.0]))}
         mr = rr.model_regimes(series, steps, ms)
         self.assertEqual([round(r['dep'], 6) for r in mr['A']], [20.0, 30.0])
+
+    def test_model_regimes_reads_every_regime_when_rsm_truncates_time(self):
+        # RSM усекает время до 0.01 сут: ожидаемые концы работы (1 ч работа + 30 мин остановка) 17488.0417, .1042, .1667, .2292, .2917
+        # печатаются как .04, .10, .16, .22, .29 (4-й режим отстоял на 0.0092 и выпадал из допуска 0.0075 - на графике ГДИ у режима не было модельной точки)
+        start = datetime(2026, 2, 12)
+        ms = datetime(1978, 3, 28)
+        t0 = float((start - ms).days)
+        ends = [1.0 + 1.5 * k for k in range(5)]                                  # часы от начала даты
+        steps = [rr.RegimeStep('A', k, 1000.0 * (k + 1), start + timedelta(hours=h)) for k, h in enumerate(ends)]
+        rows = [t0] + [float(int((t0 + h / 24.0) * 100) / 100.0) for h in ends]      # усечение до 0.01
+        shut = [float(int((t0 + (h + 0.5) / 24.0) * 100) / 100.0) for h in ends[:-1]]
+        ts = np.array(sorted(set(rows + shut)))
+        bhp = np.array([0.0 if t in shut else 80.0 - 5.0 * i for i, t in enumerate(ts)])
+        series = {('WBHP', 'A'): (ts, bhp), ('WBP', 'A'): (ts, np.full(len(ts), 90.0))}
+        mr = rr.model_regimes(series, steps, ms)['A']
+        self.assertEqual(len(mr), 5)
+        self.assertFalse(any(np.isnan(r['dep']) for r in mr), [r['dep'] for r in mr])
+        self.assertTrue(all(r['wbhp'] > 0 for r in mr))                           # прочитан конец работы, а не остановка (WBHP = 0)
+
+    def test_p_res_gap_ignores_a_regime_without_model_point(self):
+        rows = [{'k': 0, 'q': 1000.0, 'wbhp': 70.0, 'wbp': 80.0, 'dep': 10.0}, {'k': 1, 'q': 2000.0, 'wbhp': float('nan'), 'wbp': float('nan'), 'dep': float('nan')},
+                {'k': 2, 'q': 3000.0, 'wbhp': 50.0, 'wbp': 80.0, 'dep': 30.0}]
+        c = rr.compare_with_gdi(rows, [85.0, 85.0, 85.0], [75.0, 70.0, 55.0])
+        self.assertAlmostEqual(c['p_res_gap'], -5.0)                              # Pпл модели 80 против 85 ГДИ; пропуск режима не обнуляет разрыв
 
     def test_no_history_rate_is_error(self):
         with self.assertRaises(ValueError):
