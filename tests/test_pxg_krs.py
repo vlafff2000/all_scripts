@@ -273,7 +273,7 @@ def test_acts_written_to_summary_with_fill(tmp_path):
     assert ws.cell(3, 4).value.startswith("КР 2.022")                    # прежние ячейки на месте
 
 
-def make_sprav(path):
+def make_sprav(path, tr=False):
     """Минимальный .docx без python-docx: заголовок и таблица (выделение текста — w:highlight)."""
     import zipfile
     from xml.sax.saxutils import escape
@@ -294,8 +294,10 @@ def make_sprav(path):
              "2 квартал / Cкв№11 / Начата ремонтом / 06.07.26г / Дата окончания / 01.09.2026г / Cкв№12 / Начата ремонтом / 14.01.26г / Дата окончания / 31.08.2026г",
              "Скв13 статус / В план КР", "")
     r2 = row("КР 2.022 ГТ Ликвидация пробки", "1", [("14(Н)", None)], "", "", "3 квартал", "Скв14статус / Утвержден", "")
-    body = ('<w:p>%s</w:p><w:tbl>%s%s%s</w:tbl>' % (
-        run("Справка по выполнению Плана капитального ремонта скважин на Касимовском ПХГ в 2026г."), head, r1, r2))
+    r3 = row("ТР 3.01 Текущий ремонт", "2", [("15(П)", "green"), ("16(Н)", "green")], "2", [("15(П)", "green")],
+             "Скв 15-25.05.2026-28.05.2026г / Скв 16-22.05.2026-25.05.2026г", "", "") if tr else ""
+    body = ('<w:p>%s</w:p><w:tbl>%s%s%s%s</w:tbl>' % (
+        run("Справка по выполнению Плана капитального ремонта скважин на Касимовском ПХГ в 2026г."), head, r1, r2, r3))
     xml = ('<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
            '<w:body>%s</w:body></w:document>' % body)
     with zipfile.ZipFile(path, "w") as z:
@@ -318,6 +320,19 @@ def test_sprav_plan_db(tmp_path):
     prev.loc[prev["Скважина"] == 13, "Ремонт будет"] = "Да"                                           # ручное значение главнее
     merged = krs_plan.merge_manual(plan, prev)
     assert merged.set_index("Скважина").loc[13, "Ремонт будет"] == "Да"
+
+
+def test_sprav_tr_separate_sheet_and_well_types(tmp_path):
+    from pxg_core import krs_plan
+    f = tmp_path / "s.docx"
+    make_sprav(str(f), tr=True)
+    plan, _ = krs_plan.parse_sprav(str(f))
+    kr, tr = krs_plan.split_tr(plan)
+    assert set(kr["Скважина"]) == {11, 12, 13, 14} and set(tr["Скважина"]) == {15, 16}
+    t = tr.set_index("Скважина")
+    assert t.loc[15, "Тип скважины"] == "поглотительная" and t.loc[16, "Тип скважины"] == "наблюдательная"
+    assert t.loc[15, "Дата начала"] == "25.05.2026" and t.loc[15, "Дата окончания"] == "28.05.2026"
+    assert not set(krs_plan.works_from_plan(plan)["Скважина"]) & {15, 16}        # ТР — не капремонт
 
 
 def test_sprav_tr_dates_pair_with_wells():

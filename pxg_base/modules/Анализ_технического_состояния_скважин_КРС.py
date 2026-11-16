@@ -125,7 +125,9 @@ def main(argv=None):
         data.revisions.sort_values(["Скважина", "Сезон", "Источник"]).to_excel(xw, sheet_name="Ревизии КРУ", index=False)
         data.gdi.to_excel(xw, sheet_name="Спец ГДИ", index=False)
         if plan is not None:
-            plan.to_excel(xw, sheet_name="План КР", index=False)
+            kr_plan, tr_plan = krs_plan.split_tr(plan)
+            kr_plan.to_excel(xw, sheet_name="План КР", index=False)
+            tr_plan.to_excel(xw, sheet_name="ТР", index=False)
         prio.sort_values(["Приоритет итог", "Скважина"], na_position="last")[prio_cols].to_excel(xw, sheet_name="Приоритет", index=False)
         calc.to_excel(xw, sheet_name="Потребность", index=False)
         for name, df in stats.items():
