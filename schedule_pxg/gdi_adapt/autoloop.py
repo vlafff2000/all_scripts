@@ -288,6 +288,20 @@ def _f(x) -> Optional[float]:
     return x if math.isfinite(x) else None
 
 
+def snapshots_for(snaps: Optional[dict], gdis: Sequence[GDI]) -> Optional[dict]:
+    """Снимки комплекта для набора ГДИ одной даты: в комплекте ключи «скважина@ГГГГ-ММ-ДД» (одна скважина на много дат); для цикла
+    одной даты нужен словарь по имени скважины. Нет снимка на дату - скважины в словаре нет; пусто - None (базовый прогон нужен)."""
+    if not snaps:
+        return None
+    out = {}
+    for g in gdis:
+        key = f'{g.wname}@{g.date:%Y-%m-%d}'
+        snap = snaps.get(key) or snaps.get(g.wname)
+        if snap is not None:
+            out[g.wname] = snap
+    return out or None
+
+
 def group_by_date(gdis: Sequence[GDI]) -> Dict[datetime, List[GDI]]:
     out: Dict[datetime, List[GDI]] = {}
     for g in gdis:

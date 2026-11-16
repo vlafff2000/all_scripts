@@ -3,7 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 
@@ -75,14 +75,25 @@ class TestSchedule(unittest.TestCase):
         self.assertIn('200000.0', tail)
 
     def test_model_regimes_reads_fractional_days(self):
-        # RSM пишет время с округлением (0.041667 вместо 1/24): давление на конце часа работы читается
+        # реальный RSM (tNavigator 22.3): время с двумя знаками, округлено вниз: ожидаемые 0.0417, 0.1042, 0.1667, 0.2292, 0.2917 сут
+        # печатаются как .04, .10, .16, .22, .29, остановки (.06, .12, .18, .25) стоят между ними
         ms = datetime(2014, 1, 1)
-        steps = [rr.RegimeStep('A', 0, 1.0, datetime(2014, 1, 14, 1, 0)), rr.RegimeStep('A', 1, 2.0, datetime(2014, 1, 14, 2, 30))]
+        ends = [(0, 60), (1, 150), (2, 240), (3, 330), (4, 420)]
+        steps = [rr.RegimeStep('A', k, float(k), datetime(2014, 1, 14) + timedelta(minutes=m)) for k, m in ends]
         t0 = 13.0
-        ts = np.array([t0, t0 + 0.04, t0 + 0.10])       # RSM пишет 7 значащих цифр: 13.0417 -> 13.04, 13.1042 -> 13.10
-        series = {('WBHP', 'A'): (ts, np.array([80.0, 70.0, 60.0])), ('WBP', 'A'): (ts, np.array([90.0, 90.0, 90.0]))}
+        offs = [0.0, .04, .06, .10, .12, .16, .18, .22, .25, .29, 1.0]
+        ts = np.array([t0 + o for o in offs])
+        wbhp = np.array([80, 70, 0, 71, 0, 72, 0, 73, 0, 74, 80], float)
+        series = {('WBHP', 'A'): (ts, wbhp), ('WBP', 'A'): (ts, np.full(len(ts), 90.0))}
         mr = rr.model_regimes(series, steps, ms)
-        self.assertEqual([round(r['dep'], 6) for r in mr['A']], [20.0, 30.0])
+        self.assertEqual([round(r['dep'], 6) for r in mr['A']], [20.0, 19.0, 18.0, 17.0, 16.0])
+
+    def test_p_res_gap_ignores_a_regime_without_model_point(self):
+        # режим без модельной точки (NaN) не должен обнулять разрыв Pпл по всей скважине
+        rows = [{'k': 0, 'q': 1e5, 't': 1.0, 'wbhp': 70.0, 'wbp': 90.0, 'dep': 20.0},
+                {'k': 1, 'q': 2e5, 't': 2.0, 'wbhp': float('nan'), 'wbp': float('nan'), 'dep': float('nan')}]
+        c = rr.compare_with_gdi(rows, [92.0, 92.0], [70.0, 68.0])
+        self.assertAlmostEqual(c['p_res_gap'], -2.0)
 
     def test_no_history_rate_is_error(self):
         with self.assertRaises(ValueError):
