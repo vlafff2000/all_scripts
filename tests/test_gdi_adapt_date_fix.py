@@ -73,6 +73,27 @@ class TestObjectOnly(unittest.TestCase):
         self.assertEqual((out2[0].date, fx2), (a.date, []))
 
 
+class TestFixDatesWithoutScenario(unittest.TestCase):
+    def test_object_pressure_alone_is_enough_and_missing_data_is_reported(self):
+        from unittest import mock
+        from schedule_pxg import adapt_view
+        from schedule_pxg.gdi_adapt.selection import Settings
+        obj = [(D0 + timedelta(days=i), 90.0 - 0.45 * i) for i in range(0, 90, 7)]
+        p = mock.Mock(results={}, histmodel={})
+        a = gdi('83', datetime(2026, 2, 17), 82.8)
+        with mock.patch.object(adapt_view.atlas_data, 'object_pressure', return_value=obj):
+            studies, fixes, notes = adapt_view.fix_dates(p, '', [a], Settings(), [])
+        self.assertEqual(fixes[0].status, 'fixed')                 # сценария и результатов модели нет, объекта достаточно
+        self.assertEqual(studies[0].date_orig, a.date)
+        with mock.patch.object(adapt_view.atlas_data, 'object_pressure', return_value=[]):
+            studies, fixes, notes = adapt_view.fix_dates(p, '', [a], Settings(), [])
+        self.assertEqual((studies[0].date, fixes), (a.date, []))
+        self.assertTrue(any('не выполнен' in n for n in notes))   # причина видна инженеру
+        with mock.patch.object(adapt_view.atlas_data, 'object_pressure', return_value=obj):
+            _, fixes, _ = adapt_view.fix_dates(p, '', [a], Settings(date_fix=False), [])
+        self.assertEqual(fixes, [])                                # отключено полностью
+
+
 class TestApply(unittest.TestCase):
     def test_apply_changes_date_and_notes_and_keep_option(self):
         a = gdi('187', datetime(2026, 2, 17), 82.8)
