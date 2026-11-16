@@ -40,6 +40,8 @@ def _merge_settings(raw: Optional[dict]) -> selection.Settings:
         clean["max_age_years"] = float(clean["max_age_years"])
     if "date_fix" in clean:
         clean["date_fix"] = bool(clean["date_fix"])
+    if "date_fix_ref" in clean:
+        clean["date_fix_ref"] = str(clean["date_fix_ref"]).strip().strip('"')
     if "date_keep" in clean:
         clean["date_keep"] = [str(x) for x in (clean["date_keep"] or [])]
     st = selection.Settings(**clean)
@@ -103,9 +105,14 @@ def fix_dates(p: Project, scenario: str, studies: list, st: selection.Settings, 
     saved = p.histmodel or {}
     obj: list = []
     try:
-        obj = atlas_data.object_pressure(str(saved.get("atlas_storage") or ""), str(saved.get("atlas_project") or ""))
+        if str(st.date_fix_ref or "").strip():           # файл, заданный инженером, главнее проекта Атласа
+            obj = atlas_data.object_pressure_file(st.date_fix_ref)
+        else:
+            obj = atlas_data.object_pressure(str(saved.get("atlas_storage") or ""), str(saved.get("atlas_project") or ""))
+            if not obj:
+                notes = notes + ["В проекте Атласа нет среднего давления по объекту: укажите файл давления объекта в настройках подбора даты"]
     except (OSError, ValueError, KeyError, ImportError) as e:
-        notes = notes + ["Давление объекта из Атласа не прочитано (%s)" % e]
+        notes = notes + ["Давление объекта не прочитано (%s)" % e]
     models: Dict[str, list] = {}
     res_path = (p.results or {}).get(scenario, "")
     if res_path:

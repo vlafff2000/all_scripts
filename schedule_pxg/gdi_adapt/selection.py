@@ -70,6 +70,7 @@ class Settings:
     date_fix: bool = True                  # подбор даты ГДИ по давлению (костыль на ошибки ручного ввода даты; можно отключить)
     date_fix_window: int = 120             # окно поиска даты, ±суток
     date_fix_tol: float = 3.0              # допуск расхождения Pпл ГДИ и давления модели, бар
+    date_fix_ref: str = ""                # файл со средним давлением по объекту (.gasatlas.zip/.parquet/.csv/.xlsx); пусто - из проекта Атласа
     date_keep: List[str] = field(default_factory=list)   # «скважина@ГГГГ-ММ-ДД» исходных дат, которые инженер велел не трогать
 
     def validate(self) -> None:

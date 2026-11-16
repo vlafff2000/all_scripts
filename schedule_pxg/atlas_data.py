@@ -103,3 +103,41 @@ def object_pressure(storage: str = "", project_id: str = "") -> list:
         return []
     df = df.dropna(subset=["Дата", "Давление_бар"]).sort_values("Дата")
     return [(pd.Timestamp(d).to_pydatetime(), float(v)) for d, v in zip(df["Дата"], df["Давление_бар"])]
+
+
+def object_pressure_file(path: str) -> list:
+    """Среднее давление по объекту из файла: резервная копия Атласа (.gasatlas.zip с data/object_pressure.parquet), .parquet, .csv или .xlsx.
+    Столбцы: date/Дата и pressure (кгс/см²; переводится в бар) либо Давление_бар (уже бар). Несколько значений за день усредняются.
+    Возвращает [(дата, бар)] по возрастанию даты."""
+    import io
+    import os
+    import zipfile
+    path = str(path or "").strip().strip('"')
+    if not os.path.isfile(path):
+        raise ValueError("Не нашёл файл давления объекта «%s»" % path)
+    low = path.lower()
+    if low.endswith(".zip"):
+        with zipfile.ZipFile(path) as z:
+            names = [n for n in z.namelist() if n.replace("\\", "/").endswith("object_pressure.parquet")]
+            if not names:
+                raise ValueError("В архиве нет data/object_pressure.parquet")
+            df = pd.read_parquet(io.BytesIO(z.read(names[0])))
+    elif low.endswith(".parquet"):
+        df = pd.read_parquet(path)
+    elif low.endswith(".csv"):
+        df = pd.read_csv(path, sep=None, engine="python")
+    else:
+        df = pd.read_excel(path)
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    dcol = cols.get("date") or cols.get("дата")
+    if dcol is None:
+        raise ValueError("В файле давления объекта нет столбца даты (date/Дата)")
+    if cols.get("давление_бар") is not None:
+        vals, k = pd.to_numeric(df[cols["давление_бар"]], errors="coerce"), 1.0
+    elif cols.get("pressure") is not None:
+        vals, k = pd.to_numeric(df[cols["pressure"]], errors="coerce"), 0.980665      # кгс/см² -> бар
+    else:
+        raise ValueError("В файле давления объекта нет столбца pressure (кгс/см²) или Давление_бар")
+    d = pd.DataFrame({"d": pd.to_datetime(df[dcol], errors="coerce").dt.normalize(), "p": vals * k}).dropna()
+    d = d.groupby("d", as_index=False)["p"].mean().sort_values("d")
+    return [(pd.Timestamp(x).to_pydatetime(), float(v)) for x, v in zip(d["d"], d["p"])]
