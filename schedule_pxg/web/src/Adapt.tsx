@@ -139,7 +139,10 @@ export default function Adapt() {
             <option value="fair">хорошее и удовлетворительное</option><option value="good">только хорошее</option></select></label>
           <label>Не старше, лет<input style={{ width: 90 }} value={set.max_age_years ?? ''} placeholder="без ограничения"
             onChange={e => setSettings(s => ({ ...s, max_age_years: num(e.target.value) ?? null }))} /></label>
+          <label className="check"><input type="checkbox" checked={set.date_fix !== false} onChange={e => setSettings(s => ({ ...s, date_fix: e.target.checked }))} />
+            Подбирать дату ГДИ по давлению</label>
         </div>
+        <p className="muted small">Подбор даты — временная мера на случай ошибок ручного ввода даты в БД ГДИ: если Pпл ГДИ расходится с давлением модели и средним по объекту, программа ищет в окне ±{set.date_fix_window ?? 120} сут дату, где давление совпадает. Каждое исправление показано ниже с причиной; отключить можно целиком или оставить исходную дату по скважине.</p>
         <p className="muted small">По каждой скважине проверяется качество всех исследований; берётся самое свежее из прошедших проверку. Модель задаёт, какие скважины вообще можно адаптировать.</p>
       </section>
 
@@ -175,6 +178,14 @@ export default function Adapt() {
         <p className="lead">Ручных решений: <b>{sel.counts.manual}</b>{sel.counts.manual > 0 && <> · <button onClick={resetDecisions} disabled={busy}>Сбросить все ручные решения</button></>}</p>
         <p className="muted small">Программа лишь советует: замечания по качеству показаны в таблице исследований. Окончательное решение по каждому исследованию за инженером.</p>
         {sel.notes.map((n, i) => <p key={i} className="muted small">{n}</p>)}
+        {!!sel.date_fixes?.length && <div className="scroll">
+          <p className="lead">Проверка дат ГДИ по давлению: исправлено <b>{sel.counts.date_fixed ?? 0}</b>, остальные требуют вашего взгляда. Источник даты надо поправить в БД ГДИ.</p>
+          <table className="data-grid dense"><thead><tr><th>Скважина</th><th>Дата в БД</th><th>Решение</th><th>Новая дата</th><th>Сдвиг, сут</th><th>Pпл ГДИ, бар</th><th>Pпл модели на дату, бар</th><th>Причина</th><th></th></tr></thead>
+            <tbody>{sel.date_fixes.map(f => <tr key={f.well + f.date} className={f.status === 'fixed' ? '' : 'warnrow'}>
+              <td>{f.well}</td><td>{f.date}</td><td>{f.status === 'fixed' ? 'исправлена' : f.status === 'ambiguous' ? 'неоднозначно' : 'не найдена'}</td>
+              <td>{f.new_date || '—'}</td><td>{f.new_date ? f.shift_days : '—'}</td><td>{f.p_gdi}</td><td>{f.p_model ?? '—'}</td><td className="muted small">{f.reason}</td>
+              <td>{f.status === 'fixed' && <button disabled={busy} onClick={() => { const keep = [...(set.date_keep || []), `${f.well}@${f.date}`]; setSettings(s => ({ ...s, date_keep: keep })); guard(async () => { const r = await adaptSelect({ ...req(), settings: { ...set, date_keep: keep } }); setSel(r); setCols(r.cols) }) }}>Оставить исходную</button>}</td>
+            </tr>)}</tbody></table></div>}
         <div className="row">
           <label>Показать<select value={filter} onChange={e => setFilter(e.target.value)}>
             <option value="all">все</option><option value="on">включённые</option><option value="off">выключенные</option>

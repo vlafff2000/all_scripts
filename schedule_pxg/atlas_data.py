@@ -89,3 +89,17 @@ def base_model_info(storage: str = "", project_id: str = "") -> Tuple[str, str]:
 
 def base_model(storage: str = "", project_id: str = "") -> str:
     return base_model_info(storage, project_id)[0]
+
+
+def object_pressure(storage: str = "", project_id: str = "") -> list:
+    """Среднее пластовое давление по объекту из проекта Атласа: [(дата, бар)] по возрастанию даты; нет данных — []."""
+    from gsp_maps import atlas_source
+    found, root = projects(storage)
+    if not found:
+        return []
+    pid = project_id if any(p["id"] == project_id for p in found) else atlas_source.default_project(found) or found[0]["id"]
+    df, _warn = atlas_source.AtlasData(atlas_source.storage_root(storage), pid).pressure(False)
+    if df is None or df.empty or "Давление_бар" not in df:
+        return []
+    df = df.dropna(subset=["Дата", "Давление_бар"]).sort_values("Дата")
+    return [(pd.Timestamp(d).to_pydatetime(), float(v)) for d, v in zip(df["Дата"], df["Давление_бар"])]

@@ -243,7 +243,8 @@ export interface AdaptConfig {
   well_bounds?: Record<string, { pi_mult_bounds?: [number, number]; dfac_bounds?: [number, number] }> | null
   [k: string]: unknown
 }
-export interface AdaptSettings { p_units: string; q_units: string; min_status: string; max_age_years: number | null; from_date: string | null }
+export interface AdaptSettings { p_units: string; q_units: string; min_status: string; max_age_years: number | null; from_date: string | null
+  date_fix: boolean; date_fix_window: number; date_fix_tol: number; date_keep: string[] }
 export interface AdaptState {
   config: AdaptConfig; settings: AdaptSettings; p_units: string[]; q_units: string[]
   db: string; sheet: string; cols: Record<string, string>; saved_settings: Partial<AdaptSettings>; saved_config: Partial<AdaptConfig>
@@ -259,9 +260,11 @@ export interface AdaptStudy {
   well: string; model: string; date: string; key: string; status: string; reasons: string; warnings: string; n_regimes: number
   a: number | null; b: number | null; auto: boolean; manual: boolean | null; use: boolean
 }
+/** Проверка даты ГДИ по давлению: fixed - дата исправлена, ambiguous - подходящих дат несколько, none - подходящей даты в окне нет. */
+export interface AdaptDateFix { well: string; date: string; status: string; new_date: string; shift_days: number; p_gdi: number; p_model: number | null; reason: string }
 export interface AdaptSelection {
-  rows: AdaptRow[]; model_only: string[]; notes: string[]; cols: Record<string, string>; studies: AdaptStudy[]
-  counts: { wells_db: number; included: number; no_model: number; all_bad: number; old: number; model_only: number; manual: number }
+  rows: AdaptRow[]; model_only: string[]; notes: string[]; cols: Record<string, string>; studies: AdaptStudy[]; date_fixes?: AdaptDateFix[]
+  counts: { wells_db: number; included: number; no_model: number; all_bad: number; old: number; model_only: number; manual: number; date_fixed?: number }
 }
 export interface AdaptRequest {
   db: string; sheet?: string; cols?: Record<string, string>; settings: Partial<AdaptSettings>; config: Partial<AdaptConfig>

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -44,6 +44,7 @@ class GDI:
     n_dropped: int = 0           # режимов отброшено при загрузке (Pзаб >= Pпл или Q <= 0)
     multi: bool = False          # у скважины несколько дат в одном прогоне: ключ включает дату
     source: str = 'gdi'          # 'gdi' - реальное исследование; 'average' - синтетическое по средней скважине
+    date_orig: Optional[datetime] = None   # дата в БД ГДИ, если её исправил подбор по давлению (gdi_adapt/date_fix.py)
 
     @property
     def key(self) -> str:
