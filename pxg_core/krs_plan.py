@@ -24,7 +24,7 @@ STATE_DONE, STATE_PROGRESS, STATE_CANCEL, STATE_PLAN = "Выполнено", "В
 COLOR_STATE = {"green": STATE_DONE, "yellow": STATE_PROGRESS, "red": STATE_CANCEL}      # значения w:highlight в Word
 COLOR_NAME = {"green": "зелёный", "yellow": "жёлтый", "red": "красный"}
 APPROVED = "Утвержден"
-WELL_TYPES = {"Э": "эксплуатационная", "Н": "наблюдательная", "П": "поглощающая"}
+WELL_TYPES = {"Э": "эксплуатационная", "Н": "наблюдательная", "П": "поглотительная"}
 
 CODE_START = re.compile(r"(?:КР|ИС|ТР)\s*\d+(?:\.\d+)?")
 WELL_TOKEN = re.compile(r"(?<![\d.])(\d{1,4})(?:\s*\(\s*([А-ЯЭ])\s*\))?(?![\d.])")
@@ -173,7 +173,7 @@ def parse_sprav(path: str) -> Tuple[pd.DataFrame, List[Tuple[str, str]]]:
             if len(cells) < 6 or not re.fullmatch(r"\d+", cells[1].text.strip() or "x"):
                 continue                      # шапка и чужие строки
             codes, names = split_codes(cells[0].text)
-            kind = (codes[0].split(" ")[0] if codes else "")
+            kind = (codes[0].split(" ")[0] if codes else ("ТР" if "текущ" in cells[0].text.lower() else ""))
             quarter, dates, _ = parse_notes(cells[5].text)
             extra = " / ".join(c.text for c in cells[6:])
             status = parse_status(extra)
@@ -212,6 +212,12 @@ def parse_sprav(path: str) -> Tuple[pd.DataFrame, List[Tuple[str, str]]]:
     return plan, notes
 
 
+def split_tr(plan: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """(КР и ИС, текущий ремонт ТР): ТР — отдельный лист книги, в таблицу 7.1 и в БД капремонтов не идёт."""
+    tr = plan["Вид"].eq("ТР")
+    return plan[~tr].reset_index(drop=True), plan[tr].reset_index(drop=True)
+
+
 def merge_manual(plan: pd.DataFrame, prev: Optional[pd.DataFrame]) -> pd.DataFrame:
     """Ручные значения «Ремонт будет» и «В таблицу 7.1» из прежней БД главнее пересчёта (скважина+год+шифры)."""
     if prev is None or prev.empty or plan.empty:
@@ -233,7 +239,7 @@ def merge_manual(plan: pd.DataFrame, prev: Optional[pd.DataFrame]) -> pd.DataFra
 
 def works_from_plan(plan: pd.DataFrame) -> pd.DataFrame:
     """Выполненные ремонты (с датой окончания или в столбце «выполнено») → формат актов для БД «Ремонты» и сводной таблицы."""
-    done = plan[(plan["Состояние"] == STATE_DONE) & plan["Год"].notna()]
+    done = plan[(plan["Состояние"] == STATE_DONE) & plan["Год"].notna() & plan["Вид"].ne("ТР")]
     rows = []
     for _, r in done.iterrows():
         codes = [c for c in str(r["Коды работ"]).split("; ") if c]
