@@ -106,7 +106,7 @@ class TestLoop(unittest.TestCase):
                            journal=MultJournal(os.path.join(self.tmp.name, 'j.json')))
 
     def test_converges_to_true_mult_and_writes_journal(self):
-        lp = self.loop(threshold_pct=2.0, max_iter=8)
+        lp = self.loop(threshold_pct=2.0, max_iter=8, metric='regimes')
         st = lp.run()
         self.assertEqual(st['status'], 'done', st)
         self.assertEqual(st['stop_reason'], 'все скважины в пределах порога')
@@ -119,6 +119,15 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(lp.runner.calls[0][1], 7)                                               # шаг рестарта передан
         self.assertAlmostEqual(lp.journal.total('W1'), TRUE_M['W1'], delta=0.15)                # журнал: лучший итог
         self.assertTrue(os.path.exists(os.path.join(self.tmp.name, 'work', 'loop.json')))
+
+    def test_default_target_is_indicator_curve_dp2(self):
+        # цель адаптации по умолчанию — индикаторная кривая ΔP², а не депрессия; шаг мультов тоже по ΔP²
+        self.assertEqual(al.LoopSettings().metric, 'dp2')
+        lp = self.loop(threshold_pct=2.0, max_iter=3)
+        st = lp.run()
+        w = st['iterations'][-1]['wells']['W1']
+        self.assertEqual(st['metric'], 'dp2')
+        self.assertEqual(w['err'], w['err_dp2'])
 
     def test_iteration_limit_and_rollback(self):
         lp = self.loop(threshold_pct=0.0001, max_iter=2, min_gain_pct=-1e9)

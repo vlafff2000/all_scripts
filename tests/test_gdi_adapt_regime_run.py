@@ -95,14 +95,15 @@ class TestSchedule(unittest.TestCase):
         c = rr.compare_with_gdi(rows, [92.0, 92.0], [70.0, 68.0])
         self.assertAlmostEqual(c['p_res_gap'], -2.0)
 
-    def test_dp2_of_model_is_taken_at_gdi_reservoir_pressure(self):
-        # Pпл модели ниже Pпл ГДИ на 12 бар, депрессия та же: ΔP² модели на графике должен совпасть с ГДИ (мульты Pпл не меняют)
+    def test_dp2_of_model_uses_its_own_pressures(self):
+        # ΔP² модели — по её собственным Pпл и Pзаб: при Pпл ниже на 12 бар и той же депрессии кривая ΔP² не совпадает с ГДИ
+        # (цель адаптации — индикаторная кривая, а не депрессия)
         rows = [{'k': 0, 'q': 1e5, 't': 1.0, 'wbhp': 57.0, 'wbp': 60.0, 'dep': 3.0},
                 {'k': 1, 'q': 2e5, 't': 2.0, 'wbhp': 54.0, 'wbp': 60.0, 'dep': 6.0}]
         c = rr.compare_with_gdi(rows, [72.0, 72.0], [69.0, 66.0])
-        self.assertAlmostEqual(c['err_dp2_pct'], 0.0, places=6)
-        self.assertAlmostEqual(c['p_res_gap'], -12.0)          # разрыв Pпл остаётся виден
-        np.testing.assert_allclose(c['dp2_model'], c['dp2_gdi'])
+        self.assertAlmostEqual(c['err_dep_pct'], 0.0, places=6)
+        self.assertGreater(c['err_dp2_pct'], 10.0)
+        np.testing.assert_allclose(c['dp2_model'], [60.0 ** 2 - 57.0 ** 2, 60.0 ** 2 - 54.0 ** 2])
 
     def test_no_history_rate_is_error(self):
         with self.assertRaises(ValueError):
