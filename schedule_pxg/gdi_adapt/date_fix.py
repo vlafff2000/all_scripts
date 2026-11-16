@@ -67,7 +67,7 @@ def _runs(mask: np.ndarray) -> List[Tuple[int, int]]:
 
 
 def suggest(wname: str, date: dt.datetime, p_gdi: float, model: Optional[Series], obj: Optional[Series] = None,
-            window_days: int = 120, tol_bar: float = 3.0) -> DateFix:
+            window_days: int = 120, tol_bar: float = 3.0, near_days: int = 93, near_ratio: float = 2.0) -> DateFix:
     """Проверка даты одного исследования. model/obj — ряды давления [(дата, бар)]; obj необязателен (среднее по объекту)."""
     fx = DateFix(wname=wname, date=date, status='nodata', p_gdi=float(p_gdi))
     days = np.arange(-int(window_days), int(window_days) + 1)
@@ -95,9 +95,17 @@ def suggest(wname: str, date: dt.datetime, p_gdi: float, model: Optional[Series]
     best = [min(range(a, b + 1), key=lambda k: res[k]) for a, b in runs]
     fx.candidates = [date + dt.timedelta(days=int(days[k])) for k in best]
     if len(runs) > 1:
-        fx.status = 'ambiguous'
-        fx.reason = 'Pпл ГДИ %.1f бар: подходящих дат несколько (%s), дата не менялась' % (p_gdi, ', '.join('%s' % d.strftime('%d.%m.%Y') for d in fx.candidates))
-        return fx
+        # давление проходит один уровень несколько раз (спад зимой, подъём весной): ошибка ввода даты обычно невелика, поэтому берём
+        # ближайшую дату, если она в пределах near_days и остальные не ближе чем в near_ratio раз дальше; иначе решает инженер
+        order = sorted(range(len(best)), key=lambda i: abs(int(days[best[i]])))
+        d0 = abs(int(days[best[order[0]]]))
+        d1 = abs(int(days[best[order[1]]]))
+        if d0 <= near_days and d1 >= near_ratio * max(d0, 1):
+            best = [best[order[0]]]
+        else:
+            fx.status = 'ambiguous'
+            fx.reason = 'Pпл ГДИ %.1f бар: подходящих дат несколько (%s), дата не менялась' % (p_gdi, ', '.join('%s' % d.strftime('%d.%m.%Y') for d in fx.candidates))
+            return fx
     k = best[0]
     fx.status, fx.new_date, fx.p_model_new = 'fixed', fx.candidates[0], float(pm[k])
     fx.reason = 'Pпл ГДИ %.1f бар, модель на дату %.1f; давление модели %.1f на %s (%+d сут)' % (

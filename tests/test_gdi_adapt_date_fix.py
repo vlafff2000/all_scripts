@@ -42,7 +42,7 @@ class TestSuggest(unittest.TestCase):
 
     def test_ambiguous_when_pressure_oscillates(self):
         s = [(D0 + timedelta(days=i), 70.0 + 10.0 * np.sin(i / 8.0)) for i in range(120)]
-        fx = df.suggest('1', datetime(2026, 3, 1), 80.0, s, window_days=60, tol_bar=1.0)
+        fx = df.suggest('1', D0 + timedelta(days=38), 80.0, s, window_days=60, tol_bar=1.0)     # два пика на равном удалении (±25 сут)
         self.assertEqual(fx.status, 'ambiguous')
         self.assertIsNone(fx.new_date)
         self.assertGreater(len(fx.candidates), 1)
@@ -58,6 +58,16 @@ class TestSuggest(unittest.TestCase):
         fx = df.suggest('1', datetime(2026, 2, 17), 82.8, mdl, obj, tol_bar=3.0)
         self.assertEqual(fx.status, 'fixed')
         self.assertTrue(-40 <= fx.shift_days <= -25, fx.shift_days)
+
+
+class TestNearest(unittest.TestCase):
+    def test_nearest_of_two_matches_is_taken_when_other_is_much_farther(self):
+        # спад зимой и подъём весной проходят один уровень: скв. 187 (17.02): январь −31 сут, май +92 сут -> берём январь
+        s = [(D0 + timedelta(days=i), 90.0 - 0.45 * i if i < 70 else 58.5 + 0.28 * (i - 70)) for i in range(0, 190)]
+        fx = df.suggest('187', datetime(2026, 2, 17), 82.8, s, window_days=120, tol_bar=3.0)
+        self.assertEqual(fx.status, 'fixed')
+        self.assertEqual(fx.shift_days, -31)
+        self.assertGreater(len(fx.candidates), 0)
 
 
 class TestObjectOnly(unittest.TestCase):
