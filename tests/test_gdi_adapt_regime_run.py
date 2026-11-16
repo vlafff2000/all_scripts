@@ -88,6 +88,13 @@ class TestSchedule(unittest.TestCase):
         mr = rr.model_regimes(series, steps, ms)
         self.assertEqual([round(r['dep'], 6) for r in mr['A']], [20.0, 19.0, 18.0, 17.0, 16.0])
 
+    def test_p_res_gap_ignores_a_regime_without_model_point(self):
+        # режим без модельной точки (NaN) не должен обнулять разрыв Pпл по всей скважине
+        rows = [{'k': 0, 'q': 1e5, 't': 1.0, 'wbhp': 70.0, 'wbp': 90.0, 'dep': 20.0},
+                {'k': 1, 'q': 2e5, 't': 2.0, 'wbhp': float('nan'), 'wbp': float('nan'), 'dep': float('nan')}]
+        c = rr.compare_with_gdi(rows, [92.0, 92.0], [70.0, 68.0])
+        self.assertAlmostEqual(c['p_res_gap'], -2.0)
+
     def test_no_history_rate_is_error(self):
         with self.assertRaises(ValueError):
             rr.build_test_schedule(SCHED, START, {'Z': [1.0]})
