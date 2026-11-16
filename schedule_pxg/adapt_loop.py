@@ -25,7 +25,7 @@ from .gdi_adapt.selection import chosen_for_kit
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOOPS: Dict[str, dict] = {}
 _ids = itertools.count(1)
-KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula', 'gpu')
+KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula', 'gpu', 'work_min', 'rest_min')
 
 
 def _find_data(path: str) -> str:
@@ -151,7 +151,8 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         if thr is not None:
             well_thr[g.wname] = float(thr)
     st = autoloop.LoopSettings(threshold_pct=_num(opts.get('threshold_pct'), float, 10.0), max_iter=_num(opts.get('max_iter'), int, 6),
-                               metric=str(opts.get('metric') or 'regimes'), well_threshold=well_thr)
+                               metric=str(opts.get('metric') or 'regimes'), well_threshold=well_thr,
+                               work_min=_num(opts.get('work_min'), float, 0.0), rest_min=_num(opts.get('rest_min'), float, 30.0))
     restart = _num(opts.get('restart'), int, None)
     pvt = PVT.from_csv(os.path.join(HERE, 'gdi_adapt', 'pvt_default.csv'), warn=lambda *_: None)
     journal = MultJournal(os.path.join(work, 'mult_journal.json'))
