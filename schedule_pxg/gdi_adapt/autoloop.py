@@ -41,6 +41,8 @@ class LoopSettings:
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки) - стоп по «нет улучшения»
     metric: str = 'regimes'                     # 'regimes' (депрессия по режимам) | 'dp2'
     step_days: int = 1
+    work_min: float = 0.0                       # > 0: режимы ГДИ через TSTEP: минут работы на режиме (0 - режим сутки)
+    rest_min: float = 30.0                      # минут остановки скважины между режимами (при work_min > 0)
 
     def thr(self, w: str) -> float:
         return float(self.well_threshold.get(w, self.threshold_pct))
@@ -154,7 +156,8 @@ class AutoLoop:
     def _iteration(self, k: int, mults: Optional[Dict[str, dict]], label: str) -> dict:
         regimes = {w: [float(x) for x in g.q] for w, g in self.gdis.items()}
         rows = [(w, m['inc'], m.get('d')) for w, m in (mults or {}).items()] or None
-        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days)
+        case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days,
+                             work_min=self.st.work_min, rest_min=self.st.rest_min)
         rsm = self.runner.run(case, self.restart, label, self.cancel)
         series = parse_rsm(rsm)
         msd = case['model_start']

@@ -77,11 +77,15 @@ class RegimeStep:
 
 
 def build_test_schedule(text: str, start: datetime, regimes: Dict[str, Sequence[float]], mults: Optional[list] = None,
-                        step_days: int = 1, extra_lines: Sequence[str] = (), prior_text: str = '') -> Tuple[str, List[RegimeStep], dict]:
+                        step_days: int = 1, extra_lines: Sequence[str] = (), prior_text: str = '', work_min: float = 0.0,
+                        rest_min: float = 30.0, nextstep: float = 0.005) -> Tuple[str, List[RegimeStep], dict]:
     """Расписание тестового прогона. regimes: {скважина: [дебиты режимов, ст. м³/сут]}; mults: [(скважина, приращение WPIMULT, D|None)]
     на дату start; extra_lines - дополнительные ключевые слова на дату start (например COMPDAT для проверки смены интервала).
     Возвращает (текст, шаги режимов, отчёт). Режим k скважины идёт с start+k*step_days по start+(k+1)*step_days;
-    после последнего режима скважины ставится её дебит истории."""
+    после последнего режима скважины ставится её дебит истории.
+    work_min > 0 - режимы как при реальном ГДИ: work_min минут работы на дебите режима (WCONHIST), затем rest_min минут остановки
+    (WELOPEN SHUT), следующий режим; интервалы задаются TSTEP (дни, дробные), давления читаются на конце работы режима.
+    После последнего режима у всех скважин возвращается история."""
     nl = '\r\n' if '\r\n' in text else '\n'
     base = cut_schedule(text, start)
     wells = list(regimes)
@@ -95,6 +99,28 @@ def build_test_schedule(text: str, start: datetime, regimes: Dict[str, Sequence[
         out += _keywords(start, mults, False)
     out += list(extra_lines)
     steps: List[RegimeStep] = []
+    if work_min > 0:
+        work_d, rest_d = f'{work_min / 1440.0:.7f}', f'{rest_min / 1440.0:.7f}'
+        for k in range(kmax):
+            t_end = start + timedelta(minutes=k * (work_min + rest_min) + work_min)
+            rows = []
+            for w in wells:
+                if k < len(regimes[w]):
+                    rows.append(f'{w}\tOPEN\tGRAT\t1*\t1*\t{regimes[w][k]:.1f}\t1*\t/')
+                    steps.append(RegimeStep(w, k, float(regimes[w][k]), t_end))
+            out += ['WCONHIST'] + rows + ['/']
+            if nextstep:
+                out += ['NEXTSTEP', f'{nextstep:g} /']
+            out += ['TSTEP', f'{work_d} /']
+            shut = [w for w in wells if k < len(regimes[w])]
+            if k < kmax - 1:
+                out += ['WELOPEN'] + [f'{w}\tSHUT\t/' for w in shut] + ['/', 'TSTEP', f'{rest_d} /']
+            else:
+                out += ['WELOPEN'] + [f'{w}\tSHUT\t/' for w in shut] + ['/']
+        out += ['WCONHIST'] + [f'{w}\tOPEN\tGRAT\t1*\t1*\t{hist[w]:.1f}\t1*\t/' for w in wells] + ['/']
+        total_d = ((kmax - 1) * (work_min + rest_min) + work_min) / 1440.0
+        out += ['DATES', f'{_fmt(start + timedelta(days=int(total_d) + 1))}\t/', '/', MARK + ' (конец) тестовый прогон по режимам ГДИ', '']
+        return nl.join(out), steps, {'hist_rates': hist, 'n_steps': len(steps), 'start': start}
     for k in range(kmax + 1):
         d = start + timedelta(days=k * step_days)
         if k > 0:
@@ -179,9 +205,10 @@ def model_regimes(series: dict, steps: Sequence[RegimeStep], model_start: dateti
     """По режимам: {скважина: [{k, q, t, wbhp, wbp, dep}]}; dep = Pпл - Pзаб модели на конце режима, бар (давления абсолютные)."""
     out: Dict[str, List[dict]] = {}
     for st in steps:
-        t = float((st.end - model_start).days)
-        bhp = value_at(series[('WBHP', st.well)], t)
-        bp = value_at(series[('WBP', st.well)], t)
+        t = (st.end - model_start).total_seconds() / 86400.0
+        tol = 1e-6 if t == int(t) else 3e-5               # дробные сутки (TSTEP): RSM печатает время с округлением
+        bhp = value_at(series[('WBHP', st.well)], t, tol)
+        bp = value_at(series[('WBP', st.well)], t, tol)
         out.setdefault(st.well, []).append({'k': st.k, 'q': st.q, 't': t, 'wbhp': bhp, 'wbp': bp, 'dep': bp - bhp})
     return out
 

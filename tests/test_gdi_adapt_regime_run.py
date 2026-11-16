@@ -55,6 +55,35 @@ class TestSchedule(unittest.TestCase):
         self.assertTrue(text.rstrip().split('\n')[-1].startswith('-- GDM-ADAPT'))
         self.assertEqual(len(scan_dates(text.split('\n'))), 6)
 
+    def test_timed_regimes_work_and_shut_via_tstep(self):
+        # режим как при реальном ГДИ: час работы на дебите режима, 30 минут остановки (WELOPEN SHUT), затем следующий режим
+        text, steps, rep = rr.build_test_schedule(SCHED, START, {'A': [300000.0, 400000.0], 'B': [250000.0]}, None,
+                                                  work_min=60, rest_min=30)
+        self.assertEqual([(s.well, s.k, s.end) for s in steps],
+                         [('A', 0, datetime(2014, 1, 14, 1, 0)), ('B', 0, datetime(2014, 1, 14, 1, 0)), ('A', 1, datetime(2014, 1, 14, 2, 30))])
+        self.assertEqual(text.split('\n').count('TSTEP'), 3)                           # работа 1, остановка, работа 2; после последнего режима сразу возврат истории
+        self.assertIn('0.0416667', text)
+        self.assertIn('0.0208333', text)
+        self.assertIn('WELOPEN', text)
+        self.assertIn('A\tSHUT', text)
+        # внутри блока режимов нет дат, кроме даты ГДИ и закрывающей
+        self.assertEqual(len(scan_dates(text.split('\n'))), 4)
+        self.assertLess(text.index('300000.0'), text.index('TSTEP'))
+        # история возвращается у обеих скважин в конце блока
+        tail = text[text.rindex('\nTSTEP\n'):]
+        self.assertIn('100000.0', tail)
+        self.assertIn('200000.0', tail)
+
+    def test_model_regimes_reads_fractional_days(self):
+        # RSM пишет время с округлением (0.041667 вместо 1/24): давление на конце часа работы читается
+        ms = datetime(2014, 1, 1)
+        steps = [rr.RegimeStep('A', 0, 1.0, datetime(2014, 1, 14, 1, 0)), rr.RegimeStep('A', 1, 2.0, datetime(2014, 1, 14, 2, 30))]
+        t0 = 13.0
+        ts = np.array([t0, t0 + 0.041667, t0 + 0.104167])
+        series = {('WBHP', 'A'): (ts, np.array([80.0, 70.0, 60.0])), ('WBP', 'A'): (ts, np.array([90.0, 90.0, 90.0]))}
+        mr = rr.model_regimes(series, steps, ms)
+        self.assertEqual([round(r['dep'], 6) for r in mr['A']], [20.0, 30.0])
+
     def test_no_history_rate_is_error(self):
         with self.assertRaises(ValueError):
             rr.build_test_schedule(SCHED, START, {'Z': [1.0]})
