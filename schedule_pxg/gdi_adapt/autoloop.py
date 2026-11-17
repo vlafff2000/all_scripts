@@ -257,6 +257,8 @@ class AutoLoop:
         except Cancelled:
             self._push(status='cancelled', stop_reason='остановлено инженером', message='остановлено')
         except Exception as e:
+            if isinstance(e, rr.NoHistoryError):
+                self.state['no_history'] = list(e.wells)
             self._push(status='failed', stop_reason=f'{type(e).__name__}: {e}', message='ошибка')
         self._write_journal()
         return self.state
@@ -466,6 +468,25 @@ class AutoBatch:
                                      snapshots=snaps or None, tag='_' + item['date'])
                 self.loop.cancel = self.cancel
                 st = self.loop.run()
+                dropped = {}
+                while st.get('no_history'):
+                    # у части скважин до даты ГДИ нет дебита истории: их исключаем с причиной, остальные считаем дальше
+                    for w in st['no_history']:
+                        dropped[w] = 'нет дебита истории (WCONHIST GRAT) в расписании до даты ГДИ: тестовое расписание построить нельзя'
+                    run_group = [g for g in run_group if g.wname not in dropped]
+                    if not run_group:
+                        break
+                    snaps = {g.wname: self.snapshots[g.wname] for g in run_group if self.snapshots and g.wname in self.snapshots}
+                    self.loop = AutoLoop(self.model_data, self.workdir, self.runner, run_group, self.cfg, self.pvt, self.st, restart, self.journal,
+                                         snapshots=snaps or None, tag='_' + item['date'])
+                    self.loop.cancel = self.cancel
+                    st = self.loop.run()
+                if dropped:
+                    st.setdefault('skipped', {}).update(dropped)
+                    if not run_group:
+                        st['no_mults'] = True
+                        st['stop_reason'] = 'ни у одной скважины даты нет дебита истории до даты ГДИ'
+                    self.loop._push()
                 item['runs'] = len([i for i in st['iterations']])
                 for g in run_group:
                     b = self.loop.best(g.wname)
