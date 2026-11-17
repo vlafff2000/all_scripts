@@ -305,5 +305,13 @@ table.matrix.shares { width: max-content; } .matrix.shares th.mo { min-width: 62
 
 /* Меню выделенных скважин на карте (SelectionMenu) */
 .sel-menu { position: relative; display: inline-block }
-.sel-menu-panel { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30; min-width: 280px; max-width: min(420px, 70vw); max-height: 60vh; overflow: auto; padding: 10px 12px; display: grid; gap: 8px }
+.sel-menu-panel { position: absolute; left: 0; top: auto; bottom: calc(100% + 6px); z-index: 30; min-width: 280px; max-width: min(420px, 70vw); max-height: 60vh; overflow: auto; padding: 10px 12px; display: grid; gap: 8px }
 .sel-menu-panel input[type=text] { flex: 1 1 140px; min-width: 0 }
+.map-chips:has(.sel-menu-panel) { z-index: 8 }
+.sel-menu-panel { width: 340px; white-space: normal; font-weight: 400; color: var(--ink); text-align: left }
+.sel-menu-panel .well-filter-actions { display: flex; flex-wrap: wrap; gap: 6px }
+.sel-menu-panel .well-filter-actions button { border: 1px solid var(--line); background: var(--surface); padding: 5px 10px }
+.sel-menu-panel .well-filter-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff }
+.sel-menu-panel .well-filter-actions button:disabled { opacity: .5; cursor: default }
+.map-chip.accent { position: relative }
+.map-chip.accent .sel-menu { position: static }
