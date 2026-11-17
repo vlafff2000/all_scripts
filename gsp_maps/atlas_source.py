@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -50,6 +51,37 @@ PARAM_AGG = {"mean": "среднее", "sum": "сумма", "last": "после�
 SOURCES = [("flow", "Расходы по скважинам"), ("periods", "Периоды работы объекта"), ("press_gsp", "Давление по ГСП"),
            ("press_obj", "Давление по объекту"), ("water", "Вынос воды по скважинам"), ("xy", "Координаты X, Y"),
            ("altitude", "Альтитуды"), ("perf", "Перфорации")]
+
+
+# Типы элементов конструкции — те же правила, что в паспорте скважины Атласа (`atlas/passport_card.py: classify`): Карты Атлас не
+# импортируют, поэтому правила продублированы, а тест сверяет их, если Атлас рядом. Выбор типа («Фильтр», «Перфорация»…) собирает
+# все элементы этого типа из разных шаблонов, у которых названия разные.
+KIND_LABELS = {"filter": "Фильтр", "perf": "Перфорация", "reaming": "Расширка", "casing": "Эксплуатационная колонна", "tubing": "НКТ",
+               "packer": "Пакер", "bridge": "Цементный мост", "pay": "Пласт", "bottom": "Забой", "artificial": "Искусственный забой",
+               "blank": "Надфильтровые трубы", "perf_nipple": "Перфорированный патрубок", "equipment": "Оборудование"}
+_KIND_SPECIFIC = (("perf_nipple", r"перфорированн\w*\s+(?:патруб|труб)|перфопатруб|перфорированная\s+труб"), ("blank", r"надфильтр|затворн|глух\w*\s+труб"),
+                  ("equipment", r"зумпф|подгоночн|клапан|переводник"))
+_KIND_RULES = (("reaming", r"расшир|подзабой|каверн"), ("filter", r"фильтр"), ("perf", r"перфор"), ("packer", r"пакер"), ("bridge", r"мост"),
+               ("tubing", r"нкт|лифт|насосно"), ("pay", r"пласт|коллектор|продуктив"), ("casing", r"эксплуатационн|э/?к\b"))
+_KIND_SKIPPED = r"кондуктор|направлени|потайн|хвостовик|техническ"
+
+
+def element_kind(name: str) -> Optional[str]:
+    """Тип элемента конструкции по названию (None — не относится ни к одному из известных типов)."""
+    text = str(name).lower()
+    if re.search("искусствен", text):
+        return "artificial"
+    if re.search("забой", text):
+        return "bottom"
+    for kind, pattern in _KIND_SPECIFIC:
+        if re.search(pattern, text):
+            return kind
+    if re.search(_KIND_SKIPPED, text) and not re.search("фильтр|перфор|расшир", text):
+        return None
+    for kind, pattern in _KIND_RULES:
+        if re.search(pattern, text):
+            return kind
+    return None
 
 
 def storage_root(configured: str = "") -> Optional[Path]:
@@ -333,13 +365,16 @@ class AtlasData:
                             "rows": int(self.tables[table]), "perWell": True, "elements": elements})
         return out
 
-    def construction_elements(self) -> List[str]:
-        """Названия элементов конструкции скважин в проекте Атласа (колонна, НКТ, фильтр, пакер…): по ним выбирают, что показать на карте."""
+    def construction_elements(self) -> List[dict]:
+        """Что можно выбрать на карте: типы элементов («Фильтр», «Перфорация»…), затем точные названия из проекта Атласа.
+        Значение типа — `тип:filter`, названия — как в данных."""
         df = self._param_frame("construction")
         if df is None or "element" not in df:
             return []
-        names = df["element"].dropna().astype(str).str.strip()
-        return sorted(n for n in names.unique() if n)
+        names = sorted(n for n in df["element"].dropna().astype(str).str.strip().unique() if n)
+        kinds = [k for k in KIND_LABELS if any(element_kind(n) == k for n in names)]
+        return ([{"value": "тип:" + k, "label": "Тип: " + KIND_LABELS[k]} for k in kinds]
+                + [{"value": n, "label": n} for n in names])
 
     def parameter_values(self, table: str, column: str, agg: str = "mean", start: str = "", end: str = "",
                          element: str = "") -> Tuple[Dict[int, float], List[str]]:
@@ -354,8 +389,15 @@ class AtlasData:
             df = df.assign(thickness_m=pd.to_numeric(df["bottom_m"], errors="coerce") - pd.to_numeric(df["top_m"], errors="coerce"))
         if df is None or column not in df or "well" not in df:
             return {}, ["В проекте Атласа нет параметра «%s» (%s)." % (column, PARAM_TABLES[table])]
+        snapshot = False
         if element and table == "construction" and "element" in df:
-            df = df[df["element"].fillna("").astype(str).str.strip() == element.strip()]
+            names = df["element"].fillna("").astype(str).str.strip()
+            if element.startswith("тип:"):
+                kind = element[4:]
+                df = df[names.map(lambda n: element_kind(n) == kind)]
+            else:
+                df = df[names == element.strip()]
+            snapshot = True
         elif element:
             warn.append("Выбор элемента относится только к конструкции скважины.")
         well = pd.to_numeric(df["well"], errors="coerce")
@@ -378,8 +420,16 @@ class AtlasData:
         if "date" in df:
             part["date"] = date[keep].to_numpy()
             part = part.sort_values("date", kind="stable")
-        grouped = part.groupby("well")["v"]
-        series = {"mean": grouped.mean, "sum": grouped.sum, "last": grouped.last, "count": grouped.count}[agg]()
+        if snapshot and "date" in df and len(part):
+            # последний снимок конструкции каждой скважины; интервал элементов выбранного типа: верх — самый верхний, низ — самый нижний,
+            # мощность — сумма мощностей, диаметр — наибольший
+            part = part[part["date"] == part.groupby("well")["date"].transform("max")]
+            grouped = part.groupby("well")["v"]
+            how = {"top_m": grouped.min, "bottom_m": grouped.max, "thickness_m": grouped.sum}.get(column, grouped.max)
+            series = how()
+        else:
+            grouped = part.groupby("well")["v"]
+            series = {"mean": grouped.mean, "sum": grouped.sum, "last": grouped.last, "count": grouped.count}[agg]()
         return {int(w): float(v) for w, v in series.items() if np.isfinite(v)}, warn
 
     def _param_frame(self, table: str) -> Optional[pd.DataFrame]:

@@ -130,7 +130,7 @@ export const openFolder = () => call<{ ok: boolean }>('/api/open-folder', post({
 export interface WorkSeason { kind: 'Отбор' | 'Закачка'; key: string; total: number[]; days: number[]; first: number[]; idle: number[]; start: number; end: number }
 export interface WorkData { wells: number[]; seasons: WorkSeason[]; months: number[]; monthFlow: number[][]; monthDays: number[][]; monthWater: number[][] }
 /** Параметр проекта Атласа по скважинам: таблица и числовая колонка (см. /api/params). */
-export interface ParamItem { table: string; column: string; title: string; label: string; rows: number; perWell: boolean; elements?: string[] }
+export interface ParamItem { table: string; column: string; title: string; label: string; rows: number; perWell: boolean; elements?: { value: string; label: string }[] }
 export interface ParamValues { table: string; column: string; agg: string; element?: string; title: string; values: Record<string, number>; warnings: string[] }
 /** ГИС и ГВК из базы ГИС проекта Атласа: что есть (пачки, сезоны, показатели) и значения по скважинам (см. /api/gis). */
 export interface GisCatalog { packs: string[]; seasons: { key: string; wells: number }[]; metrics: { key: string; label: string }[]; note: string }

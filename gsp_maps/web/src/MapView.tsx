@@ -1024,10 +1024,9 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
               {(() => { const els = atlas.items.find(i => i.table + '|' + i.column === atlas.pick)?.elements; return els?.length ? (
-                <select value={atlas.element} onChange={e => atlas.onPick(atlas.pick, atlas.agg, e.target.value)} aria-label="Элемент конструкции"
-                  title="Глубина верха, низа, мощность или диаметр одного элемента конструкции из Атласа. «Все элементы» смешивает колонну, НКТ и фильтр, для глубин это не имеет смысла.">
-                  <option value="">Все элементы</option>
-                  {els.map(n => <option key={n} value={n}>{n}</option>)}
+                <select value={els.some(e => e.value === atlas.element) ? atlas.element : els[0].value} onChange={e => atlas.onPick(atlas.pick, atlas.agg, e.target.value)} aria-label="Элемент конструкции"
+                  title="Что показать на карте: тип элемента (например «Фильтр» — верх самого верхнего и низ самого нижнего фильтра последнего снимка конструкции) или точное название элемента из Атласа.">
+                  {els.map(n => <option key={n.value} value={n.value}>{n.label}</option>)}
                 </select>) : null })()}
             </>}
             {options.paint === 'gdi' && gdi && <>
