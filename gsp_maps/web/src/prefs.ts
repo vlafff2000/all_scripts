@@ -6,6 +6,8 @@ export const theme = pref<Theme>('gsp.theme', 'system', raw => (raw === 'dark' |
 export const paintMode = pref<'flow' | 'entry' | 'depth' | 'wf' | 'atlas' | 'model' | 'gis' | 'gdi' | 'ref'>('gsp.paint', 'flow', raw => (raw === 'wfall' ? 'wf' : ['entry', 'depth', 'wf', 'atlas', 'model', 'gis', 'gdi', 'ref'].includes(String(raw)) ? (raw as 'entry') : 'flow'))
 /** Выбранный параметр Атласа («таблица|колонка») и агрегация; запоминаются между сеансами. */
 export const atlasParam = pref<string>('gsp.atlasParam', '', raw => String(raw || ''))
+/** Элемент конструкции скважины (колонна, НКТ, фильтр…) для глубин на карте; пусто — все элементы вместе. */
+export const atlasElement = pref<string>('gsp.atlasElement', '', raw => String(raw || ''))
 export const atlasAgg = pref<string>('gsp.atlasAgg', 'mean', raw => String(raw || 'mean'))
 /** Размер окна «Вид карты» (px), если его растянули; null — размер по умолчанию. */
 export const layersBox = pref<{ w: number; h: number } | null>('gsp.layersBox', null, raw => {

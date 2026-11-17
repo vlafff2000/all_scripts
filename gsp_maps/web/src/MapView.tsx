@@ -15,6 +15,7 @@ import { alignTransform, applyAffine, FLIP_Y, polyAlign, polyStyles, styleOf, us
 import { ALL_CRITERION_SPEC, AW_MODES, AW_DEPTHS, awDeviation, awResidual, awValue, type AwDepth, type AwMode, type AwPoint, type GisModelWells, type GisVariants } from './allWells'
 import PaletteEditor from './PaletteEditor'
 import { defOf, gradientStops, paletteAt, setOverride, usePaletteOverride } from './palette'
+import { SelectionMenu } from './SelectionMenu'
 import { PAINTS, ATLAS_AGGS, GAS, SEASON_STOPS, SEASON_STOPS_DARK, WATER_STOPS, type PaintData, paintFor, rampColor, paintColor, scopeKeys, waterMonths, type Paint, type Scope, MONTH_NAME, MONTH_SHORT, SeasonCalc, WATER, fmt1, fmtDay, fmtMln, fmtPct, fmtTh, contourLines, fillRoofGaps, parseRefWells, REF_PRESET_AN2025, gwcContour, gwcUnified, isolines, niceLevelStep, monthOf, niceStep, place, sectorPath, waterByWell, type GwcParams, type GwcUnified, type IsoResult, type RoofRaster } from './model'
 
 /** Цвета вариантов критерия: одинаковы на карте, в списке вариантов панели и в подписях изолиний. */
@@ -24,7 +25,7 @@ export const AW_COLORS = ['#d62728', '#1f77b4', '#2ca02c', '#9467bd', '#ff7f0e',
 
 export interface MapOptions { sectors: 'months' | 'plain'; water: boolean; share: boolean; fixed: boolean; paint: Paint; scale: number; labels: 'num' | 'val' | 'none'; hideIdle: boolean; minValue: number }
 /** Параметр Атласа на карте: список параметров, выбор и агрегация, готовая раскраска (считает страница). */
-export interface AtlasPicker { items: ParamItem[]; pick: string; agg: string; onPick: (pick: string, agg: string) => void; paint: PaintData | null }
+export interface AtlasPicker { items: ParamItem[]; pick: string; agg: string; element: string; onPick: (pick: string, agg: string, element: string) => void; paint: PaintData | null }
 /** Раскраска по моделям tNavigator: выбор моделей и вектора (панель) и значения на карте (paint). */
 /** Режим «ГИС и ГВК»: что выбрано и что можно выбрать; замер скважины закрепляется вручную (pins), по умолчанию берётся последний в сезоне. */
 export interface GisPicker {
@@ -47,7 +48,7 @@ export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null
 export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
 interface Props {
   g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number
-  options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; title: string
+  options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; onFilterWells?: (ws: string[]) => void; title: string
   /** Параметр Атласа: только на странице карты. */
   atlas?: AtlasPicker
   gdi?: GdiPicker
@@ -285,7 +286,7 @@ function GisControls({ gwcShares, catalog, pack, metric, season, against, pins, 
   </>
 }
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView, atlas, gis, gdi, models }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, season, a, b, options, onOptions, selected, onSelect, group, onGroup, onFilterWells, title, tipHost, tipTag, multi, stickyTip = true, compact, scaleMax, view: viewProp, onView, atlas, gis, gdi, models }, ref) {
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
@@ -1015,13 +1016,19 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
           <section><h4>Цвет</h4>
             <select value={options.paint} onChange={e => onOptions({ paint: e.target.value as Paint })} aria-label="Раскраска">{PAINTS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
             {options.paint === 'atlas' && atlas && <>
-              <select value={atlas.pick} onChange={e => atlas.onPick(e.target.value, atlas.agg)} aria-label="Параметр Атласа">
+              <select value={atlas.pick} onChange={e => atlas.onPick(e.target.value, atlas.agg, atlas.element)} aria-label="Параметр Атласа">
                 <option value="">Выберите параметр…</option>
                 {atlas.items.map(i => <option key={i.table + '|' + i.column} value={i.table + '|' + i.column}>{i.title} · {i.label}</option>)}
               </select>
-              <select value={atlas.agg} onChange={e => atlas.onPick(atlas.pick, e.target.value)} aria-label="Агрегация">
+              <select value={atlas.agg} onChange={e => atlas.onPick(atlas.pick, e.target.value, atlas.element)} aria-label="Агрегация">
                 {ATLAS_AGGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
+              {(() => { const els = atlas.items.find(i => i.table + '|' + i.column === atlas.pick)?.elements; return els?.length ? (
+                <select value={atlas.element} onChange={e => atlas.onPick(atlas.pick, atlas.agg, e.target.value)} aria-label="Элемент конструкции"
+                  title="Глубина верха, низа, мощность или диаметр одного элемента конструкции из Атласа. «Все элементы» смешивает колонну, НКТ и фильтр, для глубин это не имеет смысла.">
+                  <option value="">Все элементы</option>
+                  {els.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>) : null })()}
             </>}
             {options.paint === 'gdi' && gdi && <>
               <div className="segmented" role="radiogroup" aria-label="Приведение ГДИ">
@@ -1107,7 +1114,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       </div>
       {box && <div className="selbox no-export" style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}
       <div className="map-chips no-export">
-        {group.length > 1 && <span className="map-chip accent">Выбрано скважин: {group.length}<button type="button" onClick={() => onGroup([])} aria-label="Сбросить выбор">×</button></span>}
+        {group.length > 1 && <span className="map-chip accent">Выбрано скважин: {group.length}<SelectionMenu wells={group} onFilter={onFilterWells} /><button type="button" onClick={() => onGroup([])} aria-label="Сбросить выбор">×</button></span>}
         {isRef && refInfo.missing.length > 0 && <span className="map-chip warn" title="Этих скважин из списка нет на карте выбранных групп">Не на карте: {refInfo.missing.join(', ')}{multiG ? '' : ' (выберите «Весь объект»)'}</span>}
         {far.length > 0 && <span className="map-chip" title={'Далёкие скважины: ' + far.join(', ')}>{frameAll ? 'Показаны все скважины' : `За кадром: ${far.length} скв.`}<button type="button" onClick={() => setFrameAll(v => !v)}>{frameAll ? 'Основная группа' : 'Показать'}</button></span>}
         {spread && placed.length > 1 && <span className="map-chip" title="Скважины разнесены для читаемости: взаимное расположение сохранено, расстояния условные">Схема, расстояния условные</span>}

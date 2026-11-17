@@ -125,7 +125,8 @@ async def param(request: Request):
     q = request.query_params
     try:
         return JSONResponse(await run_in_threadpool(PROJECT.parameter_payload, q.get("table") or "", q.get("column") or "",
-                                                    q.get("agg") or "mean", q.get("start") or "", q.get("end") or ""))
+                                                    q.get("agg") or "mean", q.get("start") or "", q.get("end") or "",
+                                                    q.get("element") or ""))
     except ValueError as e:
         return _err(str(e), 404)
 
