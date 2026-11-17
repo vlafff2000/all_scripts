@@ -2,7 +2,7 @@ import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { customGroups, groupLabel, groupOfWells, usePresets, type CustomGroup } from './customGroups'
 import CustomGroupsPanel from './CustomGroupsPanel'
-import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
+import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, markerColors, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo, type GdiCatalog, type GdiValues } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
@@ -84,6 +84,8 @@ const Glyph = memo(function Glyph(p: {
   selected: boolean; label: string; dim: boolean; hot?: boolean; gcolor?: string; pal: Pal; lf?: LabelFmt
   /** Пользовательская группа скважин: свой цвет и множитель размера круга (customGroups.ts). */
   cg?: { color: string; size: number }
+  /** Два цвета маркера: `rim` — обод, `fillc` — заливка (пусто — скважины нет в наборе, цвет по умолчанию). */
+  two?: boolean; rim?: string; fillc?: string
 }) {
   const { x, y, rmax, pal } = p
   const idle = p.paint === undefined ? !(p.total > 0) : !p.paint
@@ -92,15 +94,17 @@ const Glyph = memo(function Glyph(p: {
   const ring = rmax * 0.05
   const els: React.ReactNode[] = []
   if (idle) {
-    els.push(<circle key="c" cx={x} cy={y} r={r} fill={pal.surface} stroke={p.cg?.color ?? pal.muted} strokeWidth={rmax * (p.cg ? 0.09 : 0.04)} strokeDasharray={`${rmax * 0.09} ${rmax * 0.07}`} />)
+    els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.two && p.fillc ? p.fillc : pal.surface} stroke={p.two ? p.rim ?? pal.muted : p.cg?.color ?? pal.muted} strokeWidth={rmax * (p.two && p.rim ? 0.12 : p.cg ? 0.09 : 0.04)} strokeDasharray={`${rmax * 0.09} ${rmax * 0.07}`} />)
   } else if (p.paint) {
-    els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.paint.color} stroke={p.cg?.color || p.gcolor || pal.surface} strokeWidth={p.cg ? ring * 3.2 : p.gcolor ? ring * 2.2 : ring} />)
+    els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.paint.color} stroke={p.two ? p.rim || pal.surface : p.cg?.color || p.gcolor || pal.surface} strokeWidth={p.two ? (p.rim ? ring * 3.2 : ring) : p.cg ? ring * 3.2 : p.gcolor ? ring * 2.2 : ring} />)
+  } else if (p.two && (p.fillc || !p.sectors)) {
+    els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.fillc || pal.gas} stroke={p.rim || pal.surface} strokeWidth={p.rim ? ring * 3.2 : ring} />)
   } else if (!p.sectors || p.cg) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.cg?.color || p.gcolor || pal.gas} stroke={pal.surface} strokeWidth={ring} />)
   } else {
     const sum = p.months.reduce((s, v) => s + v, 0) || 1
     const parts = p.order.filter(m => p.months[m] > 0)
-    if (parts.length <= 1) els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.monthColors[parts[0] ?? 0] || pal.gas} stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
+    if (parts.length <= 1) els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.monthColors[parts[0] ?? 0] || pal.gas} stroke={p.two ? p.rim || pal.surface : p.gcolor || pal.surface} strokeWidth={p.two ? (p.rim ? ring * 3.2 : ring) : p.gcolor ? ring * 2.2 : ring} />)
     else {
       let a0 = 0
       for (const m of parts) {
@@ -108,7 +112,7 @@ const Glyph = memo(function Glyph(p: {
         els.push(<path key={m} d={sectorPath(x, y, r, a0, a1)} fill={p.monthColors[m]} stroke={pal.surface} strokeWidth={rmax * 0.03} strokeLinejoin="round" />)
         a0 = a1
       }
-      els.push(<circle key="o" cx={x} cy={y} r={r} fill="none" stroke={p.gcolor || pal.surface} strokeWidth={p.gcolor ? ring * 2.2 : ring} />)
+      els.push(<circle key="o" cx={x} cy={y} r={r} fill="none" stroke={p.two ? p.rim || pal.surface : p.gcolor || pal.surface} strokeWidth={p.two ? (p.rim ? ring * 3.2 : ring) : p.gcolor ? ring * 2.2 : ring} />)
     }
   }
   // вода: по кольцу на каждый месяц с водой, снаружи друг от друга (раньше — ближе к кругу), цвет — месяц, толщина ∝ л/ч; водный фактор — кружок на внешнем кольце
@@ -625,6 +629,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const multiG = !!g.groups && g.groups.length > 1
   const byGroup = multiG && groupsOn
   const gcol = (well: number) => (byGroup ? groupColor(g.groupOf![String(well)]) : undefined)
+  // два цвета маркера: обод — один набор (группа ГСП или пользовательская группа), заливка — другой
+  const mcMode = usePref(markerColors), two = mcMode !== 'single' && !isRef
+  const gspOf = (well: number) => { const n = g.groupOf?.[String(well)]; return n ? groupColor(n) : undefined }
+  const twoColors = (well: number, cg?: CustomGroup) => {
+    const gs = gspOf(well), cs = cg?.color
+    return mcMode === 'rimGsp' ? { rim: gs, fillc: cs } : { rim: cs, fillc: gs }
+  }
   const rpx0 = Math.max(12, Math.min(22, rmax * fit.s))
   const rd = useCluster ? rpx0 / K : rmax
   const items = useMemo(() => {
@@ -763,14 +774,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 months={win.months[n] || EMPTY} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
                 paint={paints ? paints.get(q.well) ?? null : undefined}
                 water={options.water ? rings.get(q.well) || EMPTY : EMPTY} maxFlow={maxFlow} showShare={options.share}
-                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} cg={cg} lf={cg && (cg.labelSize !== 1 || cg.labelColor) ? { ...lf, size: lf.size * cg.labelSize, color: cg.labelColor || lf.color } : lf}
+                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} cg={cg} two={two} {...(two ? twoColors(q.well, cg) : {})} lf={cg && (cg.labelSize !== 1 || cg.labelColor) ? { ...lf, size: lf.size * cg.labelSize, color: cg.labelColor || lf.color } : lf}
                 label={cg ? groupLabel(cg, q.well, base, win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : '') : base} />
               )
             })}
       </>
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lf, items, rd, isRef, refNums, refK, cgMap, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well])
+  }, [lf, items, rd, isRef, refNums, refK, cgMap, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well, two, mcMode])
   // наблюдательные (ромб) и геофизические (треугольник) скважины вне групп: в координатах карты; при «схеме» положения условные, поэтому они не рисуются
   const obsLayer = obsPts.length ? <g aria-label="Наблюдательные и геофизические скважины">
     {obsPts.map(o => {
@@ -988,7 +999,31 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             </g>}
           </>}
         </g>}
-        {multiG && !isRef && !compact && (() => {
+        {two && !compact && (() => {
+          // два набора в легенде: обод — кольцо, заливка — закрашенный кружок; порядок и подписи зависят от выбранной пары
+          const gsp = multiG ? sortLabels(g.groups!, n => n) : []
+          const cgs = cgList.filter(c => c.on && (cgCovered.get(c.id) ?? 0) > 0)
+          const gspSec = { title: mcMode === 'rimGsp' ? 'Обод — группа ГСП' : 'Заливка — группа ГСП', ring: mcMode === 'rimGsp', items: gsp.map(n => ({ k: n, name: n, color: groupColor(n) })) }
+          const cgSec = { title: mcMode === 'rimGsp' ? 'Заливка — пользовательская' : 'Обод — пользовательская', ring: mcMode !== 'rimGsp', items: cgs.map(c => ({ k: c.id, name: c.name, color: c.color })) }
+          const secs = (mcMode === 'rimGsp' ? [gspSec, cgSec] : [cgSec, gspSec]).filter(s => s.items.length)
+          if (!secs.length) return null
+          const all = secs.flatMap(s => [s.title, ...s.items.map(i => i.name)]), w = Math.max(...all.map(n => n.length)) * 7 + 44
+          const rows = secs.reduce((s, x) => s + x.items.length + 1, 0), h = 16 + 18 * rows + 8 * (secs.length - 1) + 6
+          let yy = 26
+          return <g transform={`translate(${size.w - 14 - w} 66)`} aria-label="Цвета маркера скважины">
+            <rect width={w} height={h} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
+            {secs.map(s => {
+              const y0 = yy; yy += 18 * (s.items.length + 1) + 8
+              return <g key={s.title}>
+                <text x={12} y={y0 - 6} fontSize={11.5} fontWeight={700} fill={pal.ink}>{s.title}</text>
+                {s.items.map((i, j) => <g key={i.k} transform={`translate(12 ${y0 + 12 + 18 * j})`}>
+                  {s.ring ? <circle r={5} fill={pal.surface} stroke={i.color} strokeWidth={2.6} /> : <circle r={5.5} fill={i.color} stroke={pal.line} strokeWidth={0.6} />}
+                  <text x={13} fontSize={11.5} dominantBaseline="central" fill={pal.ink}>{i.name}</text></g>)}
+              </g>
+            })}
+          </g>
+        })()}
+        {multiG && !isRef && !compact && !two && (() => {
           // легенда цветов групп рисуется в самой картинке (не HTML-чипами), поэтому попадает и в PNG
           const names = sortLabels(g.groups!, n => n), w = Math.max(...names.map(n => n.length)) * 7 + 44, h = 30 + 18 * names.length
           return <g transform={`translate(${size.w - 14 - w} 66)`} aria-label="Цвета групп">
@@ -1081,6 +1116,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             </details>}
             <details className="pal-det"><summary>Пользовательские группы{cgList.length ? ` · ${cgList.length}` : ''}</summary>
               <CustomGroupsPanel groups={cgList} covered={cgCovered} /></details>
+            {!isRef && <>
+              <label className="row" title="Обод круга — цвет одного набора, заливка — другого. Скважина вне набора остаётся с обычным цветом"><span>Цвета маркера</span>
+                <select value={mcMode} onChange={e => markerColors.set(e.target.value as 'single' | 'rimGsp' | 'rimCustom')} aria-label="Цвета маркера скважины">
+                  <option value="single">один цвет</option><option value="rimGsp">обод — группа ГСП, заливка — пользовательская</option><option value="rimCustom">обод — пользовательская, заливка — группа ГСП</option></select></label>
+              {two && <button type="button" className="quiet" onClick={() => markerColors.set(mcMode === 'rimGsp' ? 'rimCustom' : 'rimGsp')}>⇄ Поменять обод и заливку местами</button>}
+              {two && paintData && <p className="muted small">При раскраске по значению заливку занимает значение, поэтому показан только обод.</p>}
+            </>}
             {multiG && <label className="check" title="Цвет группы: заливка круга, а при секторах по месяцам или раскраске по значению — обводка"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
             <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
             <label className="check" title="Раздвинуть скважины, чтобы круги не налезали друг на друга; расстояния на карте становятся условными"><input type="checkbox" checked={spread} onChange={e => spreadWells.set(e.target.checked)} />Разнести скважины (схема)</label>
