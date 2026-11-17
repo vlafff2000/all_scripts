@@ -104,6 +104,9 @@ export const spreadWells = pref<boolean>('gsp.spread', false)
 export const clusterWells = pref<boolean>('gsp.cluster', true)
 /** Красить круги цветом группы, когда на карте несколько ГСП. */
 export const groupColoring = pref<boolean>('gsp.groupcolor', true)
+/** Цвета маркера скважины: один (как раньше) или два — обод по одному набору (группа ГСП / пользовательская группа), заливка по другому; наборы меняются местами. */
+export type MarkerColors = 'single' | 'rimGsp' | 'rimCustom'
+export const markerColors = pref<MarkerColors>('gsp.markercolors', 'single', raw => (raw === 'rimGsp' || raw === 'rimCustom' ? raw : 'single'))
 /** Опорная сетка на карте: список номеров скважин (по умолчанию таблица 1.2 отчёта АН-2025) и размер их маркера относительно фоновых скважин. */
 export const refWells = pref<string>('gsp.refWells', '56, 83, 220, 182, 237, 264, 437, 520', raw => String(raw ?? ''))
 /** Квадратная координатная сетка на фоне карты (по XY); выключена — остаётся только фон. */
