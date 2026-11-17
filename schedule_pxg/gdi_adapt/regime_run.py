@@ -43,6 +43,15 @@ def cut_schedule(text: str, start: datetime) -> List[str]:
 _BLOCKS = ('WCONHIST', 'WCONPROD', 'DATES', 'WELSPECS', 'COMPDAT', 'COMPDATMD', 'WPIMULT', 'WDFAC', 'WEFAC', 'GCONPROD')
 
 
+def _expand_repeats(toks: Sequence[str]) -> List[str]:
+    """Повтор значений по умолчанию «N*» -> N раз «1*» (в WCONHIST «228 OPEN GRAT 2* 108750 /» - нефть и вода по умолчанию)."""
+    out: List[str] = []
+    for t in toks:
+        m = re.fullmatch(r'(\d+)\*', t)
+        out += ['1*'] * int(m.group(1)) if m else [t]
+    return out
+
+
 def last_hist_gas_rates(lines: Sequence[str], wells: Sequence[str]) -> Dict[str, float]:
     """Последний дебит газа истории скважины в расписании (WCONHIST ... GRAT, 6-е поле), ст. м³/сут."""
     out: Dict[str, float] = {}
@@ -58,7 +67,7 @@ def last_hist_gas_rates(lines: Sequence[str], wells: Sequence[str]) -> Dict[str,
             block = None
             continue
         if block == 'WCONHIST':
-            toks = s.replace('/', ' ').split()
+            toks = _expand_repeats(s.replace('/', ' ').split())
             w = toks[0].strip("'\"")
             if w in wells and len(toks) >= 6 and toks[2].strip("'\"").upper() == 'GRAT':
                 try:

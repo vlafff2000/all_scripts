@@ -189,6 +189,11 @@ class TestResults(unittest.TestCase):
         with self.assertRaises(ValueError):
             rr.snapshot_with_fallback(self.s, '295', t_idle, [6.0])
 
+    def test_history_rate_with_repeated_defaults(self):
+        # «228 OPEN GRAT 2* 108750 /»: нефть и вода по умолчанию записаны одним токеном «2*», дебит газа - 6-е поле
+        lines = ['WCONHIST', "228 OPEN GRAT 2* 108750 /", "71 OPEN GRAT 1* 1* 3296.9 /", '/']
+        self.assertEqual(rr.last_hist_gas_rates(lines, ['228', '71']), {'228': 108750.0, '71': 3296.9})
+
     def test_model_depression_and_comparison(self):
         steps = [rr.RegimeStep('295', 0, 530000.0, datetime(1978, 3, 28) + (datetime(2014, 1, 15) - datetime(1978, 3, 28)))]
         mr = rr.model_regimes(self.s, steps, datetime(1978, 3, 28))
