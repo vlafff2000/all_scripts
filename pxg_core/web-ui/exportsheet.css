@@ -1,0 +1,7 @@
+/* Окно выгрузки на лист (ExportSheetDialog.tsx): цвета из base.css */
+.xs-back { position: fixed; inset: 0; z-index: 1000; background: var(--shadow-strong); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.xs-win { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); width: min(420px, 100%); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.xs-win h3 { margin: 0 0 4px; font-size: 16px; }
+.xs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.xs-row select { min-width: 200px; }
+.xs-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

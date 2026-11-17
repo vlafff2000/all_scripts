@@ -45,7 +45,7 @@ export interface GisPicker {
 /** Режим «ГДИ на опорную точку»: что выбрано, значения от API и готовая раскраска. */
 export interface GdiPicker { cat: GdiCatalog | null; mode: 'q' | 'dp2'; ref: string; season: string; data: GdiValues | null; paint: PaintData | null; error: string; onChange: (p: { mode?: 'q' | 'dp2'; ref?: string; season?: string }) => void }
 export interface ModelsPanel { picker: ModelPickerProps; paint: PaintData | null }
-export interface MapHandle { toPng: () => Promise<Blob>; fit: () => void; focus: (well: number) => void }
+export interface MapHandle { toPng: () => Promise<Blob>; snapshot: () => { svg: SVGSVGElement; w: number; h: number }; fit: () => void; focus: (well: number) => void }
 interface Props {
   g: GspData; calc: SeasonCalc; kind: string; season: string; a: number; b: number
   options: MapOptions; onOptions: (o: Partial<MapOptions>) => void; selected: number | null; onSelect: (w: number | null) => void; group: number[]; onGroup: (ws: number[]) => void; onFilterWells?: (ws: string[]) => void; title: string
@@ -409,6 +409,13 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       if (!p) return
       const k = 2.6
       setView({ k, tx: size.w / 2 - k * (fit.s * p.x + fit.ox), ty: size.h / 2 - k * (fit.s * p.y + fit.oy) })
+    },
+    // копия экранной карты без служебных элементов (кнопки, подсказки) — для выгрузки на лист (pxg_core/web-ui/exportSheet.ts)
+    snapshot: () => {
+      const clone = svg.current!.cloneNode(true) as SVGSVGElement
+      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+      clone.querySelectorAll('.no-export').forEach(n => n.remove())
+      return { svg: clone, w: size.w, h: size.h }
     },
     toPng: async () => {
       const el = svg.current!
