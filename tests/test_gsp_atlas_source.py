@@ -168,20 +168,35 @@ def test_any_atlas_numeric_column_is_a_map_parameter(tmp_path):
     assert none == {} and warn
 
 
-def test_construction_depths_by_element_and_thickness(tmp_path):
-    cons = pd.DataFrame({"well": ["11", "11", "12"], "date": pd.to_datetime(["2025-01-01"] * 3),
-                         "element": ["Фильтр", "НКТ", "Фильтр"], "top_m": [1000.0, 0.0, 1100.0], "bottom_m": [1050.0, 990.0, 1180.0],
-                         "diameter_mm": [114.0, 89.0, 114.0]})
-    data = open_data(tmp_path, {"production": prod(), "construction": cons})
+def _cons():
+    return pd.DataFrame({"well": ["11", "11", "11", "12", "12"],
+                         "date": pd.to_datetime(["2025-01-01", "2025-01-01", "2024-01-01", "2025-01-01", "2025-01-01"]),
+                         "element": ["Фильтр 114 мм", "Фильтр 89 мм", "Фильтр 114 мм", "Фильтр 114 мм", "НКТ 89 мм"],
+                         "top_m": [1000.0, 1040.0, 900.0, 1100.0, 0.0], "bottom_m": [1030.0, 1050.0, 950.0, 1180.0, 990.0],
+                         "diameter_mm": [114.0, 89.0, 114.0, 114.0, 89.0]})
+
+
+def test_construction_kind_collects_filters_of_latest_snapshot(tmp_path):
+    data = open_data(tmp_path, {"production": prod(), "construction": _cons()})
     items = {(p["table"], p["column"]): p for p in data.parameters()}
-    assert sorted(items[("construction", "top_m")]["elements"]) == ["НКТ", "Фильтр"]
+    values = [e["value"] for e in items[("construction", "top_m")]["elements"]]
+    assert values[:2] == ["тип:filter", "тип:tubing"] and "НКТ 89 мм" in values
     assert ("construction", "thickness_m") in items
-    top, _ = data.parameter_values("construction", "top_m", "last", element="Фильтр")
-    assert top == {11: 1000.0, 12: 1100.0}                    # только фильтр, НКТ на карту не попадает
-    thick, _ = data.parameter_values("construction", "thickness_m", "last", element="Фильтр")
-    assert thick == {11: 50.0, 12: 80.0}
-    bottom, _ = data.parameter_values("construction", "bottom_m", "last", element="НКТ")
-    assert bottom == {11: 990.0}
+    top, _ = data.parameter_values("construction", "top_m", element="тип:filter")
+    bottom, _ = data.parameter_values("construction", "bottom_m", element="тип:filter")
+    thick, _ = data.parameter_values("construction", "thickness_m", element="тип:filter")
+    # скважина 11: два фильтра свежего снимка (1000–1030 и 1040–1050); снимок 2024 года не мешает; верх — самый верхний, низ — самый нижний
+    assert top == {11: 1000.0, 12: 1100.0} and bottom == {11: 1050.0, 12: 1180.0} and thick == {11: 40.0, 12: 80.0}
+    one, _ = data.parameter_values("construction", "bottom_m", element="НКТ 89 мм")
+    assert one == {12: 990.0}                                 # точное название элемента
+
+
+def test_element_kinds_match_atlas_passport_if_atlas_is_importable():
+    sys.path.insert(0, "/home/claude/gas_atlas")
+    card = pytest.importorskip("atlas.passport_card")
+    for name in ("Фильтр 114 мм", "Надфильтровые трубы", "Перфорированный патрубок", "Расширка", "НКТ 89", "Эксплуатационная колонна 168",
+                 "Кондуктор", "Искусственный забой", "Цементный мост", "Зумпф"):
+        assert atlas_source.element_kind(name) == card.classify(name), name
 
 
 # ---------- сезоны: строго как в Атласе ----------
