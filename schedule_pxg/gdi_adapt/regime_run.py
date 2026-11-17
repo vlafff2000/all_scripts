@@ -68,6 +68,14 @@ def last_hist_gas_rates(lines: Sequence[str], wells: Sequence[str]) -> Dict[str,
     return out
 
 
+class NoHistoryError(ValueError):
+    """У скважин нет дебита истории (WCONHIST GRAT) до даты ГДИ: тестовое расписание строить не от чего."""
+
+    def __init__(self, wells):
+        self.wells = list(wells)
+        super().__init__('нет дебита истории (WCONHIST GRAT) в расписании до даты ГДИ у скважин: ' + ', '.join(self.wells))
+
+
 @dataclass
 class RegimeStep:
     well: str
@@ -92,7 +100,7 @@ def build_test_schedule(text: str, start: datetime, regimes: Dict[str, Sequence[
     hist = last_hist_gas_rates(prior_text.splitlines() + base, wells)       # prior_text - расписание из предыдущих include
     miss = [w for w in wells if w not in hist]
     if miss:
-        raise ValueError('нет дебита истории (WCONHIST GRAT) в расписании до даты ГДИ у скважин: ' + ', '.join(miss))
+        raise NoHistoryError(miss)
     kmax = max(len(q) for q in regimes.values())
     out = list(base) + [MARK + ' (начало) тестовый прогон по режимам ГДИ', 'DATES', f'{_fmt(start)}\t/', '/']
     if mults:

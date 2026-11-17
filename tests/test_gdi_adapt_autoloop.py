@@ -250,6 +250,32 @@ class TestBatch(unittest.TestCase):
         self.assertEqual([x['status'] for x in st['dates']], ['failed', 'done'])
         self.assertIn('нет скважин', st['dates'][0]['message'])
 
+    def test_date_without_history_rate_does_not_stop_queue(self):
+        # у скважины нет дебита истории до даты ГДИ: она исключается с причиной, очередь идёт дальше (раньше вся очередь вставала на ошибке)
+        from schedule_pxg.gdi_adapt import regime_run as rr
+        orig = cb_build = al.cb.build_case
+
+        def build(model_data, workdir, start, regimes, *a, **kw):
+            if 'W1' in regimes and start == datetime(2014, 1, 14):
+                raise rr.NoHistoryError(['W1'])
+            return orig(model_data, workdir, start, regimes, *a, **kw)
+        al.cb.build_case = build
+
+        class R(FakeRunner):
+            def run(s, case, restart, label, cancel):
+                t0 = float((case['steps'][0].end - MODEL_START).days) - 1
+                return rsm_for_date(case, t0)
+        try:
+            b = al.AutoBatch(self.data, self.work, R(), self.gdis(), self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0, max_iter=6), restart=7)
+            st = b.run()
+        finally:
+            al.cb.build_case = orig
+        self.assertEqual(st['status'], 'done', st)
+        by = {x['date']: x for x in st['dates']}
+        self.assertEqual(by['2014-01-14']['status'], 'failed')
+        self.assertIn('дебита истории', by['2014-01-14'].get('message', '') + str(st.get('stop_reason', '')))
+        self.assertEqual(by['2014-01-20']['status'], 'done')
+
     def test_dates_in_order_one_run_at_a_time_and_resume(self):
         calls = []
 
