@@ -150,6 +150,24 @@ class TestLoop(unittest.TestCase):
         self.assertLessEqual(last['wells']['W2']['err'], 2.0)
         self.assertAlmostEqual(last['mults']['W2']['inc'], TRUE_M['W2'], delta=0.05 * TRUE_M['W2'])
 
+    def test_well_idle_in_model_on_gdi_date_is_still_tuned_and_explained(self):
+        # ГДИ в сезон закачки/нейтральный период: в модели скважина не работает, снимка нет - не бросаем исследование
+        from schedule_pxg.gdi_adapt import regime_run as rr
+        orig = rr.snapshot_with_fallback
+
+        def fake(series, well, t0, later):
+            if well == 'W2':
+                raise ValueError('скважина W2: на шаге 1 нет работающих соединений')
+            return orig(series, well, t0, later)
+        rr.snapshot_with_fallback = fake
+        try:
+            st = self.loop(threshold_pct=2.0, max_iter=8).run()
+        finally:
+            rr.snapshot_with_fallback = orig
+        self.assertIn('не работает', st['skipped']['W2'])
+        self.assertEqual(st['iterations'][1]['mults']['W2']['inc'], 1.0)
+        self.assertIn('W2', st['iterations'][-1]['wells'])
+
     def test_iteration_limit_and_rollback(self):
         lp = self.loop(threshold_pct=0.0001, max_iter=2, min_gain_pct=-1e9)
         st = lp.run()

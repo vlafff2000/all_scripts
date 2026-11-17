@@ -69,6 +69,8 @@ def build(workdir: str, date_orig: Optional[Dict[str, str]] = None, expected: Op
                     row['regimes'] = _regimes(wk)
                 if row['status'] == BAD:
                     row['reason'] = 'ошибка %.1f %% выше порога %s %%' % (row['err_pct'], '%g' % t if t is not None else '?')
+                if w in skipped:
+                    row['reason'] = (row['reason'] + '; ' if row['reason'] else '') + str(skipped[w])
                 miss = sum(1 for x in row['regimes'] if not x['modeled'])
                 if miss:
                     row['reason'] = (row['reason'] + '; ' if row['reason'] else '') + 'режимов без модельной точки: %d' % miss
