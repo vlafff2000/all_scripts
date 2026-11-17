@@ -181,9 +181,13 @@ def snapshot_from_rsm(series: dict, well: str, t: float, t_name: str = '') -> We
     if not conns:
         raise ValueError(f'в RSM нет соединений скважины {well} (CEKH): добавьте векторы соединений в SUMMARY')
 
+    def val(key):
+        # дробные сутки (шаги ГДИ): RSM округляет время вниз, нужно окно (см. _value_near)
+        return value_at(series[key], t) if t == int(t) else _value_near(series[key], t, 0.0125)
+
     def get(v, c):
-        return value_at(series[(v, well, c)], t)
-    wbhp = value_at(series[('WBHP', well)], t)
+        return val((v, well, c))
+    wbhp = val(('WBHP', well))
     rows = []
     for c in conns:
         cgpr, cdrd, cekh, ctfac, cdfac = get('CGPR', c), get('CDRD', c), get('CEKH', c), get('CTFAC', c), get('CDFAC', c)
@@ -198,7 +202,22 @@ def snapshot_from_rsm(series: dict, well: str, t: float, t_name: str = '') -> We
     return WellSnapshot(wname=well, t_name=name, t_requested=name, substituted=False,
                         cbp=a[:, 0], cdrd=a[:, 1], cgpr=a[:, 2], cdfac=a[:, 3], cekh=a[:, 4],
                         cdiam=np.ones(len(a)), cefr=np.exp(denum) / 2.0, ctfac=a[:, 5],
-                        wbp=value_at(series[('WBP', well)], t), wgpr=value_at(series[('WGPR', well)], t), wbhp=wbhp)
+                        wbp=val(('WBP', well)), wgpr=val(('WGPR', well)), wbhp=wbhp)
+
+
+def snapshot_with_fallback(series: dict, well: str, t0: float, later: Sequence[float]) -> WellSnapshot:
+    """Снимок на старте даты ГДИ; если на t0 скважина не добывает (закачка/остановка до записи даты ГДИ), - на концах режимов
+    (скважина уже работает на дебите режима). Бросает ValueError, если нигде нет работающих соединений."""
+    err = None
+    for t in [t0] + [x for x in later if x == x]:
+        try:
+            snap = snapshot_from_rsm(series, well, float(t))
+            if t != t0:
+                snap.substituted = True
+            return snap
+        except ValueError as e:
+            err = err or e
+    raise err
 
 
 def _value_near(series, t: float, tol: float) -> float:

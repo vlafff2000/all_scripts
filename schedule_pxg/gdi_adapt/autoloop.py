@@ -175,7 +175,7 @@ class AutoLoop:
         if k == 0:
             for w in self.gdis:
                 try:
-                    self.snapshots[w] = rr.snapshot_from_rsm(series, w, t0)
+                    self.snapshots[w] = rr.snapshot_with_fallback(series, w, t0, [r['t'] for r in mr.get(w, [])])
                 except ValueError as e:
                     wells[w]['snapshot_error'] = str(e)
         return {'k': k, 'label': label, 'mults': {w: dict(m) for w, m in (mults or {}).items()}, 'wells': wells, 'rsm': rsm,

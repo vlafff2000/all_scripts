@@ -179,6 +179,16 @@ class TestResults(unittest.TestCase):
         with self.assertRaises(ValueError):
             rr.snapshot_from_rsm(self.s, '999', 13076.0)
 
+    def test_snapshot_falls_back_to_regime_end_when_well_idle_at_start(self):
+        # на старте даты ГДИ скважина в модели ещё не добывает (до записи даты ГДИ - закачка/остановка): снимок берём на конце режима
+        t_idle = 5.0
+        with self.assertRaises(ValueError):
+            rr.snapshot_from_rsm(self.s, '295', t_idle)
+        snap = rr.snapshot_with_fallback(self.s, '295', t_idle, [13076.0])
+        self.assertEqual(snap.n_perf, 2)
+        with self.assertRaises(ValueError):
+            rr.snapshot_with_fallback(self.s, '295', t_idle, [6.0])
+
     def test_model_depression_and_comparison(self):
         steps = [rr.RegimeStep('295', 0, 530000.0, datetime(1978, 3, 28) + (datetime(2014, 1, 15) - datetime(1978, 3, 28)))]
         mr = rr.model_regimes(self.s, steps, datetime(1978, 3, 28))
