@@ -107,6 +107,17 @@ export const groupColoring = pref<boolean>('gsp.groupcolor', true)
 /** Цвета маркера скважины: один (как раньше) или два — обод по одному набору (группа ГСП / пользовательская группа), заливка по другому; наборы меняются местами. */
 /** Фонд целиком: все скважины рисуются одинаковыми закрашенными кругами независимо от работы в выбранном сезоне (размер не по расходу, простаивающие не прячутся). */
 export const allWellsEqual = pref<boolean>('gsp.allwells', false)
+/** «Условные обозначения» на карте: заголовок, названия наборов и строк инженер правит сам (пусто — по умолчанию), размер — множителем. */
+export interface LegendText { title?: string; gsp?: string; cg?: string; items?: Record<string, string> }
+export const LEGEND_DEFAULTS = { title: 'Условные обозначения', gsp: 'Группы ГСП', cg: 'Пользовательские группы' }
+export const legendText = pref<LegendText>('gsp.legendtext', {}, raw => {
+  const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const s = (v: unknown) => (typeof v === 'string' ? v : undefined)
+  const items: Record<string, string> = {}
+  if (o.items && typeof o.items === 'object') for (const [k, v] of Object.entries(o.items as object)) if (typeof v === 'string' && v.trim()) items[k] = v
+  return { title: s(o.title), gsp: s(o.gsp), cg: s(o.cg), items }
+})
+export const legendScale = pref<number>('gsp.legendscale', 1, raw => { const x = Number(raw); return Number.isFinite(x) && x >= 0.6 && x <= 3 ? x : 1 })
 export type MarkerColors = 'single' | 'rimGsp' | 'rimCustom'
 export const markerColors = pref<MarkerColors>('gsp.markercolors', 'single', raw => (raw === 'rimGsp' || raw === 'rimCustom' ? raw : 'single'))
 /** Опорная сетка на карте: список номеров скважин (по умолчанию таблица 1.2 отчёта АН-2025) и размер их маркера относительно фоновых скважин. */
