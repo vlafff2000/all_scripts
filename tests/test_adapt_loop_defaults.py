@@ -1,5 +1,6 @@
 """Автоопределение для кнопки «Запустить адаптацию»: модель рядом с результатами, сохранённое приоритетнее найденного."""
 import os
+import pytest
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -45,3 +46,22 @@ def test_start_requires_something_clear_when_nothing_found():
     p = SimpleNamespace(adapt={}, results={})
     with pytest.raises(ValueError, match='tNavigator|модели'):
         adapt_loop.start(p, tempfile.gettempdir(), {}, SimpleNamespace(), None)
+
+
+class TestBatchIncludeOneDate:
+    DATES = [{'date': '2013-01-16', 'results': {'228': {'inc': 1.5, 'd': 1e-5}}},
+             {'date': '2025-12-04', 'results': {'341': {'inc': 0.8, 'd': None}, '36': {'inc': 2.0, 'd': 2e-5}}}]
+
+    def test_one_date_puts_all_mults_in_one_block(self):
+        from schedule_pxg import adapt_loop
+        lines, n = adapt_loop.batch_include_lines(self.DATES, '2012-01-01')
+        text = '\n'.join(lines)
+        assert n == 3
+        assert text.count("DATES") == 1                                 # один блок на одну дату
+        assert '01 JAN 2012' in text
+        for w in ('228', '341', '36'):
+            assert w in text
+        per_date, n2 = adapt_loop.batch_include_lines(self.DATES)
+        assert "\n".join(per_date).count("DATES") == 2                  # без даты - как раньше, по датам ГДИ
+        with pytest.raises(ValueError):
+            adapt_loop.batch_include_lines(self.DATES, '01.01.2012')

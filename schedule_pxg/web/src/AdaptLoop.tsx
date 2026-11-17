@@ -50,8 +50,9 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
     setSt(null); setBs(null); setSelDate(''); setWell(''); setId(r.id)
   })
   const stop = () => guard(async () => { await stopLoop(id) })
-  const write = (k: number) => guard(async () => {
-    const r = await loopInclude(id, k, eff.workdir || kit)
+  const [incDate, setIncDate] = useState('')
+  const write = (k: number, date = '') => guard(async () => {
+    const r = await loopInclude(id, k, eff.workdir || kit, date)
     setMsg('Include записан в ' + r.path + ' (' + r.wells + ' скв.). Вставьте его в модель: журнал мультов обновлён.')
   })
   const running = (bs?.status ?? st?.status) === 'running'
@@ -127,6 +128,11 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
           onRow={(_t, i) => { setSelDate(bs.dates[i].date); setWell('') }} />
         <p className="muted small">Нажмите на строку, чтобы открыть дашборд этой даты. «Записать include» для очереди собирает один файл по всем датам.</p>
         <div className="row"><button disabled={busy} onClick={() => write(0)}>Записать include очереди (все даты)</button></div>
+        <div className="row">
+          <label>Одна дата для всех мультов <input type="date" value={incDate} onChange={e => setIncDate(e.target.value)} /></label>
+          <button disabled={busy || !incDate} onClick={() => write(0, incDate)}>Записать include на одну дату</button>
+        </div>
+        <p className="muted small">Все подобранные мульты одним блоком на выбранную дату: настройка действует весь период адаптации, а не только с даты своего ГДИ. Мульты итоговые от базовой модели, поэтому не накапливаются.</p>
       </>}
       <h3>Подтверждение по каждому исследованию ГДИ</h3>
       <p className="muted small">По каждому исследованию: прогнано ли оно на модели, настроилась ли скважина (ошибка по режимам не выше порога) или нет, а если не прогонялось, то почему. Читается из файлов очереди, поэтому работает и во время расчёта.</p>

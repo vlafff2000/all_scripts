@@ -228,22 +228,45 @@ def stop(lid: str) -> dict:
     return {'ok': True}
 
 
-def write_include(lid: str, k: int, out_dir: str) -> dict:
-    """include с мультами итерации k (откат на любую итерацию) на дату ГДИ; в журнал записывается выбранная итерация."""
+def batch_include_lines(dates: list, one_date: str = '') -> tuple:
+    """Строки include очереди и число скважин. По умолчанию мульты ставятся на дату ГДИ каждой скважины; one_date (ГГГГ-ММ-ДД) -
+    все подобранные мульты одним блоком на эту дату, чтобы настройка действовала весь период адаптации, а не только с даты ГДИ.
+    Мульты в очереди итоговые от базовой модели, поэтому на одной дате они не накапливаются."""
+    if one_date:
+        try:
+            when = datetime.strptime(one_date, '%Y-%m-%d')
+        except ValueError:
+            raise ValueError('Дата include: ГГГГ-ММ-ДД, например 2013-01-01.')
+        best = {}
+        for item in sorted(dates, key=lambda x: x['date']):             # скважина на нескольких датах: берём самое позднее исследование
+            for w, r in item['results'].items():
+                best[w] = (r['inc'], r.get('d'))
+        rows = [(w, v[0], v[1]) for w, v in sorted(best.items())]
+        if not rows:
+            raise ValueError('В очереди пока нет результатов.')
+        lines = ['-- Мульты очереди ГДМ (итоговые от базовой модели), все на одну дату %s: действуют с неё весь период' % one_date]
+        return lines + _keywords(when, rows, True), len(rows)
+    lines = ['-- Мульты очереди ГДМ (итоговые от базовой модели, лучшая итерация каждой скважины)']
+    n = 0
+    for item in dates:
+        rows = [(w, r['inc'], r.get('d')) for w, r in sorted(item['results'].items())]
+        if rows:
+            lines += _keywords(datetime.strptime(item['date'], '%Y-%m-%d'), rows, True)
+            n += len(rows)
+    if not n:
+        raise ValueError('В очереди пока нет результатов.')
+    return lines, n
+
+
+def write_include(lid: str, k: int, out_dir: str, one_date: str = '') -> dict:
+    """include с мультами итерации k (откат на любую итерацию) на дату ГДИ; в журнал записывается выбранная итерация.
+    one_date - для очереди: все мульты на одну дату."""
     e = _get(lid)
     loop = e['loop']
     if e.get('batch'):                                  # очередь: один include на все даты с лучшими итогами по скважинам
-        lines = ['-- Мульты очереди ГДМ (итоговые от базовой модели, лучшая итерация каждой скважины)']
-        n = 0
-        for item in loop.state['dates']:
-            rows = [(w, r['inc'], r.get('d')) for w, r in sorted(item['results'].items())]
-            if rows:
-                lines += _keywords(datetime.strptime(item['date'], '%Y-%m-%d'), rows, True)
-                n += len(rows)
-        if not n:
-            raise ValueError('В очереди пока нет результатов.')
+        lines, n = batch_include_lines(loop.state['dates'], one_date)
         os.makedirs(out_dir, exist_ok=True)
-        path = os.path.join(out_dir, 'wpimult_wdfac_batch.inc')
+        path = os.path.join(out_dir, 'wpimult_wdfac_batch%s.inc' % ('_' + one_date if one_date else ''))
         with open(path, 'w', encoding='utf-8') as f:
             f.write(chr(10).join(lines))
         return {'path': path, 'wells': n}
