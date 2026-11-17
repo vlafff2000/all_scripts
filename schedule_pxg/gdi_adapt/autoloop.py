@@ -178,6 +178,7 @@ class AutoLoop:
                     self.snapshots[w] = rr.snapshot_with_fallback(series, w, t0, [r['t'] for r in mr.get(w, [])])
                 except ValueError as e:
                     wells[w]['snapshot_error'] = str(e)
+                    self.state.setdefault('snapshot_errors', {})[w] = str(e)
         return {'k': k, 'label': label, 'mults': {w: dict(m) for w, m in (mults or {}).items()}, 'wells': wells, 'rsm': rsm,
                 'at': time.strftime('%Y-%m-%d %H:%M:%S')}
 
@@ -186,6 +187,11 @@ class AutoLoop:
         for w, g in self.gdis.items():
             snap = self.snapshots.get(w)
             if snap is None:
+                # ГДИ в сезон закачки/нейтральный период или скважина в модели не работает ни на старте, ни на режимах:
+                # формуле не от чего считать, но исследование всё равно проверяем прогонами с мульта 1,0
+                why = (self.state.get('snapshot_errors') or {}).get(w) or 'нет снимка скважины'
+                self.state.setdefault('skipped', {})[w] = 'в модели скважина на дату ГДИ не работает (%s): подбор на модели с мульта 1,0' % why
+                out[w] = {'inc': 1.0, 'd': None, 'source': 'старт с мульта 1,0 (скважина в модели не работает на дату ГДИ)', 'problems': [why]}
                 continue
             try:
                 r = adapt_well(g, snap, self.pvt, self.cfg)
