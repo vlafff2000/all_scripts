@@ -21,6 +21,8 @@ import { WellFilter, useWellFilter } from '../../../pxg_core/web-ui/WellFilter'
 import { setWellView } from './wellView'
 import { useShared } from '../../../pxg_core/web-ui/windows'
 import { saveBlobAs, saveBlobToFolder } from '../../../pxg_core/web-ui/desktopDownload'
+import ExportSheetDialog from '../../../pxg_core/web-ui/ExportSheetDialog'
+import { renderSheet, sheetNamePart, type SheetOptions } from '../../../pxg_core/web-ui/exportSheet'
 import { openFilePicker } from '../../../pxg_core/web-ui/FilePicker'
 import { WindowButtons } from '../../../pxg_core/web-ui/WindowButtons'
 
@@ -383,13 +385,17 @@ export default function App() {
   useEffect(() => { document.title = 'Карты' + (gsp ? ' · ' + gsp : '') }, [gsp])
 
   const flash = (t: string) => { setNote(t); setTimeout(() => setNote(''), 6000) }
-  const png = async () => {
+  // «Скачать картинку»: формат, лист (А5/А4/А3 или как на экране), ориентация, разрешение — общее окно ядра
+  const [sheetOpen, setSheetOpen] = useState(false), [sheetBusy, setSheetBusy] = useState(false), [sheetErr, setSheetErr] = useState('')
+  const sheet = async (o: SheetOptions) => {
+    setSheetBusy(true); setSheetErr('')
     try {
-      const blob = await map.current!.toPng()
-      const name = `Карта_${gsp.replace(/\s/g, '_')}_${kind}_${season}.png`
+      const s = map.current!.snapshot()
+      const blob = await renderSheet(s.svg, s.w, s.h, o)
+      const name = `Карта_${gsp.replace(/\s/g, '_')}_${kind}_${season}_${sheetNamePart(o, s.w, s.h)}.${o.format}`
       const saved = await saveBlobAs(blob, name)
-      flash(saved ? 'Картинка сохранена: ' + saved : 'Сохранение отменено')
-    } catch (e) { flash(String((e as Error).message || e)) }
+      if (saved) { flash('Файл сохранён: ' + saved); setSheetOpen(false) }
+    } catch (e) { setSheetErr(String((e as Error).message || e)) } finally { setSheetBusy(false) }
   }
   const [batchDir, setBatchDir] = useState('')
   const savePng = async (name: string) => { await saveBlobToFolder(await map.current!.toPng(), batchDir, name) }
@@ -526,7 +532,7 @@ export default function App() {
                 <summary><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11" /></svg>{batch ? `PNG ${batch.i + 1}/${batch.keys.length}` : 'Скачать'}</summary>
                 <div className="menu" onClick={() => exportRef.current?.removeAttribute('open')}>
                   <button type="button" onClick={excel}>Excel<small>Таблицы сезона, доли, давление</small></button>
-                  <button type="button" onClick={png}>Картинка карты<small>PNG текущего вида</small></button>
+                  <button type="button" onClick={() => { setSheetErr(''); setSheetOpen(true) }}>Картинка карты…<small>PNG, SVG, PDF; А5, А4, А3; альбомная и книжная</small></button>
                   <button type="button" onClick={pngAll} disabled={!!batch}>Картинки всех сезонов<small>PNG по каждому сезону вида</small></button>
                 </div>
               </details>
@@ -535,6 +541,7 @@ export default function App() {
             </>}
           </div>)}
         {note && <div className="note info" role="status">{note}</div>}
+        {sheetOpen && <ExportSheetDialog title="Скачать карту" busy={sheetBusy} error={sheetErr} onGo={sheet} onClose={() => setSheetOpen(false)} />}
         {body()}
       </main>
     </div>
