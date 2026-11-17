@@ -2,7 +2,7 @@ import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { customGroups, groupLabel, groupOfWells, usePresets, type CustomGroup } from './customGroups'
 import CustomGroupsPanel from './CustomGroupsPanel'
-import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, markerColors, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
+import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, markerColors, allWellsEqual, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo, type GdiCatalog, type GdiValues } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
@@ -86,20 +86,23 @@ const Glyph = memo(function Glyph(p: {
   cg?: { color: string; size: number }
   /** Два цвета маркера: `rim` — обод, `fillc` — заливка (пусто — скважины нет в наборе, цвет по умолчанию). */
   two?: boolean; rim?: string; fillc?: string
+  /** Режим «все скважины одинаково»: круг фиксированного размера, без привязки к работе в сезоне. */
+  uniform?: boolean
 }) {
   const { x, y, rmax, pal } = p
-  const idle = p.paint === undefined ? !(p.total > 0) : !p.paint
+  const uni = !!p.uniform && !p.paint
+  const idle = uni ? false : p.paint === undefined ? !(p.total > 0) : !p.paint
   const k = p.cg?.size ?? 1
-  const r = k * (p.paint !== undefined ? (p.paint ? rmax * 0.62 : rmax * 0.24) : idle ? rmax * 0.24 : p.r)
+  const r = k * (uni ? rmax * 0.5 : p.paint !== undefined ? (p.paint ? rmax * 0.62 : rmax * 0.24) : idle ? rmax * 0.24 : p.r)
   const ring = rmax * 0.05
   const els: React.ReactNode[] = []
   if (idle) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.two && p.fillc ? p.fillc : pal.surface} stroke={p.two ? p.rim ?? pal.muted : p.cg?.color ?? pal.muted} strokeWidth={rmax * (p.two && p.rim ? 0.12 : p.cg ? 0.09 : 0.04)} strokeDasharray={`${rmax * 0.09} ${rmax * 0.07}`} />)
   } else if (p.paint) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.paint.color} stroke={p.two ? p.rim || pal.surface : p.cg?.color || p.gcolor || pal.surface} strokeWidth={p.two ? (p.rim ? ring * 3.2 : ring) : p.cg ? ring * 3.2 : p.gcolor ? ring * 2.2 : ring} />)
-  } else if (p.two && (p.fillc || !p.sectors)) {
+  } else if (p.two && (p.fillc || !p.sectors || uni)) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.fillc || pal.gas} stroke={p.rim || pal.surface} strokeWidth={p.rim ? ring * 3.2 : ring} />)
-  } else if (!p.sectors || p.cg) {
+  } else if (!p.sectors || p.cg || uni) {
     els.push(<circle key="c" cx={x} cy={y} r={r} fill={p.cg?.color || p.gcolor || pal.gas} stroke={pal.surface} strokeWidth={ring} />)
   } else {
     const sum = p.months.reduce((s, v) => s + v, 0) || 1
@@ -116,7 +119,7 @@ const Glyph = memo(function Glyph(p: {
     }
   }
   // вода: по кольцу на каждый месяц с водой, снаружи друг от друга (раньше — ближе к кругу), цвет — месяц, толщина ∝ л/ч; водный фактор — кружок на внешнем кольце
-  const ws = p.water.filter(w => (w.flow ?? 0) > 0)
+  const ws = uni ? [] : p.water.filter(w => (w.flow ?? 0) > 0)
   if (ws.length && !idle) {
     let r0 = r + rmax * 0.07
     ws.forEach((w, i) => {
@@ -137,7 +140,7 @@ const Glyph = memo(function Glyph(p: {
   const fs0 = rmax * (p.label.length > 4 ? 0.3 : p.label.length > 3 ? 0.36 : 0.42), fs = fs0 * (p.lf?.size ?? 1)
   const inside = !idle && r >= fs0 * (p.label.length > 3 ? 1.5 : 1.1)
   const ff = p.lf?.family || undefined, fc = p.lf?.color || ''
-  const share = !idle && p.paint === undefined && p.showShare && p.share >= 0.02 ? (p.share * 100).toFixed(p.share >= 0.1 ? 0 : 1).replace('.', ',') + ' %' : ''
+  const share = !idle && !uni && p.paint === undefined && p.showShare && p.share >= 0.02 ? (p.share * 100).toFixed(p.share >= 0.1 ? 0 : 1).replace('.', ',') + ' %' : ''
   const lx = inside ? x : x + r + rmax * 0.1, ly = y
   return (
     <g className="glyph" data-well={p.well} opacity={p.dim ? 0.22 : 1}>
@@ -630,6 +633,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const byGroup = multiG && groupsOn
   const gcol = (well: number) => (byGroup ? groupColor(g.groupOf![String(well)]) : undefined)
   // два цвета маркера: обод — один набор (группа ГСП или пользовательская группа), заливка — другой
+  const allEq = usePref(allWellsEqual)
   const mcMode = usePref(markerColors), two = mcMode !== 'single' && !isRef
   const gspOf = (well: number) => { const n = g.groupOf?.[String(well)]; return n ? groupColor(n) : undefined }
   const twoColors = (well: number, cg?: CustomGroup) => {
@@ -642,7 +646,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
     const vis: number[] = []
     placed.forEach((q, n) => {
       const t = win.stats[n].total
-      const hidden = !paintData && !isRef && ((options.hideIdle && !(t > 0)) || (options.minValue > 0 && t < options.minValue * 1e6))
+      const hidden = !paintData && !isRef && !allEq && ((options.hideIdle && !(t > 0)) || (options.minValue > 0 && t < options.minValue * 1e6))
       if (!hidden || selected === q.well || group.includes(q.well) || cgMap.has(q.well)) vis.push(n)
     })
     vis.sort((u, v) => win.stats[v].total - win.stats[u].total)
@@ -671,7 +675,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
       out.push({ cl: { id: id++, x: cx / sw, y: cy / sw, idx: mem, total } })
     }
     return out
-  }, [placed, win, paintData, isRef, options.hideIdle, options.minValue, options.scale, selected, group, useCluster, view.k, rd, cgMap])
+  }, [placed, win, paintData, isRef, options.hideIdle, options.minValue, options.scale, selected, group, useCluster, view.k, rd, cgMap, allEq])
   const zoomTo = (idx: number[]) => {
     const xs = idx.map(n => placed[n].x), ys = idx.map(n => placed[n].y)
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
@@ -774,14 +778,14 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
                 months={win.months[n] || EMPTY} order={win.order} monthColors={monthColors} sectors={options.sectors === 'months'}
                 paint={paints ? paints.get(q.well) ?? null : undefined}
                 water={options.water ? rings.get(q.well) || EMPTY : EMPTY} maxFlow={maxFlow} showShare={options.share}
-                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} cg={cg} two={two} {...(two ? twoColors(q.well, cg) : {})} lf={cg && (cg.labelSize !== 1 || cg.labelColor) ? { ...lf, size: lf.size * cg.labelSize, color: cg.labelColor || lf.color } : lf}
+                selected={selected === q.well || group.includes(q.well)} dim={false} hot={tip?.well === q.well} gcolor={gcol(q.well)} cg={cg} uniform={allEq} two={two} {...(two ? twoColors(q.well, cg) : {})} lf={cg && (cg.labelSize !== 1 || cg.labelColor) ? { ...lf, size: lf.size * cg.labelSize, color: cg.labelColor || lf.color } : lf}
                 label={cg ? groupLabel(cg, q.well, base, win.stats[n].total > 0 ? fmtMln(win.stats[n].total) : '') : base} />
               )
             })}
       </>
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lf, items, rd, isRef, refNums, refK, cgMap, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well, two, mcMode])
+  }, [lf, items, rd, isRef, refNums, refK, cgMap, options, paintData, paints, win, rings, water, maxFlow, monthColors, pal, selected, group, byGroup, g, placed, tip?.well, two, mcMode, allEq])
   // наблюдательные (ромб) и геофизические (треугольник) скважины вне групп: в координатах карты; при «схеме» положения условные, поэтому они не рисуются
   const obsLayer = obsPts.length ? <g aria-label="Наблюдательные и геофизические скважины">
     {obsPts.map(o => {
@@ -1116,6 +1120,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             </details>}
             <details className="pal-det"><summary>Пользовательские группы{cgList.length ? ` · ${cgList.length}` : ''}</summary>
               <CustomGroupsPanel groups={cgList} covered={cgCovered} /></details>
+            {!isRef && !paintData && <label className="check" title="Все скважины ГСП рисуются одинаковыми закрашенными кругами, даже если в выбранном сезоне они не работали; размер круга не зависит от расхода"><input type="checkbox" checked={allEq} onChange={e => allWellsEqual.set(e.target.checked)} />Все скважины одинаково (без привязки к сезону)</label>}
             {!isRef && <>
               <label className="row" title="Обод круга — цвет одного набора, заливка — другого. Скважина вне набора остаётся с обычным цветом"><span>Цвета маркера</span>
                 <select value={mcMode} onChange={e => markerColors.set(e.target.value as 'single' | 'rimGsp' | 'rimCustom')} aria-label="Цвета маркера скважины">
@@ -1141,7 +1146,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             {scopeMode !== 'one' && multi.seasons.length > 1 && scope?.keys.some(k => k !== season && !multi.calcs.has(k)) && options.paint === 'entry' && <p className="muted small">Загружаю сезоны…</p>}
           </section>}
           {!paintData && <section><h4>Показывать</h4>
-            <label className="check"><input type="checkbox" checked={options.hideIdle} onChange={e => onOptions({ hideIdle: e.target.checked })} />Только работающие</label>
+            <label className="check"><input type="checkbox" checked={options.hideIdle} disabled={allEq && !paintData} onChange={e => onOptions({ hideIdle: e.target.checked })} />Только работающие</label>
             <label className="row" title="Скрыть скважины с расходом ниже порога"><span>Порог, млн м³</span><input type="number" min={0} step={0.5} className="thr" value={options.minValue} onChange={e => onOptions({ minValue: Math.max(0, Number(e.target.value) || 0) })} /></label>
             <label className="check"><input type="checkbox" checked={options.water} onChange={e => onOptions({ water: e.target.checked })} />Вынос воды</label>
             {options.water && <details className="pal-det"><summary>Палитра воды{waterOv ? ' · изменена' : ''}</summary>
