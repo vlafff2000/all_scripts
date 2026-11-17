@@ -2,7 +2,7 @@ import Chart from './Chart'
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { customGroups, groupLabel, groupOfWells, usePresets, type CustomGroup } from './customGroups'
 import CustomGroupsPanel from './CustomGroupsPanel'
-import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, markerColors, allWellsEqual, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
+import { labelColor, labelFont, labelSize, legendOpen, pickedSeasons, seasonScope, spreadWells, clusterWells, groupColoring, markerColors, allWellsEqual, legendText, legendScale, LEGEND_DEFAULTS, mapGrid, refWells, refSize, usePref, layersBox, type SeasonScope } from './prefs'
 import { createPortal } from 'react-dom'
 import { groupColor, reportIssue, type TnavModel, type Observers, type GisCatalog, type GspData, type ParamItem, type SeasonInfo, type GdiCatalog, type GdiValues } from './api'
 import ModelPicker, { type ModelPickerProps } from './ModelPicker'
@@ -634,6 +634,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
   const gcol = (well: number) => (byGroup ? groupColor(g.groupOf![String(well)]) : undefined)
   // два цвета маркера: обод — один набор (группа ГСП или пользовательская группа), заливка — другой
   const allEq = usePref(allWellsEqual)
+  const lgd = usePref(legendText), lgScale = usePref(legendScale)
   const mcMode = usePref(markerColors), two = mcMode !== 'single' && !isRef
   const gspOf = (well: number) => { const n = g.groupOf?.[String(well)]; return n ? groupColor(n) : undefined }
   const twoColors = (well: number, cg?: CustomGroup) => {
@@ -1003,37 +1004,32 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
             </g>}
           </>}
         </g>}
-        {two && !compact && (() => {
-          // два набора в легенде: обод — кольцо, заливка — закрашенный кружок; порядок и подписи зависят от выбранной пары
+        {!isRef && !compact && (() => {
+          // «Условные обозначения»: заголовок, названия наборов и строк инженер правит сам (Вид карты → Круги); размер — множителем
           const gsp = multiG ? sortLabels(g.groups!, n => n) : []
-          const cgs = cgList.filter(c => c.on && (cgCovered.get(c.id) ?? 0) > 0)
-          const gspSec = { title: mcMode === 'rimGsp' ? 'Обод — группа ГСП' : 'Заливка — группа ГСП', ring: mcMode === 'rimGsp', items: gsp.map(n => ({ k: n, name: n, color: groupColor(n) })) }
-          const cgSec = { title: mcMode === 'rimGsp' ? 'Заливка — пользовательская' : 'Обод — пользовательская', ring: mcMode !== 'rimGsp', items: cgs.map(c => ({ k: c.id, name: c.name, color: c.color })) }
-          const secs = (mcMode === 'rimGsp' ? [gspSec, cgSec] : [cgSec, gspSec]).filter(s => s.items.length)
+          const cgs = two ? cgList.filter(c => c.on && (cgCovered.get(c.id) ?? 0) > 0) : []
+          const gspSec = { key: 'gsp', title: lgd.gsp || LEGEND_DEFAULTS.gsp, ring: two && mcMode === 'rimGsp', items: gsp.map(n => ({ k: 'i:' + n, name: lgd.items?.[n] || n, color: groupColor(n) })) }
+          const cgSec = { key: 'cg', title: lgd.cg || LEGEND_DEFAULTS.cg, ring: mcMode === 'rimCustom', items: cgs.map(c => ({ k: 'c:' + c.id, name: lgd.items?.[c.id] || c.name, color: c.color })) }
+          const secs = (mcMode === 'rimCustom' ? [cgSec, gspSec] : [gspSec, cgSec]).filter(s => s.items.length)
           if (!secs.length) return null
-          const all = secs.flatMap(s => [s.title, ...s.items.map(i => i.name)]), w = Math.max(...all.map(n => n.length)) * 7 + 44
-          const rows = secs.reduce((s, x) => s + x.items.length + 1, 0), h = 16 + 18 * rows + 8 * (secs.length - 1) + 6
-          let yy = 26
-          return <g transform={`translate(${size.w - 14 - w} 66)`} aria-label="Цвета маркера скважины">
+          const title = lgd.title ?? LEGEND_DEFAULTS.title, head = title.trim() ? 24 : 6
+          const showSecTitle = secs.length > 1 || two
+          const all = [title, ...secs.flatMap(s => [showSecTitle ? s.title : '', ...s.items.map(i => i.name)])], w = Math.max(...all.map(n => n.length)) * 7 + 44
+          const rows = secs.reduce((s, x) => s + x.items.length + (showSecTitle ? 1 : 0), 0), h = head + 12 + 18 * rows + 8 * (secs.length - 1)
+          let yy = head + 14
+          return <g transform={`translate(${size.w - 14 - w * lgScale} 66) scale(${lgScale})`} aria-label="Условные обозначения">
             <rect width={w} height={h} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
+            {title.trim() && <text x={12} y={19} fontSize={12} fontWeight={700} fill={pal.ink}>{title}</text>}
             {secs.map(s => {
-              const y0 = yy; yy += 18 * (s.items.length + 1) + 8
-              return <g key={s.title}>
-                <text x={12} y={y0 - 6} fontSize={11.5} fontWeight={700} fill={pal.ink}>{s.title}</text>
-                {s.items.map((i, j) => <g key={i.k} transform={`translate(12 ${y0 + 12 + 18 * j})`}>
+              const y0 = yy; yy += 18 * (s.items.length + (showSecTitle ? 1 : 0)) + 8
+              const top = showSecTitle ? y0 + 12 : y0 - 6
+              return <g key={s.key}>
+                {showSecTitle && <text x={12} y={y0} fontSize={11.5} fontWeight={600} fill={pal.muted}>{s.title}</text>}
+                {s.items.map((i, j) => <g key={i.k} transform={`translate(12 ${top + 18 * j})`}>
                   {s.ring ? <circle r={5} fill={pal.surface} stroke={i.color} strokeWidth={2.6} /> : <circle r={5.5} fill={i.color} stroke={pal.line} strokeWidth={0.6} />}
                   <text x={13} fontSize={11.5} dominantBaseline="central" fill={pal.ink}>{i.name}</text></g>)}
               </g>
             })}
-          </g>
-        })()}
-        {multiG && !isRef && !compact && !two && (() => {
-          // легенда цветов групп рисуется в самой картинке (не HTML-чипами), поэтому попадает и в PNG
-          const names = sortLabels(g.groups!, n => n), w = Math.max(...names.map(n => n.length)) * 7 + 44, h = 30 + 18 * names.length
-          return <g transform={`translate(${size.w - 14 - w} 66)`} aria-label="Цвета групп">
-            <rect width={w} height={h} rx={10} fill={pal.surface} fillOpacity={0.96} stroke={pal.line} filter="url(#mapShadow)" />
-            <text x={12} y={20} fontSize={11.5} fontWeight={700} fill={pal.ink}>Группы</text>
-            {names.map((n, i) => <g key={n} transform={`translate(12 ${36 + 18 * i})`}><circle r={5.5} fill={groupColor(n)} /><text x={13} fontSize={11.5} dominantBaseline="central" fill={pal.ink}>{n}</text></g>)}
           </g>
         })()}
         {unit && <g transform={`translate(${size.w - 64 - bar * K} ${size.h - 24})`}>
@@ -1122,11 +1118,20 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ g, calc, kind, s
               <CustomGroupsPanel groups={cgList} covered={cgCovered} /></details>
             {!isRef && !paintData && <label className="check" title="Все скважины ГСП рисуются одинаковыми закрашенными кругами, даже если в выбранном сезоне они не работали; размер круга не зависит от расхода"><input type="checkbox" checked={allEq} onChange={e => allWellsEqual.set(e.target.checked)} />Все скважины одинаково (без привязки к сезону)</label>}
             {!isRef && <>
-              <label className="row" title="Обод круга — цвет одного набора, заливка — другого. Скважина вне набора остаётся с обычным цветом"><span>Цвета маркера</span>
+              <label className="row" title="Кольцо по краю круга — цвет одного набора, внутренняя заливка — другого. Скважина вне набора остаётся с обычным цветом"><span>Цвета маркера</span>
                 <select value={mcMode} onChange={e => markerColors.set(e.target.value as 'single' | 'rimGsp' | 'rimCustom')} aria-label="Цвета маркера скважины">
-                  <option value="single">один цвет</option><option value="rimGsp">обод — группа ГСП, заливка — пользовательская</option><option value="rimCustom">обод — пользовательская, заливка — группа ГСП</option></select></label>
-              {two && <button type="button" className="quiet" onClick={() => markerColors.set(mcMode === 'rimGsp' ? 'rimCustom' : 'rimGsp')}>⇄ Поменять обод и заливку местами</button>}
-              {two && paintData && <p className="muted small">При раскраске по значению заливку занимает значение, поэтому показан только обод.</p>}
+                  <option value="single">один цвет</option><option value="rimGsp">кольцо — группа ГСП, внутри — пользовательская</option><option value="rimCustom">кольцо — пользовательская, внутри — группа ГСП</option></select></label>
+              {two && <button type="button" className="quiet" onClick={() => markerColors.set(mcMode === 'rimGsp' ? 'rimCustom' : 'rimGsp')}>⇄ Поменять местами кольцо и заливку</button>}
+              <details className="pal-det"><summary>Условные обозначения{lgd.title !== undefined || lgd.gsp || lgd.cg || Object.keys(lgd.items || {}).length || lgScale !== 1 ? ' · изменены' : ''}</summary>
+                <label className="row"><span>Заголовок</span><input type="text" value={lgd.title ?? LEGEND_DEFAULTS.title} onChange={e => legendText.set({ ...lgd, title: e.target.value })} aria-label="Заголовок условных обозначений" placeholder="пусто — без заголовка" /></label>
+                {multiG && <label className="row"><span>Набор: ГСП</span><input type="text" value={lgd.gsp ?? ''} placeholder={LEGEND_DEFAULTS.gsp} onChange={e => legendText.set({ ...lgd, gsp: e.target.value })} aria-label="Название набора групп ГСП" /></label>}
+                {two && <label className="row"><span>Набор: польз.</span><input type="text" value={lgd.cg ?? ''} placeholder={LEGEND_DEFAULTS.cg} onChange={e => legendText.set({ ...lgd, cg: e.target.value })} aria-label="Название набора пользовательских групп" /></label>}
+                {multiG && sortLabels(g.groups!, n => n).map(n => <label key={n} className="row"><span>{n}</span><input type="text" value={lgd.items?.[n] ?? ''} placeholder={n} onChange={e => legendText.set({ ...lgd, items: { ...lgd.items, [n]: e.target.value } })} aria-label={'Подпись группы ' + n} /></label>)}
+                {two && cgList.filter(c => c.on).map(c => <label key={c.id} className="row"><span>{c.name}</span><input type="text" value={lgd.items?.[c.id] ?? ''} placeholder={c.name} onChange={e => legendText.set({ ...lgd, items: { ...lgd.items, [c.id]: e.target.value } })} aria-label={'Подпись пользовательской группы ' + c.name} /></label>)}
+                <label className="row"><span>Размер</span><input type="range" min={0.6} max={3} step={0.1} value={lgScale} onChange={e => legendScale.set(Number(e.target.value))} aria-label="Размер условных обозначений" /><span className="muted small">×{lgScale.toFixed(1)}</span></label>
+                <button type="button" className="quiet" onClick={() => { legendText.set({}); legendScale.set(1) }}>Сбросить подписи и размер</button>
+              </details>
+              {two && paintData && <p className="muted small">При раскраске по значению внутри круга показано значение, поэтому виден только набор по кольцу.</p>}
             </>}
             {multiG && <label className="check" title="Цвет группы: заливка круга, а при секторах по месяцам или раскраске по значению — обводка"><input type="checkbox" checked={groupsOn} onChange={e => groupColoring.set(e.target.checked)} />Красить по группам</label>}
             <label className="check" title="Близкие скважины объединяются в один круг со счётчиком, при приближении карты они расходятся"><input type="checkbox" checked={useCluster} onChange={e => clusterWells.set(e.target.checked)} />Группировать близкие скважины</label>
