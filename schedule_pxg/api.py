@@ -1367,7 +1367,7 @@ async def adapt_verify(request: Request):
 async def adapt_loop_include(request: Request):
     body = await request.json()
     try:
-        return JSONResponse(await run_in_threadpool(adapt_loop.write_include, str(body.get("id") or ""), int(body.get("k")), _clean(body.get("out"))))
+        return JSONResponse(await run_in_threadpool(adapt_loop.write_include, str(body.get("id") or ""), int(body.get("k")), _clean(body.get("out")), str(body.get("date") or "").strip()))
     except (ValueError, OSError, TypeError) as e:
         return _err(str(e))
 

@@ -449,4 +449,4 @@ export interface BatchDate { date: string; wells: string[]; status: 'queued' | '
 export interface BatchState { id: string; status: LoopState['status']; message: string; stop_reason: string; dates: BatchDate[] }
 export const getLoopStatus = (id: string, date = '') => call<LoopState & Partial<BatchState>>('/api/adapt/loop/status?' + new URLSearchParams(date ? { id, date } : { id }))
 export const stopLoop = (id: string) => call<{ ok: boolean }>('/api/adapt/loop/stop', post({ id }))
-export const loopInclude = (id: string, k: number, out: string) => call<{ path: string; wells: number }>('/api/adapt/loop/include', post({ id, k, out }))
+export const loopInclude = (id: string, k: number, out: string, date = '') => call<{ path: string; wells: number }>('/api/adapt/loop/include', post({ id, k, out, date }))
