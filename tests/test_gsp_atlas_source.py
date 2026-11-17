@@ -168,6 +168,22 @@ def test_any_atlas_numeric_column_is_a_map_parameter(tmp_path):
     assert none == {} and warn
 
 
+def test_construction_depths_by_element_and_thickness(tmp_path):
+    cons = pd.DataFrame({"well": ["11", "11", "12"], "date": pd.to_datetime(["2025-01-01"] * 3),
+                         "element": ["Фильтр", "НКТ", "Фильтр"], "top_m": [1000.0, 0.0, 1100.0], "bottom_m": [1050.0, 990.0, 1180.0],
+                         "diameter_mm": [114.0, 89.0, 114.0]})
+    data = open_data(tmp_path, {"production": prod(), "construction": cons})
+    items = {(p["table"], p["column"]): p for p in data.parameters()}
+    assert sorted(items[("construction", "top_m")]["elements"]) == ["НКТ", "Фильтр"]
+    assert ("construction", "thickness_m") in items
+    top, _ = data.parameter_values("construction", "top_m", "last", element="Фильтр")
+    assert top == {11: 1000.0, 12: 1100.0}                    # только фильтр, НКТ на карту не попадает
+    thick, _ = data.parameter_values("construction", "thickness_m", "last", element="Фильтр")
+    assert thick == {11: 50.0, 12: 80.0}
+    bottom, _ = data.parameter_values("construction", "bottom_m", "last", element="НКТ")
+    assert bottom == {11: 990.0}
+
+
 # ---------- сезоны: строго как в Атласе ----------
 
 def long_prod(season="", year=""):

@@ -429,10 +429,10 @@ class Project:
     def parameter_catalog(self) -> List[dict]:
         return self.atlas.parameters() if self.atlas is not None else []
 
-    def parameter_payload(self, table: str, column: str, agg: str, start: str, end: str) -> dict:
+    def parameter_payload(self, table: str, column: str, agg: str, start: str, end: str, element: str = "") -> dict:
         assert self.atlas is not None
-        values, warn = self.atlas.parameter_values(table, column, agg, start, end)
-        return {"table": table, "column": column, "agg": agg, "title": atlas_source.PARAM_TABLES[table],
+        values, warn = self.atlas.parameter_values(table, column, agg, start, end, element)
+        return {"table": table, "column": column, "agg": agg, "element": element, "title": atlas_source.PARAM_TABLES[table],
                 "values": {str(w): v for w, v in values.items()}, "warnings": warn}
 
     def gdi_catalog(self) -> dict:

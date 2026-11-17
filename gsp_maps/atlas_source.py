@@ -45,7 +45,7 @@ PARAM_SKIP = {"well", "year", "np", "season", "x", "y"}   # номера и ко
 PARAM_LABELS = {"q": "Расход", "pressure": "Давление, кгс/см²", "level": "Уровень", "work_hours": "Время работы, ч",
                 "water_rate": "Расход воды, т/сут", "water_factor_l": "Водный фактор", "bottom_m": "Забой, м", "top_m": "Верх, м",
                 "altitude": "Альтитуда, м", "perf_top": "Перфорация, верх, м", "perf_bottom": "Перфорация, низ, м", "dp2": "Депрессия",
-                "fact": "Факт", "model": "Модель", "hc": "Углеводороды", "gas": "Газ", "p": "Давление", "diameter_mm": "Диаметр, мм"}
+                "thickness_m": "Мощность (низ − верх), м", "fact": "Факт", "model": "Модель", "hc": "Углеводороды", "gas": "Газ", "p": "Давление", "diameter_mm": "Диаметр, мм"}
 PARAM_AGG = {"mean": "среднее", "sum": "сумма", "last": "последнее", "count": "число записей"}
 SOURCES = [("flow", "Расходы по скважинам"), ("periods", "Периоды работы объекта"), ("press_gsp", "Давление по ГСП"),
            ("press_obj", "Давление по объекту"), ("water", "Вынос воды по скважинам"), ("xy", "Координаты X, Y"),
@@ -318,22 +318,46 @@ class AtlasData:
             path = self._dir / (table + ".parquet")
             if not self.tables.get(table) or not path.is_file():
                 continue
-            for field in pq.read_schema(path):
+            schema = pq.read_schema(path)
+            elements = self.construction_elements() if table == "construction" else []
+            for field in schema:
                 if field.name in PARAM_SKIP or not (pa.types.is_integer(field.type) or pa.types.is_floating(field.type)):
                     continue
-                out.append({"table": table, "column": field.name, "title": title, "label": PARAM_LABELS.get(field.name, field.name),
-                            "rows": int(self.tables[table]), "perWell": table != "well_geo"})
+                item = {"table": table, "column": field.name, "title": title, "label": PARAM_LABELS.get(field.name, field.name),
+                        "rows": int(self.tables[table]), "perWell": table != "well_geo"}
+                if elements:
+                    item["elements"] = elements
+                out.append(item)
+            if elements and {"top_m", "bottom_m"} <= set(schema.names):      # мощность элемента считаем сами: низ − верх
+                out.append({"table": table, "column": "thickness_m", "title": title, "label": PARAM_LABELS["thickness_m"],
+                            "rows": int(self.tables[table]), "perWell": True, "elements": elements})
         return out
 
-    def parameter_values(self, table: str, column: str, agg: str = "mean", start: str = "", end: str = "") -> Tuple[Dict[int, float], List[str]]:
+    def construction_elements(self) -> List[str]:
+        """Названия элементов конструкции скважин в проекте Атласа (колонна, НКТ, фильтр, пакер…): по ним выбирают, что показать на карте."""
+        df = self._param_frame("construction")
+        if df is None or "element" not in df:
+            return []
+        names = df["element"].dropna().astype(str).str.strip()
+        return sorted(n for n in names.unique() if n)
+
+    def parameter_values(self, table: str, column: str, agg: str = "mean", start: str = "", end: str = "",
+                         element: str = "") -> Tuple[Dict[int, float], List[str]]:
         """Значение параметра по каждой скважине за период: среднее, сумма, последнее или число записей.
+        `element` — только для конструкции: глубина или диаметр одного элемента (верх, низ, мощность); пусто — все элементы вместе.
         Исключённые в Атласе точки — пропуск. Пустой результат — не ошибка, а пустой словарь с пояснением."""
         if table not in PARAM_TABLES or agg not in PARAM_AGG:
             raise ValueError("Нет такого параметра: %s / %s / %s" % (table, column, agg))
         warn: List[str] = []
         df = self._param_frame(table)
+        if df is not None and table == "construction" and column == "thickness_m" and {"top_m", "bottom_m"} <= set(df.columns):
+            df = df.assign(thickness_m=pd.to_numeric(df["bottom_m"], errors="coerce") - pd.to_numeric(df["top_m"], errors="coerce"))
         if df is None or column not in df or "well" not in df:
             return {}, ["В проекте Атласа нет параметра «%s» (%s)." % (column, PARAM_TABLES[table])]
+        if element and table == "construction" and "element" in df:
+            df = df[df["element"].fillna("").astype(str).str.strip() == element.strip()]
+        elif element:
+            warn.append("Выбор элемента относится только к конструкции скважины.")
         well = pd.to_numeric(df["well"], errors="coerce")
         val = pd.to_numeric(df[column], errors="coerce")
         keep = well.notna() & val.notna()
