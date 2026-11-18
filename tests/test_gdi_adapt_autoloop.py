@@ -145,6 +145,16 @@ class TestLoop(unittest.TestCase):
         self.assertGreater(al.curve_floor_pct(q, noisy), 2.0)                           # разброс 8-10 % по двум режимам
         self.assertTrue(np.isnan(al.curve_floor_pct(q[:2], smooth[:2])))                # меньше трёх точек: шум не определён
 
+    def test_pinned_well_is_detected_and_explained(self):
+        # депрессия модели не зависит от дебита, ошибка в тысячи процентов не меняется от мульта: скважина прижата, подбор бесполезен
+        lp = self.loop(threshold_pct=5.0, max_iter=6)
+        wr = {'err': 3315.0, 'dep_model': [71.28, 71.27, 71.25], 'dep_gdi': [0.69, 1.67, 3.63]}
+        self.assertFalse(lp._pinned('W1', wr, [(0.0, 0.5)]))                                  # мульт ещё не пробовали
+        self.assertTrue(lp._pinned('W1', wr, [(0.0, 0.5), (2.0, 0.5)]))
+        self.assertIn('не отдаёт режимы ГДИ', lp.state['skipped']['W1'])
+        ok = {'err': 3315.0, 'dep_model': [1.0, 2.0, 3.0], 'dep_gdi': [0.69, 1.67, 3.63]}      # модель растёт с дебитом: это обычная неудача
+        self.assertFalse(lp._pinned('W1', ok, [(0.0, 0.5), (2.0, 0.5)]))
+
     def test_default_target_is_indicator_curve_dp2(self):
         # цель адаптации по умолчанию — индикаторная кривая ΔP², а не депрессия; шаг мультов тоже по ΔP²
         self.assertEqual(al.LoopSettings().metric, 'dp2')
