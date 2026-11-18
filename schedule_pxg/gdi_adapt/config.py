@@ -49,7 +49,7 @@ class Config:
     objective: str = 'relative'           # 'relative' - сумма квадратов относительных ошибок дебита;
                                           # 'absolute' - абсолютных (нормированных на средний дебит ГДИ)
     pi_mult_bounds: Tuple[float, float] = (1e-4, 1000.0)
-    dfac_bounds: Tuple[float, float] = (0.0, 1e-4)
+    dfac_bounds: Tuple[float, float] = (0.0, 1e-3)
     well_bounds: Optional[dict] = None    # индивидуальные границы: {"33": {"pi_mult_bounds": [0.1, 50], "dfac_bounds": [0, 1e-5]}}
     n_starts: int = 3                     # число стартовых точек оптимизации (защита от локальных минимумов)
 
