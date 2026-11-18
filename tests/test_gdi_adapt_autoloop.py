@@ -137,6 +137,14 @@ class TestLoop(unittest.TestCase):
         mults = [it['mults']['W1']['inc'] for it in st['iterations'] if it['k'] > 0]
         self.assertLess(abs(math.log(mults[2] / mults[0])), abs(math.log(mults[1] / mults[0])))   # вторая попытка короче первой и снова от лучшей
 
+    def test_curve_floor_is_noise_of_gdi_points_around_smooth_curve(self):
+        q = np.array([400000.0, 300000.0, 200000.0, 100000.0])
+        smooth = q / 1000.0 * (0.1 + 0.001 * q / 1000.0)
+        self.assertLess(al.curve_floor_pct(q, smooth), 1e-6)                           # точки на кривой: шума нет
+        noisy = smooth * np.array([1.0, 1.1, 0.92, 1.0])
+        self.assertGreater(al.curve_floor_pct(q, noisy), 2.0)                           # разброс 8-10 % по двум режимам
+        self.assertTrue(np.isnan(al.curve_floor_pct(q[:2], smooth[:2])))                # меньше трёх точек: шум не определён
+
     def test_default_target_is_indicator_curve_dp2(self):
         # цель адаптации по умолчанию — индикаторная кривая ΔP², а не депрессия; шаг мультов тоже по ΔP²
         self.assertEqual(al.LoopSettings().metric, 'dp2')
