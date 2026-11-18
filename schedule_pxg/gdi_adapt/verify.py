@@ -71,6 +71,9 @@ def build(workdir: str, date_orig: Optional[Dict[str, str]] = None, expected: Op
                     row['reason'] = 'ошибка %.1f %% выше порога %s %%' % (row['err_pct'], '%g' % t if t is not None else '?')
                 if w in skipped:
                     row['reason'] = (row['reason'] + '; ' if row['reason'] else '') + str(skipped[w])
+                row['tried'] = [{'k': it.get('k'), 'pi_mult': _num((it.get('mults') or {}).get(w, {}).get('inc')),
+                                 'd': _num((it.get('mults') or {}).get(w, {}).get('d')), 'err_pct': _num(((it.get('wells') or {}).get(w) or {}).get('err'))}
+                                for it in loop.get('iterations', []) if (it.get('k') or 0) >= 1 and w in (it.get('mults') or {})]
                 miss = sum(1 for x in row['regimes'] if not x['modeled'])
                 if miss:
                     row['reason'] = (row['reason'] + '; ' if row['reason'] else '') + 'режимов без модельной точки: %d' % miss
@@ -110,7 +113,10 @@ def to_excel(rows: List[dict], path: str) -> str:
     regs = [{'Скважина': r['well'], 'Дата': r['date'], 'Режим': i + 1, 'Дебит, м3/сут': x['q'], 'Депрессия ГДИ, бар': x['dep_gdi'],
              'Депрессия модели, бар': x['dep_model'], 'Отклонение, %': x['err_pct'], 'Модельная точка есть': 'да' if x['modeled'] else 'нет'}
             for r in rows for i, x in enumerate(r['regimes'])]
+    tried = [{'Скважина': r['well'], 'Дата': r['date'], 'Прогон': t['k'], 'Мульт PIMULT': t['pi_mult'], 'D-фактор': t['d'], 'Ошибка, %': t['err_pct'],
+              'Лучший': 'да' if r.get('iteration') == t['k'] else ''} for r in rows for t in r.get('tried', [])]
     with pd.ExcelWriter(path) as xw:
         pd.DataFrame(head).to_excel(xw, sheet_name='Исследования', index=False)
+        pd.DataFrame(tried, columns=['Скважина', 'Дата', 'Прогон', 'Мульт PIMULT', 'D-фактор', 'Ошибка, %', 'Лучший']).to_excel(xw, sheet_name='Прогоны', index=False)
         pd.DataFrame(regs).to_excel(xw, sheet_name='Режимы', index=False)
     return path

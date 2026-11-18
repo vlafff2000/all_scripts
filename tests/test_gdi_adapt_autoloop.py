@@ -209,6 +209,19 @@ class TestLoop(unittest.TestCase):
         lm2, fresh2 = al.next_mult([(top, 2.0), (top, 2.0)], 4.0, b)
         self.assertFalse(fresh2)
 
+    def test_next_d_scales_by_b_ratio_within_bounds(self):
+        b = (0.0, 1e-4)
+        d, moved = al.next_d(1e-5, 2.0, 4.0, 4.0, b)                 # B ГДИ вдвое больше - D вдвое больше
+        self.assertAlmostEqual(d, 2e-5)
+        self.assertTrue(moved)
+        d2, _ = al.next_d(1e-5, 1.0, 1000.0, 4.0, b)                 # не более чем в 4 раза за шаг
+        self.assertAlmostEqual(d2, 4e-5)
+        d3, moved3 = al.next_d(1e-5, 1.0, 1.02, 4.0, b)              # почти совпало - не трогаем
+        self.assertFalse(moved3)
+        d4, _ = al.next_d(9e-5, 1.0, 100.0, 4.0, b)                  # граница D
+        self.assertEqual(d4, 1e-4)
+        self.assertEqual(al.next_d(None, 1.0, 2.0, 4.0, b), (None, False))
+
     def test_secant_step_bounded(self):
         lm = al.secant_step([(0.0, 5.0)], 4.0, (1e-4, 1000.0))
         self.assertAlmostEqual(lm, np.log(4.0))                                                  # шаг ограничен
