@@ -39,6 +39,7 @@ class LoopSettings:
     max_iter: int = 6                           # лимит прогонов после базового
     step_limit: float = 4.0                     # мульт за итерацию меняется не более чем в столько раз
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки): используется, только если stall_stop
+    tune_d: bool = True                         # подбирать D-фактор (кривизну ΔP²) по коэффициенту B ГДИ, чередуя шаги с мультом
     stall_stop: bool = False                    # остановка по «нет улучшения» (по умолчанию выключена: гоняем до порога или до лимита итераций)
     metric: str = 'dp2'                         # 'dp2' (индикаторная кривая ΔP², по умолчанию) | 'regimes' (депрессия по режимам)
     step_days: int = 1
@@ -137,6 +138,33 @@ def next_mult(hist: List[tuple], limit: float, bounds: tuple) -> tuple:
             cand = float(np.clip(lm + direction * math.log(limit) / 2.0, lo, hi))
     cand = float(np.clip(cand, lo, hi))
     return cand, not any(abs(cand - h[0]) < 1e-3 for h in hist)
+
+
+def next_d(d: Optional[float], b_model: Optional[float], b_gdi: Optional[float], limit: float, bounds: tuple) -> tuple:
+    """Следующий D-фактор по коэффициентам B (ΔP² = A·Q + B·Q²) модели и ГДИ: B примерно пропорционален D, поэтому D умножается на
+    B_ГДИ / B_модели (не более чем в limit раз за шаг, в границах скважины). Возвращает (D, изменился ли заметно: больше 10 %)."""
+    lo, hi = bounds
+    if d is None or not np.isfinite(d) or b_model is None or b_gdi is None or not np.isfinite(b_model) or not np.isfinite(b_gdi):
+        return d, False
+    base = d if d > 0 else hi * 0.05
+    if b_gdi <= 0:
+        factor = 1.0 / limit
+    elif b_model <= 0:
+        factor = limit
+    else:
+        factor = float(np.clip(b_gdi / b_model, 1.0 / limit, limit))
+    new = float(np.clip(base * factor, lo, hi))
+    return new, abs(math.log(new / d)) > 0.1 if d > 0 and new > 0 else new != d
+
+
+def _start_d(snap) -> Optional[float]:
+    """D-фактор скважины в модели: среднее положительное значение по перфорациям снимка."""
+    try:
+        v = np.asarray(snap.cdfac, float)
+        v = v[np.isfinite(v) & (v > 0)]
+        return float(v.mean()) if len(v) else None
+    except (AttributeError, TypeError):
+        return None
 
 
 class AutoLoop:
@@ -277,6 +305,15 @@ class AutoLoop:
                     if w in done or not hist.get(w):
                         nxt[w] = m
                         continue
+                    wr = it['wells'][w]
+                    if self.st.tune_d and k % 2 == 0 and wr.get('b_gdi') is not None:           # чётные итерации - шаг по D (кривизна), нечётные - по мульту (наклон)
+                        d_cur = m.get('d') if m.get('d') is not None else _start_d(self.snapshots.get(w))
+                        d_new, moved = next_d(d_cur, wr.get('b_model'), wr.get('b_gdi'), self.st.step_limit, self.cfg.bounds_for(w)[1])
+                        if moved:
+                            fresh = True
+                            hist[w] = []                                          # D изменил кривую: прежние точки по мульту не сравнимы
+                            nxt[w] = dict(m, d=d_new, source=f'D-фактор уточнён по B ГДИ (итерация {k})')
+                            continue
                     lm, new = next_mult(hist[w], self.st.step_limit, self._bounds(w))
                     fresh = fresh or new
                     nxt[w] = dict(m, inc=math.exp(lm), source=f'уточнено по прогону (итерация {k})')

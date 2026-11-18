@@ -56,7 +56,7 @@ class TestVerify(unittest.TestCase):
         rows = verify.build(self.tmp.name)
         path = verify.to_excel(rows, os.path.join(self.tmp.name, 'v.xlsx'))
         x = pd.ExcelFile(path)
-        self.assertEqual(x.sheet_names, ['Исследования', 'Режимы'])
+        self.assertEqual(x.sheet_names, ['Исследования', 'Прогоны', 'Режимы'])     # «Прогоны» - все пробованные пары (мульт, D) с ошибкой
         self.assertEqual(len(x.parse('Режимы')), 3)
 
 
