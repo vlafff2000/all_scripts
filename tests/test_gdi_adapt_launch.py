@@ -312,6 +312,24 @@ class TestIncludePaths(unittest.TestCase):
             self.assertIn('в .data записано', str(cm.exception))
 
 
+class TestLinkFolders(unittest.TestCase):
+    @unittest.skipIf(os.name == 'nt', 'на Windows junction проверяется вручную')
+    def test_model_folders_are_linked_not_copied_and_results_is_skipped(self):
+        # tNavigator ищет INCLUDE рядом с рабочим .data: подключаем папки модели ссылками на оригинал, RESULTS и существующие имена не трогаем
+        with tempfile.TemporaryDirectory() as d:
+            src, work = os.path.join(d, 'model'), os.path.join(d, 'work')
+            for sub in ('INCLUDE', 'RESULTS', 'PVT'):
+                os.makedirs(os.path.join(src, sub))
+            open(os.path.join(src, 'INCLUDE', 'grid.inc'), 'w').write('x')
+            os.makedirs(os.path.join(work, 'PVT'))
+            notes = cb.link_model_folders(src, work)
+            self.assertTrue(os.path.islink(os.path.join(work, 'INCLUDE')))
+            self.assertTrue(os.path.isfile(os.path.join(work, 'INCLUDE', 'grid.inc')))     # читается из оригинала
+            self.assertFalse(os.path.exists(os.path.join(work, 'RESULTS')))
+            self.assertFalse(os.path.islink(os.path.join(work, 'PVT')))                      # своё в workdir не затирается
+            self.assertEqual(notes, ['INCLUDE: ссылка'])
+
+
 class TestRestartCopy(unittest.TestCase):
     def test_truncated_results_copy_is_resynced(self):
         # копия RESULTS была сделана, пока исходная модель ещё считалась: файл короче исходного, одного файла нет вовсе

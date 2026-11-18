@@ -252,6 +252,41 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
             'hist_rates': rep['hist_rates'], 'notes': notes}
 
 
+def _link_dir(src: str, dst: str) -> str:
+    """Ссылка dst -> src на папку: символическая (Linux, РЕД ОС), на Windows junction (mklink /J, права администратора не нужны).
+    Возвращает 'ссылка' или 'копия' (копируется только если ссылку создать нельзя, например junction на сетевой диск)."""
+    try:
+        if os.name == 'nt':
+            import subprocess
+            r = subprocess.run(['cmd', '/c', 'mklink', '/J', dst, src], capture_output=True)
+            if r.returncode != 0 or not os.path.isdir(dst):
+                raise OSError(r.stderr.decode('cp866', 'replace') or 'mklink не удался')
+        else:
+            os.symlink(src, dst, target_is_directory=True)
+        return 'ссылка'
+    except OSError:
+        shutil.copytree(src, dst)
+        return 'копия'
+
+
+def link_model_folders(src_dir: str, workdir: str, data_name: str = '') -> List[str]:
+    """Папки модели (INCLUDE, GRID, PVT и т.п.) подключаются в рабочую папку ссылками на оригинал, а не копируются: tNavigator ищет
+    относительные файлы рядом с рабочим .data, а читать их можно прямо из оригинала. RESULTS здесь не трогаем (ensure_results копирует
+    только нужную модель). Уже существующие в workdir имена не перезаписываются. Возвращает записи о сделанном."""
+    src_dir, workdir = os.path.abspath(src_dir), os.path.abspath(workdir)
+    notes: List[str] = []
+    os.makedirs(workdir, exist_ok=True)
+    for name in sorted(os.listdir(src_dir)):
+        full = os.path.join(src_dir, name)
+        dst = os.path.join(workdir, name)
+        if name.casefold() == 'results' or os.path.normcase(os.path.abspath(full)) == os.path.normcase(workdir):
+            continue
+        if os.path.lexists(dst) or not os.path.isdir(full):
+            continue
+        notes.append(f'{name}: {_link_dir(full, dst)}')
+    return notes
+
+
 def results_files(src_dir: str, base: str) -> List[str]:
     """Файлы результатов ТОЛЬКО модели base (имя .data без расширения): подпапка RESULTS/<base> и файлы RESULTS/<base>.* (журнал запуска).
     В RESULTS могут лежать результаты многих моделей, остальные не копируются. Имя подпапки сверяется без учёта регистра; если подпапки
