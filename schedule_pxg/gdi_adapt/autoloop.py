@@ -227,6 +227,23 @@ class AutoLoop:
         t, f = self.st.noise_tol_pct, wr.get('floor_pct')
         return t is not None and f is not None and wr.get('err') is not None and self.st.metric != 'regimes' and wr['err'] <= f + t
 
+    def _pinned(self, w: str, wr: dict, hist: List[tuple]) -> bool:
+        """Скважина в модели не отдаёт режимы ГДИ: депрессия модели от дебита не зависит (прижата к ограничению по забойному давлению),
+        ошибка в сотни процентов не меняется от мульта. Подбор бесполезен, причина пишется в «пропущено» и видна в подтверждении."""
+        dm = [x for x in (wr.get('dep_model') or []) if x is not None]
+        dg = [x for x in (wr.get('dep_gdi') or []) if x is not None]
+        if wr.get('err') is None or wr['err'] < 300.0 or len(dm) < 2 or len(dg) < 2 or min(dm) <= 0 or min(dg) <= 0 or len(hist) < 2:
+            return False
+        flat_model = max(dm) / min(dm) < 1.05
+        growing_gdi = max(dg) / min(dg) > 1.5
+        mults = [h[0] for h in hist]
+        moved = max(mults) - min(mults) > math.log(2.0)                     # мульт уже менялся в разы, а ошибка осталась огромной
+        if flat_model and growing_gdi and moved:
+            self.state.setdefault('skipped', {})[w] = ('в модели скважина не отдаёт режимы ГДИ: депрессия модели %.2f-%.2f бар не зависит от дебита '
+                                                       '(ограничение по забойному давлению?), мульт и D не помогают; проверить модель' % (min(dm), max(dm)))
+            return True
+        return False
+
     def _bounds(self, w: str):
         (lo, hi), _ = self.cfg.bounds_for(w)
         return lo, hi
@@ -322,6 +339,8 @@ class AutoLoop:
                             bad[w] = bad.get(w, 0) + 1
                             damp[w] = damp.get(w, 1.0) * 0.5
                     if wr['err'] is not None and (wr['err'] <= self.st.thr(w) or self._in_noise(wr)):
+                        done.add(w)
+                    elif k >= 2 and w not in done and self._pinned(w, wr, hist.get(w, [])):
                         done.add(w)
                 self._push()
                 if all(w in done for w in mults):
