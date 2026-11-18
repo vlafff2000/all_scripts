@@ -962,12 +962,19 @@ def _repair_header_dates(groups: List[Group], rep: Report) -> None:
         if g.date is None:
             continue
         if prev is not None and g.date <= prev:
-            fixed = g.date
+            limit = _add_months(dt.date(rep.date.year, rep.date.month, 1), 2) if rep.date is not None else None
+            fixed, step = g.date, "шаг 6 мес."
+            if g.date < prev:                                 # «05.2025» после «10.2025»: опечатка в году, месяц замера (весна) верный — сдвиг на год, не на полгода (иначе весна станет осенью)
+                same = g.date
+                while same <= prev:
+                    same = _add_months(same, 12)
+                if limit is None or same <= limit:
+                    fixed, step = same, "месяц замера сохранён, год сдвинут"
             while fixed <= prev:
                 fixed = _add_months(fixed, 6)
-            if rep.date is None or fixed <= _add_months(dt.date(rep.date.year, rep.date.month, 1), 2):
-                rep.issue("warn", "header_date_fixed", "Дата столбца-замера «%s»: %s не больше предыдущей (%s) — опечатка шапки, принята %s (шаг 6 мес.), сверить по отчёту" % (
-                    g.label[:30], g.date.strftime("%m.%Y"), prev.strftime("%m.%Y"), fixed.strftime("%m.%Y")), "шапка таблицы")
+            if limit is None or fixed <= limit:
+                rep.issue("warn", "header_date_fixed", "Дата столбца-замера «%s»: %s не больше предыдущей (%s) — опечатка шапки, принята %s (%s), сверить по отчёту" % (
+                    g.label[:30], g.date.strftime("%m.%Y"), prev.strftime("%m.%Y"), fixed.strftime("%m.%Y"), step), "шапка таблицы")
                 g.date, g.exact = fixed, False
         prev = g.date
     # последний столбец позже месяца отчёта (отчёт от 30.03.2023, столбец «04.2023г»): такого замера на дату отчёта быть не может, это опечатка текущего замера;
@@ -1180,7 +1187,9 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
             t = texts[0].text
             if re.match(r"\s*(ГВК|водо)", t, re.I) and re.search(r"ГВК", t, re.I):
                 md, ab = _gvk_from(t)
-                g = sgroups[-1] if sgroups else None
+                cell = texts[0]
+                narrow = (cell.x1 - cell.x0) < 0.8 * (tbl.x1 - tbl.x0)        # ГВК в ячейке под одним замером (пустые ячейки рядом растянули строку): это его ГВК, а не последнего
+                g = (next((x for x in sgroups if inb(x, cell)), None) if narrow else None) or (sgroups[-1] if sgroups else None)
                 named = classify_pack(t, mapping)[0]              # «ГВК по верхней песчаной пачке…» стоит после заголовка нижней: ГВК той пачки, что названа в строке
                 gv_pack, gv_title = pack, pack_title
                 if named and named != pack:
@@ -1188,7 +1197,7 @@ def read_intervals(rep: Report, tbl: wt.Table, nhdr: int, mapping: Optional[Dict
                     gv_title = next((p["Заголовок в документе"] for p in reversed(rep.packs) if p.get("_kind") == "heading" and p.get("Таблица") == tid and p.get("Пачка") == named), pack_title)
                 if g is not None:
                     _add_gvk(rep, g, gv_pack, gv_title, md, ab, t, _src(tbl, i), MID,
-                             "строка ГВК на всю ширину таблицы: отнесена к последнему замеру (текущему), а не ко всем столбцам")
+                             "строка ГВК под одним замером: отнесена к нему" if narrow and g is not None and inb(g, cell) else "строка ГВК на всю ширину таблицы: отнесена к последнему замеру (текущему), а не ко всем столбцам")
                 continue
             if re.match(r"\s*примечан", t, re.I):
                 continue

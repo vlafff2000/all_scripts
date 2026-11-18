@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from pxg_base import checks
-from pxg_core import archives, gis_report as gr, word_tables as wt
+from pxg_core import archives, gis_report as gr, ocr_blocks as ob, word_tables as wt
 
 DATA = os.path.join(os.path.dirname(__file__), "data_gis_report")
 A = os.path.join(DATA, "18_kasimov_201026.doc")     # «Газпром недра»: три замера РИГИС в одной таблице, ГВК по датам, вторичные скопления
@@ -1493,3 +1493,29 @@ def test_empty_kg_cell_in_latest_report_is_filled_from_other_report_of_same_meas
     got = allrows[allrows["В БД"] == "да"].sort_values("От, м")
     assert list(got["Кг"].iloc[:1]) == [0.50] and got["Кг"].iloc[1] != got["Кг"].iloc[1] and got["Кг (как в отчёте)"].iloc[1] == "-"
     assert any(i["Код"] == "empty_value_filled" for i in later.issues) and "own_231023" in got["Основание"].iloc[0]
+
+
+def _md_report(header_cols, rows_html, gvk_row):
+    return ("## 3. Оценка характера насыщения пласта-коллектора\n\n<table><tr><td rowspan=\"2\" colspan=\"2\">Интервал, м</td><td rowspan=\"2\">Кп, %</td>" + header_cols +
+            "</tr><tr>" + "<td colspan=\"2\">Интервалы (Нг), м</td><td>Кг, %</td>" * (header_cols.count("РИГИС")) + "</tr>"
+            "<tr><td colspan=\"" + str(3 + 3 * header_cols.count("РИГИС")) + "\">Верхняя песчаная пачка щигровского горизонта (D3sc)</td></tr>" + rows_html + gvk_row + "</table>\n")
+
+
+def test_gvk_row_under_one_measurement_belongs_to_it_not_to_the_last_column():
+    """Тест: ГВК, написанный в ячейке под столбцом 20.10.2025, не приписывается последнему замеру 08.05.2026 (ячейки рядом пусты, строка выглядела «на всю ширину»)."""
+    head = "".join('<td colspan="3">РИГИС от %s</td>' % d for d in ("31.03.2025г", "20.10.2025г", "08.05.2026г"))
+    data = "<tr><td>777.2</td><td>778.6</td><td>28</td>" + "<td>777.2</td><td>778.6</td><td>35</td>" * 3 + "</tr>"
+    gvk = '<tr><td></td><td></td><td></td><td colspan="3"></td><td colspan="3">ГВК на гл. 793.2м (а.о.-665.3м)</td><td colspan="3"></td></tr>'
+    blocks, _ = ob.blocks_from_markdown(_md_report(head, data, gvk))
+    rep = gr.parse_blocks(blocks, "1Касимов_080526.ocr.md")
+    got = {str(p["Дата замера"]): p["ГВК MD, м"] for p in rep.packs if p.get("_kind") == "gvk"}
+    assert got == {"2025-10-20": 793.2}
+
+
+def test_header_year_typo_keeps_month_of_the_measurement():
+    """Тест: столбец «05.2025» после «10.2025» (опечатка в году) становится 05.2026, а не 11.2025: весна не превращается в осень."""
+    rep = gr.Report(file="1Касимов_201026.doc", well="1")
+    rep.date = dt.date(2026, 10, 20)
+    groups = [gr.Group("РИГИС от %s" % t, i, i + 1, dt.date(y, m, 1), False) for i, (t, y, m) in enumerate([("03.2025г", 2025, 3), ("10.2025г", 2025, 10), ("05.2025г", 2025, 5), ("10.2026г", 2026, 10)])]
+    gr._repair_header_dates(groups, rep)
+    assert [g.date for g in groups] == [dt.date(2025, 3, 1), dt.date(2025, 10, 1), dt.date(2026, 5, 1), dt.date(2026, 10, 1)]
