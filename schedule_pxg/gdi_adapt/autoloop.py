@@ -39,7 +39,7 @@ class LoopSettings:
     max_iter: int = 6                           # лимит прогонов после базового
     step_limit: float = 4.0                     # мульт за итерацию меняется не более чем в столько раз
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки): используется, только если stall_stop
-    tune_d: bool = True                         # подбирать D-фактор (кривизну ΔP²) по коэффициенту B ГДИ, чередуя шаги с мультом
+    tune_d: bool = True                         # подбирать D-фактор (кривизну ΔP²) по коэффициенту B ГДИ, одновременно с мультом
     stall_stop: bool = False                    # остановка по «нет улучшения» (по умолчанию выключена: гоняем до порога или до лимита итераций)
     metric: str = 'dp2'                         # 'dp2' (индикаторная кривая ΔP², по умолчанию) | 'regimes' (депрессия по режимам)
     step_days: int = 1
@@ -306,17 +306,21 @@ class AutoLoop:
                         nxt[w] = m
                         continue
                     wr = it['wells'][w]
-                    if self.st.tune_d and k % 2 == 0 and wr.get('b_gdi') is not None:           # чётные итерации - шаг по D (кривизна), нечётные - по мульту (наклон)
+                    d_new = m.get('d')
+                    if self.st.tune_d and wr.get('b_gdi') is not None:                          # D (кривизна) и мульт (наклон) меняются в одном прогоне
                         d_cur = m.get('d') if m.get('d') is not None else _start_d(self.snapshots.get(w))
                         d_new, moved = next_d(d_cur, wr.get('b_model'), wr.get('b_gdi'), self.st.step_limit, self.cfg.bounds_for(w)[1])
                         if moved:
                             fresh = True
-                            hist[w] = []                                          # D изменил кривую: прежние точки по мульту не сравнимы
-                            nxt[w] = dict(m, d=d_new, source=f'D-фактор уточнён по B ГДИ (итерация {k})')
-                            continue
+                            hist[w] = hist[w][-1:]                                # D изменил кривую: старые точки по мульту не сравнимы, остаётся текущая
+                        else:
+                            d_new = m.get('d')
                     lm, new = next_mult(hist[w], self.st.step_limit, self._bounds(w))
                     fresh = fresh or new
                     nxt[w] = dict(m, inc=math.exp(lm), source=f'уточнено по прогону (итерация {k})')
+                    if d_new is not None and d_new != m.get('d'):
+                        nxt[w]['d'] = d_new
+                        nxt[w]['source'] = f'мульт и D-фактор уточнены по прогону (итерация {k})'
                 if not fresh:
                     self._push(status='done', stop_reason='нечего пробовать', message='остановлено: мульты упёрлись в границы, новых значений нет')
                     break
