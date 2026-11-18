@@ -99,6 +99,29 @@ class TestCase(unittest.TestCase):
         self.assertIn('sch_k0.inc', data)
         self.assertNotIn(os.path.join(self.src, 'sch_a.inc').replace(chr(92), '/'), data)
 
+    def test_nested_includes_in_generated_schedule_point_to_original_files(self):
+        # рабочая копия расписания лежит в другой папке, а tNavigator ищет относительные пути от папки файла: вложенные include (любые имена
+        # подпапок, обратные косые, любая глубина) становятся абсолютными путями на оригинал, сами файлы не копируются
+        sub = os.path.join(self.src, 'Расписания_2026')
+        os.makedirs(os.path.join(sub, 'вложенная', 'inc_2026'))
+        with open(os.path.join(sub, 'sch_b.inc'), 'w', encoding='utf-8') as f:
+            f.write("INCLUDE\n'вложенная\\inc_2026\\wells.inc' /\n" + SCH_B)
+        with open(os.path.join(sub, 'вложенная', 'inc_2026', 'wells.inc'), 'w', encoding='utf-8') as f:
+            f.write('-- wells\n')
+        os.remove(os.path.join(self.src, 'sch_b.inc'))
+        with open(self.data, 'w', encoding='utf-8') as f:
+            f.write(DATA.replace("'sch_b.inc'", "'Расписания_2026/sch_b.inc'"))
+        work = os.path.join(self.tmp.name, 'work')
+        res = cb.build_case(self.data, work, START, {'W1': [1.0]}, name='x')
+        inc = open(res['include'], encoding='utf-8').read()
+        want = os.path.join(sub, 'вложенная', 'inc_2026', 'wells.inc').replace(chr(92), '/')
+        self.assertIn("'" + want + "' /", inc)
+        self.assertEqual(sorted(os.listdir(work)), ['BASE.DATA', 'sch_x.inc'])                       # копий include-файлов нет
+
+    def test_abs_includes_unit(self):
+        got = cb.abs_includes(["INCLUDE", "'А\\Б/в.inc' /", "WCONHIST"], '/m/dir')
+        self.assertEqual(got, ["INCLUDE", "'/m/dir/А/Б/в.inc' /", "WCONHIST"])
+
     def test_hist_rate_from_earlier_include(self):
         with open(os.path.join(self.src, 'sch_b.inc'), 'w', encoding='utf-8') as f:
             f.write("DATES\n 10 JAN 2014 /\n 14 JAN 2014 /\n/\n")
