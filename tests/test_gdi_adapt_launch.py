@@ -268,6 +268,37 @@ class TestGpuFlag(unittest.TestCase):
         self.assertIn('CPU', r.gpu_fallback)
 
 
+class TestIncludePaths(unittest.TestCase):
+    def test_windows_separators_and_case_are_resolved_on_disk(self):
+        # include в .data записан на Windows: «Schedule\\SCH.INC», а на диске (РЕД ОС, регистр важен) schedule/sch.inc
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'schedule'))
+            real = os.path.join(d, 'schedule', 'sch.inc')
+            open(real, 'w').write('x')
+            got = cb._abs('Schedule\\SCH.INC', d)
+            self.assertTrue(os.path.isfile(got), got)
+            self.assertEqual(os.path.normcase(os.path.realpath(got)), os.path.normcase(os.path.realpath(real)))
+            self.assertTrue(os.path.isfile(cb._abs("'schedule/sch.inc'", d)))
+
+    def test_include_name_with_subfolder_is_not_cut_at_slash(self):
+        # «INCLUDE 'schedule/sch.inc' /»: имя читалось до первого «/» и превращалось в «schedule» (ошибка «нет файла расписания» с путём папки)
+        self.assertEqual(cb._include_name("'schedule/sch.inc' /"), 'schedule/sch.inc')
+        self.assertEqual(cb._include_name('"a\\b/c.inc"  /'), 'a\\b/c.inc')
+        self.assertEqual(cb._include_name('sch.inc /'), 'sch.inc')
+        self.assertEqual(cb._include_name('inc/sch.inc /'), 'inc/sch.inc')
+        self.assertEqual(cb._include_name("'sch.inc'/"), 'sch.inc')
+
+    def test_missing_schedule_error_names_what_was_written_in_data(self):
+        with tempfile.TemporaryDirectory() as d:
+            data = os.path.join(d, 'BASE.data')
+            with open(data, 'w') as f:
+                f.write("RUNSPEC\nSTART\n1 JAN 2000 /\nSUMMARY\nWBHP\n/\nSCHEDULE\nINCLUDE\n'nope/sch.inc' /\nEND\n")
+            with self.assertRaises(cb.CaseError) as cm:
+                cb.build_case(data, os.path.join(d, 'w'), datetime(2001, 1, 1), {'W': [1.0]})
+            self.assertIn('nope/sch.inc', str(cm.exception))
+            self.assertIn('в .data записано', str(cm.exception))
+
+
 class TestRestartCopy(unittest.TestCase):
     def test_truncated_results_copy_is_resynced(self):
         # копия RESULTS была сделана, пока исходная модель ещё считалась: файл короче исходного, одного файла нет вовсе

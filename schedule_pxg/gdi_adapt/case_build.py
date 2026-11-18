@@ -40,6 +40,14 @@ def model_start(text: str) -> datetime:
     raise CaseError('в .data не найдена дата START')
 
 
+def _include_name(line: str) -> str:
+    """Имя файла из строки INCLUDE: в кавычках (внутри могут быть «/», например 'inc/sch.inc' /) или без кавычек до завершающего « /»."""
+    m = re.match(r"""^\s*(['"])(.*?)\1""", line)
+    if m:
+        return m.group(2)
+    return re.split(r'\s+/|/\s*$', line.strip(), maxsplit=1)[0].strip()
+
+
 def include_records(lines: Sequence[str]) -> List[Tuple[int, int, str]]:
     """INCLUDE-записи: (строка слова INCLUDE, строка с именем файла, имя). Имя в кавычках или без, до ' /'."""
     out = []
@@ -50,17 +58,47 @@ def include_records(lines: Sequence[str]) -> List[Tuple[int, int, str]]:
             while j < len(lines) and not _clean(lines[j]):
                 j += 1
             if j < len(lines):
-                tok = _clean(lines[j]).split('/')[0].strip()
-                m = re.match(r"""^(['"])(.*)\1$""", tok)
-                out.append((i, j, m.group(2) if m else tok))
+                out.append((i, j, _include_name(_clean(lines[j]))))
                 i = j
         i += 1
     return out
 
 
+def _find_ci(base: str, parts: List[str]) -> Optional[str]:
+    """Путь base/parts, где каждая часть ищется без учёта регистра (РЕД ОС: файловая система чувствительна к регистру, а include в .data
+    писали на Windows: «Schedule\\SCH.inc» при файле schedule/sch.inc)."""
+    cur = base
+    for part in parts:
+        if part in ('', '.'):
+            continue
+        if part == '..':
+            cur = os.path.dirname(cur)
+            continue
+        direct = os.path.join(cur, part)
+        if os.path.exists(direct):
+            cur = direct
+            continue
+        try:
+            hit = [n for n in os.listdir(cur) if n.casefold() == part.casefold()]
+        except OSError:
+            return None
+        if len(hit) != 1:
+            return None
+        cur = os.path.join(cur, hit[0])
+    return cur
+
+
 def _abs(name: str, src_dir: str) -> str:
-    p = name if os.path.isabs(name) else os.path.join(src_dir, name)
-    return os.path.abspath(p).replace('\\', '/')
+    """Полный путь include из .data. Обратные косые (Windows) приводятся к прямым; если точного файла нет, имена сверяются с диском без учёта регистра."""
+    norm = name.strip().strip("'\"").replace('\\', '/')
+    if os.path.isabs(norm) or re.match(r'^[A-Za-z]:/', norm):
+        return norm if re.match(r'^[A-Za-z]:/', norm) else os.path.abspath(norm).replace('\\', '/')
+    p = os.path.abspath(os.path.join(src_dir, norm))
+    if not os.path.exists(p):
+        hit = _find_ci(os.path.abspath(src_dir), norm.split('/'))
+        if hit:
+            p = os.path.abspath(hit)
+    return p.replace('\\', '/')
 
 
 def _rewrite_include(line: str, new_name: str) -> str:
@@ -161,7 +199,8 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
     for i, j, nm in recs:
         path = _abs(nm, src_dir)
         if not os.path.isfile(path):
-            raise CaseError(f'нет файла расписания «{path}»')
+            raise CaseError(f'нет файла расписания «{path}» (в .data записано «{nm}», папка модели «{src_dir}»): проверьте, что файл лежит рядом с моделью по этому пути, '
+                            'а .data и include скопированы вместе; на РЕД ОС регистр букв в именах важен')
         t, e = _read(path)
         lns = [ln.rstrip('\r') for ln in t.split('\n')]
         if any(d >= start for b in scan_dates(lns) for _, d in b['items']):
