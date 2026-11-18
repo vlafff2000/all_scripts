@@ -285,6 +285,32 @@ class TestRestartCopy(unittest.TestCase):
             self.assertEqual(os.path.getsize(os.path.join(work, 'RESULTS', 'BASE', 'maps.res')), 1000)
             self.assertEqual(os.path.getsize(os.path.join(work, 'RESULTS', 'BASE', 'limits')), 10)
 
+    def test_only_results_of_the_given_data_file_are_copied(self):
+        # в RESULTS лежат результаты нескольких моделей: копируется только подпапка с именем .data (без учёта регистра) и её журнал запуска
+        with tempfile.TemporaryDirectory() as d:
+            src, work = os.path.join(d, 'model'), os.path.join(d, 'work')
+            for sub in ('Base', 'OTHER1', 'OTHER2'):
+                os.makedirs(os.path.join(src, 'RESULTS', sub))
+                with open(os.path.join(src, 'RESULTS', sub, 'maps.res'), 'wb') as f:
+                    f.write(bytes(100))
+            for n in ('Base.job.log', 'OTHER1.job.log'):
+                with open(os.path.join(src, 'RESULTS', n), 'w') as f:
+                    f.write('x')
+            cb.ensure_results(src, work, data_name='BASE.data')
+            self.assertTrue(os.path.exists(os.path.join(work, 'RESULTS', 'Base', 'maps.res')))
+            self.assertTrue(os.path.exists(os.path.join(work, 'RESULTS', 'Base.job.log')))
+            self.assertFalse(os.path.exists(os.path.join(work, 'RESULTS', 'OTHER1')))
+            self.assertFalse(os.path.exists(os.path.join(work, 'RESULTS', 'OTHER1.job.log')))
+
+    def test_missing_model_subfolder_is_an_explained_error_not_a_full_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, work = os.path.join(d, 'model'), os.path.join(d, 'work')
+            os.makedirs(os.path.join(src, 'RESULTS', 'OTHER1'))
+            with self.assertRaises(cb.CaseError) as cm:
+                cb.ensure_results(src, work, data_name='BASE.data')
+            self.assertIn('OTHER1', str(cm.exception))                              # перечень найденного: решает инженер
+            self.assertFalse(os.path.exists(os.path.join(work, 'RESULTS')))
+
     def test_interrupted_copy_leaves_no_short_file_under_final_name(self):
         # копирование оборвали (перезапуск программы, нет места): недокопированный файл не должен остаться под своим именем,
         # иначе следующий запуск примет его за готовый
