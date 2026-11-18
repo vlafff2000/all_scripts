@@ -65,3 +65,27 @@ class TestBatchIncludeOneDate:
         assert "\n".join(per_date).count("DATES") == 2                  # без даты - как раньше, по датам ГДИ
         with pytest.raises(ValueError):
             adapt_loop.batch_include_lines(self.DATES, '01.01.2012')
+
+
+def test_results_stay_visible_after_restart_of_the_program():
+    # после перезапуска ГДМ словарь циклов пуст: очередь и результаты дат должны читаться с диска, а не пропадать
+    import json
+    adapt_loop.LOOPS.clear()
+    with tempfile.TemporaryDirectory() as d:
+        work = os.path.join(d, 'adapt_work')
+        os.makedirs(work)
+        json.dump({'status': 'running', 'message': 'идёт', 'stop_reason': '', 'started': 0.0,
+                   'dates': [{'date': '2026-02-13', 'wells': ['162'], 'status': 'done', 'runs': 3, 'results': {'162': {'err': 5.7}}}]},
+                  open(os.path.join(work, 'batch.json'), 'w', encoding='utf-8'))
+        json.dump({'status': 'done', 'date': '2026-02-13', 'iterations': [{'k': 1}]}, open(os.path.join(work, 'loop_2026-02-13.json'), 'w', encoding='utf-8'))
+        p = SimpleNamespace(adapt={'tnav': {'workdir': work}}, results={})
+        try:
+            loops = adapt_loop.info(p, d)['loops']
+            assert len(loops) == 1 and loops[0]['batch']
+            s = adapt_loop.status(loops[0]['id'])
+            assert s['dates'][0]['results']['162']['err'] == 5.7
+            assert s['status'] == 'cancelled'                               # расчёт при перезапуске прервался: опрос «идёт» не нужен
+            assert adapt_loop.status(loops[0]['id'], '2026-02-13')['iterations'] == [{'k': 1}]
+            assert adapt_loop.stop(loops[0]['id']) == {'ok': True}          # остановка восстановленной записи ничего не ломает
+        finally:
+            adapt_loop.LOOPS.clear()
