@@ -38,7 +38,8 @@ class LoopSettings:
     well_threshold: Dict[str, float] = field(default_factory=dict)   # порог по скважине (инженер задаёт сам)
     max_iter: int = 6                           # лимит прогонов после базового
     step_limit: float = 4.0                     # мульт за итерацию меняется не более чем в столько раз
-    min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки) - стоп по «нет улучшения»
+    min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки): используется, только если stall_stop
+    stall_stop: bool = False                    # остановка по «нет улучшения» (по умолчанию выключена: гоняем до порога или до лимита итераций)
     metric: str = 'dp2'                         # 'dp2' (индикаторная кривая ΔP², по умолчанию) | 'regimes' (депрессия по режимам)
     step_days: int = 1
     work_min: float = 0.0                       # > 0: режимы ГДИ через TSTEP: минут работы на режиме (0 - режим сутки)
@@ -111,6 +112,31 @@ def secant_step(hist: List[tuple], limit: float, bounds: tuple) -> float:
                 slope = s
     step = float(np.clip(-e / slope, -math.log(limit), math.log(limit)))
     return float(np.clip(lm + step, math.log(bounds[0]), math.log(bounds[1])))
+
+
+def next_mult(hist: List[tuple], limit: float, bounds: tuple) -> tuple:
+    """Следующий log(мульт) по истории [(logM, e)] и признак «новый» (False - такой мульт уже пробовали, пробовать нечего).
+    Есть вилка (e > 0 и e < 0): метод ложного положения внутри вилки (с отступом от краёв). Иначе секущая; если она ведёт в уже
+    испробованную точку (упёрлись в границу, плоский участок), делается шаг в сторону уменьшения ошибки на полшага лимита."""
+    lo, hi = math.log(bounds[0]), math.log(bounds[1])
+    lm, e = hist[-1]
+    pos = [h for h in hist if h[1] > 0]
+    neg = [h for h in hist if h[1] < 0]
+    if pos and neg:
+        a = min(pos, key=lambda h: h[1])
+        b = max(neg, key=lambda h: h[1])
+        t = a[1] / (a[1] - b[1])
+        cand = a[0] + t * (b[0] - a[0])
+        span = abs(b[0] - a[0])
+        cand = float(np.clip(cand, min(a[0], b[0]) + 0.1 * span, max(a[0], b[0]) - 0.1 * span))
+    else:
+        cand = secant_step(hist, limit, bounds)
+        if any(abs(cand - h[0]) < 1e-3 for h in hist):
+            direction = -1.0 if e > 0 else 1.0                        # e > 0: депрессия модели велика, мульт надо увеличить
+            direction = -direction
+            cand = float(np.clip(lm + direction * math.log(limit) / 2.0, lo, hi))
+    cand = float(np.clip(cand, lo, hi))
+    return cand, not any(abs(cand - h[0]) < 1e-3 for h in hist)
 
 
 class AutoLoop:
@@ -238,7 +264,7 @@ class AutoLoop:
                     self._push(status='done', stop_reason='все скважины в пределах порога', message='готово')
                     break
                 prev = its[-2]['wells'] if k >= 2 else None
-                if prev is not None and all(
+                if self.st.stall_stop and prev is not None and all(
                         (it['wells'][w]['err'] is None or prev[w]['err'] is None or prev[w]['err'] - it['wells'][w]['err'] < self.st.min_gain_pct)
                         for w in mults if w not in done):
                     self._push(status='done', stop_reason='нет улучшения', message='остановлено: ошибка перестала уменьшаться')
@@ -246,13 +272,17 @@ class AutoLoop:
                 if k == self.st.max_iter:
                     self._push(status='done', stop_reason='лимит итераций', message='достигнут лимит итераций')
                     break
-                nxt = {}
+                nxt, fresh = {}, False
                 for w, m in mults.items():
                     if w in done or not hist.get(w):
                         nxt[w] = m
                         continue
-                    lm = secant_step(hist[w], self.st.step_limit, self._bounds(w))
+                    lm, new = next_mult(hist[w], self.st.step_limit, self._bounds(w))
+                    fresh = fresh or new
                     nxt[w] = dict(m, inc=math.exp(lm), source=f'уточнено по прогону (итерация {k})')
+                if not fresh:
+                    self._push(status='done', stop_reason='нечего пробовать', message='остановлено: мульты упёрлись в границы, новых значений нет')
+                    break
                 mults = nxt
         except Cancelled:
             self._push(status='cancelled', stop_reason='остановлено инженером', message='остановлено')

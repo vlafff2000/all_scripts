@@ -190,6 +190,25 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(st['status'], 'cancelled')
         self.assertEqual(len(lp.runner.calls), 1)
 
+    def test_loop_does_not_stop_on_stall_before_iteration_limit(self):
+        # «нет улучшения» больше не останавливает цикл раньше лимита: гоняем модель до порога или до max_iter
+        st = self.loop(threshold_pct=0.0001, max_iter=5).run()
+        self.assertGreaterEqual(len(st['iterations']), 4)
+        self.assertNotEqual(st['stop_reason'], 'нет улучшения')
+
+    def test_next_mult_bisects_inside_bracket_and_explores_when_stuck(self):
+        import math
+        b = (1e-4, 1000.0)
+        # вилка: e меняет знак - следующая точка между испробованными
+        lm, fresh = al.next_mult([(0.0, 1.0), (math.log(4.0), -1.0)], 4.0, b)
+        self.assertTrue(fresh)
+        self.assertGreater(lm, 0.0)
+        self.assertLess(lm, math.log(4.0))
+        # упёрлись в верхнюю границу, e всё ещё > 0: пробовать нечего
+        top = math.log(1000.0)
+        lm2, fresh2 = al.next_mult([(top, 2.0), (top, 2.0)], 4.0, b)
+        self.assertFalse(fresh2)
+
     def test_secant_step_bounded(self):
         lm = al.secant_step([(0.0, 5.0)], 4.0, (1e-4, 1000.0))
         self.assertAlmostEqual(lm, np.log(4.0))                                                  # шаг ограничен
