@@ -49,6 +49,15 @@ def _find_data(path: str) -> str:
     return ''
 
 
+def _model_results_gb(model: str) -> Optional[float]:
+    """Размер результатов только этой модели (подпапка RESULTS/<имя .data>); подпапки нет - None."""
+    try:
+        files = case_build.results_files(os.path.dirname(os.path.abspath(model)), os.path.splitext(os.path.basename(model))[0])
+        return sum(os.path.getsize(f) for f in files) / 2 ** 30
+    except (OSError, case_build.CaseError):
+        return None
+
+
 def _dir_gb(path: str, cap: int = 5000) -> float:
     total, n = 0, 0
     for root, _d, files in os.walk(path):
@@ -88,7 +97,7 @@ def defaults(p, folder: str) -> dict:
         free = shutil.disk_usage(probe).free / 2 ** 30
     except OSError:
         free = None
-    res_gb = _dir_gb(os.path.join(os.path.dirname(model), 'RESULTS')) if model else None
+    res_gb = _model_results_gb(model) if model else None
     return {'model': model, 'exe': exe, 'workdir': work, 'snapshots': snaps, 'free_gb': free, 'results_gb': res_gb,
             'work_exists': os.path.isdir(os.path.join(work, 'RESULTS'))}
 
@@ -178,7 +187,7 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
             loop._push(status='running', message='проверяю tNavigator')                   # сразу «идёт»: проверка версии и копия RESULTS могут занять минуты
             loop.state['tnav_version'] = tnav_run.probe(exe)['version']       # версия tNavigator видна в итогах и в журнале
             loop._push(status='running', message='копирую RESULTS модели (один раз, десятки ГБ)')
-            case_build.ensure_results(os.path.dirname(os.path.abspath(model)), work)
+            case_build.ensure_results(os.path.dirname(os.path.abspath(model)), work, data_name=os.path.basename(model))
         except Exception as e:
             loop._push(status='failed', stop_reason='%s: %s' % (type(e).__name__, e), message='ошибка')
             return

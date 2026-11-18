@@ -213,16 +213,38 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
             'hist_rates': rep['hist_rates'], 'notes': notes}
 
 
-def ensure_results(src_dir: str, workdir: str, progress: Optional[Callable[[int, int], None]] = None, min_free_gb: float = 20.0) -> str:
-    """Копия папки RESULTS (restart-файлы модели) в workdir; уже есть - не копируется. Нужен запас свободного места."""
+def results_files(src_dir: str, base: str) -> List[str]:
+    """Файлы результатов ТОЛЬКО модели base (имя .data без расширения): подпапка RESULTS/<base> и файлы RESULTS/<base>.* (журнал запуска).
+    В RESULTS могут лежать результаты многих моделей, остальные не копируются. Имя подпапки сверяется без учёта регистра; если подпапки
+    нет или подходит несколько - ошибка с перечнем найденного (какую брать, решает инженер: молча копировать всё нельзя)."""
+    res = os.path.join(src_dir, 'RESULTS')
+    subs = sorted(n for n in os.listdir(res) if os.path.isdir(os.path.join(res, n)))
+    hit = [n for n in subs if n == base] or [n for n in subs if n.casefold() == base.casefold()]
+    if not hit:
+        raise CaseError(f'в RESULTS нет подпапки «{base}» (имя .data без расширения): рестарт невозможен. Найдены подпапки: '
+                        f'{", ".join(subs) or "нет"}. Укажите .data, для которого модель была посчитана, или переименуйте подпапку.')
+    if len(hit) > 1:
+        raise CaseError(f'в RESULTS несколько подпапок, подходящих под «{base}» по имени: {", ".join(hit)}. Оставьте одну.')
+    sub = os.path.join(res, hit[0])
+    files = [os.path.join(r, f) for r, _, fs in os.walk(sub) for f in fs]
+    pre = hit[0].casefold() + '.'
+    files += [os.path.join(res, n) for n in sorted(os.listdir(res)) if os.path.isfile(os.path.join(res, n)) and n.casefold().startswith(pre)]
+    return files
+
+
+def ensure_results(src_dir: str, workdir: str, progress: Optional[Callable[[int, int], None]] = None, min_free_gb: float = 20.0,
+                   data_name: str = '') -> str:
+    """Копия результатов модели (restart-файлы) в workdir/RESULTS; уже есть - не копируется. Нужен запас свободного места.
+    data_name - имя .data (с расширением или без): копируются только результаты этой модели, а не вся папка RESULTS."""
     src = os.path.join(src_dir, 'RESULTS')
     dst = os.path.join(workdir, 'RESULTS')
     if not os.path.isdir(src):
         if os.path.isdir(dst):
             return dst
         raise CaseError(f'нет папки результатов модели «{src}»: рестарт невозможен')
+    base = os.path.splitext(os.path.basename(data_name))[0] if data_name else ''
     # копия уже есть - сверяем с оригиналом: её могли сделать, пока модель ещё считалась, тогда в ней нет поздних шагов рестарта
-    files = [os.path.join(r, f) for r, _, fs in os.walk(src) for f in fs]
+    files = results_files(src_dir, base) if base else [os.path.join(r, f) for r, _, fs in os.walk(src) for f in fs]
     todo = []
     for f in files:
         d = os.path.join(dst, os.path.relpath(f, src))
@@ -250,23 +272,6 @@ def ensure_results(src_dir: str, workdir: str, progress: Optional[Callable[[int,
             if os.path.exists(part):
                 os.remove(part)
             raise
-        done += os.path.getsize(f)
-        if progress:
-            progress(done, total)
-    return dst
-    if not os.path.isdir(src):
-        raise CaseError(f'нет папки результатов модели «{src}»: рестарт невозможен')
-    files = [os.path.join(r, f) for r, _, fs in os.walk(src) for f in fs]
-    total = sum(os.path.getsize(f) for f in files)
-    os.makedirs(workdir, exist_ok=True)
-    free = shutil.disk_usage(workdir).free
-    if free < total + min_free_gb * 2 ** 30:
-        raise CaseError(f'мало места: для копии RESULTS нужно {total / 2**30:.0f} ГБ и запас {min_free_gb:g} ГБ, свободно {free / 2**30:.0f} ГБ')
-    done = 0
-    for f in files:
-        d = os.path.join(dst, os.path.relpath(f, src))
-        os.makedirs(os.path.dirname(d), exist_ok=True)
-        shutil.copy2(f, d)
         done += os.path.getsize(f)
         if progress:
             progress(done, total)
