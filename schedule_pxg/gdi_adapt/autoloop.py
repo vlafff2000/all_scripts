@@ -45,6 +45,7 @@ class LoopSettings:
     metric: str = 'dp2'                         # 'dp2' (индикаторная кривая ΔP², по умолчанию) | 'regimes' (депрессия по режимам)
     step_days: int = 1
     work_min: float = 0.0                       # > 0: режимы ГДИ через TSTEP: минут работы на режиме (0 - режим сутки)
+    work_steps: int = 1                         # режим работает work_steps TSTEP по work_min минут (3 шага по 60 мин = режим 3 ч)
     rest_min: float = 30.0                      # минут остановки скважины между режимами (при work_min > 0)
 
     def thr(self, w: str) -> float:
@@ -212,7 +213,7 @@ class AutoLoop:
         regimes = {w: [float(x) for x in g.q] for w, g in self.gdis.items()}
         rows = [(w, m['inc'], m.get('d')) for w, m in (mults or {}).items()] or None
         case = cb.build_case(self.model_data, self.workdir, self.start, regimes, rows, name='test', step_days=self.st.step_days,
-                             work_min=self.st.work_min, rest_min=self.st.rest_min)
+                             work_min=self.st.work_min, rest_min=self.st.rest_min, work_steps=self.st.work_steps)
         rsm = self.runner.run(case, self.restart, label, self.cancel)
         series = parse_rsm(rsm)
         msd = case['model_start']

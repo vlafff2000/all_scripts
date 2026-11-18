@@ -174,7 +174,7 @@ def add_report_dates(files: Sequence[List[str]], extra: Sequence[datetime]) -> T
 
 def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, Sequence[float]], mults: Optional[list] = None,
                wells: Optional[Sequence[str]] = None, name: str = 'T', step_days: int = 1, extra_lines: Sequence[str] = (), work_min: float = 0.0,
-               rest_min: float = 30.0) -> dict:
+               rest_min: float = 30.0, work_steps: int = 1) -> dict:
     """Пишет в workdir копию модели под тестовый прогон. Возвращает {data, include, steps, model_start, hist_rates, notes}."""
     src_data = os.path.abspath(src_data)
     src_dir = os.path.dirname(src_data)
@@ -244,7 +244,7 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
     inc_name = f'sch_{name}.inc'
     prior_text = nl.join(prior)
     sched_text, steps, rep = rr.build_test_schedule(t, start, regimes, mults, step_days, extra_lines, prior_text=prior_text,
-                                                       work_min=work_min, rest_min=rest_min)
+                                                       work_min=work_min, rest_min=rest_min, work_steps=work_steps)
     os.makedirs(workdir, exist_ok=True)
     with open(os.path.join(workdir, inc_name), 'w', encoding=e if e != 'utf-8-sig' else 'utf-8', newline='') as f:
         f.write(sched_text)

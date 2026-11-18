@@ -74,6 +74,13 @@ class TestSchedule(unittest.TestCase):
         self.assertIn('100000.0', tail)
         self.assertIn('200000.0', tail)
 
+    def test_work_steps_split_regime_into_hourly_tsteps(self):
+        # режим 3 ч = три TSTEP по часу на одном дебите; давления читаются на конце всей работы, остановка и следующий режим после
+        text, steps, _ = rr.build_test_schedule(SCHED, START, {'A': [300000.0, 400000.0]}, None, work_min=60, rest_min=30, work_steps=3)
+        self.assertEqual([(s.k, s.end) for s in steps], [(0, datetime(2014, 1, 14, 3, 0)), (1, datetime(2014, 1, 14, 6, 30))])
+        self.assertEqual(text.split('\n').count('TSTEP'), 3 + 1 + 3)                  # 3 часа работы, остановка, 3 часа работы
+        self.assertEqual(text.count('300000.0'), 1)                                    # WCONHIST режима пишется один раз
+
     def test_model_regimes_reads_fractional_days(self):
         # реальный RSM (tNavigator 22.3): время с двумя знаками, округлено вниз: ожидаемые 0.0417, 0.1042, 0.1667, 0.2292, 0.2917 сут
         # печатаются как .04, .10, .16, .22, .29, остановки (.06, .12, .18, .25) стоят между ними
