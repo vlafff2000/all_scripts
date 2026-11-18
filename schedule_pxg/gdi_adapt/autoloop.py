@@ -40,6 +40,7 @@ class LoopSettings:
     step_limit: float = 4.0                     # мульт за итерацию меняется не более чем в столько раз
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки): используется, только если stall_stop
     tune_d: bool = True                         # подбирать D-фактор (кривизну ΔP²) по коэффициенту B ГДИ, одновременно с мультом
+    stall_n: int = 3                            # остановка скважины, если N итераций подряд не улучшили лучшую ошибку (0 - не останавливать)
     stall_stop: bool = False                    # остановка по «нет улучшения» (по умолчанию выключена: гоняем до порога или до лимита итераций)
     metric: str = 'dp2'                         # 'dp2' (индикаторная кривая ΔP², по умолчанию) | 'regimes' (депрессия по режимам)
     step_days: int = 1
@@ -264,6 +265,9 @@ class AutoLoop:
         its: List[dict] = self.state['iterations']
         hist: Dict[str, List[tuple]] = {}
         done: set = set()
+        best: Dict[str, dict] = {}                                   # лучшая пара по скважине: err, m, wr, pt (точка в hist)
+        damp: Dict[str, float] = {}                                  # доверительный шаг: после неудачи вдвое меньше
+        bad: Dict[str, int] = {}                                     # подряд итераций без улучшения лучшей ошибки
         try:
             if not self.preset:
                 its.append(self._iteration(0, None, 'базовый (без мультов)'))
@@ -285,11 +289,22 @@ class AutoLoop:
                     wr = it['wells'][w]
                     if wr['e'] is not None:
                         hist.setdefault(w, []).append((math.log(m['inc']), wr['e']))
+                    if wr['err'] is not None:
+                        if w not in best or wr['err'] < best[w]['err'] - 1e-9:
+                            best[w] = {'err': wr['err'], 'm': dict(m), 'wr': wr, 'pt': hist[w][-1] if wr['e'] is not None else None}
+                            bad[w] = 0
+                        else:
+                            bad[w] = bad.get(w, 0) + 1
+                            damp[w] = damp.get(w, 1.0) * 0.5
                     if wr['err'] is not None and wr['err'] <= self.st.thr(w):
                         done.add(w)
                 self._push()
                 if all(w in done for w in mults):
                     self._push(status='done', stop_reason='все скважины в пределах порога', message='готово')
+                    break
+                live = [w for w in mults if w not in done]
+                if self.st.stall_n > 0 and live and all(bad.get(w, 0) >= self.st.stall_n for w in live):
+                    self._push(status='done', stop_reason='нет улучшения', message=f'остановлено: {self.st.stall_n} итерации подряд без улучшения лучшей пары')
                     break
                 prev = its[-2]['wells'] if k >= 2 else None
                 if self.st.stall_stop and prev is not None and all(
@@ -302,25 +317,35 @@ class AutoLoop:
                     break
                 nxt, fresh = {}, False
                 for w, m in mults.items():
-                    if w in done or not hist.get(w):
+                    if w in done or not hist.get(w) or w not in best:
                         nxt[w] = m
                         continue
-                    wr = it['wells'][w]
-                    d_new = m.get('d')
+                    if bad.get(w, 0) >= self.st.stall_n > 0:                                  # застой: остаёмся на лучшей паре
+                        nxt[w] = dict(best[w]['m'], source=f'лучшая пара (итерация {k}): улучшений нет')
+                        continue
+                    mb, wr, g = best[w]['m'], best[w]['wr'], damp.get(w, 1.0)               # шаг всегда от лучшей точки, не от последней
+                    d_new = mb.get('d')
+                    h = [x for x in hist[w] if x is not best[w]['pt']] + ([best[w]['pt']] if best[w]['pt'] else [])
                     if self.st.tune_d and wr.get('b_gdi') is not None:                          # D (кривизна) и мульт (наклон) меняются в одном прогоне
-                        d_cur = m.get('d') if m.get('d') is not None else _start_d(self.snapshots.get(w))
-                        d_new, moved = next_d(d_cur, wr.get('b_model'), wr.get('b_gdi'), self.st.step_limit, self.cfg.bounds_for(w)[1])
-                        if moved:
+                        d_cur = mb.get('d') if mb.get('d') is not None else _start_d(self.snapshots.get(w))
+                        d_c, moved = next_d(d_cur, wr.get('b_model'), wr.get('b_gdi'), self.st.step_limit, self.cfg.bounds_for(w)[1])
+                        if moved and d_cur and d_cur > 0:
+                            d_new = d_cur * math.exp(g * math.log(d_c / d_cur))
                             fresh = True
-                            hist[w] = hist[w][-1:]                                # D изменил кривую: старые точки по мульту не сравнимы, остаётся текущая
+                            h = h[-1:]                                            # D изменил кривую: старые точки по мульту не сравнимы
                         else:
-                            d_new = m.get('d')
-                    lm, new = next_mult(hist[w], self.st.step_limit, self._bounds(w))
+                            d_new = mb.get('d')
+                    if h:
+                        lm_c, new = next_mult(h, self.st.step_limit, self._bounds(w))
+                        lm = h[-1][0] + g * (lm_c - h[-1][0])
+                    else:
+                        lm, new = math.log(mb['inc']), False
+                    hist[w] = h
                     fresh = fresh or new
-                    nxt[w] = dict(m, inc=math.exp(lm), source=f'уточнено по прогону (итерация {k})')
-                    if d_new is not None and d_new != m.get('d'):
+                    nxt[w] = dict(mb, inc=math.exp(lm), source=f'уточнено по прогону (итерация {k}, шаг от лучшей пары ×{g:g})')
+                    if d_new is not None and d_new != mb.get('d'):
                         nxt[w]['d'] = d_new
-                        nxt[w]['source'] = f'мульт и D-фактор уточнены по прогону (итерация {k})'
+                        nxt[w]['source'] = f'мульт и D-фактор уточнены (итерация {k}, шаг от лучшей пары ×{g:g})'
                 if not fresh:
                     self._push(status='done', stop_reason='нечего пробовать', message='остановлено: мульты упёрлись в границы, новых значений нет')
                     break
