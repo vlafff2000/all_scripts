@@ -97,7 +97,7 @@ export default function Adapt() {
   const rows = useMemo(() => (sel?.rows || []).filter(r =>
     filter === 'all' ? true : filter === 'on' ? r.include : filter === 'off' ? !r.include : filter === 'bad' ? r.note.startsWith('все ГДИ забракованы') : filter === 'nomodel' ? r.note === 'нет в модели' : true), [sel, filter])
   const pm = cfg.pi_mult_bounds || [1e-4, 1000]
-  const dm = cfg.dfac_bounds || [0, 1e-4]
+  const dm = cfg.dfac_bounds || [0, 1e-3]
 
   if (!st) return <main className="workspace">{msg && <p className="note warn">{msg}</p>}</main>
   return (
