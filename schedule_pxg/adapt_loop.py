@@ -102,8 +102,40 @@ def defaults(p, folder: str) -> dict:
             'work_exists': os.path.isdir(os.path.join(work, 'RESULTS'))}
 
 
+class _Restored:
+    """Очередь, прочитанная с диска после перезапуска программы: только просмотр результатов, расчёт не идёт."""
+    loop = None
+
+    def __init__(self, workdir: str, state: dict):
+        self.workdir = workdir
+        self.state = state
+
+    def stop(self) -> None:
+        return None
+
+
+def _restore(workdir: str) -> None:
+    """После перезапуска LOOPS пуст, и экран адаптации терял все результаты. Если в рабочей папке есть batch.json, регистрируем его
+    для просмотра: графики и таблицы дат читаются из loop_<дата>.json, как у идущей очереди."""
+    if not workdir or any(getattr(v.get('loop'), 'workdir', None) == workdir for v in LOOPS.values()):
+        return
+    try:
+        with open(os.path.join(workdir, 'batch.json'), encoding='utf-8') as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return
+    if not isinstance(st, dict) or not isinstance(st.get('dates'), list):
+        return
+    if st.get('status') in ('running', 'idle'):                       # расчёт оборвался вместе с программой
+        st['status'] = 'cancelled'
+        st['message'] = 'программа перезапускалась: расчёт не идёт, результаты ниже прочитаны с диска'
+    LOOPS['restored'] = {'batch': True, 'loop': _Restored(workdir, st), 'runner': None, 'jobs': []}
+
+
 def info(p, folder: str = '') -> dict:
     saved = dict((p.adapt or {}).get('tnav') or {})
+    if not LOOPS:
+        _restore(str(saved.get('workdir') or os.path.join(folder, 'adapt_work')) if folder or saved.get('workdir') else '')
     return {'saved': saved, 'candidates': tnav_run.find_exe(saved.get('exe', '')), 'defaults': defaults(p, folder),
             'loops': [dict(id=i, **_brief(v)) for i, v in LOOPS.items()]}
 
