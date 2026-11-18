@@ -101,6 +101,16 @@ def _abs(name: str, src_dir: str) -> str:
     return p.replace('\\', '/')
 
 
+def abs_includes(lines: Sequence[str], orig_dir: str) -> List[str]:
+    """Копия строк include-файла, где вложенные INCLUDE заменены абсолютными путями от папки ИСХОДНОГО файла. Рабочая копия лежит в другой
+    папке, а tNavigator ищет относительные пути от папки файла, в котором они записаны: без этого вложенные файлы искались бы в рабочей папке
+    (завершение с кодом 1). Сами вложенные файлы не копируются: читаются из оригинала."""
+    out = list(lines)
+    for _i, j, nm in include_records(out):
+        out[j] = _rewrite_include(out[j], _abs(nm, orig_dir))
+    return out
+
+
 def _rewrite_include(line: str, new_name: str) -> str:
     return f"'{new_name}' /"
 
@@ -226,10 +236,11 @@ def build_case(src_data: str, workdir: str, start: datetime, regimes: Dict[str, 
                 if patched[k] != lns:
                     name_k = f'sch_k{k}.inc'
                     with open(os.path.join(workdir, name_k), 'w', encoding=enc_k if enc_k != 'utf-8-sig' else 'utf-8', newline='') as f:
-                        f.write(nl.join(patched[k]))
+                        f.write(nl.join(abs_includes(patched[k], os.path.dirname(_abs(kept[k][2], src_dir)))))
                     kept_names[k] = name_k
             t = nl.join(patched[-1])
             notes.append(f'в расписание добавлено отчётных шагов оригинала: {n_extra} (номера шагов рестарта совпадут с картами модели)')
+    t = nl.join(abs_includes([ln.rstrip('\r') for ln in t.split('\n')], os.path.dirname(_abs(nm, src_dir))))   # вложенные include - абсолютными путями на оригинал
     inc_name = f'sch_{name}.inc'
     prior_text = nl.join(prior)
     sched_text, steps, rep = rr.build_test_schedule(t, start, regimes, mults, step_days, extra_lines, prior_text=prior_text,
