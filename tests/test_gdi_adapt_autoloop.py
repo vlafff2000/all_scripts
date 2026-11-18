@@ -1,4 +1,5 @@
 """Автоцикл подбора мультов по тестовому прогону: подставной симулятор (депрессия = K*q/мульт) и сходимость к известному мульту."""
+import math
 import os
 import sys
 import tempfile
@@ -119,6 +120,22 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(lp.runner.calls[0][1], 7)                                               # шаг рестарта передан
         self.assertAlmostEqual(lp.journal.total('W1'), TRUE_M['W1'], delta=0.15)                # журнал: лучший итог
         self.assertTrue(os.path.exists(os.path.join(self.tmp.name, 'work', 'loop.json')))
+
+    def test_bad_steps_go_back_to_best_pair_and_stall_stops(self):
+        # шаг, ухудшающий ошибку, не должен уводить цикл: после него шаг считается от лучшей пары, трёх неудач подряд хватает для остановки
+        orig = al.next_mult
+        al.next_mult = lambda hist, limit, bounds: (math.log(1e-6), True)             # всегда тянет мульт в сторону худшей ошибки
+        try:
+            lp = self.loop(threshold_pct=0.001, max_iter=12, metric='regimes')
+            st = lp.run()
+        finally:
+            al.next_mult = orig
+        self.assertEqual(st['stop_reason'], 'нет улучшения')
+        self.assertLess(len(st['iterations']), 13)                                  # остановилось раньше лимита 12
+        best = min(it['wells']['W1']['err'] for it in st['iterations'] if it['k'] > 0)
+        self.assertEqual(st['iterations'][1]['wells']['W1']['err'], best)                # лучшей остаётся стартовая пара по формуле
+        mults = [it['mults']['W1']['inc'] for it in st['iterations'] if it['k'] > 0]
+        self.assertLess(abs(math.log(mults[2] / mults[0])), abs(math.log(mults[1] / mults[0])))   # вторая попытка короче первой и снова от лучшей
 
     def test_default_target_is_indicator_curve_dp2(self):
         # цель адаптации по умолчанию — индикаторная кривая ΔP², а не депрессия; шаг мультов тоже по ΔP²
