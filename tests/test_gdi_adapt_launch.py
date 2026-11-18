@@ -132,6 +132,19 @@ class TestCase(unittest.TestCase):
         self.assertEqual(cb.restart_step_from_times([0, 3, 187, 278], 200), 2)
 
 
+class TestJobReasons(unittest.TestCase):
+    def test_exit_code_error_names_the_real_reason_from_the_log(self):
+        # журнал tNavigator заканчивается «Проблемы 0 Предупреждения 0 ... выполнено», а причина (нет файла и т.п.) выше
+        code = ("print('Чтение данных');print('Ошибка: не найден файл включения sch/inc.inc');"
+                "print('Проблемы 0 Предупреждения 0');print('Запись результатов (таблиц) в файл... выполнено');import sys;sys.exit(1)")
+        with tempfile.TemporaryDirectory() as d:
+            j = tr.Job([sys.executable, '-c', code], d, expect='BASE.RSM').start()
+            j.wait() if hasattr(j, 'wait') else j._thread.join(10)
+            self.assertEqual(j.status, 'failed')
+            self.assertIn('не найден файл включения', j.error)
+            self.assertIn('Полный журнал', j.error)
+
+
 class TestJob(unittest.TestCase):
     def test_command_flags(self):
         c = tr.command('tnav.exe', 'C:/x/BASE.DATA', 1479)

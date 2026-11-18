@@ -185,7 +185,9 @@ class Job:
             if self._cancel:
                 self.status = 'cancelled' if not self.error else 'failed'
             elif self.returncode not in (0, None):
-                self.status, self.error = 'failed', f'tNavigator завершился с кодом {self.returncode}: {self.tail(3)}'
+                why = self.reasons()
+                self.status, self.error = 'failed', (f'tNavigator завершился с кодом {self.returncode}: ' + (f'причина по журналу:\n{why}\n---\n' if why else '')
+                                                     + f'{self.tail(3)}\nПолный журнал: {self.log_path}')
             elif self.expect and not os.path.exists(os.path.join(self.cwd, self.expect)):
                 self.status, self.error = 'failed', f'после запуска нет файла {self.expect}: {self.tail(3)}'
             else:
@@ -229,6 +231,25 @@ class Job:
             return int(m[-1]) if m else 0
         except OSError:
             return 0
+
+    _REASON = re.compile(r'ошибк|error|не найден|не удалось|невозможн|cannot|can\'t|failed|fatal|критич|exception|not found|incorrect|неверн|недопустим', re.I)
+
+    def reasons(self, n: int = 6) -> str:
+        """Строки журнала tNavigator с причиной остановки (ошибки, «не найден», «невозможно»...): последние строки журнала обычно
+        только «Проблемы 0 Предупреждения 0 ... выполнено» и причину не называют."""
+        try:
+            with open(self.log_path, 'rb') as f:
+                f.seek(max(0, os.path.getsize(self.log_path) - 300000))
+                lines = [ln.strip() for ln in f.read().decode('utf-8', 'replace').splitlines() if ln.strip()]
+        except OSError:
+            return ''
+        hits = [ln for ln in lines if self._REASON.search(ln) and not re.search(r'(проблемы|ошибки|errors?)\s*:?\s*0\b', ln, re.I)]
+        seen, out = set(), []
+        for ln in hits:
+            if ln not in seen:
+                seen.add(ln)
+                out.append(ln[:300])
+        return '\n'.join(out[:n])
 
     def tail(self, n: int = 20) -> str:
         try:
