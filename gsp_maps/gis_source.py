@@ -50,6 +50,8 @@ def _packs(atlas: AtlasData) -> Optional[pd.DataFrame]:
     df["hikg"] = np.nan
     if iv is not None and {"pack", "hi_m", "kg"} <= set(iv.columns):
         iv["_x"] = pd.to_numeric(iv["hi_m"], errors="coerce") * pd.to_numeric(iv["kg"], errors="coerce")
+        if "h_eff_m" in iv:                                              # как в модуле «ГИС» Атласа: интервал с hэф = 0 (заглинизирован, Кг «<20» и т.п.) в сумму не входит
+            iv["_x"] = iv["_x"].where(pd.to_numeric(iv["h_eff_m"], errors="coerce") != 0)
         s = iv.dropna(subset=["_x"]).groupby(["_w", "_d", "pack"])["_x"].sum()
         df["hikg"] = [s.get((w, d, p), np.nan) for w, d, p in zip(df["_w"], df["_d"], df["pack"])]
     for c in METRICS:

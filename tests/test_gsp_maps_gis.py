@@ -63,6 +63,14 @@ def test_sum_hi_kg_from_intervals(atlas):
     assert r["values"] == {"11": pytest.approx(2.0), "12": pytest.approx(4.0)}
 
 
+def test_sum_hi_kg_skips_intervals_with_zero_effective_thickness(tmp_path):
+    """Тест: интервал hэф = 0 (Кг «<20» → 0,20, не коллектор) в Σ hi·Кг не входит: 5,524 → 5,324."""
+    iv = intervals().assign(h_eff_m=[2.0, 0.0, 8.0])
+    root = write_project(tmp_path / "s", {"gis_packs": packs(), "gis_intervals": iv})
+    r = gis_source.values(atlas_source.AtlasData(root, "a" * 32), "нижняя", "hikg", "осень 2022")
+    assert r["values"] == {"11": pytest.approx(1.0), "12": pytest.approx(4.0)}
+
+
 def test_empty_selection_is_a_note_not_an_error(atlas):
     r = gis_source.values(atlas, "перемычка", "gvk_abs_m", "осень 2022")
     assert r["values"] == {} and r["warnings"]
