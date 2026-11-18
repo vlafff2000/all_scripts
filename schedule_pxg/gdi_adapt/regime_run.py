@@ -95,13 +95,15 @@ class RegimeStep:
 
 def build_test_schedule(text: str, start: datetime, regimes: Dict[str, Sequence[float]], mults: Optional[list] = None,
                         step_days: int = 1, extra_lines: Sequence[str] = (), prior_text: str = '', work_min: float = 0.0,
-                        rest_min: float = 30.0, nextstep: float = 0.005) -> Tuple[str, List[RegimeStep], dict]:
+                        rest_min: float = 30.0, nextstep: float = 0.005, work_steps: int = 1) -> Tuple[str, List[RegimeStep], dict]:
     """Расписание тестового прогона. regimes: {скважина: [дебиты режимов, ст. м³/сут]}; mults: [(скважина, приращение WPIMULT, D|None)]
     на дату start; extra_lines - дополнительные ключевые слова на дату start (например COMPDAT для проверки смены интервала).
     Возвращает (текст, шаги режимов, отчёт). Режим k скважины идёт с start+k*step_days по start+(k+1)*step_days;
     после последнего режима скважины ставится её дебит истории.
     work_min > 0 - режимы как при реальном ГДИ: work_min минут работы на дебите режима (WCONHIST), затем rest_min минут остановки
     (WELOPEN SHUT), следующий режим; интервалы задаются TSTEP (дни, дробные), давления читаются на конце работы режима.
+    work_steps > 1 - работа режима режется на work_steps TSTEP по work_min минут (режим 3 ч = 3 шага по 1 ч): давления на конце каждого шага
+    остаются в RSM для проверки выхода на установившееся значение; читаются по-прежнему на конце всей работы режима.
     После последнего режима у всех скважин возвращается история."""
     nl = '\r\n' if '\r\n' in text else '\n'
     base = cut_schedule(text, start)
@@ -117,9 +119,11 @@ def build_test_schedule(text: str, start: datetime, regimes: Dict[str, Sequence[
     out += list(extra_lines)
     steps: List[RegimeStep] = []
     if work_min > 0:
+        ns = max(1, int(work_steps))
         work_d, rest_d = f'{work_min / 1440.0:.7f}', f'{rest_min / 1440.0:.7f}'
+        work_all = work_min * ns
         for k in range(kmax):
-            t_end = start + timedelta(minutes=k * (work_min + rest_min) + work_min)
+            t_end = start + timedelta(minutes=k * (work_all + rest_min) + work_all)
             rows = []
             for w in wells:
                 if k < len(regimes[w]):
@@ -128,14 +132,15 @@ def build_test_schedule(text: str, start: datetime, regimes: Dict[str, Sequence[
             out += ['WCONHIST'] + rows + ['/']
             if nextstep:
                 out += ['NEXTSTEP', f'{nextstep:g} /']
-            out += ['TSTEP', f'{work_d} /']
+            for _ in range(ns):
+                out += ['TSTEP', f'{work_d} /']
             shut = [w for w in wells if k < len(regimes[w])]
             if k < kmax - 1:
                 out += ['WELOPEN'] + [f'{w}\tSHUT\t/' for w in shut] + ['/', 'TSTEP', f'{rest_d} /']
             else:
                 out += ['WELOPEN'] + [f'{w}\tSHUT\t/' for w in shut] + ['/']
         out += ['WCONHIST'] + [f'{w}\tOPEN\tGRAT\t1*\t1*\t{hist[w]:.1f}\t1*\t/' for w in wells] + ['/']
-        total_d = ((kmax - 1) * (work_min + rest_min) + work_min) / 1440.0
+        total_d = ((kmax - 1) * (work_all + rest_min) + work_all) / 1440.0
         out += ['DATES', f'{_fmt(start + timedelta(days=int(total_d) + 1))}\t/', '/', MARK + ' (конец) тестовый прогон по режимам ГДИ', '']
         return nl.join(out), steps, {'hist_rates': hist, 'n_steps': len(steps), 'start': start}
     for k in range(kmax + 1):
