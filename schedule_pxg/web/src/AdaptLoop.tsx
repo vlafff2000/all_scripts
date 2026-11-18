@@ -40,7 +40,7 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
     timer.current = window.setInterval(tick, 2500)
     return () => window.clearInterval(timer.current)
   }, [id, selDate])
-  useEffect(() => { if (st && !well) setWell(st.wells[0] || '') }, [st, well])
+  useEffect(() => { if (st && (!well || !st.wells.includes(well))) setWell(st.wells[0] || '') }, [st, well])   // скважина другой даты не остаётся выбранной
 
   const d = info?.defaults
   const eff = { exe: o.exe || d?.exe || '', model: o.model || d?.model || '', workdir: o.workdir || d?.workdir || '' }
