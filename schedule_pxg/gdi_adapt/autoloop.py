@@ -41,6 +41,7 @@ class LoopSettings:
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки): используется, только если stall_stop
     tune_d: bool = True                         # подбирать D-фактор (кривизну ΔP²) по коэффициенту B ГДИ, одновременно с мультом
     stall_n: int = 3                            # остановка скважины, если N итераций подряд не улучшили лучшую ошибку (0 - не останавливать)
+    noise_tol_pct: float = 1.0                  # скважина настроена «в пределах точности ГДИ», если ошибка не больше шума точек ГДИ + это (п.п.); None - не применять
     stall_stop: bool = False                    # остановка по «нет улучшения» (по умолчанию выключена: гоняем до порога или до лимита итераций)
     metric: str = 'dp2'                         # 'dp2' (индикаторная кривая ΔP², по умолчанию) | 'regimes' (депрессия по режимам)
     step_days: int = 1
@@ -100,6 +101,23 @@ def _log_ratio(dep_model, dep_gdi) -> float:
     m, g = np.asarray(dep_model, float), np.asarray(dep_gdi, float)
     ok = np.isfinite(m) & np.isfinite(g) & (m > 0) & (g > 0)
     return float(np.mean(np.log(m[ok] / g[ok]))) if ok.any() else float('nan')
+
+
+def curve_floor_pct(q_m3d, dp2_gdi) -> float:
+    """Лучшая достижимая средняя относительная ошибка, %: насколько сами точки ГДИ отличаются от ближайшей гладкой кривой
+    dP² = A·Q + B·Q² (B >= 0). Модель с такой же гладкой кривой точнее не станет: это «шум» исследования. NaN, если точек < 3."""
+    q = np.asarray(q_m3d, float) / 1000.0
+    y = np.asarray(dp2_gdi, float)
+    ok = np.isfinite(q) & np.isfinite(y) & (y > 0)
+    if ok.sum() < 3:
+        return float('nan')
+    q, y = q[ok], y[ok]
+    coef, *_ = np.linalg.lstsq(np.vstack((q / y, q * q / y)).T, np.ones_like(y), rcond=None)       # МНК по относительным остаткам
+    a, b = float(coef[0]), float(coef[1])
+    if b < 0:
+        b = 0.0
+        a = float(np.sum(q * q / (y * y)) ** -1 * np.sum(q / y))
+    return float(np.mean(np.abs(a * q + b * q * q - y) / y) * 100.0)
 
 
 def secant_step(hist: List[tuple], limit: float, bounds: tuple) -> float:
@@ -184,7 +202,7 @@ class AutoLoop:
         self.cancel = threading.Event()
         self.state = {'status': 'idle', 'message': '', 'iterations': [], 'wells': list(self.gdis), 'date': self.start.strftime('%Y-%m-%d'),
                       'stop_reason': '', 'started': 0.0,
-                      'thresholds': {w: self.st.thr(w) for w in self.gdis}, 'metric': self.st.metric}
+                      'thresholds': {w: self.st.thr(w) for w in self.gdis}, 'metric': self.st.metric, 'noise_tol_pct': self.st.noise_tol_pct}
         self.snapshots: dict = dict(snapshots or {})
         self.preset = bool(snapshots)            # снимки уже есть (комплект): базовый прогон не нужен, экономим один запуск на дату
         self.tag = tag
@@ -203,6 +221,11 @@ class AutoLoop:
 
     def stop(self) -> None:
         self.cancel.set()
+
+    def _in_noise(self, wr: dict) -> bool:
+        """Ошибка модели не больше разброса самих точек ГДИ вокруг гладкой кривой (плюс допуск): точнее подбор не имеет смысла."""
+        t, f = self.st.noise_tol_pct, wr.get('floor_pct')
+        return t is not None and f is not None and wr.get('err') is not None and self.st.metric != 'regimes' and wr['err'] <= f + t
 
     def _bounds(self, w: str):
         (lo, hi), _ = self.cfg.bounds_for(w)
@@ -227,7 +250,8 @@ class AutoLoop:
             wells[w] = {'err': _f(err), 'err_dep': _f(c['err_dep_pct']), 'err_dp2': _f(c['err_dp2_pct']), 'p_res_gap': _f(c['p_res_gap']),
                         'dep_model': [_f(x) for x in c['dep_model']], 'dep_gdi': [_f(x) for x in c['dep_gdi']],
                         'q': [float(x) for x in g.q], 'e': _f(_log_ratio(ref_m, ref_g)),
-                        'a_model': _f(c['a_model']), 'b_model': _f(c['b_model']), 'a_gdi': _f(g.a), 'b_gdi': _f(g.b)}
+                        'a_model': _f(c['a_model']), 'b_model': _f(c['b_model']), 'a_gdi': _f(g.a), 'b_gdi': _f(g.b),
+                        'floor_pct': _f(curve_floor_pct(g.q, c['dp2_gdi']))}
         if k == 0:
             for w in self.gdis:
                 try:
@@ -297,7 +321,7 @@ class AutoLoop:
                         else:
                             bad[w] = bad.get(w, 0) + 1
                             damp[w] = damp.get(w, 1.0) * 0.5
-                    if wr['err'] is not None and wr['err'] <= self.st.thr(w):
+                    if wr['err'] is not None and (wr['err'] <= self.st.thr(w) or self._in_noise(wr)):
                         done.add(w)
                 self._push()
                 if all(w in done for w in mults):

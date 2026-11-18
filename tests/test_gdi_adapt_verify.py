@@ -51,6 +51,21 @@ class TestVerify(unittest.TestCase):
         s = verify.summary(list(rows.values()))
         self.assertEqual((s[verify.OK], s[verify.BAD], s[verify.FORMULA], s['ran_on_model'], s['total']), (1, 1, 1, 2, 6))
 
+    def test_error_within_gdi_noise_is_marked_but_not_hidden(self):
+        # ошибка выше порога, но не выше разброса самих точек ГДИ + допуск: «настроена в пределах точности ГДИ» с видимой причиной
+        d = self.tmp.name
+        loop = json.load(open(os.path.join(d, 'loop_2026-01-17.json'), encoding='utf-8'))
+        loop['noise_tol_pct'] = 1.0
+        loop['iterations'][0]['wells']['9']['floor_pct'] = 6.8                       # 7,5 % <= 6,8 + 1,0
+        dump(os.path.join(d, 'loop_2026-01-17.json'), loop)
+        r = {(x['well'], x['date']): x for x in verify.build(d)}[('9', '2026-01-17')]
+        self.assertEqual(r['status'], verify.NOISE)
+        self.assertIn('разброса самих точек ГДИ', r['reason'])
+        self.assertIn('решение за инженером', r['reason'])
+        loop['iterations'][0]['wells']['9']['floor_pct'] = 3.0                       # 7,5 % > 3,0 + 1,0: остаётся «не настроена»
+        dump(os.path.join(d, 'loop_2026-01-17.json'), loop)
+        self.assertEqual({(x['well'], x['date']): x for x in verify.build(d)}[('9', '2026-01-17')]['status'], verify.BAD)
+
     def test_excel_has_study_and_regime_sheets(self):
         import pandas as pd
         rows = verify.build(self.tmp.name)

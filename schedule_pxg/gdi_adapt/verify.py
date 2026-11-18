@@ -11,6 +11,7 @@ import os
 from typing import Dict, List, Optional
 
 OK, BAD, FORMULA, NOT_RUN = 'настроена', 'не настроена', 'принята по формуле, без прогона', 'не прогонялась'
+NOISE = 'настроена в пределах точности ГДИ'
 
 
 def _read(path: str) -> Optional[dict]:
@@ -65,6 +66,11 @@ def build(workdir: str, date_orig: Optional[Dict[str, str]] = None, expected: Op
                 t = row['threshold_pct']
                 row['status'] = OK if t is None or row['err_pct'] <= t else BAD
                 wk = ((iters.get(k) or {}).get('wells') or {}).get(w)
+                fl = _num((wk or {}).get('floor_pct'))
+                tol = loop.get('noise_tol_pct')
+                if row['status'] == BAD and fl is not None and tol is not None and row['err_pct'] <= fl + float(tol):
+                    row['status'] = NOISE
+                    row['reason'] = 'ошибка %.1f %% выше порога %g %%, но не выше разброса самих точек ГДИ (%.1f %%) плюс допуск %g п.п.; решение за инженером' % (row['err_pct'], t, fl, float(tol))
                 if wk:
                     row['regimes'] = _regimes(wk)
                 if row['status'] == BAD:
