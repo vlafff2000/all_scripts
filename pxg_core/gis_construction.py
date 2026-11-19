@@ -546,11 +546,11 @@ SHIFT_MAX_M = 15.0          # привязка мер к ГИС: не дальш
 NOT_ASSEMBLY = re.compile(r"расшир|открыт|фрезер|вырез|перфорац|цементн|мост|каверн|подзабой|пласт|ствол", re.I)   # интервалы ствола, а не трубы компоновки
 
 
-def _shift(elements):
+def _shift(elements, skip=()):
     """Сдвиг мер для элементов без глубины ГИС: по ближайшему элементу той же компоновки, у которого есть и меры, и ГИС (интервалы).
     Возвращает {id(элемента): (сдвиг, название опорного элемента, меры, ГИС)}."""
     anchors = [e for e in elements if e["kind"] == "interval" and e.get("pr_bot") is not None and e.get("g_bot") is not None
-               and not e.get("g_shared") and not e.get("g_from_text") and not NOT_ASSEMBLY.search(e["name"] + " " + e["label"])]
+               and not e.get("g_shared") and not e.get("g_from_text") and not NOT_ASSEMBLY.search(e["name"] + " " + e["label"]) and id(e) not in skip]
     out = {}
     for e in elements:
         if e["kind"] != "interval" or e.get("g_bot") is not None or e.get("pr_bot") is None or e.get("pr_top") is None                 or NOT_ASSEMBLY.search(e["name"] + " " + e["label"]):
@@ -596,11 +596,26 @@ def read_files(files: List[str]):
     return reports, notes
 
 
-def build(reports, shift: bool = True) -> Dict[str, pd.DataFrame]:
+SHORT_REACH_M = 0.5          # недоход прибора: ИЗ глубже остановки прибора ГИС больше чем на столько метров
+
+
+def short_reach(meta: dict, thr: float):
+    """(ИЗ, остановка прибора ГИС, недоход, м) при недоходе прибора до искусственного забоя больше порога; иначе None. ИЗ — по промысловым данным (фиксированная глубина)."""
+    art = meta.get("artificial") if meta.get("artificial") is not None else meta.get("cur_pr")
+    stop = meta.get("cur_gis")
+    if art is None or stop is None or thr is None or thr <= 0:
+        return None
+    return (art, stop, round(art - stop, 2)) if art - stop > thr else None
+
+
+def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gis=()) -> Dict[str, pd.DataFrame]:
     """Таблицы двух вариантов (`initial`, `gis`: лист «Конструкция» и пр.) и общие листы.
     Вариант «ГИС»: глубины по данным ГИС главнее; объединённая ячейка ГИС действует на все свои строки; элементы из текста отчёта добавляются;
     ``shift`` — элементам, которые ГИС не охватил, глубина по мерам сдвигается на разницу мер и ГИС ближайшего элемента той же компоновки
-    (подсказка с причиной в «Источнике глубины»; исходная глубина — в «Комментарии»)."""
+    (подсказка с причиной в «Источнике глубины»; исходная глубина — в «Комментарии»).
+    ``short_thr`` — порог недохода прибора, м (0 — проверка выключена): если прибор ГИС остановился выше искусственного забоя больше чем на порог, элементы,
+    чья промысловая нижняя граница на глубине остановки или ниже, берутся по промысловым данным (по ГИС они обрезаны остановкой прибора, скв. 410);
+    ``keep_gis`` — скважины, где инженер оставил глубины ГИС несмотря на недоход."""
     per_well = defaultdict(list)
     for rep, tbl, p in reports:
         if tbl is not None and rep.well:
@@ -624,7 +639,16 @@ def build(reports, shift: bool = True) -> Dict[str, pd.DataFrame]:
             continue
         initial_elements = [dict(e) for e in elements]
         _merge_text(elements, getattr(rep, "cons_text", None) or [], check_rows, well, rep)
-        moves = _shift(elements) if shift else {}
+        sr = short_reach(meta, short_thr) if well not in set(str(x).strip() for x in keep_gis) else None
+        pr_pick = set()
+        if sr:
+            pr_pick = {id(e) for e in elements if e["kind"] == "interval" and e.get("g_bot") is not None and e.get("pr_bot") is not None and e["pr_bot"] >= sr[1] - 0.5 and not e.get("g_from_text")}
+            check_rows.append([well, rep.date, rep.file, "warn", "недоход прибора ГИС: остановился на %s м, ИЗ %s м (недоход %s м, порог %s м): элементы ниже остановки (%d) взяты по промысловым данным — подсказка, "
+                               "оставить ГИС можно параметром «Оставить глубины ГИС»" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]), _ru(short_thr), len(pr_pick))])
+        moves = _shift(elements, pr_pick) if shift else {}
+        if sr:       # ниже остановки прибора привязки нет: элементы без глубины ГИС остаются по промысловым данным
+            below = {id(e) for e in elements if e.get("pr_bot") is not None and e["pr_bot"] >= sr[1] - 0.5}
+            moves = {k: v for k, v in moves.items() if k not in below}
         names = " ".join(e["name"] for e in elements).lower()
         if re.search(r"расшир|открытый ствол", names) and re.search(r"интервал перфорации|перфорация эк|щелевая перфорация", names):
             check_rows.append([well, rep.date, rep.file, "warn", "есть расширка/открытый ствол и интервал перфорации: вместе они не бывают, проверьте по отчёту (подсказка, ничего не удалено)"])
@@ -637,10 +661,10 @@ def build(reports, shift: bool = True) -> Dict[str, pd.DataFrame]:
             cond_rows.append([well, rep.date, k, v, rep.file])
         for variant, _t in VARIANTS:
             for e in (elements if variant == "gis" else initial_elements):
-                use_g = variant == "gis" and e.get("g_bot") is not None
+                use_g = variant == "gis" and e.get("g_bot") is not None and id(e) not in pr_pick
                 top = e["g_top"] if use_g else e["pr_top"]
                 bot = e["g_bot"] if use_g else e["pr_bot"]
-                move = moves.get(id(e)) if variant == "gis" else None
+                move = moves.get(id(e)) if variant == "gis" and id(e) not in pr_pick else None
                 if bot is None and top is None:
                     if variant == "initial":
                         check_rows.append([well, rep.date, rep.file, "warn", "«%s»: нет глубины по исходным данным («%s»)" % (e["label"][:50], e["pr_text"][:40])])
@@ -651,6 +675,9 @@ def build(reports, shift: bool = True) -> Dict[str, pd.DataFrame]:
                     bot = top
                 src = "ГИС" if use_g else ("исходные данные" if variant == "initial" else "исходные данные (ГИС: %s)" % STATUS_RU.get(e["g_status"], e["g_status"]))
                 comm = e["pr_text"] if variant == "initial" else (e["g_text"] if use_g else e["pr_text"])
+                if variant == "gis" and id(e) in pr_pick:
+                    src = "исходные данные (недоход прибора ГИС: остановился на %s м, ИЗ %s м, недоход %s м) — подсказка" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]))
+                    comm = "%s; по ГИС %s" % (comm, e["g_text"]) if comm and e.get("g_text") else comm
                 if use_g and e.get("g_from_text"):
                     src = "ГИС (текст отчёта)"
                 elif use_g and e.get("g_shared"):
