@@ -439,6 +439,9 @@ def read_bottoms(rep: Report, blocks: List[wt.Block]) -> None:
             m = re.search(r"максимальн\w*\s+глубин\w*\s+прохождения\s+прибор\w*\s*[-–—]?\s*(" + NUM + r")\s*м", b.text, re.I)
             if m:
                 add_bottom(rep, KIND_STOP, fnum(m.group(1)), "текст", HIGH)
+            m = re.search(r"текущ\w*\s+забой\s+на\s+глубине\s*(" + NUM + r")\s*м\s*\(\s*стоянк\w*[^)]*\)\s*\+\s*(" + NUM + r")\s*м\s*\(\s*[«\"]?\s*м[её]ртв\w*\s+зон\w*", b.text, re.I)
+            if m:           # «Текущий забой на глубине 799.8 м (стоянка) + 1.8 м («мертвая зона» прибора) = 801.6 м.» (отчёты 2021, графы ГИС в таблице нет)
+                add_bottom(rep, KIND_STOP, fnum(m.group(1)), "текст", HIGH, note="стоянка %s м + «мёртвая зона» %s м" % (m.group(1), m.group(2)))
         else:
             for i, r in enumerate(b.rows):
                 cells = [c.text for c in r.cells if not c.vcont]
