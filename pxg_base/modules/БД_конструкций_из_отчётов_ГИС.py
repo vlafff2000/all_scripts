@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from pxg_core import archives, gis_construction as gc, параметры
 
@@ -23,6 +24,8 @@ def main(argv=None):
     args = параметры.parse(
         "БД конструкций из отчётов ГИС", argv,
         files="отчёты ГИС (.doc/.docx, вывод OCR *.ocr.md), папки и архивы (ZIP, TAR, RAR), по одному пути в строке",
+        short_reach="недоход прибора, м: если ИЗ глубже остановки прибора ГИС больше чем на столько, элементы ниже остановки берутся по промысловым данным (по умолчанию 3; 0 — выключить)",
+        keep_gis="скважины, где оставить глубины ГИС несмотря на недоход (через запятую)",
         shift="1/0: элементы, которые ГИС не охватил, — по мерам со сдвигом по привязке к соседнему элементу (по умолчанию 1)")
     paths = _paths(args.files)
     if not paths:
@@ -40,7 +43,9 @@ def main(argv=None):
         reports, bad = gc.read_files(files)
         for b in bad:
             print("❌ %s" % b)
-        frames = gc.build(reports, shift=параметры.yes(args.shift) if args.shift is not None else True)
+        thr = float((args.short_reach or "").replace(",", ".") or gc.SHORT_REACH_M)
+        keep = [x.strip() for x in re.split(r"[,;\s]+", args.keep_gis or "") if x.strip()]
+        frames = gc.build(reports, shift=параметры.yes(args.shift) if args.shift is not None else True, short_thr=thr, keep_gis=keep)
         wells = len(frames["Скважины"])
         with_table = sum(1 for _r, t, _p in reports if t is not None)
         print("📊 Отчётов %d, с таблицей конструкции %d, скважин %d; строк конструкции: %d (исходные) и %d (ГИС)" % (
