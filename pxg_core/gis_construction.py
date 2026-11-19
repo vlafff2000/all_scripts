@@ -596,7 +596,7 @@ def read_files(files: List[str]):
     return reports, notes
 
 
-SHORT_REACH_M = 3.0          # недоход прибора: ИЗ глубже остановки прибора ГИС больше чем на столько метров
+SHORT_REACH_M = 0.5          # недоход прибора: ИЗ глубже остановки прибора ГИС больше чем на столько метров
 
 
 def short_reach(meta: dict, thr: float):
