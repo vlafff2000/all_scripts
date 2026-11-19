@@ -36,6 +36,9 @@ COND_COLUMNS = ["Скважина", "Дата", "Показатель", "Зна�
 HIST_COLUMNS = ["Скважина", "Дата отчёта", "Отчёт"]
 CHECK_COLUMNS = ["Скважина", "Дата", "Отчёт", "Уровень", "Сообщение"]
 VARIANTS = (("initial", "исходные_данные"), ("gis", "по_данным_ГИС"))
+# Три набора для схемы скважины без скрещиваний: «по промысловым данным» — только промысловые глубины (забой = искусственный забой); «по данным ГИС» — только то,
+# что ГИС определил, плюс текущий забой по ГИС; «комбинированный» — прежний вариант «gis» с подсказками (сдвиг, недоход, дополнение промысловыми).
+SETS = (("field", "по промысловым данным", "по_промысловым_данным_чистые"), ("gis_pure", "по данным ГИС", "по_данным_ГИС_чистые"), ("gis", "комбинированный (подсказки)", "по_данным_ГИС"))
 
 
 def f(s):
@@ -706,7 +709,7 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
     for rep, tbl, p in reports:
         if tbl is not None and rep.well:
             per_well[rep.well].append((rep, tbl, p))
-    cons: Dict[str, list] = {"initial": [], "gis": []}
+    cons: Dict[str, list] = {"initial": [], "gis": [], "field": [], "gis_pure": []}
     wells_rows, bottom_rows, cond_rows, check_rows, hist_rows = [], [], [], [], []
     for well, lst in sorted(per_well.items(), key=lambda kv: (len(kv[0]), kv[0])):
         lst.sort(key=lambda x: (x[0].date or dt.date.min, x[0].file))
@@ -804,7 +807,28 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
                             check_rows.append([well, rep.date, rep.file, "warn", "ИЗ %s м (по мерам, не сдвигается) выше низа компоновки %s м после привязки к ГИС: проверить ИЗ или привязку"
                                                % (_ru(val), _ru(round(low[0]["pr_bot"] + mv[0], 2)))])
                     cons[variant].append([well, rep.date, nm, val, val, None, None, comm, None, src, rep.file])
-    frames = {v: pd.DataFrame(cons[v], columns=COLUMNS) for v, _t in VARIANTS}
+        # ---- чистые наборы: каждый целиком из своего источника, без сдвигов, недоходов и дополнений
+        for e in initial_elements:
+            if e.get("pr_bot") is not None or e.get("pr_top") is not None:
+                t0 = e["pr_top"] if e.get("pr_top") is not None else e["pr_bot"]
+                b0 = e["pr_bot"] if e.get("pr_bot") is not None else e["pr_top"]
+                cons["field"].append([well, rep.date, e["name"], t0, b0, e["diam"], e["inner"], e["pr_text"], e["wall"], "промысловые данные", rep.file])
+            if e.get("g_bot") is not None:
+                t1 = e["g_top"] if e.get("g_top") is not None else e["g_bot"]
+                src_g = "ГИС (текст отчёта)" if e.get("g_from_text") else ("ГИС (общая ячейка с «%s»)" % e["g_shared"][:60] if e.get("g_shared") else "ГИС")
+                cons["gis_pure"].append([well, rep.date, e["name"], t1, e["g_bot"], e["diam"], e["inner"], e.get("g_text", ""), e["wall"], src_g, rep.file])
+        for e in elements:      # элементы только из текста отчёта (в таблице их нет) — глубины ГИС
+            if e.get("text_only") and e.get("g_bot") is not None:
+                cons["gis_pure"].append([well, rep.date, e["name"], e["g_top"], e["g_bot"], None, None, e.get("g_text", ""), None, "ГИС (текст отчёта)", rep.file])
+        art = meta["artificial"]
+        if art is not None:
+            cons["field"].append([well, rep.date, "Искусственный забой", art, art, None, None, "", None, "промысловые данные", rep.file])
+        if meta["cur_pr"] is not None and (art is None or abs(meta["cur_pr"] - art) > 0.05):
+            cons["field"].append([well, rep.date, "Забой", meta["cur_pr"], meta["cur_pr"], None, None, "текущий забой по промысловым данным", None, "промысловые данные", rep.file])
+        if meta["cur_gis"] is not None:
+            cons["gis_pure"].append([well, rep.date, "Забой", meta["cur_gis"], meta["cur_gis"], None, None, meta["cur_gis_text"], None, "ГИС", rep.file])
+
+    frames = {v: pd.DataFrame(cons[v], columns=COLUMNS) for v in ("initial", "gis", "field", "gis_pure")}
     frames["Скважины"] = pd.DataFrame(wells_rows, columns=WELL_COLUMNS)
     frames["Замеры забоя"] = pd.DataFrame(bottom_rows, columns=BOTTOM_COLUMNS)
     frames["Условия"] = pd.DataFrame(cond_rows, columns=COND_COLUMNS)
@@ -829,6 +853,12 @@ def atlas_frame(frame: pd.DataFrame) -> pd.DataFrame:
 def write(frames: Dict[str, pd.DataFrame], out_dir: str) -> List[str]:
     os.makedirs(out_dir, exist_ok=True)
     paths = []
+    for variant, _label, title in SETS:             # чистые наборы — отдельные файлы (комбинированный = «по_данным_ГИС»)
+        if variant != "gis":
+            path = os.path.join(out_dir, "Конструкции_из_ГИС_%s.xlsx" % title)
+            with pd.ExcelWriter(path, engine="openpyxl") as xw:
+                frames[variant].drop(columns=["Толщина стенки, мм"]).to_excel(xw, sheet_name="Конструкция", index=False)
+            paths.append(path)
     for variant, title in VARIANTS:                 # CSV для загрузки в Газовый Атлас (модуль «Конструкция скважин»)
         csv = os.path.join(out_dir, "construction_atlas_%s.csv" % variant)
         atlas_frame(frames[variant]).to_csv(csv, index=False, sep=";", encoding="utf-8-sig", decimal=",", date_format="%Y-%m-%d")
