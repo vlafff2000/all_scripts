@@ -735,6 +735,8 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
             pr_pick = {id(e) for e in elements if e["kind"] == "interval" and e.get("g_bot") is not None and e.get("pr_bot") is not None and e["pr_bot"] >= sr[1] - 0.5 and not e.get("g_from_text")}
             check_rows.append([well, rep.date, rep.file, "warn", "недоход прибора ГИС: остановился на %s м, ИЗ %s м (недоход %s м, порог %s м): элементы ниже остановки (%d) взяты по промысловым данным — подсказка, "
                                "оставить ГИС можно параметром «Оставить глубины ГИС»" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]), _ru(short_thr), len(pr_pick))])
+        # комбинированный подход: у элемента, обрезанного остановкой прибора, верх по ГИС определён (выше остановки) — берём верх по ГИС, а низ — по промысловым данным
+        combo = {id(e) for e in elements if id(e) in pr_pick and e.get("g_top") is not None and e["g_top"] < sr[1] - 0.5 and e.get("pr_bot") is not None} if sr else set()
         moves = _shift(elements, pr_pick) if shift else {}
         if sr:       # ниже остановки прибора привязки нет: элементы без глубины ГИС остаются по промысловым данным
             below = {id(e) for e in elements if e.get("pr_bot") is not None and e["pr_bot"] >= sr[1] - 0.5}
@@ -755,6 +757,8 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
                 top = e["g_top"] if use_g else e["pr_top"]
                 bot = e["g_bot"] if use_g else e["pr_bot"]
                 move = moves.get(id(e)) if variant == "gis" and id(e) not in pr_pick else None
+                if variant == "gis" and id(e) in combo:
+                    top = e["g_top"]
                 if bot is None and top is None:
                     if variant == "initial":
                         check_rows.append([well, rep.date, rep.file, "warn", "«%s»: нет глубины по исходным данным («%s»)" % (e["label"][:50], e["pr_text"][:40])])
@@ -766,8 +770,13 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
                 src = "ГИС" if use_g else ("исходные данные" if variant == "initial" else "исходные данные (ГИС: %s)" % STATUS_RU.get(e["g_status"], e["g_status"]))
                 comm = e["pr_text"] if variant == "initial" else (e["g_text"] if use_g else e["pr_text"])
                 if variant == "gis" and id(e) in pr_pick:
-                    src = "исходные данные (недоход прибора ГИС: остановился на %s м, ИЗ %s м, недоход %s м) — подсказка" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]))
-                    comm = "%s; по ГИС %s" % (comm, e["g_text"]) if comm and e.get("g_text") else comm
+                    if id(e) in combo:
+                        src = "ГИС (верх) + промысловые данные (низ): прибор остановился на %s м, ИЗ %s м, недоход %s м; низ ГИС обрезан остановкой — подсказка" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]))
+                        comm = "верх по ГИС %s; низ по промысловым %s" % (_ru(top), _ru(bot))
+                        comm = "%s; ГИС: %s; меры: %s" % (comm, e.get("g_text", ""), e.get("pr_text", "")) if e.get("g_text") or e.get("pr_text") else comm
+                    else:
+                        src = "исходные данные (недоход прибора ГИС: остановился на %s м, ИЗ %s м, недоход %s м) — подсказка" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]))
+                        comm = "%s; по ГИС %s" % (comm, e["g_text"]) if comm and e.get("g_text") else comm
                 if use_g and e.get("g_from_text"):
                     src = "ГИС (текст отчёта)"
                 elif use_g and e.get("g_shared"):
