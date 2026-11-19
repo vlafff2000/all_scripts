@@ -96,7 +96,7 @@ def find_legacy(blocks):
                 tables.append(blocks[j])
             j += 1
         if tables:
-            paras = [x for x in blocks[j:j + 4] if isinstance(x, wt.Para)]
+            paras = [x for x in blocks[j:j + 10] if isinstance(x, wt.Para) and not re.match(r"^\s*(?:\d+[.)]|результат|таблица\s+\d)", x.text, re.I)]
             return Legacy(tables, paras)
     return None
 
@@ -129,9 +129,9 @@ def columns(tbl):
 STRINGS = [(r"^направлени", "Направление"), (r"^кондуктор", "Кондуктор"), (r"^техническая колонна|^тех\.? ?колонна", "Техническая колонна"),
            (r"^эксплуатационная колонна|^э/к|^эк\b", "Эксплуатационная колонна"), (r"^нкт", "НКТ"),
            (r"^(потайная колонна|хвостовик)", "Потайная колонна")]
-GENERIC = [(r"^интервал расширения|^расширка|^расширение", "Расширка"), (r"^интервал перфорации|^перфорация", "Интервал перфорации"),
+GENERIC = [(r"^интервал расширени\w|^интервал расширки|^расширка|^расширение", "Расширка"), (r"^интервал перфорации|^перфорация", "Интервал перфорации"),
            (r"^фрезерование", "Фрезерование эксплуатационной колонны"), (r"^перфопатрубок|^перфорированн\w*\s+(?:патрубок|труба|труб)|^перфорированная труба", "Перфопатрубок"),
-           (r"^пакер", "Пакер"), (r"^фильтр", "Фильтр"), (r"^перф\.? ?хвостовик|^перфорированный хвостовик", "Хвостовик перфорированный"),
+           (r"^пакер", "Пакер"), (r"^фильтр|^интервал фильтр", "Фильтр"), (r"^перф\.? ?хвостовик|^перфорированный хвостовик", "Хвостовик перфорированный"),
            (r"^левый-правый переводник|^лево-правый переводник", "Лево-правый переводник"), (r"^клапанная система", "Клапанная система"),
            (r"^клапан кольцевой", "Клапан кольцевой"), (r"^(?:надфильтровые трубы|трубы надфильтровые|трубы затворные|затво\w*\s+труб)", "Надфильтровые трубы"),
            (r"^патрубок подгоночный", "Патрубок подгоночный"), (r"^зумпфовая труба|^зумфовая труба", "Зумпфовая труба"),
@@ -370,6 +370,23 @@ def _read_legacy_a(tbl, elements, meta):
             if g is not None:
                 e.update(g_top=0.0, g_bot=g, g_text=clean(gis), g_status="ok")
             elements.append(e)
+        elif t[0].strip() and not re.match(r"^(конструктивн|конструкци)", low):
+            # строки с названием элемента («Направление», «Кондуктор», «Ингибиторный клапан», «Интервал фильтра (d=114 мм)»): глубина — число или интервал, графа ГИС — рядом
+            kind, name = classify(t[0])
+            if kind == "string" and depth is not None:
+                e = _el_string(name, diam, depth, text=clean(t[2].replace("\n", " ")))
+                g = _first_num(gis)
+                if g is not None and not re.search(r"не\s+охвач|не\s+идент", gis, re.I):
+                    e.update(g_top=0.0, g_bot=g, g_text=clean(gis.replace("\n", " ")), g_status="ok")
+                elements.append(e)
+            else:
+                a, b, txt, st = parse_cell(t[2])
+                if a is not None:
+                    el = _el_interval(name or re.sub(r"\s*\(.*$", "", clean(t[0])).strip(), clean(t[0]), a, b, txt)
+                    ga, gb, gtxt, gst = parse_cell(gis)
+                    if gb is not None:
+                        el.update(g_top=ga, g_bot=gb, g_text=gtxt, g_status=gst)
+                    elements.append(el)
     for name, (d, depth) in _name_casings(casings):
         elements.append(_el_string(name, d, depth, text="%g" % depth))
 
@@ -409,6 +426,30 @@ def _read_legacy_b(tbl, elements, meta, casings, tubing):
                 casings.append((d, b, w))
 
 
+_PARA_NAME = re.compile(r"^\s*(?P<name>[А-ЯЁA-Zа-яёa-z][^:–—;]{2,70}?)\s*(?::|\s[–—-]\s)\s*(?P<rest>.*)$")
+_PARA_VAL = re.compile(r"(?<![\w\-])(" + NUM + r")(?:\s*[–—-]\s*(" + NUM + r"))?\s*м?\s*(?:\([^)]*\))?\s*[;.]?\s*$")
+
+
+def para_element(txt: str):
+    """Строка под таблицей конструкции «Пакер – ПРО-Ш-204 – 767.77 м;», «Интервал расширки – 794.5 – 802.1 м;», «Фильтр ФСЩ-114мм – 790.24 – 800.3 м.»,
+    «Клапан отсекатель: 13.83 м.» → (название, верх, низ) для известных элементов; иначе None. «Искусственный забой» разбирается отдельно."""
+    t = clean(txt)
+    m = _PARA_NAME.match(t)
+    if not m or re.match(r"^\s*(?:искусственн|текущий|пробуренн)", t, re.I):
+        return None
+    v = _PARA_VAL.search(m.group("rest"))
+    if not v:
+        return None
+    if re.search(r"в\s+интервал|на\s+глубин|отмеча|отбива|выделя|стоянк", m.group("name") + " " + m.group("rest")[:0], re.I):
+        return None                       # предложение результата («Фильтр в интервале 790.9 – 799.8 м»), а не строка списка конструкции
+    nm = classify(m.group("name"))[1]
+    if nm is None:
+        return None
+    a = f(v.group(1))
+    b = f(v.group(2)) if v.group(2) else a
+    return (nm, min(a, b), max(a, b)) if a is not None and b is not None else None
+
+
 def read_legacy(lg):
     """Другие виды конструкции → (элементы, условия, забой) в том же виде, что read_table."""
     elements, cond = [], OrderedDict()
@@ -431,14 +472,13 @@ def read_legacy(lg):
         m = re.match(r"^искусственный\s+забой\s*[:\-–]?\s*(" + NUM + ")", txt, re.I)
         if m and meta["artificial"] is None:
             meta["artificial"] = f(m.group(1))
-        m = re.match(r"^пакер\b.*?(" + NUM + r")\s*м?\s*[;.]?\s*$", txt, re.I)
-        if m and not any(e["name"] == "Пакер" for e in elements):
-            v = f(m.group(1))
-            elements.append(_el_interval("Пакер", clean(txt), v, v, txt))
+        el = para_element(txt)
+        if el and not any(e["name"] == el[0] and e.get("pr_bot") is not None and abs(e["pr_bot"] - el[2]) <= 0.05 for e in elements):
+            elements.append(_el_interval(el[0], clean(txt), el[1], el[2], txt))
     return elements, cond, meta
 
 
-TEXT_START = re.compile(r"расположени\w*\s+(?:конструктивных\s+)?элемент\w*\s+конструкц", re.I)
+TEXT_START = re.compile(r"расположени\w*\s+(?:конструктивных\s+)?элемент\w*\s+конструкц|по\s+данным\s+(?:магнитной\s+локации\s+муфт|локатора\s+муфт|ЛМ)\s*:?\s*$", re.I)
 TEXT_SHOE = [(r"эксплуатационн", "Эксплуатационная колонна"), (r"насосно|нкт", "НКТ"), (r"техническ", "Техническая колонна"), (r"кондуктор", "Кондуктор"),
              (r"направлени", "Направление"), (r"потайн|хвостовик", "Потайная колонна")]
 TEXT_EQUIP = re.compile(r"труб|патруб|пакер|клапан|переводник|лпп|муфт|фильтр|ниппел|хвостовик|цилиндр|разъединител|центратор|компенсатор|воронк|"
@@ -448,6 +488,19 @@ TEXT_VERB = re.compile(r"\s*(?:четко\s+|чётко\s+)?(?:не\s+)?(?:от�
 
 
 def text_elements(blocks) -> List[dict]:
+    """Элементы конструкции из текста отчёта: список после «уточнено расположение элементов конструкции» (``_text_elements_list``) и предложения вида
+    «Фильтр четко отмечается в интервале …», «Башмак НКТ отбивается на глубине …» в любом месте отчёта (отчёты 2018–2022, где графы ГИС в таблице нет)."""
+    out = _text_elements_list(blocks)
+    seen = {(o["kind"], o["name"], o.get("top"), o["bot"]) for o in out}
+    for o in _text_elements_verbs(blocks):
+        key = (o["kind"], o["name"], o.get("top"), o["bot"])
+        if key not in seen:
+            seen.add(key)
+            out.append(o)
+    return out
+
+
+def _text_elements_list(blocks) -> List[dict]:
     """Элементы конструкции из текста отчёта («По результатам МИД и ЛМ уточнено расположение элементов конструкции:» и список ниже).
     В тексте бывает то, чего нет в таблице: перфорированный патрубок, «элемент конструкции ЭК, неотмеченный в мерах». Повтор в выводах — один раз."""
     out, seen = [], set()
@@ -509,6 +562,39 @@ def text_elements(blocks) -> List[dict]:
             if key not in seen and name:
                 seen.add(key)
                 out.append({"kind": "interval", "name": name, "top": a, "bot": b, "text": t, "note": note})
+    return out
+
+
+_VERB_SENT = re.compile(r"^\s*(?P<what>[^.;:()]{3,90}?)\s+(?:по\s+данным\s+[\w\s]{3,30}?\s+)?(?:(?:чётко|четко)\s+)?(?:отмеча\w+|отбива\w+|выделя\w+|устанавлива\w+|фиксиру\w+)\s*(?:(?:чётко|четко)\s*)?"
+                        r"(?:в\s+интервал\w*(?:\s+глубин)?|на\s+глубин\w*)\s*:?\s*(?P<a>" + NUM + r")(?:\s*[–—-]\s*(?P<b>" + NUM + r"))?\s*м", re.I)
+
+
+def _text_elements_verbs(blocks) -> List[dict]:
+    """Предложения «<элемент> отмечается/отбивается в интервале A–B м» и «Башмак НКТ … на глубине X м» в любом месте отчёта. Только известные элементы
+    (колонны, НКТ, пакер, фильтр, перфорация, расширка, клапаны, патрубки, надфильтровые трубы…): остальное — не элемент конструкции."""
+    out = []
+    for b in blocks:
+        if not isinstance(b, wt.Para):
+            continue
+        for sent in re.split(r"(?<=[;.])\s+", clean(b.text)):
+            m = _VERB_SENT.match(sent)
+            if not m:
+                continue
+            what = re.sub(r"\s+", " ", m.group("what")).strip()
+            low_w = what.lower()
+            a, c2 = f(m.group("a")), f(m.group("b")) if m.group("b") else None
+            if re.match(r"^башмак", low_w):
+                name = next((nm for rx, nm in TEXT_SHOE if re.search(rx, low_w)), None)
+                if name and c2 is None:
+                    out.append({"kind": "shoe", "name": name, "top": None, "bot": a, "text": sent.strip()[:300], "note": ""})
+                continue
+            if c2 is None or TEXT_NOT_EQUIP.search(what) or not TEXT_EQUIP.search(what) or len(what) > 70:
+                continue
+            nm = "Пакер" if re.match(r"^пакер", low_w) else classify(what)[1]
+            if nm is None:
+                continue
+            lo, hi = sorted((a, c2))
+            out.append({"kind": "interval", "name": nm, "top": lo, "bot": hi, "text": sent.strip()[:300], "note": ""})
     return out
 
 
@@ -630,6 +716,10 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
         for k in range(len(lst) - 1, -1, -1):
             rep, tbl, _p = lst[k]
             elements, cond, meta = read_any(tbl)
+            if meta["cur_gis"] is None:           # нет графы ГИС («текущий забой» только в тексте): доход / остановка прибора из текста отчёта (rep.bottoms)
+                bt = [x for x in getattr(rep, "bottoms", []) if x.get("Вид") in ("доход шаблона", "остановка прибора") and x.get("Глубина, м") is not None]
+                if bt:
+                    meta["cur_gis"], meta["cur_gis_text"] = bt[0]["Глубина, м"], "из текста отчёта (%s)" % bt[0]["Вид"]
             if elements:
                 if k != len(lst) - 1:
                     check_rows.append([well, rep.date, rep.file, "info", "в самом свежем отчёте конструкция не разобрана: взята из более раннего отчёта"])
@@ -645,6 +735,8 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
             pr_pick = {id(e) for e in elements if e["kind"] == "interval" and e.get("g_bot") is not None and e.get("pr_bot") is not None and e["pr_bot"] >= sr[1] - 0.5 and not e.get("g_from_text")}
             check_rows.append([well, rep.date, rep.file, "warn", "недоход прибора ГИС: остановился на %s м, ИЗ %s м (недоход %s м, порог %s м): элементы ниже остановки (%d) взяты по промысловым данным — подсказка, "
                                "оставить ГИС можно параметром «Оставить глубины ГИС»" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]), _ru(short_thr), len(pr_pick))])
+        # комбинированный подход: у элемента, обрезанного остановкой прибора, верх по ГИС определён (выше остановки) — берём верх по ГИС, а низ — по промысловым данным
+        combo = {id(e) for e in elements if id(e) in pr_pick and e.get("g_top") is not None and e["g_top"] < sr[1] - 0.5 and e.get("pr_bot") is not None} if sr else set()
         moves = _shift(elements, pr_pick) if shift else {}
         if sr:       # ниже остановки прибора привязки нет: элементы без глубины ГИС остаются по промысловым данным
             below = {id(e) for e in elements if e.get("pr_bot") is not None and e["pr_bot"] >= sr[1] - 0.5}
@@ -665,6 +757,8 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
                 top = e["g_top"] if use_g else e["pr_top"]
                 bot = e["g_bot"] if use_g else e["pr_bot"]
                 move = moves.get(id(e)) if variant == "gis" and id(e) not in pr_pick else None
+                if variant == "gis" and id(e) in combo:
+                    top = e["g_top"]
                 if bot is None and top is None:
                     if variant == "initial":
                         check_rows.append([well, rep.date, rep.file, "warn", "«%s»: нет глубины по исходным данным («%s»)" % (e["label"][:50], e["pr_text"][:40])])
@@ -676,8 +770,13 @@ def build(reports, shift: bool = True, short_thr: float = SHORT_REACH_M, keep_gi
                 src = "ГИС" if use_g else ("исходные данные" if variant == "initial" else "исходные данные (ГИС: %s)" % STATUS_RU.get(e["g_status"], e["g_status"]))
                 comm = e["pr_text"] if variant == "initial" else (e["g_text"] if use_g else e["pr_text"])
                 if variant == "gis" and id(e) in pr_pick:
-                    src = "исходные данные (недоход прибора ГИС: остановился на %s м, ИЗ %s м, недоход %s м) — подсказка" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]))
-                    comm = "%s; по ГИС %s" % (comm, e["g_text"]) if comm and e.get("g_text") else comm
+                    if id(e) in combo:
+                        src = "ГИС (верх) + промысловые данные (низ): прибор остановился на %s м, ИЗ %s м, недоход %s м; низ ГИС обрезан остановкой — подсказка" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]))
+                        comm = "верх по ГИС %s; низ по промысловым %s" % (_ru(top), _ru(bot))
+                        comm = "%s; ГИС: %s; меры: %s" % (comm, e.get("g_text", ""), e.get("pr_text", "")) if e.get("g_text") or e.get("pr_text") else comm
+                    else:
+                        src = "исходные данные (недоход прибора ГИС: остановился на %s м, ИЗ %s м, недоход %s м) — подсказка" % (_ru(sr[1]), _ru(sr[0]), _ru(sr[2]))
+                        comm = "%s; по ГИС %s" % (comm, e["g_text"]) if comm and e.get("g_text") else comm
                 if use_g and e.get("g_from_text"):
                     src = "ГИС (текст отчёта)"
                 elif use_g and e.get("g_shared"):
