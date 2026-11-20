@@ -241,8 +241,8 @@ SPECS: List[WebSpec] = [
             Param("xls_formulas", "Проверять формулы в файлах .xls", "bool", default="",
                   hint="Нужен LibreOffice, добавляет около минуты на файл. Без галки .xls читается по значениям, а .xlsx проверяется всегда"),
             Param("output", "Имя файла результата", default="База_шахматка_Лена.xlsx"),
-        ),
-        args=(("files", "files"), ("otbor_year", "otbor-year"), ("zak_year", "zak-year"), ("years", "years"), ("xls_formulas", "xls-formulas"), ("output", "output")),
+        ) + APPEND_PARAMS,
+        args=(("files", "files"), ("otbor_year", "otbor-year"), ("zak_year", "zak-year"), ("years", "years"), ("xls_formulas", "xls-formulas"), ("output", "output")) + APPEND_ARGS,
         note="Qгаз.пром пересчитывается и сравнивается с файловым; ошибки формул — на листе «Контроль_формул». Рядом с книгой создаётся база SQLite.",
     ),
     WebSpec(

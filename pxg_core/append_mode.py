@@ -62,6 +62,10 @@ def _mtime(path: str) -> str:
     return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
 
 
+class AppendError(ValueError):
+    """Дополнение невозможно (другая версия схемы или разбора, другие настройки): нужна полная пересборка."""
+
+
 @dataclass
 class Registry:
     """Реестр источников БД."""
@@ -167,7 +171,7 @@ def merge_rows(old: Optional[pd.DataFrame], new: pd.DataFrame, plan: pd.DataFram
     if old is None or old.empty:
         return new.copy()
     if source_col not in old.columns:
-        raise ValueError("в прежней базе нет столбца «%s»: дополнять нельзя, нужна полная пересборка" % source_col)
+        raise AppendError("в прежней базе нет столбца «%s»: дополнять нельзя, нужна полная пересборка" % source_col)
     redo = set(plan.loc[plan["Действие"].isin([PROCESS, DROP]), "Файл"])
     keep = old[~old[source_col].isin(redo)]
     frames = [f for f in (keep, new) if f is not None and not f.empty]
@@ -222,7 +226,7 @@ def run(old: Optional[pd.DataFrame], reg: Optional[Registry], files: Sequence[st
     """
     reason = None if rebuild else check_versions(reg, schema_version, parse_version)
     if reason:
-        raise ValueError(reason)
+        raise AppendError(reason)
     if rebuild:
         old, reg = None, None
     plan = make_plan(reg, files, root, rebuild=rebuild, drop_missing=drop_missing, decisions=decisions)
@@ -333,7 +337,7 @@ def run_cached(cache: ParseCache, files: Sequence[str], root: str, parse_many, *
         cache.registry = None
     reason = None if rebuild else cache.problem()
     if reason:
-        raise ValueError(reason)
+        raise AppendError(reason)
     plan = make_plan(cache.registry, files, root, rebuild=rebuild, drop_missing=drop_missing, decisions=decisions)
     lost = plan["Статус"].eq(SAME) & plan["Действие"].eq(SKIP) & ~plan["Файл"].map(cache.has)
     plan.loc[lost, ["Действие", "Причина"]] = [PROCESS, "нет разбора в кэше"]
