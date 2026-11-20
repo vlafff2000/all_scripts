@@ -660,26 +660,37 @@ def read_any(tbl):
     return read_legacy(tbl) if isinstance(tbl, Legacy) else read_table(tbl)
 
 
-def read_files(files: List[str]):
-    """Файлы отчётов (.doc, .docx, *.ocr.md) → [(отчёт, таблица конструкции или None, путь)]. Номер скважины из начала имени файла — когда в шапке он не число (OCR)."""
-    reports = []
-    notes = []
-    for p in files:
-        try:
-            blocks = ocr_blocks.read_ocr(p)[0] if p.lower().endswith(".md") else wt.read_blocks(p)
-            rep = gr.parse_blocks(blocks, p)
-        except Exception as e:  # noqa: BLE001 - файл не пропадает молча
-            notes.append("%s: %s" % (os.path.basename(p), e))
-            continue
-        tbl = find_cons_table(blocks)
-        rep.cons_text = text_elements(blocks)         # элементы из текста «уточнено расположение элементов конструкции»
-        if not re.fullmatch(r"\d+", str(rep.well or "")):
-            mm = re.match(r"\s*0*(\d+)", os.path.basename(p))
-            if mm:
-                rep.well = mm.group(1)
-        reports.append((rep, tbl, p))
+def read_one(p: str):
+    """Один файл отчёта → (отчёт, таблица конструкции или None, путь, замечание). Замечание не пустое, если файл не прочитан.
+
+    Это самая дорогая часть чтения и она зависит только от файла, поэтому режим дополнения кэширует её результат
+    (до `resolve_dates`, который смотрит на все отчёты вместе)."""
+    try:
+        blocks = ocr_blocks.read_ocr(p)[0] if p.lower().endswith(".md") else wt.read_blocks(p)
+        rep = gr.parse_blocks(blocks, p)
+    except Exception as e:  # noqa: BLE001 - файл не пропадает молча
+        return None, None, p, "%s: %s" % (os.path.basename(p), e)
+    tbl = find_cons_table(blocks)
+    rep.cons_text = text_elements(blocks)         # элементы из текста «уточнено расположение элементов конструкции»
+    if not re.fullmatch(r"\d+", str(rep.well or "")):
+        mm = re.match(r"\s*0*(\d+)", os.path.basename(p))
+        if mm:
+            rep.well = mm.group(1)
+    return rep, tbl, p, ""
+
+
+def finish_reading(items):
+    """Собрать результаты `read_one` по всем файлам: ([(отчёт, таблица, путь)], замечания). Даты отчётов
+    уточняются по всем вместе, поэтому этот шаг всегда идёт заново, а не из кэша."""
+    reports = [(rep, tbl, p) for rep, tbl, p, note in items if not note]
+    notes = [note for _r, _t, _p, note in items if note]
     gr.resolve_dates([r for r, _t, _p in reports])
     return reports, notes
+
+
+def read_files(files: List[str]):
+    """Файлы отчётов (.doc, .docx, *.ocr.md) → [(отчёт, таблица конструкции или None, путь)]. Номер скважины из начала имени файла — когда в шапке он не число (OCR)."""
+    return finish_reading([read_one(p) for p in files])
 
 
 SHORT_REACH_M = 0.5          # недоход прибора: ИЗ глубже остановки прибора ГИС больше чем на столько метров
