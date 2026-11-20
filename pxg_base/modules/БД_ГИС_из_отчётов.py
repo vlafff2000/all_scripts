@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import sys
 
-from pxg_core import archives, gis_report, параметры
+from pxg_core import append_mode, archives, gis_report, параметры
 from pxg_core.parallel import map_jobs
 
 _ = sys
@@ -32,6 +32,11 @@ def _read_job(job):
     return gis_report.parse_file(job[0], job[1])
 
 
+# версия правил разбора отчётов: увеличивать при любой правке gis_report.parse_*, иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "gis_report-1"
+
+
 def read_all(files, mapping, known=()):
     known = list(known)
     jobs = [(f, mapping, known) for f in files]
@@ -46,7 +51,9 @@ def main(argv=None):
         files="отчёты ГИС (.doc/.docx/.pdf, вывод OCR *_content_list.json / *.ocr.md), папки и архивы (ZIP, TAR, RAR), по одному пути в строке",
         mapping="файл сопоставления заголовков пачек (Excel/CSV, лист «Заголовки пачек» прежней выгрузки), необязательно",
         kg_min="порог Кг для hэф, доля единицы (0 — порог 25 %)",
-        known="список известных скважин: БД конструкций (csv/Excel со столбцом well), необязательно")
+        known="список известных скважин: БД конструкций (csv/Excel со столбцом well), необязательно",
+        cache="папка кэша разбора отчётов (по умолчанию БД_ГИС_кэш в текущей папке)",
+        **append_mode.FLAGS)
     paths = _paths(args.files)
     if not paths:
         one = параметры.ask_path("Отчёты ГИС: файл, папка или архив", args.files if args.files is not None else None, "folder")
@@ -72,7 +79,24 @@ def main(argv=None):
         mapping = gis_report.load_mapping(параметры.clean_path(args.mapping or ""))
         kg_min = float((args.kg_min or "0").replace(",", ".") or 0)
         print("📚 Отчётов: %d" % len(files))
-        reports = read_all(files, mapping, known)
+        cache = append_mode.ParseCache(
+            параметры.clean_path(args.cache or "") or os.path.join(os.getcwd(), "БД_ГИС_кэш"), SCHEMA_VERSION, PARSE_VERSION,
+            append_mode.context_key(sorted(mapping.items()) if mapping else [], sorted(map(str, known))))
+        root = os.path.dirname(files[0]) if len(files) == 1 else os.path.commonpath(files)
+        try:
+            reports, plan = append_mode.run_cached(
+                cache, files, root, lambda paths: read_all(paths, mapping, known),
+                rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
+                plan_only=параметры.yes(args.plan_only), rows_of=lambda r: len(r.intervals), cacheable=lambda r: not r.error)
+        except ValueError as e:
+            print("❌ Дополнение невозможно: %s (параметр --rebuild=да)" % e)
+            return 1
+        print("🧩 %s" % append_mode.summary(plan))
+        for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+            print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+        if параметры.yes(args.plan_only):
+            return 0
+        append_mode.write_registry_xlsx(cache)
         for r in reports:
             if r.error:
                 print("❌ %s: %s" % (r.file, r.error))
