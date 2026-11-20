@@ -87,13 +87,46 @@ def atlas_project_folder(storage: str = "", project: str = "") -> Optional[Path]
     return folder if folder is not None and folder.is_dir() else None
 
 
+FUNDS = {"production": "Эксплуатационная", "observation": "Наблюдательная", "geophysical": "Геофизическая", "control": "Контрольная"}
+
+
+def fund_presets(folder: Optional[Path]) -> List[dict]:
+    """Готовые пресеты по фондам из проекта Атласа («Фонды скважин»: ``settings.well_funds``, у контрольных ещё
+    ``settings.well_horizons``): «Контрольная», «Контрольная · <горизонт>» и остальные фонды. Только ручной выбор инженера."""
+    if folder is None:
+        return []
+    try:
+        settings = json.loads((Path(folder) / "manifest.json").read_text("utf-8")).get("settings") or {}
+    except (OSError, ValueError, AttributeError):
+        return []
+    funds, horizons = settings.get("well_funds") or {}, settings.get("well_horizons") or {}
+    by_fund: dict = {}
+    by_horizon: dict = {}
+    for well, fund in funds.items():
+        if fund not in FUNDS:
+            continue
+        key = norm(well)
+        by_fund.setdefault(fund, []).append(key)
+        horizon = str(horizons.get(well) or horizons.get(key) or "").strip()
+        if fund == "control" and horizon:
+            by_horizon.setdefault(horizon, []).append(key)
+
+    def order(wells: Iterable[str]) -> List[str]:
+        return sorted(wells, key=lambda w: (not w.isdigit(), int(w) if w.isdigit() else 0, w))
+    out = [{"id": "fund:" + fund, "kind": "fund", "name": FUNDS[fund], "label": FUNDS[fund], "wells": order(wells)}
+           for fund, wells in by_fund.items()]
+    out += [{"id": "fund:control:" + h, "kind": "fund", "name": "Контрольная · " + h, "label": "Контрольная · " + h, "wells": order(wells)}
+            for h, wells in sorted(by_horizon.items())]
+    return out
+
+
 def routes(folder: Callable[[], Optional[Path]], builtin: Optional[Callable[[], List[dict]]] = None) -> List[Route]:
     """``folder`` — папка с файлом пресетов (``None`` — общий каталог пользователя); ``builtin`` — готовые пресеты программы (группы)."""
     def where() -> Path:
         return folder() or home()
 
     def listing() -> JSONResponse:
-        ready = builtin() if builtin else []
+        ready = builtin() if builtin else fund_presets(folder())
         return JSONResponse({"presets": [*ready, *user_presets(where())], "shared": str(where())})
 
     async def get(request: Request):
