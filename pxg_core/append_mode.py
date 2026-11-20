@@ -238,3 +238,136 @@ def run(old: Optional[pd.DataFrame], reg: Optional[Registry], files: Sequence[st
     new = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     data = merge_rows(old, new, plan, source_col)
     return data, update_registry(reg, plan, counts, schema_version, parse_version), plan
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Кэш разбора: для сборщиков, где итог строится по ВСЕМ источникам вместе (например, «самый свежий отчёт по замеру»).
+# Строки там нельзя просто дописать: новый отчёт может заменить уже взятые строки. Поэтому дополнение хранит не строки,
+# а результат разбора каждого файла; дорогой разбор делается только для новых и изменённых файлов, а сборка итога
+# идёт по всем разборам заново. Результат совпадает с полной пересборкой по построению.
+# ---------------------------------------------------------------------------------------------------------------------
+INDEX_NAME = "index.json"
+REGISTRY_XLSX = "Источники.xlsx"
+
+
+def context_key(*parts) -> str:
+    """Отпечаток настроек, от которых зависит разбор файла (сопоставления, список скважин, пороги)."""
+    import json
+    text = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+class ParseCache:
+    """Папка с разобранными файлами: `index.json` (реестр, версии, отпечаток настроек) и по одному pickle на файл.
+
+    Pickle читается только из собственной папки программы рядом с результатами; чужие файлы так не открывают.
+    """
+
+    def __init__(self, folder: str, schema_version: str, parse_version: int, context: str = ""):
+        self.folder, self.schema_version, self.parse_version, self.context = folder, schema_version, parse_version, context
+        self.registry: Optional[Registry] = None
+        self._stored_context = ""
+        path = os.path.join(folder, INDEX_NAME)
+        if os.path.isfile(path):
+            import json
+            try:
+                raw = json.load(open(path, encoding="utf-8"))
+                frame = pd.DataFrame(raw.get("files", []), columns=COLUMNS)
+                self.registry = Registry(frame, str(raw.get("schema_version", "")), int(raw.get("parse_version", 0)))
+                self._stored_context = str(raw.get("context", ""))
+            except Exception:
+                self.registry = None  # повреждённый индекс = кэша нет, пересборка
+
+    def problem(self) -> Optional[str]:
+        """Почему дополнять нельзя: версия схемы/разбора или другие настройки разбора."""
+        reason = check_versions(self.registry, self.schema_version, self.parse_version)
+        if reason:
+            return reason
+        if self.registry is not None and self._stored_context != self.context:
+            return "настройки разбора изменились (сопоставление заголовков, список скважин): пересоберите полностью"
+        return None
+
+    def _pkl(self, name: str) -> str:
+        return os.path.join(self.folder, hashlib.sha256(name.encode("utf-8")).hexdigest()[:20] + ".pkl")
+
+    def load(self, name: str):
+        import pickle
+        with open(self._pkl(name), "rb") as f:
+            return pickle.load(f)
+
+    def has(self, name: str) -> bool:
+        return os.path.isfile(self._pkl(name))
+
+    def save(self, name: str, obj) -> None:
+        import pickle
+        os.makedirs(self.folder, exist_ok=True)
+        with open(self._pkl(name), "wb") as f:
+            pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def commit(self, reg: Registry, plan: pd.DataFrame) -> None:
+        """Записать реестр и убрать pickle файлов, строки которых удалены по решению инженера."""
+        import json
+        os.makedirs(self.folder, exist_ok=True)
+        for name in plan.loc[plan["Действие"] == DROP, "Файл"]:
+            if os.path.isfile(self._pkl(name)):
+                os.remove(self._pkl(name))
+        body = {"schema_version": reg.schema_version, "parse_version": reg.parse_version, "context": self.context,
+                "files": json.loads(reg.frame.reindex(columns=COLUMNS).to_json(orient="records", force_ascii=False))}
+        atomic_write(os.path.join(self.folder, INDEX_NAME), lambda p: json.dump(body, open(p, "w", encoding="utf-8"), ensure_ascii=False))
+        self.registry = reg
+
+
+def run_cached(cache: ParseCache, files: Sequence[str], root: str, parse_many, *, rebuild: bool = False,
+               drop_missing: bool = False, decisions: Optional[Dict[str, str]] = None, plan_only: bool = False,
+               rows_of=len, cacheable=lambda obj: True):
+    """Разобрать только новые и изменённые файлы; остальное взять из кэша.
+
+    `parse_many(paths) -> list` — разбор списка файлов (в нём модуль сам включает параллельность), результат того же
+    порядка. Возврат: (список объектов разбора по всем файлам, которые должны войти в итог, план). Порядок: как в
+    `files`, затем оставленные «пропавшие» (их строки по умолчанию остаются). При `plan_only` ничего не пишется.
+    Если файл есть в плане как «без изменений», но pickle потерян, он разбирается заново. Разбор, для которого
+    `cacheable(obj)` ложно (например, файл не прочитан), в итог входит, но в кэш и реестр не попадает: при следующем
+    запуске файл снова «новый» и разбирается заново.
+    """
+    if rebuild:
+        cache.registry = None
+    reason = None if rebuild else cache.problem()
+    if reason:
+        raise ValueError(reason)
+    plan = make_plan(cache.registry, files, root, rebuild=rebuild, drop_missing=drop_missing, decisions=decisions)
+    lost = plan["Статус"].eq(SAME) & plan["Действие"].eq(SKIP) & ~plan["Файл"].map(cache.has)
+    plan.loc[lost, ["Действие", "Причина"]] = [PROCESS, "нет разбора в кэше"]
+    keep_gone = plan["Статус"].eq(GONE) & plan["Действие"].eq(KEEP) & ~plan["Файл"].map(cache.has)
+    plan.loc[keep_gone, "Действие"] = DROP  # строк нет в кэше — оставлять нечего
+    if plan_only:
+        return [], plan
+    todo = plan[plan["Действие"] == PROCESS]
+    parsed = dict(zip(todo["Файл"], parse_many(todo["Путь"].tolist()))) if len(todo) else {}
+    counts, failed = {}, []
+    for name, obj in parsed.items():
+        if cacheable(obj):
+            cache.save(name, obj)
+            counts[name] = int(rows_of(obj))
+        else:
+            failed.append(name)
+    objects = []
+    for _, r in plan.iterrows():
+        if r["Действие"] == PROCESS:
+            objects.append(parsed[r["Файл"]])
+        elif r["Действие"] in (SKIP, KEEP):
+            objects.append(cache.load(r["Файл"]))
+    reg_plan = plan.copy()
+    reg_plan.loc[reg_plan["Файл"].isin(failed), "Действие"] = SKIP  # в реестр не заносятся
+    cache.commit(update_registry(cache.registry, reg_plan, counts, cache.schema_version, cache.parse_version), reg_plan)
+    return objects, plan
+
+
+def write_registry_xlsx(cache: ParseCache) -> Optional[str]:
+    """Реестр источников в Excel рядом с кэшем: инженер видит, что и когда внесено."""
+    if cache.registry is None:
+        return None
+    path = os.path.join(cache.folder, REGISTRY_XLSX)
+    with pd.ExcelWriter(path) as xw:
+        for name, frame in cache.registry.sheets().items():
+            frame.to_excel(xw, sheet_name=name, index=False)
+    return path
