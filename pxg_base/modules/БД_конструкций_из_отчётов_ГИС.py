@@ -13,7 +13,12 @@ from __future__ import annotations
 import os
 import re
 
-from pxg_core import archives, gis_construction as gc, параметры
+from pxg_core import append_mode, archives, gis_construction as gc, параметры
+
+
+# версия правил разбора отчётов: увеличивать при любой правке gis_construction.read_one / gis_report.parse_*
+PARSE_VERSION = 1
+SCHEMA_VERSION = "gis_construction-1"
 
 
 def _paths(value: str) -> list:
@@ -26,6 +31,8 @@ def main(argv=None):
         files="отчёты ГИС (.doc/.docx, вывод OCR *.ocr.md), папки и архивы (ZIP, TAR, RAR), по одному пути в строке",
         short_reach="недоход прибора, м: если ИЗ глубже остановки прибора ГИС больше чем на столько, элементы ниже остановки берутся по промысловым данным (по умолчанию 0,5; 0 — выключить)",
         keep_gis="скважины, где оставить глубины ГИС несмотря на недоход (через запятую)",
+        cache="папка кэша разбора отчётов (по умолчанию БД_конструкций_кэш в текущей папке)",
+        **append_mode.FLAGS,
         shift="1/0: элементы, которые ГИС не охватил, — по мерам со сдвигом по привязке к соседнему элементу (по умолчанию 1)")
     paths = _paths(args.files)
     if not paths:
@@ -40,7 +47,24 @@ def main(argv=None):
             print("⚠️ Файлов .doc/.docx и вывода OCR (*.ocr.md) не найдено.")
             return 0
         print("📚 Файлов: %d" % len(files))
-        reports, bad = gc.read_files(files)
+        cache = append_mode.ParseCache(
+            параметры.clean_path(args.cache or "") or os.path.join(os.getcwd(), "БД_конструкций_кэш"), SCHEMA_VERSION, PARSE_VERSION)
+        root = os.path.dirname(files[0]) if len(files) == 1 else os.path.commonpath(files)
+        try:
+            items, plan = append_mode.run_cached(
+                cache, files, root, lambda paths: [gc.read_one(p) for p in paths],
+                rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
+                plan_only=параметры.yes(args.plan_only), rows_of=lambda it: 0 if it[1] is None else 1, cacheable=lambda it: not it[3])
+        except ValueError as e:
+            print("❌ Дополнение невозможно: %s (параметр --rebuild=да)" % e)
+            return 1
+        print("🧩 %s" % append_mode.summary(plan))
+        for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+            print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+        if параметры.yes(args.plan_only):
+            return 0
+        append_mode.write_registry_xlsx(cache)
+        reports, bad = gc.finish_reading(items)
         for b in bad:
             print("❌ %s" % b)
         thr = float((args.short_reach or "").replace(",", ".") or gc.SHORT_REACH_M)
