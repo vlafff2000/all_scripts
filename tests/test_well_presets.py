@@ -59,3 +59,14 @@ def test_work_with_source_data_has_the_presets_route(tmp_path, monkeypatch):
     c = TestClient(app)
     assert c.post("/api/well-presets", json={"name": "Скважины замечаний", "wells": ["102", "103"]}).status_code == 200
     assert [p["label"] for p in c.get("/api/well-presets").json()["presets"]] == ["Скважины замечаний"]
+
+
+def test_fund_and_horizon_presets_come_from_atlas_project(tmp_path):
+    """Фонды и горизонты контрольных из проекта Атласа видны как готовые пресеты в любой программе."""
+    settings = {"well_funds": {"5": "control", "6.0": "control", "7": "observation", "9": "bad"},
+                "well_horizons": {"5": "Г-1", "6": "Г-2"}}
+    (tmp_path / "manifest.json").write_text(json.dumps({"settings": settings}), encoding="utf-8")
+    ids = {p["id"]: p for p in _client(tmp_path).get("/api/well-presets").json()["presets"]}
+    assert ids["fund:control"]["wells"] == ["5", "6"] and ids["fund:observation"]["wells"] == ["7"]
+    assert ids["fund:control:Г-1"]["wells"] == ["5"] and ids["fund:control:Г-2"]["label"] == "Контрольная · Г-2"
+    assert "fund:bad" not in ids
