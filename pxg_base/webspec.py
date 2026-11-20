@@ -361,8 +361,8 @@ SPECS: List[WebSpec] = [
                   hint="Номер метода из отчёта: 4 — ΔP²/Q = a + bQ, как в образце базы"),
             Param("mapping", "Файл сопоставления (необязательно)", "file",
                   hint="JSON, сохранённый мастером сопоставления шапок; без него берётся запомненное и автоматическая подсказка"),
-        ),
-        args=(("folder", "folder"), ("db", "db"), ("groups", "groups"), ("method", "method"), ("mapping", "mapping")),
+        ) + APPEND_PARAMS,
+        args=(("folder", "folder"), ("db", "db"), ("groups", "groups"), ("method", "method"), ("mapping", "mapping")) + APPEND_ARGS,
     ),
     WebSpec(
         module="Шаблон_конструкции_из_свода_скважин",
