@@ -88,7 +88,7 @@ def main(argv=None):
                 cache, files, root, lambda paths: read_all(paths, mapping, known),
                 rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
                 plan_only=параметры.yes(args.plan_only), rows_of=lambda r: len(r.intervals), cacheable=lambda r: not r.error)
-        except ValueError as e:
+        except append_mode.AppendError as e:
             print("❌ Дополнение невозможно: %s (параметр --rebuild=да)" % e)
             return 1
         print("🧩 %s" % append_mode.summary(plan))

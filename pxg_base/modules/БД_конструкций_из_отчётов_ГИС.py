@@ -55,7 +55,7 @@ def main(argv=None):
                 cache, files, root, lambda paths: [gc.read_one(p) for p in paths],
                 rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
                 plan_only=параметры.yes(args.plan_only), rows_of=lambda it: 0 if it[1] is None else 1, cacheable=lambda it: not it[3])
-        except ValueError as e:
+        except append_mode.AppendError as e:
             print("❌ Дополнение невозможно: %s (параметр --rebuild=да)" % e)
             return 1
         print("🧩 %s" % append_mode.summary(plan))

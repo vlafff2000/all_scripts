@@ -806,8 +806,14 @@ def _process_file(job) -> Dict[str, object]:
     return out
 
 
+# версия правил разбора шахматок: увеличивать при правке Shakh / recompute / read_water, иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "shakhmatka-1"
+
+
 def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_year: Optional[int] = None, zak_year: Optional[int] = None,
-          xls_formulas: bool = False, log=print, years: str = "") -> Dict[str, object]:
+          xls_formulas: bool = False, log=print, years: str = "", cache=None, rebuild: bool = False, plan_only: bool = False,
+          drop_missing: bool = False, decisions=None) -> Dict[str, object]:
     """Сводит файлы (шахматки отбора и закачки по сезонам, книги воды) в книгу Excel и базу SQLite рядом (расширение .sqlite).
 
     Вид каждого файла определяется по содержимому. Год первых суток: ручной ввод (years) → otbor_year / zak_year → имя файла → шапка листа; иначе файл пропускается с ошибкой «Год не определён».
@@ -819,8 +825,21 @@ def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_y
     water: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
     unknown: List[str] = []
     noyear: List[str] = []
-    jobs = [(n, path, tmp, otbor_year, zak_year, years, xls_formulas) for n, path in enumerate(files)]
-    for r in map_jobs(_process_file, jobs, MB_PER_FILE):       # файлы независимы: по ядрам, результат тот же, что подряд
+    def read_many(todo):
+        jobs = [(n, path, tmp, otbor_year, zak_year, years, xls_formulas) for n, path in enumerate(todo)]
+        return list(map_jobs(_process_file, jobs, MB_PER_FILE))       # файлы независимы: по ядрам, результат тот же, что подряд
+
+    if cache is None:
+        results = read_many(files)
+    else:       # режим дополнения: разбираются только новые и изменённые файлы, остальное из кэша (итог собирается по всем заново)
+        from . import append_mode
+        root = os.path.dirname(files[0]) if len(files) == 1 else os.path.commonpath(files)
+        results, plan = append_mode.run_cached(
+            cache, files, root, read_many, rebuild=rebuild, drop_missing=drop_missing, decisions=decisions, plan_only=plan_only,
+            rows_of=lambda r: len(r["df"]) if r.get("status") == "ok" else 0, cacheable=lambda r: r.get("status") != "skip")
+        if plan_only:
+            return {"plan": plan}
+    for r in results:
         for line in r["log"]:
             log(line)
         status, name = r["status"], r["name"]
@@ -991,4 +1010,5 @@ def build(paths: List[str], out: str = "База_шахматка.xlsx", otbor_y
                                 (x if x is None or isinstance(x, (int, float)) else str(x)))
         d.to_sql(name, con, index=False, if_exists="replace")
     con.close()
-    return {"out": out, "sqlite": dbp, "summary": summary, "issues": issues, "wells": len(wells), "files": len(files) - len(unknown)}
+    return {"out": out, "sqlite": dbp, "summary": summary, "issues": issues, "wells": len(wells), "files": len(files) - len(unknown),
+            "plan": plan if cache is not None else None}
