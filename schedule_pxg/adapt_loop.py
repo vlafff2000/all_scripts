@@ -25,7 +25,7 @@ from .gdi_adapt.selection import chosen_for_kit
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOOPS: Dict[str, dict] = {}
 _ids = itertools.count(1)
-KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula', 'gpu', 'work_min', 'rest_min', 'work_steps')
+KEYS = ('exe', 'model', 'workdir', 'restart', 'date', 'threshold_pct', 'max_iter', 'metric', 'wells', 'batch', 'snapshots', 'accept_formula', 'gpu', 'work_min', 'rest_min', 'work_steps', 'copy_ext', 'full_dirs')
 
 
 def _find_data(path: str) -> str:
@@ -147,6 +147,14 @@ def _brief(v: dict) -> dict:
     return {'status': s['status'], 'date': s['date'], 'wells': s['wells'], 'iterations': len(s['iterations'])}
 
 
+def _names(x):
+    """Список имён/расширений из настройки (строка через запятую или список); пусто - значения по умолчанию."""
+    if isinstance(x, str):
+        x = x.replace(';', ',').split(',')
+    out = [str(v).strip() for v in (x or []) if str(v).strip()]
+    return out or None
+
+
 def _num(x, cast=float, default=None):
     try:
         return cast(x) if x not in (None, '') else default
@@ -220,7 +228,7 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
             loop.state['tnav_version'] = tnav_run.probe(exe)['version']       # версия tNavigator видна в итогах и в журнале
             loop._push(status='running', message='копирую RESULTS модели (один раз, десятки ГБ)')
             case_build.ensure_results(os.path.dirname(os.path.abspath(model)), work, data_name=os.path.basename(model))
-            loop.state['link_notes'] = case_build.link_model_folders(os.path.dirname(os.path.abspath(model)), work)       # INCLUDE и др. - ссылками, без копий
+            loop.state['link_notes'] = case_build.link_model_folders(os.path.dirname(os.path.abspath(model)), work, text_ext=_names(opts.get('copy_ext')), full_dirs=_names(opts.get('full_dirs')))       # INCLUDE и др. - ссылками, без копий
         except Exception as e:
             loop._push(status='failed', stop_reason='%s: %s' % (type(e).__name__, e), message='ошибка')
             return

@@ -280,21 +280,59 @@ def _link_dir(src: str, dst: str) -> str:
         return 'копия'
 
 
-def link_model_folders(src_dir: str, workdir: str, data_name: str = '') -> List[str]:
-    """Папки модели (INCLUDE, GRID, PVT и т.п.) подключаются в рабочую папку ссылками на оригинал, а не копируются: tNavigator ищет
-    относительные файлы рядом с рабочим .data, а читать их можно прямо из оригинала. RESULTS здесь не трогаем (ensure_results копирует
-    только нужную модель). Уже существующие в workdir имена не перезаписываются. Возвращает записи о сделанном."""
+TEXT_EXT = ('.txt', '.inc', '.include', '.dat', '.data', '.sch', '.tab', '.ev', '.grdecl', '.prop', '.props', '.pvt', '.vfp', '.csv', '.tsv',
+            '.ini', '.cfg', '.json', '.xml')            # текстовые файлы модели: из прочих папок копируются только они (настраивается)
+FULL_DIRS = ('include', 'user')                         # папки, имя которых начинается так (без учёта регистра), подключаются целиком: INCLUDE, USER, user_data
+
+
+def _full_dir(name: str, full_dirs: Sequence[str]) -> bool:
+    n = name.casefold()
+    return any(n.startswith(str(p).strip().casefold()) for p in full_dirs if str(p).strip())
+
+
+def _copy_text_tree(src: str, dst: str, exts: Sequence[str]) -> int:
+    """Копирует из src в dst (с сохранением иерархии) только файлы с текстовыми расширениями; уже совпадающие по размеру не трогает.
+    Возвращает число скопированных файлов. Ссылки на папки не раскрываются."""
+    ext = {e.casefold() if e.startswith('.') else '.' + e.casefold() for e in exts if str(e).strip()}
+    n = 0
+    for root, _, files in os.walk(src):
+        for f in files:
+            if os.path.splitext(f)[1].casefold() not in ext:
+                continue
+            s_f = os.path.join(root, f)
+            d_f = os.path.join(dst, os.path.relpath(s_f, src))
+            if os.path.exists(d_f) and os.path.getsize(d_f) == os.path.getsize(s_f):
+                continue
+            os.makedirs(os.path.dirname(d_f), exist_ok=True)
+            shutil.copy2(s_f, d_f)
+            n += 1
+    return n
+
+
+def link_model_folders(src_dir: str, workdir: str, data_name: str = '', text_ext: Optional[Sequence[str]] = None,
+                       full_dirs: Optional[Sequence[str]] = None) -> List[str]:
+    """Папки модели рядом с .data. INCLUDE, USER и близкие по имени (full_dirs) подключаются в рабочую папку ссылкой на оригинал целиком
+    (tNavigator ищет относительные файлы рядом с рабочим .data, читать их можно прямо из оригинала). Из остальных папок (GRID, PVT и т.п.)
+    копируются с сохранением иерархии только текстовые файлы (text_ext), остальные, часто тяжёлые, не берутся. RESULTS здесь не трогаем
+    (ensure_results копирует только нужную модель). Уже существующие в workdir ссылки и папки не перезаписываются, в папку-копию
+    недостающие текстовые файлы добавляются. Возвращает записи о сделанном."""
     src_dir, workdir = os.path.abspath(src_dir), os.path.abspath(workdir)
+    exts = TEXT_EXT if text_ext is None else text_ext
+    fulls = FULL_DIRS if full_dirs is None else full_dirs
     notes: List[str] = []
     os.makedirs(workdir, exist_ok=True)
     for name in sorted(os.listdir(src_dir)):
         full = os.path.join(src_dir, name)
         dst = os.path.join(workdir, name)
-        if name.casefold() == 'results' or os.path.normcase(os.path.abspath(full)) == os.path.normcase(workdir):
+        if name.casefold() == 'results' or os.path.normcase(os.path.abspath(full)) == os.path.normcase(workdir) or not os.path.isdir(full):
             continue
-        if os.path.lexists(dst) or not os.path.isdir(full):
-            continue
-        notes.append(f'{name}: {_link_dir(full, dst)}')
+        if _full_dir(name, fulls):
+            if not os.path.lexists(dst):
+                notes.append(f'{name}: {_link_dir(full, dst)}')
+        elif not os.path.islink(dst):
+            n = _copy_text_tree(full, dst, exts)
+            if n:
+                notes.append(f'{name}: скопировано текстовых файлов {n}')
     return notes
 
 
