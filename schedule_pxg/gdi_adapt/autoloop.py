@@ -85,6 +85,10 @@ class TnavRunner(Runner):
                     job.cancel()
             if job.status == 'cancelled':
                 raise Cancelled()
+            if job.status != 'done' and getattr(job, 'restart_unavailable', None):
+                need, have = job.restart_unavailable
+                raise NoRestart(f'у модели нет шага рестарта на эту дату: в копии RESULTS шаги только до {have}, нужен шаг {need} '
+                                '(копия неполная или от другой версии tNavigator)')
             if job.status != 'done' and use_gpu:
                 # сбой с --use-gpu (карта, драйвер, память, модель не для GPU): один повтор на CPU, дальше очередь идёт на CPU
                 self.gpu = False
@@ -409,6 +413,9 @@ class AutoLoop:
         except Cancelled:
             self._push(status='cancelled', stop_reason='остановлено инженером', message='остановлено')
         except Exception as e:
+            if isinstance(e, NoRestart):
+                self._write_journal()
+                raise                                           # дату пропустит очередь (AutoBatch), без ошибки цикла
             if isinstance(e, rr.NoHistoryError):
                 self.state['no_history'] = list(e.wells)
             self._push(status='failed', stop_reason=f'{type(e).__name__}: {e}', message='ошибка')
@@ -646,7 +653,12 @@ class AutoBatch:
                 self.loop = AutoLoop(self.model_data, self.workdir, self.runner, run_group, self.cfg, self.pvt, self.st, restart, self.journal,
                                      snapshots=snaps or None, tag='_' + item['date'])
                 self.loop.cancel = self.cancel
-                st = self.loop.run()
+                try:
+                    st = self.loop.run()
+                except NoRestart as e:
+                    item['status'], item['message'] = 'skipped', str(e)
+                    self._push()
+                    continue
                 dropped = {}
                 while st.get('no_history'):
                     # у части скважин до даты ГДИ нет дебита истории: их исключаем с причиной, остальные считаем дальше

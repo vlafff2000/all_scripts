@@ -421,6 +421,22 @@ class TestBatch(unittest.TestCase):
         self.assertEqual(r['status'], verify.NOT_RUN)
         self.assertIn('нет шага рестарта', r['reason'])
 
+    def test_date_with_unavailable_restart_step_in_results_copy_is_skipped(self):
+        # tNavigator: «рестарт с шага N невозможен», в копии RESULTS шаги только до M: дата пропускается, очередь идёт дальше
+        class R(FakeRunner):
+            def run(s, case, restart, label, cancel):
+                t0 = float((case['steps'][0].end - MODEL_START).days) - 1
+                if t0 > 15:
+                    raise al.NoRestart('у модели нет шага рестарта на эту дату: в копии RESULTS шаги только до 3703, нужен шаг 3883')
+                return rsm_for_date(case, t0)
+        b = al.AutoBatch(self.data, self.work, R(), self.gdis(), self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0, max_iter=6), restart=7)
+        st = b.run()
+        self.assertEqual(st['status'], 'done', st)
+        by = {x['date']: x for x in st['dates']}
+        self.assertEqual(by['2014-01-20']['status'], 'skipped')
+        self.assertIn('нужен шаг 3883', by['2014-01-20']['message'])
+        self.assertEqual(by['2014-01-14']['status'], 'done')
+
     def test_restart_step_from_saved_maps_meta(self):
         # карты рестарта сохранены не на каждом шаге: берём наибольший сохранённый шаг не позже даты ГДИ, а не отчётный из result.log
         res = os.path.join(self.src, 'RESULTS', 'BASE')

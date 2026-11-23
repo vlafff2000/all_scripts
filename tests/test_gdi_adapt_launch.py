@@ -229,6 +229,14 @@ class TestVersions(unittest.TestCase):
                 tr.command(exe, 'B.DATA', 5, flags={'--no-gui', '--restart'})
             self.assertIn('--auto-run', str(cm.exception))
 
+    def test_restart_downgraded_gives_available_step(self):
+        with tempfile.TemporaryDirectory() as d:
+            code = "print('Рестарт с шага 3883 невозможен. Будет проделан рестарт с шага 3703', flush=True); import time; time.sleep(60)"
+            j = tr.Job([sys.executable, '-c', code, '--restart=7'], d, restart_check_s=0.5)
+            j.start()
+            self.assertEqual(j.wait(40), 'failed')
+            self.assertEqual(j.restart_unavailable, (3883, 3703))
+
     def test_restart_ignored_is_stopped_fast(self):
         with tempfile.TemporaryDirectory() as d:
             code = "print('SIMULATION STARTED FROM DATE 28.03.1978', flush=True); import time; time.sleep(60)"
