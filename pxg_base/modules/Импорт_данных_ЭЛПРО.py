@@ -17,7 +17,11 @@ import os
 
 import pandas as pd
 
-from pxg_core import параметры, qc, элпро
+from pxg_core import append_mode, параметры, qc, элпро
+
+# версия правил чтения файлов ЭЛПРО: увеличивать при правке pxg_core/элпро.py (read_file и всё, что она вызывает)
+PARSE_VERSION = 1
+SCHEMA_VERSION = "elpro-1"
 
 
 def main(argv=None):
@@ -25,7 +29,8 @@ def main(argv=None):
         "Импорт данных ЭЛПРО", argv,
         folder="папка с месячными файлами ЭЛПРО (.xlsx)",
         db="прежняя база для дозаписи (Excel с листом «Данные»), необязательно",
-        output="имя файла результата")
+        output="имя файла результата",
+        cache="папка кэша чтения файлов (по умолчанию ~/.pxg/append_cache по папке с файлами)", **append_mode.FLAGS)
     folder = параметры.ask_path("Папка с файлами ЭЛПРО", args.folder, "folder")
     if not folder:
         print("❌ Папка не выбрана.")
@@ -38,7 +43,24 @@ def main(argv=None):
     old = pd.read_excel(db_path, sheet_name="Данные") if db_path else None
     if old is not None:
         print("📚 Прежняя база: %d строк" % len(old))
-    data, infos, cov, warn = элпро.build(files, old)
+    cache = append_mode.ParseCache(append_mode.cache_dir("elpro", [folder], параметры.clean_path(args.cache or "")),
+                                   SCHEMA_VERSION, PARSE_VERSION)
+    try:     # режим дополнения: читаются только новые и изменённые файлы, остальное из кэша; покрытие считается по всем (итог тот же)
+        parsed, plan = append_mode.run_cached(
+            cache, files, os.path.abspath(folder), lambda paths: [элпро.read_safe(p) for p in paths],
+            rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
+            plan_only=параметры.yes(args.plan_only), rows_of=lambda r: len(r[0]), cacheable=lambda r: not r[0].empty)
+    except append_mode.AppendError as exc:
+        print("❌ Дополнение невозможно: %s (параметр --rebuild=да)" % exc)
+        return 1
+    print("🧩 " + append_mode.summary(plan))
+    for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+        print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+    if параметры.yes(args.plan_only):
+        print("План дополнения показан, файл не создан.")
+        return 0
+    append_mode.write_registry_xlsx(cache)
+    data, infos, cov, warn = элпро.build(files, old, parsed)
     for text in warn:
         print("⚠️ %s" % text)
     if data.empty:

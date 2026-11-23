@@ -322,19 +322,25 @@ def read_file(path: str) -> Tuple[pd.DataFrame, FileInfo]:
 
 # ---------- сборка по папке ----------
 
-def build(paths: Sequence[str], db: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, List[FileInfo], pd.DataFrame, List[str]]:
+def read_safe(p: str) -> Tuple[pd.DataFrame, FileInfo]:
+    """Один файл → (таблица, сведения о файле); битый файл не останавливает пакет, а даёт пустую таблицу и предупреждение."""
+    try:
+        return read_file(p)
+    except Exception as exc:
+        info = FileInfo(name=os.path.basename(p), fmt="", month=_name_month(os.path.basename(p)))
+        info.warnings.append("%s: не прочитан (%s)" % (info.name, exc))
+        return pd.DataFrame(columns=COLUMNS), info
+
+
+def build(paths: Sequence[str], db: Optional[pd.DataFrame] = None, parsed: Optional[list] = None) -> Tuple[pd.DataFrame, List[FileInfo], pd.DataFrame, List[str]]:
     """Все файлы → одна таблица, файлы, покрытие (ГСП × месяц) и предупреждения.
 
-    Дозапись: строки прежней базы с тем же ключом (день, ГСП, скважина, режим, № п/п) заменяются новыми.
+    `parsed` — уже разобранные файлы [(таблица, сведения)] в порядке `paths` (из кэша режима дополнения); без него
+    файлы читаются здесь. Дозапись: строки прежней базы с тем же ключом (день, ГСП, скважина, режим, № п/п)
+    заменяются новыми.
     """
     frames, infos, warn = [], [], []
-    for p in paths:
-        try:
-            df, info = read_file(p)
-        except Exception as exc:  # битый файл не останавливает пакет
-            info = FileInfo(name=os.path.basename(p), fmt="", month=_name_month(os.path.basename(p)))
-            info.warnings.append("%s: не прочитан (%s)" % (info.name, exc))
-            df = pd.DataFrame(columns=COLUMNS)
+    for df, info in (parsed if parsed is not None else [read_safe(p) for p in paths]):
         frames.append(df)
         infos.append(info)
         warn += info.warnings
