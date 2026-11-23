@@ -237,6 +237,26 @@ class TestVersions(unittest.TestCase):
             self.assertEqual(j.wait(40), 'failed')
             self.assertEqual(j.restart_unavailable, (3883, 3703))
 
+    def test_restart_ignored_in_russian_log_is_stopped_fast(self):
+        # tNavigator 26.2 (русский журнал) молча игнорирует --restart и пишет «РАСЧЕТ СТАРТОВАЛ С ДАТЫ <дата START модели>»
+        from datetime import datetime
+        with tempfile.TemporaryDirectory() as d:
+            code = "print('################# РАСЧЕТ СТАРТОВАЛ С ДАТЫ 28 МАР 1978 #################', flush=True); import time; time.sleep(60)"
+            j = tr.Job([sys.executable, '-X', 'utf8', '-c', code, '--restart=3853'], d, restart_check_s=0.5, model_start=datetime(1978, 3, 28))
+            j.start()
+            self.assertEqual(j.wait(40), 'failed')
+            self.assertIn('не прочитал рестарт', j.error)
+            self.assertEqual(j.restart_unavailable, (3853, None))
+
+    def test_restart_read_in_russian_log_is_not_stopped(self):
+        from datetime import datetime
+        with tempfile.TemporaryDirectory() as d:
+            code = "print('РАСЧЕТ СТАРТОВАЛ С ДАТЫ 01 ФЕВ 2026', flush=True); import time; time.sleep(3)"
+            j = tr.Job([sys.executable, '-X', 'utf8', '-c', code, '--restart=3853'], d, restart_check_s=0.5, model_start=datetime(1978, 3, 28))
+            j.start()
+            j.wait(40)
+            self.assertNotIn('не прочитал рестарт', j.error)
+
     def test_restart_ignored_is_stopped_fast(self):
         with tempfile.TemporaryDirectory() as d:
             code = "print('SIMULATION STARTED FROM DATE 28.03.1978', flush=True); import time; time.sleep(60)"

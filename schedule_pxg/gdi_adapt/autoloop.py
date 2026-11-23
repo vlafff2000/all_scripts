@@ -77,6 +77,7 @@ class TnavRunner(Runner):
             use_gpu = self.gpu
             job = tr.Job(tr.command(self.exe, case['data'], restart, self.extra, flags, gpu=use_gpu), self.workdir, label, self.timeout,
                          expect=base + '.RSM')
+            job.model_start = case.get('model_start')
             if self.on_job:
                 self.on_job(job)
             job.start()
@@ -87,6 +88,9 @@ class TnavRunner(Runner):
                 raise Cancelled()
             if job.status != 'done' and getattr(job, 'restart_unavailable', None):
                 need, have = job.restart_unavailable
+                if have is None:
+                    raise NoRestart(f'рестарт с шага {need} не подхвачен: tNavigator начал расчёт с начала модели и прогон остановлен. '
+                                    'Вероятно, в копии RESULTS нет карт этого шага (копия неполная); дата пропущена')
                 raise NoRestart(f'у модели нет шага рестарта на эту дату: в копии RESULTS шаги только до {have}, нужен шаг {need} '
                                 '(копия неполная или от другой версии tNavigator)')
             if job.status != 'done' and use_gpu:
