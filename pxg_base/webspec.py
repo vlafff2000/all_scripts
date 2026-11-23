@@ -299,8 +299,8 @@ SPECS: List[WebSpec] = [
     ),
     WebSpec(
         module="Сбор_данных_по_межколонным_давлениям",
-        params=(Param("root", "Корневая папка с данными", "folder", required=True),),
-        args=(("root", "root"),),
+        params=(Param("root", "Корневая папка с данными", "folder", required=True),) + APPEND_PARAMS,
+        args=(("root", "root"),) + APPEND_ARGS,
         note="Результат — «БД_межколонки.xlsx».",
     ),
     WebSpec(
