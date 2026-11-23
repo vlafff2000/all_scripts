@@ -539,8 +539,8 @@ SPECS: List[WebSpec] = [
                   hint="Папка берётся со всеми подпапками: по сезонам, годам или все файлы в одной папке. Вынос воды — столбец «Пластовая жидкость»"),
             Param("injection", "Файлы или папки учёта газа по закачке", "paths",
                   hint="Необязательно: «Учет газа … Закачка», папка со всеми подпапками"),
-        ),
-        args=(("withdrawal", "withdrawal"), ("injection", "injection")),
+        ) + APPEND_PARAMS,
+        args=(("withdrawal", "withdrawal"), ("injection", "injection")) + APPEND_ARGS,
         note="Книга «БД_по_учету_газа.xlsx» сохраняется в папку результатов.",
     ),
     WebSpec(
