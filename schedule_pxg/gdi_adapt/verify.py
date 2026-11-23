@@ -87,6 +87,8 @@ def build(workdir: str, date_orig: Optional[Dict[str, str]] = None, expected: Op
                 row['reason'] = str(skipped[w])
             elif item.get('status') in ('queued', 'running'):
                 row['reason'] = 'дата ещё в очереди' if item.get('status') == 'queued' else 'дата считается сейчас'
+            elif item.get('status') == 'skipped':
+                row['reason'] = item.get('message') or 'у модели нет шага рестарта на эту дату'
             elif item.get('status') == 'failed':
                 row['reason'] = 'расчёт даты не удался: %s' % (item.get('message') or loop.get('stop_reason') or 'ошибка')
             else:

@@ -16,7 +16,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -472,6 +472,10 @@ def group_by_date(gdis: Sequence[GDI]) -> Dict[datetime, List[GDI]]:
     return dict(sorted(out.items()))
 
 
+class NoRestart(Exception):
+    """У модели нет состояния на дату ГДИ (модель рассчитана не до этой даты): дату пропускаем с причиной."""
+
+
 class AutoBatch:
     """Очередь циклов по датам ГДИ, строго по одному прогону модели (параллельные запуски не делаем: ПК не вывозит нагрузку).
 
@@ -538,6 +542,10 @@ class AutoBatch:
             t0 = float((date - cb.model_start(cb._read(self.model_data)[0])).days)
         except (OSError, cb.CaseError):
             return self.restart
+        end = self._model_end_days(src_dir, base)
+        if end is not None and t0 > end:
+            last = cb.model_start(cb._read(self.model_data)[0]) + timedelta(days=end)
+            raise NoRestart('у модели нет шага рестарта на эту дату: модель рассчитана только до %s' % last.strftime('%d.%m.%Y'))
         # tNavigator стартует рестарт только с шагов, где сохранены карты (RESULTS/<имя>/outsol_ts_maps.meta, секция [timesteps]):
         # любой другой номер он молча откатывает на старый шаг и считает часы. Поэтому сначала берётся сохранённый шаг
         meta = os.path.join(src_dir, 'RESULTS', base, 'outsol_ts_maps.meta')
@@ -565,6 +573,19 @@ class AutoBatch:
             except (OSError, ValueError, cb.CaseError):
                 pass
         return self.restart
+
+    @staticmethod
+    def _model_end_days(src_dir: str, base: str) -> Optional[float]:
+        """Последний рассчитанный день исходной модели (дни от START) по журналу отчётов; нет журнала - None (не проверяем)."""
+        for log in (os.path.join(src_dir, 'RESULTS', base, 'result.log'), os.path.join(src_dir, 'RESULTS', base + '.job.log')):
+            if os.path.exists(log):
+                try:
+                    steps = cb.steps_from_job_log(log)
+                except (OSError, cb.CaseError):
+                    continue
+                if steps:
+                    return max(float(d) for _, d in steps)
+        return None
 
     # --- формула без прогона ---
     def _accepted_by_formula(self, group: Sequence[GDI]):
@@ -610,7 +631,13 @@ class AutoBatch:
                     item['status'] = 'accepted'
                     self._push()
                     continue
-                restart = self.restart_for(d)
+                try:
+                    restart = self.restart_for(d)
+                except NoRestart as e:
+                    item['status'] = 'skipped'
+                    item['message'] = str(e)
+                    self._push()
+                    continue
                 if restart is None:
                     raise ValueError(f'для даты {item["date"]} неизвестен шаг рестарта: укажите его для первой даты (дальше он берётся из RSM)')
                 item['status'] = 'running'
@@ -657,7 +684,9 @@ class AutoBatch:
                     self._push(status='failed', stop_reason=f'дата {item["date"]}: {item["message"]}', message='очередь остановлена на ошибке: после исправления запуск продолжит с этой даты')
                     return self.state
             nof = len([x for x in self.state['dates'] if x['status'] == 'failed'])
-            self._push(status='done', stop_reason='очередь выполнена' + (f'; дат без подобранных мультов: {nof}' if nof else ''), message='готово')
+            nsk = len([x for x in self.state['dates'] if x['status'] == 'skipped'])
+            self._push(status='done', stop_reason='очередь выполнена' + (f'; дат без подобранных мультов: {nof}' if nof else '')
+                       + (f'; дат пропущено (у модели нет шага рестарта): {nsk}' if nsk else ''), message='готово')
         except Cancelled:
             self._push(status='cancelled', stop_reason='остановлено инженером', message='остановлено: запуск продолжит с первой невыполненной даты')
         except Exception as e:
