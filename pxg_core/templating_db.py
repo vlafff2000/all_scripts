@@ -177,10 +177,12 @@ def from_excel(path: str) -> Tuple[List[dict], List[str]]:
     return out, notes
 
 
-def from_reports(files: Sequence[str]) -> Tuple[List[dict], List[str]]:
-    """Отчёты ГИС (Word/PDF с текстом): тот же разбор, что у «БД ГИС из отчётов»; берутся доход шаблона и остановка прибора."""
+def from_reports(files: Sequence[str], parsed: Optional[list] = None) -> Tuple[List[dict], List[str]]:
+    """Отчёты ГИС (Word/PDF с текстом): тот же разбор, что у «БД ГИС из отчётов»; берутся доход шаблона и остановка прибора.
+
+    `parsed` — уже разобранные отчёты (`gis_report.parse_file(f, {})`, из кэша режима дополнения), по порядку `files`."""
     from . import gis_report
-    reps = [gis_report.parse_file(f, {}) for f in files]
+    reps = parsed if parsed is not None else [gis_report.parse_file(f, {}) for f in files]
     notes = ["%s: %s" % (os.path.basename(r.file), r.error) for r in reps if r.error]
     good = [r for r in reps if not r.error]
     rows = _gis_frame(gis_report.templating_frame(good)) if good else []
@@ -281,7 +283,8 @@ def bottom_frame(db: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=BOTTOM_COLUMNS)
 
 
-def build(gis_db: str = "", construction: str = "", excel: Sequence[str] = (), reports: Sequence[str] = (), decisions: str = "") -> Tuple[Dict[str, pd.DataFrame], List[str]]:
+def build(gis_db: str = "", construction: str = "", excel: Sequence[str] = (), reports: Sequence[str] = (), decisions: str = "",
+          parsed_reports: Optional[list] = None) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     rows: List[dict] = []
     notes: List[str] = []
     counts = []
@@ -299,7 +302,7 @@ def build(gis_db: str = "", construction: str = "", excel: Sequence[str] = (), r
         notes += n
         counts.append(("Excel: " + os.path.basename(f), len(got)))
     if reports:
-        got, n = from_reports(list(reports))
+        got, n = from_reports(list(reports), parsed_reports)
         rows += got
         notes += n
         counts.append(("Отчёты ГИС", len(got)))
