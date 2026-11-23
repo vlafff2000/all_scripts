@@ -352,6 +352,32 @@ class TestLinkFolders(unittest.TestCase):
             self.assertFalse(os.path.islink(os.path.join(work, 'PVT')))                      # своё в workdir не затирается
             self.assertEqual(notes, ['INCLUDE: ссылка'])
 
+    def test_other_folders_give_only_text_files_with_hierarchy_and_full_folders_are_whole(self):
+        # из папок кроме INCLUDE/USER берутся только текстовые файлы (иерархия сохраняется), тяжёлые бинарники не копируются;
+        # INCLUDE, USER и близкие по имени (любой регистр) подключаются целиком
+        with tempfile.TemporaryDirectory() as d:
+            src, work = os.path.join(d, 'model'), os.path.join(d, 'work')
+            files = {'GRID/a.GRDECL': 't', 'GRID/sub/deep/perm.inc': 't', 'GRID/big.bin': 'b', 'GRID/sub/x.egrid': 'b', 'PVT/pvt.TXT': 't',
+                     'Include_2/any.bin': 'b', 'USER_DATA/deep/obj.dat': 'b', 'user/raw.bin': 'b', 'OTHER/readme': 't', 'RESULTS/BASE/maps.res': 'b'}
+            for rel, c in files.items():
+                os.makedirs(os.path.dirname(os.path.join(src, rel)), exist_ok=True)
+                open(os.path.join(src, rel), 'w').write(c)
+            notes = cb.link_model_folders(src, work)
+            got = sorted(os.path.relpath(os.path.join(r, f), work).replace(os.sep, '/') for r, _, fs in os.walk(work, followlinks=False) for f in fs)
+            self.assertEqual(got, ['GRID/a.GRDECL', 'GRID/sub/deep/perm.inc', 'PVT/pvt.TXT'])           # бинарники и RESULTS не скопированы
+            for n in ('Include_2', 'USER_DATA', 'user'):                                              # полные папки доступны целиком (ссылкой)
+                self.assertTrue(os.path.islink(os.path.join(work, n)) or os.path.isdir(os.path.join(work, n)))
+            self.assertTrue(os.path.isfile(os.path.join(work, 'Include_2', 'any.bin')))
+            self.assertTrue(os.path.isfile(os.path.join(work, 'USER_DATA', 'deep', 'obj.dat')))
+            self.assertFalse(os.path.exists(os.path.join(work, 'OTHER')))                              # без текстовых файлов папка не создаётся
+            self.assertTrue(any(x.startswith('GRID: скопировано текстовых файлов 2') for x in notes))
+            self.assertEqual(cb.link_model_folders(src, work), [])                                    # повтор ничего не копирует
+            # расширения и «полные» папки настраиваются
+            n2 = cb.link_model_folders(src, os.path.join(d, 'w2'), text_ext=['.bin'], full_dirs=['pvt'])
+            self.assertTrue(os.path.isfile(os.path.join(d, 'w2', 'GRID', 'big.bin')))
+            self.assertFalse(os.path.exists(os.path.join(d, 'w2', 'GRID', 'a.GRDECL')))
+            self.assertTrue(os.path.isfile(os.path.join(d, 'w2', 'PVT', 'pvt.TXT')))
+
 
 class TestRestartCopy(unittest.TestCase):
     def test_truncated_results_copy_is_resynced(self):
