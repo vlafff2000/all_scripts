@@ -57,9 +57,9 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
   })
   const running = (bs?.status ?? st?.status) === 'running'
   const missing = [!wells.length && 'Отберите скважины на шаге 4', !eff.model && 'не найден файл модели .data: укажите его в «Дополнительно»', !eff.exe && 'не найден tNavigator: укажите его в «Дополнительно»'].filter(Boolean) as string[]
-  const finished = !!bs && !running && bs.dates.length > 0 && bs.dates.every(x => x.status === 'done' || x.status === 'accepted')
+  const finished = !!bs && !running && bs.dates.length > 0 && bs.dates.every(x => x.status === 'done' || x.status === 'accepted' || x.status === 'skipped')
   const results = bs ? bs.dates.flatMap(x => Object.values(x.results)) : []
-  const doneDates = bs ? bs.dates.filter(x => x.status === 'done' || x.status === 'accepted').length : 0
+  const doneDates = bs ? bs.dates.filter(x => x.status === 'done' || x.status === 'accepted' || x.status === 'skipped').length : 0
   return (
     <section className="card">
       <div className="step-head"><span className="step-n">5</span><h2>Запустить адаптацию</h2></div>
@@ -121,7 +121,7 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
       {st?.skipped && Object.entries(st.skipped).map(([w, r]) => <p key={w} className="muted small">Скв. {w}: {r}</p>)}
 
       {bs && <>
-        <h3>Очередь по датам ({bs.dates.filter(d => d.status === 'done' || d.status === 'accepted').length} из {bs.dates.length})</h3>
+        <h3>Очередь по датам ({bs.dates.filter(d => d.status === 'done' || d.status === 'accepted' || d.status === 'skipped').length} из {bs.dates.length})</h3>
         <Tables scope="adapt-batch" tables={[tableOf('adapt-batch', 'Очередь', [['Дата ГДИ', 'text'], ['Скважин', 'number', 0], ['Статус', 'text'], ['Прогонов', 'number', 0], ['Макс. ошибка, %', 'number', 1], ['Примечание', 'text']],
           bs.dates.map(d => [d.date, d.wells.length, { queued: 'в очереди', running: 'идёт', done: 'готово', accepted: 'принято по формуле', failed: 'ошибка' }[d.status], d.runs,
             Object.values(d.results).reduce((m, r) => (r.err === null ? m : Math.max(m, r.err)), 0) || null, d.message || '']))]}

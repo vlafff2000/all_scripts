@@ -397,6 +397,30 @@ class TestBatch(unittest.TestCase):
         b = al.AutoBatch(self.data, self.work, FakeRunner(), self.gdis(), self.cfg, pvt())
         self.assertEqual(b.restart_for(datetime(2014, 1, 14)), 2)         # START модели + 13 дн. = 14.01.2014, последний шаг не позже даты
 
+    def test_dates_after_end_of_model_are_skipped_with_reason(self):
+        # модель рассчитана не до всех дат ГДИ: такие даты пропускаются с причиной, очередь не падает
+        res = os.path.join(self.src, 'RESULTS')
+        os.makedirs(os.path.join(res, 'BASE'))
+        with open(os.path.join(res, 'BASE', 'result.log'), 'w', encoding='utf-8') as f:
+            f.write(chr(10).join('########### ОТЧЁТ N %d ДЕНЬ %d ДАТА x ###########' % (n, d) for n, d in ((0, 0), (1, 5), (2, 13), (3, 15))))
+
+        class R(FakeRunner):
+            def run(s, case, restart, label, cancel):
+                t0 = float((case['steps'][0].end - MODEL_START).days) - 1
+                return rsm_for_date(case, t0)
+        b = al.AutoBatch(self.data, self.work, R(), self.gdis(), self.cfg, pvt(), al.LoopSettings(threshold_pct=2.0, max_iter=6))
+        st = b.run()
+        self.assertEqual(st['status'], 'done', st)
+        by = {x['date']: x for x in st['dates']}
+        self.assertEqual(by['2014-01-20']['status'], 'skipped')
+        self.assertIn('нет шага рестарта', by['2014-01-20']['message'])
+        self.assertEqual(by['2014-01-14']['status'], 'done')
+        from schedule_pxg.gdi_adapt import verify
+        rows = {(r['well'], r['date']): r for r in verify.build(self.work)}
+        r = next(r for r in rows.values() if r['date'] == '2014-01-20')
+        self.assertEqual(r['status'], verify.NOT_RUN)
+        self.assertIn('нет шага рестарта', r['reason'])
+
     def test_restart_step_from_saved_maps_meta(self):
         # карты рестарта сохранены не на каждом шаге: берём наибольший сохранённый шаг не позже даты ГДИ, а не отчётный из result.log
         res = os.path.join(self.src, 'RESULTS', 'BASE')
