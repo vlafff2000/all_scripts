@@ -11,7 +11,12 @@ from __future__ import annotations
 import os
 import sys
 
-from pxg_core import gis_word, параметры
+from pxg_core import append_mode, gis_word, параметры
+
+# версия правил чтения заключений: увеличивать при правке pxg_core/gis_word.py (read_conclusion и его помощников),
+# иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "gis_belarus-1"
 from pxg_core.parallel import map_jobs
 
 _ = sys
@@ -39,7 +44,8 @@ def main(argv=None):
         files="заключения ГИС (.doc/.docx), файлы или папки, по одному пути в строке",
         mapping="файл сопоставления меток горизонтов (Excel/CSV, лист «Горизонты» прежней выгрузки), необязательно",
         depth="auto — с учётом отклонения, если заключение его даёт (по умолчанию), md — по стволу, incl — всегда с отклонением",
-        kg_min="порог Кг для hэф, доля единицы (0 — все интервалы)")
+        kg_min="порог Кг для hэф, доля единицы (0 — все интервалы)",
+        cache="папка кэша чтения заключений (по умолчанию ~/.pxg/append_cache по набору путей)", **append_mode.FLAGS)
     paths = _paths(args.files)
     if not paths:
         one = параметры.ask_path("Заключения ГИС: файл или папка", args.files if args.files is not None else None, "folder")
@@ -53,7 +59,26 @@ def main(argv=None):
     depth = depth if depth in ("md", "incl") else "auto"
     kg_min = float((args.kg_min or "0").replace(",", ".") or 0)
     print("📚 Заключений: %d" % len(files))
-    conclusions = read_all(files, mapping)
+    # режим дополнения: читаются только новые и изменённые заключения, остальное из кэша (итог тот же); другое сопоставление меток — другой кэш
+    cache = append_mode.ParseCache(
+        append_mode.cache_dir("gis_belarus_" + append_mode.context_key(mapping), sorted(paths), параметры.clean_path(args.cache or "")),
+        SCHEMA_VERSION, PARSE_VERSION)
+    try:
+        conclusions, plan = append_mode.run_cached(
+            cache, files, os.path.commonpath([os.path.dirname(os.path.abspath(f)) for f in files]),
+            lambda paths_: read_all(paths_, mapping), rebuild=параметры.yes(args.rebuild),
+            drop_missing=параметры.yes(args.drop_missing), plan_only=параметры.yes(args.plan_only),
+            rows_of=lambda c: len(c.rows), cacheable=lambda c: not c.error)
+    except append_mode.AppendError as exc:
+        print("❌ Дополнение невозможно: %s (параметр --rebuild=да)" % exc)
+        return 1
+    print("🧩 " + append_mode.summary(plan))
+    for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+        print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+    if параметры.yes(args.plan_only):
+        print("План дополнения показан, файл не создан.")
+        return 0
+    append_mode.write_registry_xlsx(cache)
     for c in conclusions:
         if c.error:
             print("❌ %s: %s" % (c.file, c.error))
