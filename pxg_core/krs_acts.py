@@ -117,23 +117,31 @@ def parse_act(text: str, source: str = "") -> Optional[dict]:
             "Проверить": "; ".join(reasons), "Файл": os.path.basename(source)}
 
 
-def read_acts(paths: Iterable[str]) -> Tuple[pd.DataFrame, List[Tuple[str, str]]]:
+def read_act_file(f: str) -> Tuple[Optional[dict], List[Tuple[str, str]]]:
+    """Один файл акта → (строка акта или None, замечания). Битый файл не роняет остальные."""
+    if not os.path.isfile(f):
+        return None, [("предупреждение", "Файл не найден: %s" % f)]
+    try:
+        row = parse_act(read_text(f), os.path.join(os.path.basename(os.path.dirname(f)), os.path.basename(f)))
+    except Exception as e:
+        return None, [("предупреждение", "%s: не прочитан (%s)" % (os.path.basename(f), e))]
+    if row is None:
+        return None, [("заметка", "%s: не акт КРС (нет заголовка формы В.3), пропущен" % os.path.basename(f))]
+    return row, []
+
+
+def combine_acts(parsed: Iterable[Tuple[Optional[dict], List[Tuple[str, str]]]]) -> Tuple[pd.DataFrame, List[Tuple[str, str]]]:
+    """Результаты `read_act_file` по файлам → (таблица актов, замечания): то же, что `read_acts`."""
     rows, notes = [], []
-    files = list_files(paths)
-    for f in files:
-        if not os.path.isfile(f):
-            notes.append(("предупреждение", "Файл не найден: %s" % f))
-            continue
-        try:
-            row = parse_act(read_text(f), os.path.join(os.path.basename(os.path.dirname(f)), os.path.basename(f)))
-        except Exception as e:  # битый файл не должен ронять остальные
-            notes.append(("предупреждение", "%s: не прочитан (%s)" % (os.path.basename(f), e)))
-            continue
-        if row is None:
-            notes.append(("заметка", "%s: не акт КРС (нет заголовка формы В.3), пропущен" % os.path.basename(f)))
-        else:
+    for row, n in parsed:
+        notes += n
+        if row is not None:
             rows.append(row)
     return pd.DataFrame(rows, columns=ACT_COLUMNS), notes
+
+
+def read_acts(paths: Iterable[str]) -> Tuple[pd.DataFrame, List[Tuple[str, str]]]:
+    return combine_acts(read_act_file(f) for f in list_files(paths))
 
 
 def add_acts(data: "krs.KrsData", acts: pd.DataFrame, label: str = "Акт") -> List[Tuple[str, str]]:

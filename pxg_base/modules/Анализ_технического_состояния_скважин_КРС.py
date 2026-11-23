@@ -18,7 +18,37 @@ import re
 
 import pandas as pd
 
-from pxg_core import krs, krs_acts, krs_plan, параметры
+from pxg_core import append_mode, krs, krs_acts, krs_plan, параметры
+
+# версия правил чтения актов КРС: увеличивать при правке krs_acts.parse_act / read_text, иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "krs_acts-1"
+
+
+def _read_acts_cached(paths, args):
+    """Акты после OCR: читаются только новые и изменённые файлы, остальное из кэша; итог тот же, что у `krs_acts.read_acts`.
+    Возврат: (таблица актов, замечания) или None, если надо остановиться (ошибка дополнения или только план)."""
+    files = krs_acts.list_files(paths)
+    if not files:
+        return krs_acts.combine_acts([])
+    cache = append_mode.ParseCache(append_mode.cache_dir("krs_acts", sorted(paths), параметры.clean_path(args.cache or "")),
+                                   SCHEMA_VERSION, PARSE_VERSION)
+    try:
+        got, plan = append_mode.run_cached(
+            cache, files, os.path.commonpath([os.path.dirname(os.path.abspath(f)) for f in files]),
+            lambda ps: [krs_acts.read_act_file(p) for p in ps], rebuild=параметры.yes(args.rebuild),
+            drop_missing=параметры.yes(args.drop_missing), plan_only=параметры.yes(args.plan_only),
+            rows_of=lambda r: 0 if r[0] is None else 1, cacheable=lambda r: r[0] is not None)
+    except append_mode.AppendError as exc:
+        print("❌ Дополнение невозможно (акты): %s (параметр --rebuild=да)" % exc)
+        return None
+    print("🧩 Акты: " + append_mode.summary(plan))
+    for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+        print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+    if параметры.yes(args.plan_only):
+        return None
+    append_mode.write_registry_xlsx(cache)
+    return krs_acts.combine_acts(got)
 
 
 def main(argv=None):
@@ -34,7 +64,8 @@ def main(argv=None):
         prev="прежний результат (КРС_для_Атласа.xlsx): ручные приоритеты переносятся",
         relapse="после замены фильтра: new — счёт заново с 3 (по умолчанию), two — повтор песка сразу даёт 2",
         per_season="сколько скважин ремонтировать за сезон в очереди (по умолчанию — среднее за 3 года)",
-        output="имя файла результата")
+        output="имя файла результата",
+        cache="папка кэша чтения актов (по умолчанию ~/.pxg/append_cache по набору путей)", **append_mode.FLAGS)
     table = параметры.ask_path("Таблица «Анализ ревизии КРУ»", args.table)
     if not table:
         print("❌ Таблица не выбрана.")
@@ -73,7 +104,13 @@ def main(argv=None):
         notes += krs.add_revisions(data, new, season)
         print("🔧 Вскрытия КРУ %s: %d скважин, песок у %d" % (season, len(new), int(new["Песок"].eq("Да").sum())))
     if (args.acts or "").strip():
-        acts, anotes = krs_acts.read_acts(re.split(r"[,;]\s*", args.acts.strip()))
+        res = _read_acts_cached(re.split(r"[,;]\s*", args.acts.strip()), args)
+        if res is None:
+            if параметры.yes(args.plan_only):
+                print("План дополнения показан, файл не создан.")
+                return 0
+            return 1
+        acts, anotes = res
         notes += anotes
         notes += krs_acts.add_acts(data, acts)
         added = int(data.works["Источник"].astype(str).str.startswith("Акт").sum()) if "Источник" in data.works.columns else 0
