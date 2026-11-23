@@ -1,7 +1,11 @@
 import os
 import pandas as pd
 from datetime import datetime
-from pxg_core import параметры
+from pxg_core import append_mode, параметры
+
+# версия правил чтения файлов «мк»: увеличивать при правке process_excel_file и extract_well_data, иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "interannular-1"
 from pxg_core.parallel import map_module_function
 import re
 import calendar
@@ -260,7 +264,8 @@ def process_excel_file(file_path):
 
 def main(argv=None):
     """Основная функция. Корневая папка: аргумент --root или вопрос в консоли."""
-    args = параметры.parse("Сбор данных по межколонным давлениям", argv, root="корневая папка с файлами «мк»")
+    args = параметры.parse("Сбор данных по межколонным давлениям", argv, root="корневая папка с файлами «мк»",
+                           cache="папка кэша чтения файлов (по умолчанию ~/.pxg/append_cache по корневой папке)", **append_mode.FLAGS)
     root_directory = параметры.ask_path("Путь к корневой папке с данными", args.root, kind="folder")
     
     if not root_directory:
@@ -275,12 +280,30 @@ def main(argv=None):
     # Рекурсивно обходим все подпапки
     mk_files = [os.path.join(root, file) for root, dirs, files in os.walk(root_directory) for file in files
                 if file.lower().endswith(('.xlsx', '.xls')) and 'мк' in file.lower()]
-    # файлы независимы: считаются параллельно на всех ядрах, результат и вывод идут в порядке файлов
-    for well_data in map_module_function(__file__, "process_excel_file", [(fp,) for fp in mk_files], process_excel_file):
+    # режим дополнения: разбираются только новые и изменённые файлы (параллельно), остальное из кэша; итог тот же, что без кэша
+    cache = append_mode.ParseCache(append_mode.cache_dir("interannular", [root_directory], параметры.clean_path(args.cache or "")),
+                                   SCHEMA_VERSION, PARSE_VERSION)
+    try:
+        parsed, plan = append_mode.run_cached(
+            cache, sorted(mk_files), os.path.abspath(root_directory),
+            lambda paths: map_module_function(__file__, "process_excel_file", [(fp,) for fp in paths], process_excel_file),
+            rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
+            plan_only=параметры.yes(args.plan_only), rows_of=len, cacheable=lambda rows: len(rows) > 0)
+    except append_mode.AppendError as exc:
+        print(f"❌ Дополнение невозможно: {exc} (параметр --rebuild=да)")
+        return
+    print("🧩 " + append_mode.summary(plan))
+    for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+        print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+    if параметры.yes(args.plan_only):
+        print("План дополнения показан, файл не создан.")
+        return
+    append_mode.write_registry_xlsx(cache)
+    for well_data in parsed:
         all_well_data.extend(well_data)
         processed_files += 1
-        print(f"Обработано записей в файле: {len(well_data)}\n")
-    
+        print(f"Записей в файле: {len(well_data)}\n")
+
     if not all_well_data:
         print("Не найдено данных для обработки.")
         return
