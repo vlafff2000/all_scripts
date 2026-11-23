@@ -17,8 +17,35 @@ import sys
 
 import pandas as pd
 
-from pxg_core import замеры, параметры, qc
+from pxg_core import append_mode, замеры, параметры, qc
 from pxg_core.parallel import map_jobs
+
+# версия правил чтения файлов замеров: увеличивать при правке pxg_core/замеры.py (parse_file, parse_weekly и их помощников),
+# иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "pressure-1"
+
+
+def _read_cached(name, files, root, parse_many, args, label):
+    """Разобрать только новые и изменённые файлы (остальное из кэша). Возврат: список разборов в порядке файлов или None (ошибка / только план)."""
+    cache = append_mode.ParseCache(append_mode.cache_dir(name, [root], параметры.clean_path(args.cache or "")),
+                                   SCHEMA_VERSION, PARSE_VERSION)
+    try:
+        got, plan = append_mode.run_cached(
+            cache, files, root, parse_many, rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
+            plan_only=параметры.yes(args.plan_only), rows_of=lambda p: len(p.rows),
+            cacheable=lambda p: not any(code == "FILE" for code, _, _ in p.problems))
+    except append_mode.AppendError as exc:
+        print("❌ Дополнение невозможно (%s): %s (параметр --rebuild=да)" % (label, exc))
+        return None, files
+    print("🧩 %s: %s" % (label, append_mode.summary(plan)))
+    for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+        print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+    if параметры.yes(args.plan_only):
+        return None, files
+    append_mode.write_registry_xlsx(cache)
+    kept = plan[plan["Действие"].isin([append_mode.PROCESS, append_mode.SKIP, append_mode.KEEP])]
+    return got, [p or f for p, f in zip(kept["Путь"], kept["Файл"])]       # «пропавшие» оставленные — в конце
 
 
 def main(argv=None):
@@ -31,7 +58,8 @@ def main(argv=None):
         recalc="да: сразу выполнить «Пересчёт давлений» по готовой базе",
         neighbors="склейка соседних скважин: пары «437=438; 83=82» (слева заменяемая); пусто — автоматически, «нет» — не склеивать",
         refs="для пересчёта: книга со справочниками (листы «Альтитуды» и «Перфорации»)",
-        output="имя файла результата")
+        output="имя файла результата",
+        cache="папка кэша чтения файлов (по умолчанию ~/.pxg/append_cache по папке с файлами)", **append_mode.FLAGS)
     folder = параметры.ask_path("Папка с файлами замеров", args.folder, "folder")
     if not folder:
         print("❌ Папка не выбрана.")
@@ -60,7 +88,16 @@ def main(argv=None):
         return 0
 
     frames, stat = [], []
-    for f, parsed in zip(files, map_jobs(замеры.parse_job, [(f, limit) for f in files], 400)):      # файлы независимы: по ядрам
+    root = os.path.abspath(folder)
+    parsed_files, files = _read_cached(
+        "pressure_%s" % append_mode.context_key(limit), files, root,
+        lambda paths: list(map_jobs(замеры.parse_job, [(p, limit) for p in paths], 400)), args, "месячные файлы") if files else ([], [])
+    if files and parsed_files is None:
+        if параметры.yes(args.plan_only):
+            print("План дополнения показан, файл не создан.")
+            return 0
+        return 1
+    for f, parsed in zip(files, parsed_files):
         for code, text, where in parsed.problems:
             print("⚠️ %s (%s)" % (text, where))
         print("📄 %s: %d замеров" % (os.path.basename(f), len(parsed.rows)))
@@ -69,7 +106,14 @@ def main(argv=None):
             frames.append(замеры.to_frame(parsed.rows))
     weekly = None
     if weekly_path:
-        parsed = замеры.parse_weekly(weekly_path)
+        got, _ = _read_cached("pressure_weekly", [weekly_path], os.path.dirname(os.path.abspath(weekly_path)),
+                              lambda paths: [замеры.parse_weekly(p) for p in paths], args, "еженедельные")
+        if got is None:
+            if параметры.yes(args.plan_only):
+                print("План дополнения показан, файл не создан.")
+                return 0
+            return 1
+        parsed = got[0]
         for code, text, where in parsed.problems:
             print("⚠️ %s (%s)" % (text, where))
         print("📄 %s (еженедельные): %d замеров" % (os.path.basename(weekly_path), len(parsed.rows)))

@@ -265,9 +265,9 @@ SPECS: List[WebSpec] = [
             Param("refs", "Справочники для пересчёта: альтитуды и перфорации", "file", when="recalc=1",
                   hint="Книга с листами «Альтитуды» (скважина, Z) и «Перфорации» (абсолютная отметка верха перфораций)"),
             Param("output", "Имя файла результата", default="БД_давлений_по_замерам.xlsx"),
-        ),
+        ) + APPEND_PARAMS,
         args=(("folder", "folder"), ("weekly", "weekly"), ("db", "db"), ("excess_limit", "excess-limit"), ("neighbors", "neighbors"),
-              ("recalc", "recalc"), ("refs", "refs"), ("output", "output")),
+              ("recalc", "recalc"), ("refs", "refs"), ("output", "output")) + APPEND_ARGS,
         note="Три замера в базе: Руст, Рпл и уровень жидкости; плюс избыточное давление и примечание с текстом из ячейки («г-в», «н.д.»). Столбец «ГСП» — из строки файла или из справочника скважин; эксплуатационные без группы подсвечиваются в предупреждениях.",
     ),
     WebSpec(
