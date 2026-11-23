@@ -347,7 +347,7 @@ def process_wells_data(input_files, output_file, periods_file=None, gsp_mapping_
         from pxg_core.parallel import map_module_function
         from pxg_core import append_mode
         flags = append_mode.env_flags()
-        cache = append_mode.ParseCache(flags["cache"] or os.path.join(os.getcwd(), "БД_ГДИ_таблицы_кэш"), SCHEMA_VERSION, PARSE_VERSION)
+        cache = append_mode.ParseCache(append_mode.cache_dir("gdi_tables", sorted({os.path.dirname(f) for f in input_files}), flags["cache"]), SCHEMA_VERSION, PARSE_VERSION)
         root = os.path.dirname(input_files[0]) if len(input_files) == 1 else os.path.commonpath(input_files)
         try:       # режим дополнения: читаются и чистятся только новые и изменённые файлы, остальное из кэша (итог тот же)
             loaded, plan = append_mode.run_cached(

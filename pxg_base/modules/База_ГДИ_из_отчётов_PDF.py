@@ -323,7 +323,7 @@ def main(argv=None):
         groups="таблица «скважина → ГСП» (Excel), необязательно",
         mapping="файл сопоставления шапок с полями базы (JSON из мастера), необязательно", method="метод обработки для a и b (по умолчанию 4)",
         output="имя файла результата",
-        cache="папка кэша чтения отчётов (по умолчанию БД_ГДИ_кэш в текущей папке)",
+        cache="папка кэша чтения отчётов (по умолчанию ~/.pxg/append_cache по набору входных путей)",
         **append_mode.FLAGS)
     src = параметры.clean_path(args.folder or параметры.ask("Папка с PDF-отчётами или ZIP"))
     if not src or not (os.path.isdir(src) or os.path.isfile(src)):
@@ -345,7 +345,7 @@ def main(argv=None):
     groups_path = параметры.ask_path("Таблица «скважина → ГСП» (Enter — пропустить)", args.groups if args.groups is not None else "")
 
     print("Чтение отчётов: %d…" % len(files))
-    cache = append_mode.ParseCache(параметры.clean_path(args.cache or "") or os.path.join(os.getcwd(), "БД_ГДИ_кэш"),
+    cache = append_mode.ParseCache(append_mode.cache_dir("gdi_pdf", [src], параметры.clean_path(args.cache or "")),
                                    SCHEMA_VERSION, PARSE_VERSION)
     try:       # самое долгое — чтение PDF: только новые и изменённые отчёты; остальное из кэша, итог тот же, что без кэша
         scans, plan = append_mode.run_cached(

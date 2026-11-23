@@ -27,7 +27,7 @@ def _book(out):
     return pd.read_excel(out / "out.xlsx", sheet_name=None, dtype=str)
 
 
-def test_cache_equals_no_cache_and_reads_only_new(tmp_path):
+def test_cache_equals_no_cache_and_reads_only_new(tmp_path, monkeypatch):
     src = tmp_path / "src"
     a = _src(src, "a.xlsx", 11, 20, 1)
     first = _run(tmp_path / "inc", [a])
@@ -36,6 +36,7 @@ def test_cache_equals_no_cache_and_reads_only_new(tmp_path):
     second = _run(tmp_path / "inc", [a, b])
     log = "\n".join(second["log"])
     assert "новых 1" in log and "без изменений 1" in log
+    monkeypatch.setenv("PXG_APPEND_CACHE", str(tmp_path / "full_cache"))
     _run(tmp_path / "full", [a, b])
     inc, full = _book(tmp_path / "inc"), _book(tmp_path / "full")
     assert inc.keys() == full.keys()
@@ -43,7 +44,7 @@ def test_cache_equals_no_cache_and_reads_only_new(tmp_path):
         pd.testing.assert_frame_equal(inc[name], full[name], obj=name)
 
 
-def test_changed_file_plan_only_and_rebuild(tmp_path):
+def test_changed_file_plan_only_and_rebuild(tmp_path, monkeypatch):
     src = tmp_path / "src"
     a = _src(src, "a.xlsx", 11, 20, 1)
     _run(tmp_path / "w", [a])
@@ -51,7 +52,9 @@ def test_changed_file_plan_only_and_rebuild(tmp_path):
     plan = _run(tmp_path / "w", [a], plan_only="1")
     assert "изменён" in "\n".join(plan["log"]) and "файл не создан" in "\n".join(plan["log"])
     _run(tmp_path / "w", [a])
+    monkeypatch.setenv("PXG_APPEND_CACHE", str(tmp_path / "full_cache"))
     _run(tmp_path / "full", [a])
+    monkeypatch.delenv("PXG_APPEND_CACHE")
     inc, full = _book(tmp_path / "w"), _book(tmp_path / "full")
     for name in full:
         pd.testing.assert_frame_equal(inc[name], full[name], obj=name)

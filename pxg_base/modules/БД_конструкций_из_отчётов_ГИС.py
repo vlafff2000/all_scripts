@@ -31,7 +31,7 @@ def main(argv=None):
         files="отчёты ГИС (.doc/.docx, вывод OCR *.ocr.md), папки и архивы (ZIP, TAR, RAR), по одному пути в строке",
         short_reach="недоход прибора, м: если ИЗ глубже остановки прибора ГИС больше чем на столько, элементы ниже остановки берутся по промысловым данным (по умолчанию 0,5; 0 — выключить)",
         keep_gis="скважины, где оставить глубины ГИС несмотря на недоход (через запятую)",
-        cache="папка кэша разбора отчётов (по умолчанию БД_конструкций_кэш в текущей папке)",
+        cache="папка кэша разбора отчётов (по умолчанию ~/.pxg/append_cache по набору входных путей)",
         **append_mode.FLAGS,
         shift="1/0: элементы, которые ГИС не охватил, — по мерам со сдвигом по привязке к соседнему элементу (по умолчанию 1)")
     paths = _paths(args.files)
@@ -48,7 +48,7 @@ def main(argv=None):
             return 0
         print("📚 Файлов: %d" % len(files))
         cache = append_mode.ParseCache(
-            параметры.clean_path(args.cache or "") or os.path.join(os.getcwd(), "БД_конструкций_кэш"), SCHEMA_VERSION, PARSE_VERSION)
+            append_mode.cache_dir("gis_construction", paths, параметры.clean_path(args.cache or "")), SCHEMA_VERSION, PARSE_VERSION)
         root = os.path.dirname(files[0]) if len(files) == 1 else os.path.commonpath(files)
         try:
             items, plan = append_mode.run_cached(

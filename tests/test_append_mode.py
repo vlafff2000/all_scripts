@@ -109,3 +109,11 @@ def test_registry_roundtrip_in_xlsx_and_backup(tmp_path):
     plan = am.make_plan(reg2, _files(tmp_path), str(tmp_path))
     assert list(plan["Статус"]) == [am.SAME]
     assert am.Registry.read(str(tmp_path / "a.csv")) is None  # не xlsx = старая база без реестра
+
+
+def test_default_cache_dir_is_outside_results_and_separates_input_sets(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXG_HOME", str(tmp_path / "home"))
+    a = am.cache_dir("mod", [str(tmp_path / "A")])
+    assert a == am.cache_dir("mod", [str(tmp_path / "A")]) and a.startswith(str(tmp_path / "home"))
+    assert a != am.cache_dir("mod", [str(tmp_path / "B")]) and a != am.cache_dir("other", [str(tmp_path / "A")])
+    assert am.cache_dir("mod", [str(tmp_path / "A")], explicit="x") == "x"

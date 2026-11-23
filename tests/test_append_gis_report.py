@@ -52,7 +52,7 @@ def test_append_equals_full_rebuild_and_parses_only_new(tmp_path, capsys):
     assert sorted(parsed) == ["18_kasimov_191120.doc"]  # старый отчёт не разбирался заново
     assert "новых 1" in capsys.readouterr().out
     mod.read_all = orig
-    assert _run(mod, tmp_path / "full", reports) == 0
+    assert _run(mod, tmp_path / "full", reports, "--cache", str(tmp_path / "full_cache")) == 0
     inc, full = _tables(tmp_path / "inc"), _tables(tmp_path / "full")
     assert inc.keys() == full.keys() and inc
     for name in full:
@@ -81,5 +81,5 @@ def test_other_mapping_requires_rebuild(tmp_path, capsys):
     _copy(["18_kasimov_201026.doc"], reports)
     assert _run(mod, tmp_path / "w", reports) == 0
     from pxg_core import append_mode
-    cache = append_mode.ParseCache(str(tmp_path / "w" / "БД_ГИС_кэш"), mod.SCHEMA_VERSION, mod.PARSE_VERSION, "другие настройки")
+    cache = append_mode.ParseCache(append_mode.cache_dir("gis_reports", [str(reports)]), mod.SCHEMA_VERSION, mod.PARSE_VERSION, "другие настройки")
     assert "настройки разбора" in cache.problem()

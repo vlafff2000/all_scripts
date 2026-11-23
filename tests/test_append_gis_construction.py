@@ -58,7 +58,7 @@ def test_append_equals_full_rebuild_and_parses_only_new(tmp_path, capsys):
     assert sorted(parsed) == ["116-0324.doc", "18_kasimov_191120.doc"]   # старый отчёт заново не разбирался
     assert "новых 2" in capsys.readouterr().out
     mod.gc.read_one = orig
-    assert _run(mod, tmp_path / "full", reports) == 0
+    assert _run(mod, tmp_path / "full", reports, "--cache", str(tmp_path / "full_cache")) == 0
     inc, full = _books(tmp_path / "inc"), _books(tmp_path / "full")
     assert inc.keys() == full.keys() and inc
     for name in full:
