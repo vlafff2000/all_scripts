@@ -40,6 +40,9 @@ class LoopSettings:
     step_limit: float = 4.0                     # мульт за итерацию меняется не более чем в столько раз
     min_gain_pct: float = 1.0                   # прогресс меньше этого за итерацию (в процентных пунктах ошибки): используется, только если stall_stop
     tune_d: bool = True                         # подбирать D-фактор (кривизну ΔP²) по коэффициенту B ГДИ, одновременно с мультом
+    stall_n_formula: int = 2                    # то же, но когда лучшей остаётся старт по формуле (итерация 1): формула обычно уже лучшая, долго искать лучше незачем
+    first_step: float = 1.5                     # доработка от формулы начинается с шага не более чем в столько раз (дальше, при успехе, вырастает до step_limit)
+    bad_jump: float = 3.0                       # пробная пара хуже лучшей в столько раз и более: шаг дополнительно вдвое короче
     stall_n: int = 3                            # остановка скважины, если N итераций подряд не улучшили лучшую ошибку (0 - не останавливать)
     noise_tol_pct: float = 1.0                  # скважина настроена «в пределах точности ГДИ», если ошибка не больше шума точек ГДИ + это (п.п.); None - не применять
     stall_stop: bool = False                    # остановка по «нет улучшения» (по умолчанию выключена: гоняем до порога или до лимита итераций)
@@ -222,6 +225,11 @@ class AutoLoop:
     def stop(self) -> None:
         self.cancel.set()
 
+    def _stalled(self, w: str, bad: dict, best: dict) -> bool:
+        """Скважина исчерпала попытки: N итераций подряд без улучшения лучшей пары (при лучшей формуле достаточно stall_n_formula)."""
+        n = self.st.stall_n_formula if (best.get(w) or {}).get('k') == 1 and self.st.stall_n_formula > 0 else self.st.stall_n
+        return n > 0 and bad.get(w, 0) >= n
+
     def _in_noise(self, wr: dict) -> bool:
         """Ошибка модели не больше разброса самих точек ГДИ вокруг гладкой кривой (плюс допуск): точнее подбор не имеет смысла."""
         t, f = self.st.noise_tol_pct, wr.get('floor_pct')
@@ -333,11 +341,13 @@ class AutoLoop:
                         hist.setdefault(w, []).append((math.log(m['inc']), wr['e']))
                     if wr['err'] is not None:
                         if w not in best or wr['err'] < best[w]['err'] - 1e-9:
-                            best[w] = {'err': wr['err'], 'm': dict(m), 'wr': wr, 'pt': hist[w][-1] if wr['e'] is not None else None}
+                            best[w] = {'err': wr['err'], 'm': dict(m), 'wr': wr, 'pt': hist[w][-1] if wr['e'] is not None else None, 'k': k}
                             bad[w] = 0
                         else:
                             bad[w] = bad.get(w, 0) + 1
                             damp[w] = damp.get(w, 1.0) * 0.5
+                            if best[w]['err'] > 0 and wr['err'] >= self.st.bad_jump * best[w]['err']:
+                                damp[w] *= 0.5                                   # заведомо плохая проба: следующий шаг втрое осторожнее
                     if wr['err'] is not None and (wr['err'] <= self.st.thr(w) or self._in_noise(wr)):
                         done.add(w)
                     elif k >= 2 and w not in done and self._pinned(w, wr, hist.get(w, [])):
@@ -347,7 +357,7 @@ class AutoLoop:
                     self._push(status='done', stop_reason='все скважины в пределах порога', message='готово')
                     break
                 live = [w for w in mults if w not in done]
-                if self.st.stall_n > 0 and live and all(bad.get(w, 0) >= self.st.stall_n for w in live):
+                if live and all(self._stalled(w, bad, best) for w in live):
                     self._push(status='done', stop_reason='нет улучшения', message=f'остановлено: {self.st.stall_n} итерации подряд без улучшения лучшей пары')
                     break
                 prev = its[-2]['wells'] if k >= 2 else None
@@ -364,10 +374,12 @@ class AutoLoop:
                     if w in done or not hist.get(w) or w not in best:
                         nxt[w] = m
                         continue
-                    if bad.get(w, 0) >= self.st.stall_n > 0:                                  # застой: остаёмся на лучшей паре
+                    if self._stalled(w, bad, best):                                  # застой: остаёмся на лучшей паре
                         nxt[w] = dict(best[w]['m'], source=f'лучшая пара (итерация {k}): улучшений нет')
                         continue
-                    mb, wr, g = best[w]['m'], best[w]['wr'], damp.get(w, 1.0)               # шаг всегда от лучшей точки, не от последней
+                    mb, wr, g = best[w]['m'], best[w]['wr'], damp.get(w, 1.0)
+                    if best[w].get('k') == 1:                                                # старт по формуле: пробуем осторожно
+                        g = min(g, math.log(self.st.first_step) / math.log(self.st.step_limit))               # шаг всегда от лучшей точки, не от последней
                     d_new = mb.get('d')
                     h = [x for x in hist[w] if x is not best[w]['pt']] + ([best[w]['pt']] if best[w]['pt'] else [])
                     if self.st.tune_d and wr.get('b_gdi') is not None:                          # D (кривизна) и мульт (наклон) меняются в одном прогоне
