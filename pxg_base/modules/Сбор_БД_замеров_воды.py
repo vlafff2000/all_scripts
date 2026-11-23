@@ -15,7 +15,17 @@ import numpy as np
 import pandas as pd
 
 from gsp_maps.inputs import load_water
-from pxg_core import параметры, qc
+from pxg_core import append_mode, параметры, qc
+
+# версия правил чтения файлов замеров воды: увеличивать при правке gsp_maps.inputs.load_water и его разбора строк,
+# иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "water-1"
+
+
+def parse_one(path: str):
+    """Один файл → (записи load_water, предупреждения): файлы независимы, поэтому разбор кэшируется по файлам."""
+    return load_water([path])
 
 
 def to_atlas(raw: pd.DataFrame) -> pd.DataFrame:
@@ -71,7 +81,8 @@ def main(argv=None):
         "Сбор БД замеров воды", argv,
         folder="папка с месячными файлами замеров воды (Excel)",
         db="прежняя база для дозаписи (Excel с листом «Данные»), необязательно",
-        output="имя файла результата")
+        output="имя файла результата",
+        cache="папка кэша чтения файлов (по умолчанию ~/.pxg/append_cache по папке с файлами)", **append_mode.FLAGS)
     folder = параметры.ask_path("Папка с файлами замеров воды", args.folder, "folder")
     if not folder:
         print("❌ Папка не выбрана.")
@@ -82,7 +93,27 @@ def main(argv=None):
         print("⚠️ В папке нет файлов Excel: %s" % folder)
         return 0
 
-    raw, warn = load_water(files)
+    cache = append_mode.ParseCache(append_mode.cache_dir("water", [folder], параметры.clean_path(args.cache or "")),
+                                   SCHEMA_VERSION, PARSE_VERSION)
+    try:     # режим дополнения: разбираются только новые и изменённые файлы, остальное из кэша (итог тот же)
+        parsed, plan = append_mode.run_cached(
+            cache, files, os.path.abspath(folder), lambda paths: [parse_one(p) for p in paths],
+            rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
+            plan_only=параметры.yes(args.plan_only),
+            rows_of=lambda r: len(r[0]))
+    except append_mode.AppendError as exc:
+        print("❌ Дополнение невозможно: %s (параметр --rebuild=да)" % exc)
+        return 1
+    print("🧩 " + append_mode.summary(plan))
+    for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+        print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+    if параметры.yes(args.plan_only):
+        print("План дополнения показан, файл не создан.")
+        return 0
+    append_mode.write_registry_xlsx(cache)
+    frames = [r for r, _ in parsed if not r.empty]
+    raw = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=load_water([])[0].columns)
+    warn = [w for _, ws in parsed for w in ws]
     for text in warn:
         print("⚠️ %s" % text)
     if raw.empty:
