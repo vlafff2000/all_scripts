@@ -125,6 +125,7 @@ class Job:
         self.restart_requested = any(str(c).startswith('--restart=') for c in cmd)
         self.restart_check_s = restart_check_s      # через сколько секунд проверять, что рестарт прочитан, а не считается вся модель
         self.status, self.error, self.returncode = 'idle', '', None
+        self.restart_unavailable = None
         self.started = self.finished = 0.0
         self.step = 0
         self.log_path = os.path.join(cwd, 'tnav_run.log')       # один журнал на рабочую папку, перезаписывается: прогоны не копят файлы
@@ -209,6 +210,7 @@ class Job:
             re.search(r'[Rr]estart from step (\d+) is (?:impossible|not possible).{0,40}?step (\d+)', text)
         if not m:
             return False
+        self.restart_unavailable = (int(m.group(1)), int(m.group(2)))
         self.error = (f'рестарт с шага {m.group(1)} невозможен: в копии RESULTS доступны шаги только до {m.group(2)}. '
                       'Копия неполная (сделана, пока модель ещё считалась) или посчитана другой версией tNavigator: '
                       'пересчитайте копию RESULTS и запускайте той же версией, что считала модель.')
