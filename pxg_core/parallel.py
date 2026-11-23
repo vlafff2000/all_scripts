@@ -77,6 +77,55 @@ def map_module_function(module_path: str, func: str, arg_list: Sequence[tuple], 
     return out
 
 
+def _bundle_local(local: Any, args: tuple):
+    """То же, что `_call`, но в этом процессе: (результат, замечания по датам, вывод, разбиения «54/80») по одному файлу.
+    Общие списки модуля расходов после вызова возвращаются как были: применяет их `apply_bundle`."""
+    from pxg_core import расходы_файлы as rf
+    saved_issues, saved_splits = list(rf.DATE_ISSUES), [dict(x) for x in rf.WELL_SPLITS]
+    rf.reset_date_issues()
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            res = local(*args)
+        return res, list(rf.DATE_ISSUES), buf.getvalue(), [dict(x) for x in rf.WELL_SPLITS]
+    finally:
+        rf.DATE_ISSUES[:] = saved_issues
+        rf.WELL_SPLITS[:] = saved_splits
+
+
+def bundles(module_path: str, func: str, arg_list: Sequence[tuple], local: Any, workers: Optional[int] = None) -> List[Any]:
+    """Результаты по файлам вместе с их замечаниями и выводом (пакеты), ничего не применяя и не печатая.
+
+    Пакет можно сохранить в кэш режима дополнения и позже применить `apply_bundle`: тогда замечания по датам, разбиения
+    записей и вывод файла те же, что при чтении самого файла."""
+    arg_list = list(arg_list)
+    n = min(default_workers() if workers is None else max(1, workers), len(arg_list))
+    if n < 2 or len(arg_list) < MIN_PARALLEL_ITEMS:
+        return _each(lambda a: _bundle_local(local, a), arg_list)
+    out = []
+    progress.report(total=len(arg_list), text="файлы")
+    with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as ex:
+        for b in ex.map(_call, [(module_path, func, a) for a in arg_list], chunksize=1):
+            out.append(b)
+            progress.advance()
+    return out
+
+
+def apply_bundle(bundle) -> Any:
+    """Напечатать вывод файла, добавить его замечания по датам и разбиения записей в общие списки; вернуть результат."""
+    from pxg_core import расходы_файлы as rf
+    res, issues, text, splits = bundle
+    print(text, end="")
+    rf.DATE_ISSUES.extend(issues)
+    for r in splits:
+        old = next((x for x in rf.WELL_SPLITS if x['Файл'] == r['Файл'] and x['Запись'] == r['Запись']), None)
+        if old is None:
+            rf.WELL_SPLITS.append(dict(r))
+        else:
+            old['Листов'] += r['Листов']
+    return res
+
+
 def map_jobs(fn, jobs: Sequence[Any], mb_per_worker: float = 0.0, workers: Optional[int] = None) -> List[Any]:
     """[fn(job) для job из jobs] по порядку на нескольких процессах; fn — функция верхнего уровня модуля (picklable).
 

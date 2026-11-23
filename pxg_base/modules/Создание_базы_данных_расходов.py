@@ -6,7 +6,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 import xlsxwriter
-from pxg_core.parallel import map_module_function
+from pxg_core import append_mode
+from pxg_core.parallel import map_module_function, bundles as _bundles, apply_bundle as _apply_bundle
 from pxg_core.расходы_файлы import split_combined_wells, validate_header_dates, write_date_issues, reset_date_issues, trim_unfilled_days, env_end_date, normalize_sheet_name, get_sheet_names, find_wells_count, load_periods_file, get_period_for_date, get_excel_engine, find_season_folders, find_year_folders, find_results_subfolder, find_injection_subfolder, read_excel_safe, find_time_table_intelligent, blank_cells, drop_group_off_days
 
 
@@ -372,6 +373,54 @@ def process_excel_file_intelligent(file_path, year=None, season=None, data_type=
         return None
 
 
+# версия правил чтения файлов расходов: увеличивать при правке process_excel_file_intelligent и всего, что она вызывает
+# (extract_table_data, расходы_файлы), иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "rashody-1"
+
+_PLAN_ONLY = []          # непусто, если запрошен только план дополнения (файл результата не создаётся)
+
+
+def _prefetch(kind, root_folder, jobs, periods):
+    """Режим дополнения: прочитать только новые и изменённые файлы расходов, остальное взять из кэша.
+
+    jobs — [(файл, год, сезон)] всех сезонов вместе (один план на весь набор); возврат: ({файл: пакет}, [пакеты оставленных
+    «пропавших» файлов]). Пакет — результат файла вместе с его замечаниями по датам и выводом (`parallel.bundles`);
+    применяются они при обходе сезонов, поэтому порядок вывода и итог те же, что без кэша."""
+    flags = append_mode.env_flags()
+    fixes = os.environ.get("PXG_DATE_FIXES", "").strip()
+    cache = append_mode.ParseCache(
+        append_mode.cache_dir("rashody_" + kind + (("_" + append_mode.sha256(fixes)[:8]) if fixes and os.path.isfile(fixes) else ""), [root_folder], os.path.join(flags["cache"], kind + (("_" + append_mode.sha256(fixes)[:8]) if fixes and os.path.isfile(fixes) else "")) if flags["cache"] else ""), SCHEMA_VERSION, PARSE_VERSION,
+        append_mode.context_key(periods, kind, os.environ.get("PXG_END_DATE", "").strip()))
+    files = [j[0] for j in jobs]
+    args = {j[0]: (j[0], j[1], j[2], kind, periods) for j in jobs}
+    root = os.path.dirname(files[0]) if len(files) == 1 else os.path.commonpath(files)
+    try:
+        got, plan = append_mode.run_cached(
+            cache, files, root,
+            lambda paths: _bundles(__file__, "process_excel_file_intelligent", [args[p] for p in paths], process_excel_file_intelligent),
+            rebuild=flags["rebuild"], drop_missing=flags["drop_missing"], plan_only=flags["plan_only"],
+            rows_of=lambda b: len(b[0]), cacheable=lambda b: b[0] is not None)
+    except append_mode.AppendError as exc:
+        print(f"❌ Дополнение невозможно: {exc} (включите «Пересобрать полностью»)")
+        raise SystemExit(1)
+    print(f"🧩 {kind}: " + append_mode.summary(plan))
+    for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+        print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+    if flags["plan_only"]:
+        _PLAN_ONLY.append(kind)
+        return {}, []
+    append_mode.write_registry_xlsx(cache)
+    kept = plan[plan["Действие"].isin([append_mode.PROCESS, append_mode.SKIP, append_mode.KEEP])]
+    by_path, extras = {}, []
+    for (_, row), bundle in zip(kept.iterrows(), got):
+        if row["Путь"] in args:
+            by_path[row["Путь"]] = bundle
+        else:
+            extras.append(bundle)
+    return by_path, extras
+
+
 def process_all_seasons_production(root_folder, periods):
     """
     Обрабатывает все сезоны в корневой директории для отборов
@@ -388,6 +437,17 @@ def process_all_seasons_production(root_folder, periods):
         return None
 
     print(f"Найдено папок сезонов: {len(season_folders)}")
+
+    # режим дополнения: один план на все сезоны сразу (читаются только новые и изменённые файлы)
+    jobs = []
+    for season_folder in season_folders:
+        sub = find_results_subfolder(season_folder)
+        if sub is not None:
+            name = os.path.basename(season_folder)
+            jobs += [(fp, name.split('-')[0], name) for ext in ['*.xlsx', '*.xls'] for fp in glob.glob(os.path.join(sub, ext))]
+    prefetched, extras = _prefetch("отбор", root_folder, jobs, periods) if jobs else ({}, [])
+    if _PLAN_ONLY:
+        return None
 
     # Обрабатываем каждый сезон
     for season_folder in season_folders:
@@ -420,9 +480,7 @@ def process_all_seasons_production(root_folder, periods):
         # Обрабатываем каждый файл в сезоне
         season_data = []
         # файлы независимы: считаются параллельно на всех ядрах, результат и вывод идут в порядке файлов
-        results = map_module_function(__file__, "process_excel_file_intelligent",
-                                      [(fp, year, season_name, "отбор", periods) for fp in excel_files],
-                                      process_excel_file_intelligent)
+        results = [_apply_bundle(prefetched[fp]) if fp in prefetched else None for fp in excel_files]
         for file_path, result_df in zip(excel_files, results):
             file_name = os.path.basename(file_path)
             print(f"  Обработка файла: {file_name}")
@@ -440,6 +498,11 @@ def process_all_seasons_production(root_folder, periods):
             print(f"✅ Сезон {season_name} обработан! Всего строк: {len(season_df)}")
         else:
             print(f"❌ В сезоне {season_name} нет данных для объединения")
+
+    for bundle in extras:                  # файлы, которых больше нет на диске: их данные остаются (решение инженера — --drop-missing)
+        extra_df = _apply_bundle(bundle)
+        if extra_df is not None:
+            all_files_data.append(extra_df)
 
     if all_files_data:
         combined_df = pd.concat(all_files_data, ignore_index=True)
@@ -464,6 +527,16 @@ def process_all_seasons_injection(root_folder, periods):
         return None
 
     print(f"Найдено папок с годами: {len(year_folders)}")
+
+    # режим дополнения: один план на все годы сразу (читаются только новые и изменённые файлы)
+    jobs = []
+    for year_folder in year_folders:
+        sub = find_injection_subfolder(year_folder)
+        if sub is not None:
+            jobs += [(fp, os.path.basename(year_folder), None) for ext in ['*.xlsx', '*.xls'] for fp in glob.glob(os.path.join(sub, ext))]
+    prefetched, extras = _prefetch("закачка", root_folder, jobs, periods) if jobs else ({}, [])
+    if _PLAN_ONLY:
+        return None
 
     # Обрабатываем каждый год
     for year_folder in year_folders:
@@ -492,9 +565,7 @@ def process_all_seasons_injection(root_folder, periods):
 
         # Обрабатываем каждый файл в году
         year_data = []
-        results = map_module_function(__file__, "process_excel_file_intelligent",
-                                      [(fp, year_name, None, "закачка", periods) for fp in excel_files],
-                                      process_excel_file_intelligent)
+        results = [_apply_bundle(prefetched[fp]) if fp in prefetched else None for fp in excel_files]
         for file_path, result_df in zip(excel_files, results):
             file_name = os.path.basename(file_path)
             print(f"  Обработка файла: {file_name}")
@@ -512,6 +583,11 @@ def process_all_seasons_injection(root_folder, periods):
             print(f"✅ Год {year_name} обработан! Всего строк: {len(year_df)}")
         else:
             print(f"❌ В году {year_name} нет данных для объединения")
+
+    for bundle in extras:
+        extra_df = _apply_bundle(bundle)
+        if extra_df is not None:
+            all_files_data.append(extra_df)
 
     if all_files_data:
         combined_df = pd.concat(all_files_data, ignore_index=True)
@@ -663,6 +739,10 @@ def process_all_data(main_root_folder, periods_file_path, output_path='Свод�
         print(f"\n🔄 ОБРАБОТКА ДАННЫХ ЗАКАЧКИ")
         print("-" * 40)
         injection_data = process_all_seasons_injection(injection_folder, periods)
+
+    if _PLAN_ONLY:
+        print("План дополнения показан, файл не создан.")
+        return {'plan_only': True}
 
     issues_path = write_date_issues(os.path.join(os.path.dirname(os.path.abspath(output_path)), 'Даты_к_проверке.xlsx'))
     if issues_path:
@@ -941,5 +1021,7 @@ if __name__ == "__main__":
 
     if result is None:
         print("\n❌ Обработка завершена с ошибками")
+    elif isinstance(result, dict) and result.get('plan_only'):
+        pass
     else:
         print("\n✅ Обработка успешно завершена!")
