@@ -494,9 +494,67 @@ def correction_windows(ms: Sequence[dict]) -> Dict[str, List[Tuple[date, date]]]
     return win
 
 
+SHORT_PAUSE = 7    # пауза между одноимёнными периодами не длиннее — один сезон
+
+
+def _seasons_of(periods: Sequence[Tuple[date, str]], days: Sequence[date], merge: bool) -> List[dict]:
+    """Сезоны = периоды закачки/отбора, обрезанные по суткам, где в истории есть строки."""
+    out: List[dict] = []
+    for i, (a, k) in enumerate(periods):
+        if k not in (PROD, INJ):
+            continue
+        b = (periods[i + 1][0] - timedelta(days=1)) if i + 1 < len(periods) else max(days)
+        inside = [x for x in days if a <= x <= b]
+        if not inside:
+            continue
+        a, b = min(inside), max(inside)
+        if merge and out and out[-1]["kind"] == k and (a - date.fromisoformat(out[-1]["end"])).days - 1 <= SHORT_PAUSE:
+            out[-1]["end"] = b.isoformat()
+        else:
+            out.append({"kind": k, "start": a.isoformat(), "end": b.isoformat()})
+    for i, s_ in enumerate(out):
+        s_["id"] = i
+        s_["days"] = (date.fromisoformat(s_["end"]) - date.fromisoformat(s_["start"])).days + 1
+        s_["label"] = "%s %s – %s" % (s_["kind"], date.fromisoformat(s_["start"]).strftime("%d.%m.%Y"), date.fromisoformat(s_["end"]).strftime("%d.%m.%Y"))
+    return out
+
+
+def list_seasons(df: pd.DataFrame, project=None, periods: Optional[Sequence[Tuple[date, str]]] = None,
+                 split: Optional[Dict[str, Sequence[str]]] = None) -> List[dict]:
+    """Сезоны истории для выбора: закачка/отбор по периодам (`periods` или из самой таблицы; короткие паузы до недели склеиваются
+    только у периодов из таблицы). Нумерация `id` — порядок по дате, её же принимает `build_history(seasons=...)`."""
+    if df is None or not len(df):
+        return []
+    d, _ = _names(split_wells(df, split), project)
+    return _seasons_of(list(periods) if periods else periods_from_history(d), _data_days(d), merge=not periods)
+
+
+def _data_days(d: pd.DataFrame) -> List[date]:
+    x = _prep(d)
+    return sorted(set(x.loc[x["well"].astype(str).str.strip() != "", "_day"]))
+
+
+def _ranges(seasons: Optional[Sequence[int]], date_from, date_to, avail: Sequence[dict]) -> List[Tuple[date, date]]:
+    """Диапазоны выбора: выбранные сезоны (иначе вся история), обрезанные по date_from/date_to."""
+    if seasons:
+        ids = {int(i) for i in seasons}
+        miss = ids - {s["id"] for s in avail}
+        if miss:
+            raise ValueError("Нет сезона с номером %s" % sorted(miss)[0])
+        rng = [(date.fromisoformat(s["start"]), date.fromisoformat(s["end"])) for s in avail if s["id"] in ids]
+    else:
+        rng = [(date.min, date.max)]
+    lo, hi = (_day(date_from) if date_from else date.min), (_day(date_to) if date_to else date.max)
+    out = [(max(a, lo), min(b, hi)) for a, b in rng if max(a, lo) <= min(b, hi)]
+    if not out:
+        raise ValueError("В выбранных сезонах и датах нет суток")
+    return out
+
+
 def build_history(df: pd.DataFrame, project=None, mode: str = "daily", model_dates: Sequence[date] = (),
                   periods: Optional[Sequence[Tuple[date, str]]] = None, pzrg: Pzrg = None,
-                  split: Optional[Dict[str, Sequence[str]]] = None, lo: float = RANGE_LO, hi: float = RANGE_HI) -> HistoryResult:
+                  split: Optional[Dict[str, Sequence[str]]] = None, lo: float = RANGE_LO, hi: float = RANGE_HI,
+                  seasons: Optional[Sequence[int]] = None, date_from=None, date_to=None) -> HistoryResult:
     """Шаги schedule по истории. `periods` не заданы — берутся из таблицы (`periods_from_history`). `pzrg` задан — перед
     расчётом шагов расходы правятся по ПЗРГ (журнал — в `HistoryResult.log`). `split` — деление «54/80» (по умолчанию как в старых
     скриптах; `{}` — не делить)."""
@@ -512,9 +570,22 @@ def build_history(df: pd.DataFrame, project=None, mode: str = "daily", model_dat
     per = list(periods) if periods else periods_from_history(d)
     if not periods:
         res.notes.append("Периоды закачки и отбора взяты из самой истории (по строкам с расходом)")
+    rng = None
+    if seasons or date_from or date_to:
+        # срез для дополнения готовой модели: виды периодов — по ПОЛНОЙ истории (сезон не теряет вид), строки — только в диапазонах
+        rng = _ranges(seasons, date_from, date_to, _seasons_of(per, _data_days(d), merge=not periods))
+        dd = _prep(d)
+        d = d[[any(a <= x <= b for a, b in rng) for x in dd["_day"]]].reset_index(drop=True)
+        if mode == "dates":
+            model_dates = [m for m in model_dates if any(a <= m <= b for a, b in rng)]
+        res.notes.append("Сборка по срезу: %s. Первая DATES — сутки до начала среза: модель должна быть рассчитана до этой даты"
+                         % "; ".join("%s – %s" % (a.strftime("%d.%m.%Y") if a != date.min else "начало", b.strftime("%d.%m.%Y") if b != date.max else "конец") for a, b in rng))
+        if not len(d):
+            res.notes.append("В срезе нет строк истории — шагов нет")
+            return res
     if mode == "dates":
         if not model_dates:
-            raise ValueError("Для режима «по датам замеров» нужен список дат")
+            raise ValueError("Для режима «по датам замеров» нужен список дат" + (" внутри выбранного среза" if rng else ""))
         days = sorted(set(_prep(d).loc[lambda x: x["well"].astype(str).str.strip() != "", "_day"]))
         ms = model_steps(model_dates, days, per)
         win = correction_windows(ms)
@@ -535,7 +606,23 @@ def build_history(df: pd.DataFrame, project=None, mode: str = "daily", model_dat
     res.steps, res.info = (dates_steps(d, model_dates, per, col) if mode == "dates" else daily_steps(d, per, col))
     if not res.steps:
         res.notes.append("Нет ни одной даты с расходом — шагов нет")
+    elif rng and len(rng) > 1:
+        res.steps, gaps = _fill_gaps(res.steps, rng)
+        if gaps:
+            res.notes.append("Между выбранными сезонами закрыты все скважины (нейтральный шаг): %s" % ", ".join(gaps))
     return res
+
+
+def _fill_gaps(steps: Sequence[fmod.Step], rng: Sequence[Tuple[date, date]]) -> Tuple[List[fmod.Step], List[str]]:
+    """Между невыбранными промежутками — нейтральный шаг (иначе скважины остались бы работать до следующей DATES)."""
+    out, gaps = list(steps), []
+    rr = sorted(rng)
+    for (a, b), (c, e) in zip(rr, rr[1:]):
+        g0, g1 = b + timedelta(days=1), c - timedelta(days=1)
+        if g0 <= g1 and any(s.end <= b for s in out) and any(s.start >= c for s in out):
+            out.append(fmod.Step(g0, g1, 0, NEUTRAL))
+            gaps.append("%s – %s" % (g0.strftime("%d.%m.%Y"), g1.strftime("%d.%m.%Y")))
+    return sorted(out, key=lambda s: s.start), gaps
 
 
 # ---------------------------------------------------------------- запись и сшивка

@@ -535,9 +535,8 @@ async def charts_get(request: Request):
     return JSONResponse(data)
 
 
-def _history_run(body: dict):
-    """Шаги истории по настройкам запроса: files (иначе база расходов проекта), mode, dates_file/dates, periods_file/periods,
-    pzrg_file (иначе эталонный суточный объём проекта), split (по умолчанию «54/80»), stitch — имя сценария, к которому сшивается прогноз."""
+def _history_load(body: dict):
+    """Файлы и таблица истории запроса (files, иначе база расходов проекта); группы из файла назначаются скважинам без групп."""
     p = _project()
     files = [_clean(f) for f in (body.get("files") or sources.flow_paths(p))]
     if not files:
@@ -557,17 +556,30 @@ def _history_run(body: dict):
     if given:
         p.save(FOLDER)
         notes.append("Из файла истории назначены группы %d скважинам, у которых их не было" % given)
+    return p, files, df, notes
+
+
+def _history_periods(body: dict, notes: list):
+    ptxt = body.get("periods") or (historymode.read_text(_clean(body.get("periods_file"))) if body.get("periods_file") else "")
+    if not ptxt:
+        return None
+    periods, n = historymode.parse_periods(ptxt)
+    notes += n
+    return periods
+
+
+def _history_run(body: dict):
+    """Шаги истории по настройкам запроса: files (иначе база расходов проекта), mode, dates_file/dates, periods_file/periods,
+    pzrg_file (иначе эталонный суточный объём проекта), split (по умолчанию «54/80»), stitch — имя сценария, к которому сшивается прогноз.
+    Срез для дополнения готовой модели: seasons — номера сезонов из `/api/history/seasons`, date_from/date_to — границы дат (ДД.ММ.ГГГГ или ГГГГ-ММ-ДД)."""
+    p, files, df, notes = _history_load(body)
     mode = body.get("mode") or "daily"
     dates: list = []
     if mode == "dates":
         txt = body.get("dates") or (historymode.read_text(_clean(body.get("dates_file"))) if body.get("dates_file") else "")
         dates, n = historymode.parse_dates(txt)
         notes += n
-    periods = None
-    ptxt = body.get("periods") or (historymode.read_text(_clean(body.get("periods_file"))) if body.get("periods_file") else "")
-    if ptxt:
-        periods, n = historymode.parse_periods(ptxt)
-        notes += n
+    periods = _history_periods(body, notes)
     # эталон: файл запроса, иначе «Эталонный суточный объём» проекта
     pz = historymode.read_pzrg(_clean(body["pzrg_file"])) if body.get("pzrg_file") else sources.pzrg_from_project(p)
     done = [os.path.basename(f) for f in files if history.is_normalized_db(f)]
@@ -584,7 +596,8 @@ def _history_run(body: dict):
             p.save(FOLDER)
     w = sources.pzrg_window(p)
     res = historymode.build_history(df, p, mode, dates, periods, pz, split=split if isinstance(split, dict) else None,
-                                    lo=w["lo"] * 1000.0, hi=w["hi"] * 1000.0)
+                                    lo=w["lo"] * 1000.0, hi=w["hi"] * 1000.0,
+                                    seasons=body.get("seasons") or None, date_from=body.get("date_from") or None, date_to=body.get("date_to") or None)
     res.notes = notes + res.notes
     steps, stitch = res.steps, None
     if body.get("stitch"):
@@ -595,6 +608,23 @@ def _history_run(body: dict):
         stitch = historymode.stitch(res.steps, b.steps)
         steps = stitch.steps
     return p, res, steps, stitch
+
+
+async def history_seasons(request: Request):
+    """Сезоны истории (закачка/отбор) для выбора среза: те же настройки файлов/периодов/деления «54/80», что и у `/api/history`."""
+    try:
+        body = await request.json()
+
+        def run():
+            p, files, df, notes = _history_load(body)
+            split = body.get("split")
+            return historymode.list_seasons(df, p, _history_periods(body, notes), split if isinstance(split, dict) else None), notes
+        seasons, notes = await run_in_threadpool(run)
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    except Exception as e:
+        return _err("История не обработана: %s" % e, 500)
+    return JSONResponse({"seasons": seasons, "notes": notes})
 
 
 async def history_build(request: Request):
@@ -1585,6 +1615,7 @@ def build_app() -> Starlette:
         Route("/api/scenario/schedule", scenario_schedule),
         Route("/api/charts", charts_get),
         Route("/api/history", history_build, methods=["POST"]),
+        Route("/api/history/seasons", history_seasons, methods=["POST"]),
         Route("/api/history/schedule", history_schedule, methods=["POST"]),
         Route("/api/history/log", history_log, methods=["POST"]),
         Route("/api/history/residual", history_residual, methods=["POST"]),

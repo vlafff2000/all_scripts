@@ -362,3 +362,17 @@ def test_other_kind_day_is_not_logged_and_mixed_skip():
     day2 = [r for r in log if r["start"] == "2026-05-02"]
     assert {r["kind"] for r in day2} == {INJ, PROD} and all(r["method"] == "SKIP" and "отбор, и закачка" in r["comment"] for r in day2)
     assert list(got["rate_corr"])[2:] == [100000.0, 90000.0]
+
+
+def test_api_history_seasons_and_slice(client):
+    c, xl, tmp = client
+    r = c.post("/api/history/seasons", json={"files": [xl]}).json()
+    assert r["seasons"] and {"id", "kind", "start", "end", "label"} <= set(r["seasons"][0])
+    last = r["seasons"][-1]
+    full = c.post("/api/history", json={"files": [xl]}).json()
+    cut = c.post("/api/history", json={"files": [xl], "seasons": [last["id"]]}).json()
+    assert cut["from"] == last["start"] and cut["to"] == last["end"] and cut["steps"] <= full["steps"]
+    assert any("Первая DATES" in n for n in cut["notes"])
+    assert c.post("/api/history", json={"files": [xl], "seasons": [99]}).status_code == 400
+    sch = c.post("/api/history/schedule", json={"files": [xl], "seasons": [last["id"]]}).text
+    assert sch.startswith("DATES")
