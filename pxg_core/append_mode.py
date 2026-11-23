@@ -42,6 +42,15 @@ FLAGS = dict(
 )
 
 
+def env_flags() -> Dict[str, object]:
+    """Параметры дополнения для скриптов, которым значения передаются переменными окружения (диалоговые скрипты без argparse).
+
+    PXG_APPEND_REBUILD / PXG_APPEND_PLAN_ONLY / PXG_APPEND_DROP_MISSING: «1» — да; PXG_APPEND_CACHE — папка кэша."""
+    yes = lambda name: os.environ.get(name, "").strip().lower() in ("1", "да", "true", "y", "yes")  # noqa: E731
+    return {"rebuild": yes("PXG_APPEND_REBUILD"), "plan_only": yes("PXG_APPEND_PLAN_ONLY"),
+            "drop_missing": yes("PXG_APPEND_DROP_MISSING"), "cache": os.environ.get("PXG_APPEND_CACHE", "").strip()}
+
+
 def sha256(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:

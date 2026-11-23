@@ -271,6 +271,12 @@ class DateCorrector:
         return df_corrected, corrections_df
 
 
+# версия правил чтения и очистки таблиц ГДИ: увеличивать при правке load_one_file и всего, что она вызывает,
+# иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "gdi_tables-1"
+
+
 def load_one_file(input_file):
     """Чтение одного файла ГДИ и его очистка (то, что не зависит от остальных файлов); None - файл не прочитан."""
     # Читаем Excel файл - сначала пытаемся определить тип формата
@@ -339,7 +345,27 @@ def process_wells_data(input_files, output_file, periods_file=None, gsp_mapping_
 
         # файлы независимы: читаются и чистятся параллельно на всех ядрах, результат и вывод идут в порядке файлов
         from pxg_core.parallel import map_module_function
-        loaded = map_module_function(__file__, "load_one_file", [(f,) for f in input_files], load_one_file)
+        from pxg_core import append_mode
+        flags = append_mode.env_flags()
+        cache = append_mode.ParseCache(flags["cache"] or os.path.join(os.getcwd(), "БД_ГДИ_таблицы_кэш"), SCHEMA_VERSION, PARSE_VERSION)
+        root = os.path.dirname(input_files[0]) if len(input_files) == 1 else os.path.commonpath(input_files)
+        try:       # режим дополнения: читаются и чистятся только новые и изменённые файлы, остальное из кэша (итог тот же)
+            loaded, plan = append_mode.run_cached(
+                cache, input_files, root,
+                lambda paths: map_module_function(__file__, "load_one_file", [(f,) for f in paths], load_one_file),
+                rebuild=flags["rebuild"], drop_missing=flags["drop_missing"], plan_only=flags["plan_only"],
+                rows_of=lambda d: len(d), cacheable=lambda d: d is not None)
+        except append_mode.AppendError as exc:
+            print(f"❌ Дополнение невозможно: {exc} (включите «Пересобрать полностью»)")
+            return False
+        print("🧩 " + append_mode.summary(plan))
+        for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+            print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+        if flags["plan_only"]:
+            return "plan"
+        append_mode.write_registry_xlsx(cache)
+        kept = plan[plan["Действие"].isin([append_mode.PROCESS, append_mode.SKIP, append_mode.KEEP])]
+        input_files = [p or f for p, f in zip(kept["Путь"], kept["Файл"])]       # в порядке разбора; «пропавшие» оставленные — в конце
         for input_file, df in zip(input_files, loaded):
             print(f"Обрабатывается файл: {input_file}")
             if df is not None:
@@ -2306,6 +2332,9 @@ def main():
 
     success = process_wells_data(input_files, output_file, periods_file, gsp_mapping_file)
 
+    if success == "plan":
+        print("\nПлан дополнения показан, файл не создан.")
+        return
     if success:
         print("\nОбработка завершена успешно!")
         print(f"Обработано файлов: {len(input_files)}")
