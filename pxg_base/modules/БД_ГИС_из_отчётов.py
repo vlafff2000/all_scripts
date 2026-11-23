@@ -52,7 +52,7 @@ def main(argv=None):
         mapping="файл сопоставления заголовков пачек (Excel/CSV, лист «Заголовки пачек» прежней выгрузки), необязательно",
         kg_min="порог Кг для hэф, доля единицы (0 — порог 25 %)",
         known="список известных скважин: БД конструкций (csv/Excel со столбцом well), необязательно",
-        cache="папка кэша разбора отчётов (по умолчанию БД_ГИС_кэш в текущей папке)",
+        cache="папка кэша разбора отчётов (по умолчанию ~/.pxg/append_cache по набору входных путей)",
         **append_mode.FLAGS)
     paths = _paths(args.files)
     if not paths:
@@ -80,7 +80,7 @@ def main(argv=None):
         kg_min = float((args.kg_min or "0").replace(",", ".") or 0)
         print("📚 Отчётов: %d" % len(files))
         cache = append_mode.ParseCache(
-            параметры.clean_path(args.cache or "") or os.path.join(os.getcwd(), "БД_ГИС_кэш"), SCHEMA_VERSION, PARSE_VERSION,
+            append_mode.cache_dir("gis_reports", paths, параметры.clean_path(args.cache or "")), SCHEMA_VERSION, PARSE_VERSION,
             append_mode.context_key(sorted(mapping.items()) if mapping else [], sorted(map(str, known))))
         root = os.path.dirname(files[0]) if len(files) == 1 else os.path.commonpath(files)
         try:

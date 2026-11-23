@@ -32,6 +32,8 @@ APPEND_PARAMS = (
           hint="По умолчанию данные файлов, которых больше нет в папке, остаются (файл мог быть перенесён)"),
 )
 APPEND_ARGS = (("rebuild", "rebuild"), ("plan_only", "plan-only"), ("drop_missing", "drop-missing"))
+# то же для диалоговых скриптов без аргументов командной строки: значения уходят переменными окружения
+APPEND_ENV = (("rebuild", "PXG_APPEND_REBUILD"), ("plan_only", "PXG_APPEND_PLAN_ONLY"), ("drop_missing", "PXG_APPEND_DROP_MISSING"))
 
 
 def lines_of(value: str) -> List[str]:
@@ -580,7 +582,8 @@ SPECS: List[WebSpec] = [
             Param("periods", "Файл с периодами", "file", hint="Строки «ДД.ММ.ГГГГ prod|inj|none». Пусто — сезоны определяются по данным"),
             Param("gsp", "Файл распределения скважин по ГСП", "file", hint="Excel: номер ГСП и номера скважин через запятую. Пусто — только данные из файлов"),
             Param("output", "Имя итогового файла", default="БД_ГДИ_объединенная.xlsx"),
-        ),
+        ) + APPEND_PARAMS,
+        env=APPEND_ENV,
         stdin=lambda v: "".join(x + "\n" for x in lines_of(v.get("files", ""))) + "\n" + (v.get("periods") or "").strip() + "\n"
         + (v.get("gsp") or "").strip() + "\n" + ((v.get("output") or "").strip() or "БД_ГДИ_объединенная.xlsx") + "\ny\nn\n",
         note="Результат — единая база ГДИ в папке результатов (с листом исправлений дат).",

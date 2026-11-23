@@ -59,7 +59,7 @@ def test_cache_equals_no_cache_and_scans_only_new(tmp_path, fake_reports, capsys
     assert fake_reports == ["b.txt"]                     # a.txt берётся из кэша
     assert "новых 1" in capsys.readouterr().out
     fake_reports.clear()
-    assert _run(tmp_path / "full", reports) == 0
+    assert _run(tmp_path / "full", reports, "--cache", str(tmp_path / "full_cache")) == 0
     assert sorted(fake_reports) == ["a.txt", "b.txt"]
     inc, full = _book(tmp_path / "inc"), _book(tmp_path / "full")
     assert inc.keys() == full.keys()

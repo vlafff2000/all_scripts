@@ -42,6 +42,28 @@ FLAGS = dict(
 )
 
 
+def env_flags() -> Dict[str, object]:
+    """Параметры дополнения для скриптов, которым значения передаются переменными окружения (диалоговые скрипты без argparse).
+
+    PXG_APPEND_REBUILD / PXG_APPEND_PLAN_ONLY / PXG_APPEND_DROP_MISSING: «1» — да; PXG_APPEND_CACHE — папка кэша."""
+    yes = lambda name: os.environ.get(name, "").strip().lower() in ("1", "да", "true", "y", "yes")  # noqa: E731
+    return {"rebuild": yes("PXG_APPEND_REBUILD"), "plan_only": yes("PXG_APPEND_PLAN_ONLY"),
+            "drop_missing": yes("PXG_APPEND_DROP_MISSING"), "cache": os.environ.get("PXG_APPEND_CACHE", "").strip()}
+
+
+def cache_dir(name: str, inputs: Iterable[str], explicit: str = "") -> str:
+    """Где лежит кэш разбора: `explicit`, иначе `<PXG_HOME или ~/.pxg>/append_cache/<модуль>/<отпечаток входных путей>`.
+
+    Кэш не в папке результатов: веб-запуск каждый раз получает новую папку результатов, и кэш там не пережил бы запуск.
+    Отпечаток входных путей (то, что выбрал инженер: папки, файлы, архивы) разводит разные наборы источников: данные
+    другой папки не попадают в чужую БД. Новые файлы в той же папке — тот же кэш."""
+    if explicit:
+        return explicit
+    home = os.environ.get("PXG_HOME") or os.path.join(os.path.expanduser("~"), ".pxg")
+    key = hashlib.sha1("\n".join(sorted(os.path.abspath(p) for p in inputs)).encode("utf-8")).hexdigest()[:12]
+    return os.path.join(home, "append_cache", name, key)
+
+
 def sha256(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -374,4 +396,5 @@ def write_registry_xlsx(cache: ParseCache) -> Optional[str]:
     with pd.ExcelWriter(path) as xw:
         for name, frame in cache.registry.sheets().items():
             frame.to_excel(xw, sheet_name=name, index=False)
+    print("📁 Кэш разбора и реестр источников: %s" % cache.folder)
     return path

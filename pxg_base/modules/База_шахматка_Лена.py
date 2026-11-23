@@ -30,7 +30,7 @@ def main(argv=None):
         otbor_year="год первых суток отбора (по умолчанию из имени файла)", zak_year="год первых суток закачки (по умолчанию из имени файла)",
         years="годы по файлам: строки «часть имени = год», для файлов, где год не определился сам",
         xls_formulas="1 — проверять формулы в .xls через LibreOffice (медленно)",
-        cache="папка кэша разбора шахматок (по умолчанию База_шахматка_кэш в текущей папке)",
+        cache="папка кэша разбора шахматок (по умолчанию ~/.pxg/append_cache по набору входных путей)",
         **append_mode.FLAGS)
     raw = args.files if args.files is not None else параметры.ask("Файлы шахматок и воды (через ;)").replace(";", "\n")
     files = шахматка.expand_paths([x for x in (raw or "").splitlines()])
@@ -42,7 +42,7 @@ def main(argv=None):
         out += ".xlsx"
     xls_formulas = str(args.xls_formulas or "").strip().lower() in ("1", "y", "yes", "true", "да")
     cache = append_mode.ParseCache(
-        параметры.clean_path(args.cache or "") or os.path.join(os.getcwd(), "База_шахматка_кэш"),
+        append_mode.cache_dir("shakhmatka", [x for x in (raw or "").splitlines() if x.strip()], параметры.clean_path(args.cache or "")),
         шахматка.SCHEMA_VERSION, шахматка.PARSE_VERSION,
         append_mode.context_key(_year(args.otbor_year), _year(args.zak_year), args.years or "", xls_formulas))
     try:
