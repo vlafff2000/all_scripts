@@ -118,14 +118,15 @@ def command(exe: str, data: str, restart: Optional[int] = None, extra: Sequence[
 class Job:
     """Один запуск tNavigator в фоне. status: idle | running | done | failed | cancelled."""
 
-    def __init__(self, cmd: Sequence[str], cwd: str, label: str = '', timeout: float = 4 * 3600.0, expect: str = '', restart_check_s: float = 60.0):
+    def __init__(self, cmd: Sequence[str], cwd: str, label: str = '', timeout: float = 4 * 3600.0, expect: str = '', restart_check_s: float = 60.0, model_start=None):
         self.id = f'job{next(_ids)}'
         self.cmd, self.cwd, self.label, self.timeout = list(cmd), cwd, label, timeout
         self.expect = expect                        # файл, который должен появиться (BASE.RSM)
-        self.restart_requested = any(str(c).startswith('--restart=') for c in cmd)
+        self.restart_requested = any(str(c).startswith('--restart=') and str(c) != '--restart=0' for c in cmd)
         self.restart_check_s = restart_check_s      # через сколько секунд проверять, что рестарт прочитан, а не считается вся модель
         self.status, self.error, self.returncode = 'idle', '', None
         self.restart_unavailable = None
+        self.model_start = model_start              # дата START модели: старт расчёта с неё при заказанном рестарте = рестарт не прочитан
         self.started = self.finished = 0.0
         self.step = 0
         self.log_path = os.path.join(cwd, 'tnav_run.log')       # один журнал на рабочую папку, перезаписывается: прогоны не копят файлы
@@ -177,6 +178,7 @@ class Job:
                         if self.restart_requested and not self.error and time.time() - t0 > self.restart_check_s and self._restart_ignored():
                             self.error = ('tNavigator не прочитал рестарт и считает модель с начала (это часы): прогон остановлен. '
                                           'Результаты в рабочей папке повреждены или шаг рестарта недоступен: удалите рабочую папку и скопируйте RESULTS заново.')
+                            self.restart_unavailable = (self._restart_step(), None)
                             self.cancel()
                         if self.restart_requested and not self.error and time.time() - t0 > self.restart_check_s and self._restart_downgraded():
                             self.cancel()
@@ -216,14 +218,31 @@ class Job:
                       'пересчитайте копию RESULTS и запускайте той же версией, что считала модель.')
         return True
 
+    def _restart_step(self) -> int:
+        for c in self.cmd:
+            if str(c).startswith('--restart='):
+                try:
+                    return int(str(c).split('=', 1)[1])
+                except ValueError:
+                    break
+        return 0
+
+    _START_LINE = re.compile(r'(?:РАСЧ[ЕЁ]Т СТАРТОВАЛ С ДАТЫ|SIMULATION STARTED FROM DATE)\s+(\d{1,2})\s+\S+\s+(\d{4})', re.I)
+
     def _restart_ignored(self) -> bool:
-        """В журнале есть «SIMULATION STARTED FROM DATE» (расчёт идёт с начала), но нет чтения шага рестарта."""
+        """Рестарт заказан, но tNavigator считает с начала. Признак: строка «РАСЧЕТ СТАРТОВАЛ С ДАТЫ <д> <мес> <г>» (в английском журнале
+        «SIMULATION STARTED FROM DATE») с датой START модели; при неизвестной дате START - английская строка без «Reading data for step»."""
         try:
             with open(self.log_path, 'rb') as f:
-                text = f.read().decode('latin-1')
+                text = f.read().decode('utf-8', 'replace')
         except OSError:
             return False
-        return 'SIMULATION STARTED FROM DATE' in text and 'Reading data for step' not in text
+        if self.model_start is None:
+            return 'SIMULATION STARTED FROM DATE' in text and 'Reading data for step' not in text
+        m = self._START_LINE.search(text)
+        if not m:
+            return False
+        return int(m.group(1)) == self.model_start.day and int(m.group(2)) == self.model_start.year
 
     def _last_step(self) -> int:
         try:
