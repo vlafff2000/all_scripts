@@ -12,7 +12,12 @@ import os
 
 import pandas as pd
 
-from pxg_core import параметры, учёт_газа
+from pxg_core import append_mode, параметры, учёт_газа
+
+# версия правил чтения книг учёта газа: увеличивать при правке pxg_core/учёт_газа.py (read_book, read_sheet и их помощников),
+# иначе дополнение возьмёт старый разбор
+PARSE_VERSION = 1
+SCHEMA_VERSION = "gas_accounting-1"
 
 
 def _paths(value: str) -> list:
@@ -24,7 +29,8 @@ def main(argv=None):
         "БД по учету газа: отбор с выносом воды и закачка", argv,
         withdrawal="файлы или папки учёта газа по отбору (папка — со всеми подпапками)",
         injection="файлы или папки учёта газа по закачке, необязательно",
-        output="имя файла результата")
+        output="имя файла результата",
+        cache="папка кэша чтения книг (по умолчанию ~/.pxg/append_cache по набору папок)", **append_mode.FLAGS)
     withdrawal = _paths(args.withdrawal)
     if not withdrawal:
         withdrawal = _paths(параметры.ask_path("Файл или папка учёта газа по отбору", "", "folder"))
@@ -44,14 +50,38 @@ def main(argv=None):
         print("⚠️ Пропущено (не учёт газа или нет пути): %s" % p)
 
     parts, excl_parts, logs = [], [], []
-    for path in books_w:
-        print("📖 Отбор: %s" % os.path.basename(path))
-        long_df, excl, log = учёт_газа.read_book(path, "отбор")
-        parts.append(long_df), excl_parts.append(excl), logs.append(log)
-    for path in books_i:
-        print("📖 Закачка: %s" % os.path.basename(path))
-        long_df, excl, log = учёт_газа.read_book(path, "закачка")
-        parts.append(long_df), excl_parts.append(excl), logs.append(log)
+    plan_only = False
+    for kind, books, label in (("отбор", books_w, "Отбор"), ("закачка", books_i, "Закачка")):
+        if not books:
+            continue
+        # режим дополнения: читаются только новые и изменённые книги, остальное из кэша (итог тот же)
+        cache = append_mode.ParseCache(
+            append_mode.cache_dir("gas_accounting_" + kind, sorted(set(withdrawal + injection)),
+                                  os.path.join(параметры.clean_path(args.cache), kind) if args.cache else ""),
+            SCHEMA_VERSION, PARSE_VERSION)
+        try:
+            got, plan = append_mode.run_cached(
+                cache, books, os.path.commonpath([os.path.dirname(os.path.abspath(b)) for b in books]),
+                lambda paths, kind=kind: [учёт_газа.read_book(p, kind) for p in paths],
+                rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
+                plan_only=параметры.yes(args.plan_only), rows_of=lambda r: len(r[0]), cacheable=lambda r: not r[0].empty)
+        except append_mode.AppendError as exc:
+            print("❌ Дополнение невозможно (%s): %s (параметр --rebuild=да)" % (label.lower(), exc))
+            return 1
+        print("🧩 %s: %s" % (label, append_mode.summary(plan)))
+        for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+            print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+        if параметры.yes(args.plan_only):
+            plan_only = True
+            continue
+        append_mode.write_registry_xlsx(cache)
+        kept = plan[plan["Действие"].isin([append_mode.PROCESS, append_mode.SKIP, append_mode.KEEP])]
+        for path, (long_df, excl, log) in zip([p or f for p, f in zip(kept["Путь"], kept["Файл"])], got):
+            print("📖 %s: %s" % (label, os.path.basename(path)))
+            parts.append(long_df), excl_parts.append(excl), logs.append(log)
+    if plan_only:
+        print("План дополнения показан, файл не создан.")
+        return 0
 
     everything = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     excluded = pd.concat(excl_parts, ignore_index=True)
