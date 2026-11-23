@@ -120,7 +120,10 @@ export const getCharts = (names: string[], by: string, target: string) =>
 
 export interface HistoryBody {
   mode: 'daily' | 'dates'; files?: string[]; dates?: string; periods?: string; pzrg_file?: string; split?: Record<string, string[]>; stitch?: string; window_lo?: string; window_hi?: string
+  seasons?: number[]; date_from?: string; date_to?: string
 }
+export interface HistorySeason { id: number; kind: string; start: string; end: string; days: number; label: string }
+export const getHistorySeasons = (b: HistoryBody) => call<{ seasons: HistorySeason[]; notes: string[] }>('/api/history/seasons', post(b))
 export interface HistoryLogRow {
   start: string; end: string; method: string; pzrg: number; coef: number; total_after: number; discrepancy: number; category: number; comment: string; unallocated: number; lo: number; hi: number
 }

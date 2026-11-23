@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import PageHead from './PageHead'
-import { AppState, HistoryBody, HistoryView, downloadHistoryLog, downloadHistoryResidual, downloadHistorySchedule, pickFile, runHistory } from './api'
+import { AppState, HistoryBody, HistoryView, downloadHistoryLog, downloadHistoryResidual, downloadHistorySchedule, getHistorySeasons, HistorySeason, pickFile, runHistory } from './api'
 import { Tables } from '../../../pxg_core/web-ui/table/Tables'
 import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
@@ -17,6 +17,10 @@ export default function History({ st }: { st: AppState }) {
   const [stitch, setStitch] = useState('')
   const [winLo, setWinLo] = useState('80')
   const [winHi, setWinHi] = useState('600')
+  const [seasons, setSeasons] = useState<HistorySeason[] | null>(null)
+  const [picked, setPicked] = useState<number[]>([])
+  const [dFrom, setDFrom] = useState('')
+  const [dTo, setDTo] = useState('')
   const [view, setView] = useState<HistoryView | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -27,12 +31,19 @@ export default function History({ st }: { st: AppState }) {
     window_lo: winLo, window_hi: winHi,
     mode, ...(mode === 'dates' ? { dates } : {}), ...(periods.trim() ? { periods } : {}), ...(pzrg.trim() ? { pzrg_file: pzrg.trim() } : {}),
     ...(split ? {} : { split: {} }), ...(stitch ? { stitch } : {}),
+    ...(picked.length ? { seasons: picked } : {}), ...(dFrom ? { date_from: dFrom } : {}), ...(dTo ? { date_to: dTo } : {}),
   })
   const guard = async (f: () => Promise<void>) => {
     setBusy(true); setMsg('')
     try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
   }
   const run = () => guard(async () => { setView(await runHistory(body())) })
+  const loadSeasons = () => guard(async () => {
+    const r = await getHistorySeasons({ mode, ...(periods.trim() ? { periods } : {}), ...(split ? {} : { split: {} }) })
+    setSeasons(r.seasons); setPicked([]); setView(null)
+    if (!r.seasons.length) setMsg('В истории нет сезонов закачки или отбора')
+  })
+  const toggle = (id: number) => { setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id].sort((a, b) => a - b)); setView(null) }
   const pick = () => guard(async () => { const r = await pickFile(pzrg); if (r.path) setPzrg(r.path) })
   const ready = mode === 'daily' || dates.trim().length > 0
 
@@ -67,6 +78,19 @@ export default function History({ st }: { st: AppState }) {
             <select value={stitch} onChange={e => { setStitch(e.target.value); setView(null) }}>
               <option value="">— без сшивки —</option>{st.scenarios.map(s => <option key={s.name}>{s.name}</option>)}</select></label>
         </div>
+        <h3>Срез: только выбранные сезоны и даты</h3>
+        <p className="muted small">Чтобы дополнить готовую модель, соберите schedule не за все годы. Считайте сезоны из истории, отметьте нужные и/или задайте даты (ГГГГ-ММ-ДД).
+          Первая DATES среза — сутки до его начала: модель должна быть рассчитана до этой даты. Вид периода (закачка/отбор) берётся по всей истории.</p>
+        <div className="row">
+          <button onClick={loadSeasons} disabled={busy}>Показать сезоны</button>
+          <label>с <input type="date" value={dFrom} onChange={e => { setDFrom(e.target.value); setView(null) }} /></label>
+          <label>по <input type="date" value={dTo} onChange={e => { setDTo(e.target.value); setView(null) }} /></label>
+          {(picked.length > 0 || dFrom || dTo) && <button onClick={() => { setPicked([]); setDFrom(''); setDTo(''); setView(null) }}>Сбросить срез</button>}
+        </div>
+        {seasons && seasons.length > 0 && <div className="row" style={{ flexWrap: 'wrap' }}>
+          <button onClick={() => { setPicked(seasons.map(x => x.id)); setView(null) }}>Все</button>
+          {seasons.map(x => <label key={x.id} title={x.days + ' сут'}><input type="checkbox" checked={picked.includes(x.id)} onChange={() => toggle(x.id)} /> {x.label}</label>)}
+        </div>}
         <div className="row" style={{ marginTop: 8 }}>
           <button className="primary" disabled={busy || !ready} onClick={run}>Посчитать</button>
           {view && view.steps > 0 && <button disabled={busy} onClick={() => guard(() => downloadHistorySchedule(body()))}>Скачать schedule.inc</button>}
