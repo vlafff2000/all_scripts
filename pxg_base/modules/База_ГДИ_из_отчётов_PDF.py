@@ -24,7 +24,7 @@ import pandas as pd
 
 from pxg_core import гдис_карта as kart
 from pxg_core import гдис_pdf as pdf
-from pxg_core import параметры
+from pxg_core import append_mode, параметры
 from pxg_core.parallel import map_jobs
 
 COLUMNS = ["№ п/п", "№скв", "ГСП", "дата", "метод исслед.", "способ исслед.", "a", "b", "DPmax кгс/см2",
@@ -310,13 +310,21 @@ def write(path: str, wide: pd.DataFrame, bad: pd.DataFrame, detail: pd.DataFrame
             c.font = Font(bold=True)
 
 
+# версия правил чтения отчётов: увеличивать при любой правке гдис_pdf.scan_report / layout_pages / scan_pages,
+# иначе дополнение возьмёт старый разбор. Сопоставление шапок (mapping) в кэш не входит: оно применяется при каждом запуске.
+PARSE_VERSION = 1
+SCHEMA_VERSION = "gdis_pdf-1"
+
+
 def main(argv=None):
     args = параметры.parse(
         "База ГДИ из PDF-отчётов «Мониторинг ГДИС»", argv,
         folder="папка с PDF-отчётами или ZIP-архив", db="прежняя база ГДИ для дозаписи, необязательно",
         groups="таблица «скважина → ГСП» (Excel), необязательно",
         mapping="файл сопоставления шапок с полями базы (JSON из мастера), необязательно", method="метод обработки для a и b (по умолчанию 4)",
-        output="имя файла результата")
+        output="имя файла результата",
+        cache="папка кэша чтения отчётов (по умолчанию БД_ГДИ_кэш в текущей папке)",
+        **append_mode.FLAGS)
     src = параметры.clean_path(args.folder or параметры.ask("Папка с PDF-отчётами или ZIP"))
     if not src or not (os.path.isdir(src) or os.path.isfile(src)):
         print("❌ Папка или архив не найдены: %s" % src)
@@ -337,7 +345,22 @@ def main(argv=None):
     groups_path = параметры.ask_path("Таблица «скважина → ГСП» (Enter — пропустить)", args.groups if args.groups is not None else "")
 
     print("Чтение отчётов: %d…" % len(files))
-    scans = map_jobs(pdf.scan_report, files, 150.0)       # отчёты независимы: по ядрам, результат тот же, что подряд
+    cache = append_mode.ParseCache(параметры.clean_path(args.cache or "") or os.path.join(os.getcwd(), "БД_ГДИ_кэш"),
+                                   SCHEMA_VERSION, PARSE_VERSION)
+    try:       # самое долгое — чтение PDF: только новые и изменённые отчёты; остальное из кэша, итог тот же, что без кэша
+        scans, plan = append_mode.run_cached(
+            cache, files, folder, lambda paths: list(map_jobs(pdf.scan_report, paths, 150.0)),
+            rebuild=параметры.yes(args.rebuild), drop_missing=параметры.yes(args.drop_missing),
+            plan_only=параметры.yes(args.plan_only), rows_of=lambda sc: len(sc.items), cacheable=lambda sc: not sc.error)
+    except append_mode.AppendError as exc:
+        print("❌ Дополнение невозможно: %s (параметр --rebuild=да)" % exc)
+        return 1
+    print("🧩 %s" % append_mode.summary(plan))
+    for _, row in plan[plan["Статус"] != append_mode.SAME].iterrows():
+        print("   • %s: %s → %s (%s)" % (row["Файл"], row["Статус"], row["Действие"], row["Причина"]))
+    if параметры.yes(args.plan_only):
+        return 0
+    append_mode.write_registry_xlsx(cache)
     studies, templates = read_studies(scans, параметры.clean_path(args.mapping or ""), (args.method or "").strip() or "4")
     if len(templates["Шаблон"].unique()) > 1 if not templates.empty else False:
         print("ℹ️ Найдено шаблонов отчёта: %d. Сопоставление по каждому — на листе «Шаблоны»; изменить можно в мастере «Сопоставление шапок»." % templates["Шаблон"].nunique())
