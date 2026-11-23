@@ -155,6 +155,19 @@ class TestLoop(unittest.TestCase):
         ok = {'err': 3315.0, 'dep_model': [1.0, 2.0, 3.0], 'dep_gdi': [0.69, 1.67, 3.63]}      # модель растёт с дебитом: это обычная неудача
         self.assertFalse(lp._pinned('W1', ok, [(0.0, 0.5), (2.0, 0.5)]))
 
+    def test_formula_start_stops_after_two_failed_refinements_with_short_first_step(self):
+        # лучшая остаётся формула (итерация 1): после двух неудачных доработок скважина останавливается, первый шаг не больше ×1,5
+        orig = al.next_mult
+        al.next_mult = lambda hist, limit, bounds: (hist[-1][0] - math.log(limit), True)   # всегда шаг вниз на лимит: ошибка растёт
+        try:
+            st = self.loop(threshold_pct=0.001, max_iter=12, metric='regimes').run()
+        finally:
+            al.next_mult = orig
+        self.assertEqual(st['stop_reason'], 'нет улучшения')
+        self.assertLessEqual(len(st['iterations']), 5)                                      # базовый + формула + 2 неудачи (+1 запас у второй скважины)
+        m = [it['mults']['W1']['inc'] for it in st['iterations'] if it['k'] > 0]
+        self.assertLessEqual(abs(math.log(m[1] / m[0])), math.log(1.5) + 1e-6)             # первая доработка от формулы короткая
+
     def test_default_target_is_indicator_curve_dp2(self):
         # цель адаптации по умолчанию — индикаторная кривая ΔP², а не депрессия; шаг мультов тоже по ΔP²
         self.assertEqual(al.LoopSettings().metric, 'dp2')
@@ -227,7 +240,7 @@ class TestLoop(unittest.TestCase):
 
     def test_loop_does_not_stop_on_stall_before_iteration_limit(self):
         # «нет улучшения» больше не останавливает цикл раньше лимита: гоняем модель до порога или до max_iter
-        st = self.loop(threshold_pct=0.0001, max_iter=5).run()
+        st = self.loop(threshold_pct=0.0001, max_iter=5, stall_n=0, stall_n_formula=0).run()     # остановка по застою отключена явно
         self.assertGreaterEqual(len(st['iterations']), 4)
         self.assertNotEqual(st['stop_reason'], 'нет улучшения')
 
