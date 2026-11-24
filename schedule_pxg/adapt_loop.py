@@ -199,7 +199,7 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
         metric, thr = cfg.dep_criterion_for(g.wname)
         if thr is not None:
             well_thr[g.wname] = float(thr)
-    st = autoloop.LoopSettings(threshold_pct=_num(opts.get('threshold_pct'), float, 10.0), max_iter=_num(opts.get('max_iter'), int, 6),
+    st = autoloop.LoopSettings(threshold_pct=_num(opts.get('threshold_pct'), float, 10.0), max_iter=_num(opts.get('max_iter'), int, 3),
                                metric=str(opts.get('metric') or 'dp2'), well_threshold=well_thr,
                                work_min=_num(opts.get('work_min'), float, 0.0), rest_min=_num(opts.get('rest_min'), float, 30.0), work_steps=_num(opts.get('work_steps'), int, 1))
     restart = _num(opts.get('restart'), int, None)

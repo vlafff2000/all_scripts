@@ -11,7 +11,7 @@ const METRIC: Record<string, string> = { regimes: 'депрессия по ре�
 /** Шаг 7 вкладки «Адаптация по ГДИ»: автоцикл по тестовому прогону модели (подбор → прогон tNavigator → чтение → порог). Решение за инженером. */
 export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest; wells: string[]; kit: string }) {
   const [info, setInfo] = useState<LoopInfo | null>(null)
-  const [o, setO] = useState<Partial<LoopOpts>>({ threshold_pct: 10, max_iter: 6, metric: 'dp2' })
+  const [o, setO] = useState<Partial<LoopOpts>>({ threshold_pct: 10, max_iter: 3, metric: 'dp2' })
   const [id, setId] = useState('')
   const [st, setSt] = useState<LoopState | null>(null)
   const [bs, setBs] = useState<BatchState | null>(null)
