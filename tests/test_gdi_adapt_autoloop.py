@@ -437,6 +437,10 @@ class TestBatch(unittest.TestCase):
         self.assertIn('нужен шаг 3883', by['2014-01-20']['message'])
         self.assertEqual(by['2014-01-14']['status'], 'done')
 
+    def test_default_is_formula_run_plus_two_refinements(self):
+        # на уже посчитанных исследованиях лучшей в 87 % случаев была формула: по умолчанию прогон формулы и не более двух доводок
+        self.assertEqual(al.LoopSettings().max_iter, 3)
+
     def test_restart_step_from_saved_maps_meta(self):
         # карты рестарта сохранены не на каждом шаге: берём наибольший сохранённый шаг не позже даты ГДИ, а не отчётный из result.log
         res = os.path.join(self.src, 'RESULTS', 'BASE')
