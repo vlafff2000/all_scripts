@@ -30,13 +30,24 @@ def _num(x) -> Optional[float]:
         return None
 
 
-def _regimes(w: dict) -> List[dict]:
+def _at(w: Optional[dict], key: str, i: int) -> Optional[float]:
+    arr = (w or {}).get(key) or []
+    return _num(arr[i]) if i < len(arr) else None
+
+
+def _regimes(w: dict, before: Optional[dict] = None) -> List[dict]:
+    """Режимы ГДИ: дебит, давления (абсолютные) по ГДИ и по модели после настройки; before - запись той же скважины из прогона без
+    мультов (до настройки), если он был. Нет значения - None (в таблице прочерк), не ноль."""
     q, dg, dm = (w.get(k) or [] for k in ('q', 'dep_gdi', 'dep_model'))
     out = []
     for i in range(len(q)):
         g, m = _num(dg[i]) if i < len(dg) else None, _num(dm[i]) if i < len(dm) else None
         out.append({'q': _num(q[i]), 'dep_gdi': g, 'dep_model': m,
-                    'err_pct': None if not g or m is None else abs(m - g) / g * 100.0, 'modeled': m is not None})
+                    'err_pct': None if not g or m is None else abs(m - g) / g * 100.0, 'modeled': m is not None,
+                    'p_res_gdi': _at(w, 'p_res_gdi', i), 'bhp_gdi': _at(w, 'bhp_gdi', i),
+                    'p_res_model': _at(w, 'p_res_model', i), 'bhp_model': _at(w, 'bhp_model', i),
+                    'dep_model_before': _at(before, 'dep_model', i), 'p_res_model_before': _at(before, 'p_res_model', i),
+                    'bhp_model_before': _at(before, 'bhp_model', i)})
     return out
 
 
@@ -72,7 +83,7 @@ def build(workdir: str, date_orig: Optional[Dict[str, str]] = None, expected: Op
                     row['status'] = NOISE
                     row['reason'] = 'ошибка %.1f %% выше порога %g %%, но не выше разброса самих точек ГДИ (%.1f %%) плюс допуск %g п.п.; решение за инженером' % (row['err_pct'], t, fl, float(tol))
                 if wk:
-                    row['regimes'] = _regimes(wk)
+                    row['regimes'] = _regimes(wk, ((iters.get(0) or {}).get('wells') or {}).get(w))
                 if row['status'] == BAD:
                     row['reason'] = 'ошибка %.1f %% выше порога %s %%' % (row['err_pct'], '%g' % t if t is not None else '?')
                 if w in skipped:
@@ -119,7 +130,9 @@ def to_excel(rows: List[dict], path: str) -> str:
              'Статус': r['status'], 'Ошибка, %': r['err_pct'], 'Порог, %': r['threshold_pct'], 'Итерация': r['iteration'], 'Мульт PIMULT': r['pi_mult'],
              'Причина': r['reason']} for r in rows]
     regs = [{'Скважина': r['well'], 'Дата': r['date'], 'Режим': i + 1, 'Дебит, м3/сут': x['q'], 'Депрессия ГДИ, бар': x['dep_gdi'],
-             'Депрессия модели, бар': x['dep_model'], 'Отклонение, %': x['err_pct'], 'Модельная точка есть': 'да' if x['modeled'] else 'нет'}
+             'Депрессия модели, бар': x['dep_model'], 'Отклонение, %': x['err_pct'], 'Модельная точка есть': 'да' if x['modeled'] else 'нет',
+             'Pпл ГДИ, бар': x['p_res_gdi'], 'Pзаб ГДИ, бар': x['bhp_gdi'], 'Pпл модели после, бар': x['p_res_model'], 'Pзаб модели после, бар': x['bhp_model'],
+             'Pпл модели до, бар': x['p_res_model_before'], 'Pзаб модели до, бар': x['bhp_model_before'], 'Депрессия модели до, бар': x['dep_model_before']}
             for r in rows for i, x in enumerate(r['regimes'])]
     tried = [{'Скважина': r['well'], 'Дата': r['date'], 'Прогон': t['k'], 'Мульт PIMULT': t['pi_mult'], 'D-фактор': t['d'], 'Ошибка, %': t['err_pct'],
               'Лучший': 'да' if r.get('iteration') == t['k'] else ''} for r in rows for t in r.get('tried', [])]

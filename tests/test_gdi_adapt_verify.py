@@ -66,6 +66,28 @@ class TestVerify(unittest.TestCase):
         dump(os.path.join(d, 'loop_2026-01-17.json'), loop)
         self.assertEqual({(x['well'], x['date']): x for x in verify.build(d)}[('9', '2026-01-17')]['status'], verify.BAD)
 
+    def test_regimes_carry_pressures_and_rates_before_and_after_tuning(self):
+        # честные числа: давления (абсолютные) и дебит по ГДИ и по модели до (прогон без мультов) и после настройки; нет значения - None, не 0
+        d = self.tmp.name
+        dump(os.path.join(d, 'loop_2026-01-17.json'), {
+            'thresholds': {'187': 5.0}, 'iterations': [
+                {'k': 0, 'wells': {'187': {'q': [100.0, 200.0], 'dep_gdi': [2.0, 4.0], 'dep_model': [1.0, 2.0], 'p_res_gdi': [250.0, 250.0],
+                                           'bhp_gdi': [248.0, 246.0], 'p_res_model': [249.0, 249.0], 'bhp_model': [248.0, 247.0]}}},
+                {'k': 2, 'wells': {'187': {'q': [100.0, 200.0], 'dep_gdi': [2.0, 4.0], 'dep_model': [2.1, None], 'p_res_gdi': [250.0, 250.0],
+                                           'bhp_gdi': [248.0, 246.0], 'p_res_model': [250.0, None], 'bhp_model': [247.9, None]}}}]})
+        r = {(x['well'], x['date']): x for x in verify.build(d)}[('187', '2026-01-17')]['regimes']
+        self.assertEqual(r[0]['p_res_gdi'], 250.0)
+        self.assertEqual(r[0]['bhp_gdi'], 248.0)
+        self.assertEqual((r[0]['p_res_model'], r[0]['bhp_model']), (250.0, 247.9))
+        self.assertEqual((r[0]['p_res_model_before'], r[0]['bhp_model_before'], r[0]['dep_model_before']), (249.0, 248.0, 1.0))
+        self.assertIsNone(r[1]['p_res_model'])                       # нет модельной точки: прочерк, не ноль
+        self.assertEqual(r[1]['bhp_model_before'], 247.0)
+        import pandas as pd
+        path = verify.to_excel(verify.build(d), os.path.join(d, 'v2.xlsx'))
+        cols = list(pd.ExcelFile(path).parse('Режимы').columns)
+        for c in ('Pпл ГДИ, бар', 'Pзаб ГДИ, бар', 'Pпл модели после, бар', 'Pзаб модели после, бар', 'Pпл модели до, бар', 'Pзаб модели до, бар'):
+            self.assertIn(c, cols)
+
     def test_excel_has_study_and_regime_sheets(self):
         import pandas as pd
         rows = verify.build(self.tmp.name)
