@@ -377,3 +377,19 @@ def test_sprav_done_goes_to_works_and_summary(tmp_path):
     ws = openpyxl.load_workbook(out).active
     col = next(c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value == "Выполнение КР 2026")
     assert ws.cell(3, col).value.startswith("КР 1.094") and ws.cell(3, col).fill.fgColor.rgb.endswith(FILTER)
+
+
+def test_all_kinds_of_one_repair_are_recorded():
+    """В одном ремонте несколько видов работ: пишутся все, а не один главный (БД ремонтов — основа анализа)."""
+    text = "КР 1.094-ПА Замена фильтра. Восстановление герметичности цементного кольца. КР 4.033-ЗР Кислотная обработка"
+    codes = [c for c, _ in krs.split_works(text)]
+    assert krs.all_kinds(codes, text) == [krs.KIND_FILTER, krs.KIND_ISOL, krs.KIND_CTS]
+    assert krs.all_kinds([], "ИС 3.6.3 диагностика") == [krs.KIND_OTHER]
+    from pxg_core import krs_acts
+    act = krs_acts.parse_act(ACT_CODES, "a.md")
+    assert krs.KIND_FILTER in act["Виды работ"] and krs.KIND_CTS in act["Виды работ"]      # код 1.094 и 4.033 в одном акте
+    data = krs.KrsData(works=pd.DataFrame([{"Скважина": 1, "Год": 2024, "Тип ремонта": krs.KIND_ISOL, "Виды работ": krs.KIND_ISOL + "; " + krs.KIND_FILTER}]),
+                       revisions=pd.DataFrame(columns=["Скважина", "Сезон", "Источник", "Песок"]), gdi=pd.DataFrame(), wells=pd.DataFrame({"Скважина": [1]}),
+                       table_need=pd.DataFrame(columns=["Скважина", "Год", "Потребность (таблица)"]), notes=[], legend={}, columns=None)
+    why = krs.compute_priorities(data, 2024, 2024)["Причина"].iloc[0]
+    assert "Замена фильтра" in why and "сбросила счёт" in why         # фильтр внутри ремонта с ЦК сбрасывает счёт, хотя главный вид — ЦК

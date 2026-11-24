@@ -233,8 +233,8 @@ CODE_KINDS: Dict[str, str] = {"1.094": KIND_FILTER, "2.013": KIND_ARM, "4.033": 
 KIND_ORDER = (KIND_FILTER, KIND_ARM, KIND_ISOL, KIND_COLUMN, KIND_CTS, KIND_CT, KIND_PLUG, KIND_KILL)
 
 
-def kind_by_text(text: str) -> str:
-    """Вид ремонта по названию работ (шифры из справки, описание акта, подпись легенды); не распознано — KIND_OTHER."""
+def kinds_in_text(text: str) -> set:
+    """Все виды работ в названии (шифры из справки, описание акта, подпись легенды); пусто — вид не распознан."""
     low = " ".join(str(text or "").lower().split())
     found = set()
     if "фильтр" in low and ("замен" in low or "установ" in low):
@@ -255,7 +255,25 @@ def kind_by_text(text: str) -> str:
         found.add(KIND_PLUG)
     if "глушен" in low:
         found.add(KIND_KILL)
+    return found
+
+
+def kind_by_text(text: str) -> str:
+    """Главный вид ремонта по названию работ; не распознано — KIND_OTHER."""
+    found = kinds_in_text(text)
     return next((k for k in KIND_ORDER if k in found), KIND_OTHER)
+
+
+def all_kinds(codes: Iterable[str], text: str = "", main: str = "") -> List[str]:
+    """ВСЕ виды работ ремонта (а не только главный), в порядке важности; main — вид, уже выбранный по цвету таблицы. Ничего не узнано — [KIND_OTHER]."""
+    found = {CODE_KINDS[n] for n in (c.split(" ")[1] for c in codes if " " in c) if n in CODE_KINDS} | kinds_in_text(text)
+    if main and main != KIND_OTHER:
+        found.add(main)
+    return [k for k in KIND_ORDER if k in found] or [KIND_OTHER]
+
+
+def kinds_cell(kinds: Iterable[str]) -> str:
+    return "; ".join(kinds)
 
 
 def kind_by_codes(codes: Iterable[str], text: str = "") -> str:
@@ -323,6 +341,7 @@ def parse(path: str, sheet: Optional[str] = None) -> Tuple[KrsData, Grid]:
             if how == "цвет ячейки" and by_codes not in (KIND_OTHER, kind) and kind in (KIND_CT, KIND_CTS):
                 notes.append(("предупреждение", "Скв. %d, %d год: цвет «%s», но в кодах есть работа типа «%s»" % (w, year, kind, by_codes)))
             works_rows.append({"Скважина": w, "ГСП": gsp, "Год": year, "Тип ремонта": kind, "Тип определён по": how,
+                               "Виды работ": kinds_cell(all_kinds(codes, text, kind)),
                                "Коды работ": "; ".join(codes), "Описание работ": text, "Работ": len(items)})
         for season, c in cols.rev.items():
             v = g.value(r, c)
@@ -354,7 +373,7 @@ def parse(path: str, sheet: Optional[str] = None) -> Tuple[KrsData, Grid]:
     if not wells.empty:
         wells["В плане КР"] = wells["Скважина"].map(plan_by_well)
     return KrsData(
-        works=pd.DataFrame(works_rows, columns=["Скважина", "ГСП", "Год", "Тип ремонта", "Тип определён по", "Коды работ", "Описание работ", "Работ"]),
+        works=pd.DataFrame(works_rows, columns=["Скважина", "ГСП", "Год", "Тип ремонта", "Тип определён по", "Виды работ", "Коды работ", "Описание работ", "Работ"]),
         revisions=pd.DataFrame(rev_rows, columns=["Скважина", "ГСП", "Сезон", "Источник", "Песок", "Примечание"]),
         gdi=pd.DataFrame(gdi_rows, columns=["Скважина", "ГСП", "Сезон", "Результат"]),
         wells=wells,
@@ -477,7 +496,8 @@ def compute_priorities(data: KrsData, start_year: int = 2022, end_year: Optional
     sand_by_well = rev.groupby("Скважина")["Сезон"].apply(lambda s: sorted({season_end_year(x) for x in s})).to_dict()
     reps: Dict[int, Dict[int, List[str]]] = {}
     for _, r in data.works.iterrows():
-        reps.setdefault(int(r["Скважина"]), {}).setdefault(int(r["Год"]), []).append(r["Тип ремонта"])
+        kinds = [k.strip() for k in str(r.get("Виды работ", "") or "").split(";") if k.strip()] or [r["Тип ремонта"]]
+        reps.setdefault(int(r["Скважина"]), {}).setdefault(int(r["Год"]), []).extend(kinds)      # все виды работ ремонта: фильтр в одном ремонте с ЦК сбрасывает счёт
     tbl = {(int(r["Скважина"]), int(r["Год"])): r["Потребность (таблица)"] for _, r in data.table_need.iterrows()}
     rows = []
     for w in data.wells["Скважина"]:
