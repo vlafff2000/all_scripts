@@ -251,9 +251,25 @@ def test_acts_parse_and_db(tmp_path):
     assert len(data.works) == n0 + 2
     krs_acts.add_acts(data, acts)                                    # повторный запуск не дублирует
     assert len(data.works) == n0 + 2
-    clash = dict(b, **{"Скважина": 12, "Год": 2024})                  # в таблице у скв. 12 за 2024 уже есть ремонт: не затирается
-    notes = krs_acts.add_acts(data, pd.DataFrame([clash]))
-    assert len(data.works) == n0 + 2 and any("уже есть" in n[1] for n in notes)
+    own = data.works[(data.works["Скважина"] == 12) & (data.works["Год"] == 2024)].iloc[0]
+    same = dict(b, **{"Скважина": 12, "Год": 2024, "Коды работ": own["Коды работ"], "Описание работ": "тот же ремонт из акта"})
+    krs_acts.add_acts(data, pd.DataFrame([same]))                     # тот же ремонт (общие коды), уже записанный таблицей: не дублируется
+    assert len(data.works) == n0 + 2
+    other = dict(b, **{"Скважина": 12, "Год": 2024, "Коды работ": "КР 3.099", "Тип ремонта": krs.KIND_ISOL})
+    notes = krs_acts.add_acts(data, pd.DataFrame([other]))            # другой ремонт того же года: добавляется, а не теряется
+    assert len(data.works) == n0 + 3 and any("другой ремонт" in n[1] for n in notes)
+
+
+def test_kinds_cover_all_repairs():
+    cases = {"КР 1.094-ПА Замена противопесочного фильтра": krs.KIND_FILTER,
+             "КР 4.033-ЗР Кислотная обработка под давлением": krs.KIND_CTS,
+             "Ремонтно-изоляционные работы по восстановлению герметичности цементного кольца": krs.KIND_ISOL,
+             "Ремонт эксплуатационной колонны (смятие)": krs.KIND_COLUMN,
+             "КР 2.022 ГТ Ликвидация пробки": krs.KIND_PLUG, "КР 7.02 Глушение скважины": krs.KIND_KILL,
+             "Промывка ГПП колтюбингом без СКО": krs.KIND_CT, "ИС 3.6.3 диагностика": krs.KIND_OTHER}
+    for text, kind in cases.items():
+        assert krs.kind_by_codes([c for c, _ in krs.split_works(text)], text) == kind, text
+    assert krs.KIND_ISOL not in krs.RESETTING and krs.KIND_FILTER in krs.RESETTING      # герметичность ЦК окно наблюдения не сбрасывает, замена фильтра сбрасывает
 
 
 def test_acts_written_to_summary_with_fill(tmp_path):

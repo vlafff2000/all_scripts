@@ -56,16 +56,7 @@ def _norm(s: str) -> str:
 
 
 def kind_by_description(text: str) -> str:
-    low = text.lower()
-    if "фильтр" in low and "замен" in low:
-        return krs.KIND_FILTER
-    if "армирован" in low or ("закреплен" in low and "пзп" in low):
-        return krs.KIND_ARM
-    if "колтюбинг" in low:
-        return krs.KIND_CTS if ("ско" in low or "кислот" in low) else krs.KIND_CT
-    if re.search(r"\bско\b|кислотн", low):
-        return krs.KIND_CTS
-    return krs.KIND_OTHER
+    return krs.kind_by_text(text)
 
 
 def parse_act(text: str, source: str = "") -> Optional[dict]:
@@ -96,7 +87,7 @@ def parse_act(text: str, source: str = "") -> Optional[dict]:
     items = krs.split_works(ops)
     codes = [c for c, _ in items]
     if codes:
-        kind, how = krs.kind_by_codes(codes), "коды работ"
+        kind, how = krs.kind_by_codes(codes, ops), "коды работ"
         if kind == krs.KIND_OTHER:
             kind = kind_by_description(ops)
             how = "описание акта" if kind != krs.KIND_OTHER else "коды работ"
@@ -144,6 +135,23 @@ def read_acts(paths: Iterable[str]) -> Tuple[pd.DataFrame, List[Tuple[str, str]]
     return combine_acts(read_act_file(f) for f in list_files(paths))
 
 
+def _codes(text) -> set:
+    return {"%s %s" % (m.group(1), m.group(2)) for m in krs.CODE_RE.finditer(str(text or ""))}      # без суффикса «-ПА»: в справке и таблице он пишется по-разному
+
+
+def _same_repair(same: pd.DataFrame, act) -> bool:
+    """Тот же ремонт, что уже записан: общие коды работ, а без кодов — тот же вид ремонта."""
+    new = _codes(act["Коды работ"])
+    for _, r in same.iterrows():
+        old = _codes(r["Коды работ"])
+        if new and old:
+            if new & old:
+                return True
+        elif r["Тип ремонта"] == act["Тип ремонта"] and act["Тип ремонта"] != krs.KIND_OTHER:
+            return True
+    return False
+
+
 def add_acts(data: "krs.KrsData", acts: pd.DataFrame, label: str = "Акт") -> List[Tuple[str, str]]:
     """Дополнить БД «Ремонты» актами. Запись таблицы (или введённая вручную) главнее акта: тот же скважина+год не затирается."""
     notes: List[Tuple[str, str]] = []
@@ -161,11 +169,10 @@ def add_acts(data: "krs.KrsData", acts: pd.DataFrame, label: str = "Акт") -> 
         w, y = int(w), int(y)
         same = works[(works["Скважина"] == w) & (works["Год"] == y)]
         if not same.empty:
-            if (same["Источник"].astype(str) != "таблица").any() and (same["Описание работ"] == a["Описание работ"]).any():
-                continue       # повторный запуск с теми же актами
-            notes.append(("предупреждение", "Скв. %d, %d год: в таблице уже есть ремонт, акт «%s» не записан (решает инженер): %s"
-                          % (w, y, a["Файл"], a["Проверить"])))
-            continue
+            if (same["Описание работ"] == a["Описание работ"]).any() or _same_repair(same, a):
+                continue       # повторный запуск или тот же ремонт, уже записанный таблицей: не дублируем и не затираем
+            # другой ремонт в тот же год (например, восстановление герметичности ЦК после замены фильтра): в БД добавляется, а ячейка таблицы, если занята, не затирается
+            notes.append(("заметка", "Скв. %d, %d год: в таблице уже есть другой ремонт, акт «%s» добавлен в БД отдельной строкой (%s)" % (w, y, a["Файл"], a["Тип ремонта"])))
         if w not in known:
             notes.append(("предупреждение", "Скв. %d из акта «%s» нет в таблице анализа: ремонт добавлен в БД, в сводный Excel не попадёт" % (w, a["Файл"])))
         text = a["Описание работ"]
