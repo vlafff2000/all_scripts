@@ -144,6 +144,14 @@ export default function AdaptLoop({ req, wells, kit }: { req: () => AdaptRequest
         <Tables scope="adapt-verify" tables={[tableOf('adapt-verify', 'Подтверждение', [['Скважина', 'text'], ['Дата ГДИ', 'text'], ['Дата в БД (исправлена)', 'text'], ['Прогнано на модели', 'text'], ['Статус', 'text'],
           ['Ошибка, %', 'number', 1], ['Порог, %', 'number', 1], ['Итерация', 'number', 0], ['Мульт', 'number', 3], ['Режимов', 'number', 0], ['Причина', 'text']],
           ver.rows.map(r => [r.well, r.date, r.date_orig, r.ran_on_model ? 'да' : 'нет', r.status, r.err_pct, r.threshold_pct, r.iteration, r.pi_mult, r.regimes.length || null, r.reason]))]} />
+        <h4>Давления и дебит по режимам: ГДИ и модель до и после настройки</h4>
+        <p className="muted small">Давления абсолютные, бар; дебит, м³/сут. «До» - прогон модели без мультов (его нет, если исследование принято по формуле без прогона); «после» - лучший прогон. Прочерк: значения нет, а не ноль.</p>
+        <Tables scope="adapt-regimes" tables={[tableOf('adapt-regimes', 'Давления и дебит по режимам', [['Скважина', 'text'], ['Дата ГДИ', 'text'], ['Режим', 'number', 0], ['Дебит, м³/сут', 'number', 1],
+          ['Pпл ГДИ, бар', 'number', 2], ['Pзаб ГДИ, бар', 'number', 2], ['Депрессия ГДИ, бар', 'number', 2],
+          ['Pпл модели до, бар', 'number', 2], ['Pзаб модели до, бар', 'number', 2], ['Депрессия модели до, бар', 'number', 2],
+          ['Pпл модели после, бар', 'number', 2], ['Pзаб модели после, бар', 'number', 2], ['Депрессия модели после, бар', 'number', 2], ['Отклонение после, %', 'number', 1]],
+          ver.rows.flatMap(r => r.regimes.map((x, i) => [r.well, r.date, i + 1, x.q, x.p_res_gdi, x.bhp_gdi, x.dep_gdi, x.p_res_model_before, x.bhp_model_before, x.dep_model_before,
+            x.p_res_model, x.bhp_model, x.dep_model, x.err_pct])))]} />
       </>}
       {st && st.iterations.length > 0 && <AdaptDashboard st={st} well={well} setWell={setWell} write={write} busy={busy} />}
     </section>
