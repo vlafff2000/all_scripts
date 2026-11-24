@@ -251,9 +251,25 @@ def test_acts_parse_and_db(tmp_path):
     assert len(data.works) == n0 + 2
     krs_acts.add_acts(data, acts)                                    # повторный запуск не дублирует
     assert len(data.works) == n0 + 2
-    clash = dict(b, **{"Скважина": 12, "Год": 2024})                  # в таблице у скв. 12 за 2024 уже есть ремонт: не затирается
-    notes = krs_acts.add_acts(data, pd.DataFrame([clash]))
-    assert len(data.works) == n0 + 2 and any("уже есть" in n[1] for n in notes)
+    own = data.works[(data.works["Скважина"] == 12) & (data.works["Год"] == 2024)].iloc[0]
+    same = dict(b, **{"Скважина": 12, "Год": 2024, "Коды работ": own["Коды работ"], "Описание работ": "тот же ремонт из акта"})
+    krs_acts.add_acts(data, pd.DataFrame([same]))                     # тот же ремонт (общие коды), уже записанный таблицей: не дублируется
+    assert len(data.works) == n0 + 2
+    other = dict(b, **{"Скважина": 12, "Год": 2024, "Коды работ": "КР 3.099", "Тип ремонта": krs.KIND_ISOL})
+    notes = krs_acts.add_acts(data, pd.DataFrame([other]))            # другой ремонт того же года: добавляется, а не теряется
+    assert len(data.works) == n0 + 3 and any("другой ремонт" in n[1] for n in notes)
+
+
+def test_kinds_cover_all_repairs():
+    cases = {"КР 1.094-ПА Замена противопесочного фильтра": krs.KIND_FILTER,
+             "КР 4.033-ЗР Кислотная обработка под давлением": krs.KIND_CTS,
+             "Ремонтно-изоляционные работы по восстановлению герметичности цементного кольца": krs.KIND_ISOL,
+             "Ремонт эксплуатационной колонны (смятие)": krs.KIND_COLUMN,
+             "КР 2.022 ГТ Ликвидация пробки": krs.KIND_PLUG, "КР 7.02 Глушение скважины": krs.KIND_KILL,
+             "Промывка ГПП колтюбингом без СКО": krs.KIND_CT, "ИС 3.6.3 диагностика": krs.KIND_OTHER}
+    for text, kind in cases.items():
+        assert krs.kind_by_codes([c for c, _ in krs.split_works(text)], text) == kind, text
+    assert krs.KIND_ISOL not in krs.RESETTING and krs.KIND_FILTER in krs.RESETTING      # герметичность ЦК окно наблюдения не сбрасывает, замена фильтра сбрасывает
 
 
 def test_acts_written_to_summary_with_fill(tmp_path):
@@ -361,3 +377,31 @@ def test_sprav_done_goes_to_works_and_summary(tmp_path):
     ws = openpyxl.load_workbook(out).active
     col = next(c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value == "Выполнение КР 2026")
     assert ws.cell(3, col).value.startswith("КР 1.094") and ws.cell(3, col).fill.fgColor.rgb.endswith(FILTER)
+
+
+def test_all_kinds_of_one_repair_are_recorded():
+    """В одном ремонте несколько видов работ: пишутся все, а не один главный (БД ремонтов — основа анализа)."""
+    text = "КР 1.094-ПА Замена фильтра. Восстановление герметичности цементного кольца. КР 4.033-ЗР Кислотная обработка"
+    codes = [c for c, _ in krs.split_works(text)]
+    assert krs.all_kinds(codes, text) == [krs.KIND_FILTER, krs.KIND_ISOL, krs.KIND_CTS]
+    assert krs.all_kinds([], "ИС 3.6.3 диагностика") == [krs.KIND_OTHER]
+    from pxg_core import krs_acts
+    act = krs_acts.parse_act(ACT_CODES, "a.md")
+    assert krs.KIND_FILTER in act["Виды работ"] and krs.KIND_CTS in act["Виды работ"]      # код 1.094 и 4.033 в одном акте
+    data = krs.KrsData(works=pd.DataFrame([{"Скважина": 1, "Год": 2024, "Тип ремонта": krs.KIND_ISOL, "Виды работ": krs.KIND_ISOL + "; " + krs.KIND_FILTER}]),
+                       revisions=pd.DataFrame(columns=["Скважина", "Сезон", "Источник", "Песок"]), gdi=pd.DataFrame(), wells=pd.DataFrame({"Скважина": [1]}),
+                       table_need=pd.DataFrame(columns=["Скважина", "Год", "Потребность (таблица)"]), notes=[], legend={}, columns=None)
+    why = krs.compute_priorities(data, 2024, 2024)["Причина"].iloc[0]
+    assert "Замена фильтра" in why and "сбросила счёт" in why         # фильтр внутри ремонта с ЦК сбрасывает счёт, хотя главный вид — ЦК
+
+
+def test_only_filter_resets_and_other_kinds_share_one_fill():
+    """Egor 2026-11-24: счёт сбрасывает только замена ППФ; армирование и прочее — нет; все прочие виды красятся одним цветом."""
+    assert krs.RESETTING == (krs.KIND_FILTER,)
+    why = krs.priority_history([2024], {2024: [krs.KIND_ARM]}, [2024])[0][2]
+    assert "счёт не сбросила" in why
+    data = krs.KrsData(works=pd.DataFrame(), revisions=pd.DataFrame(), gdi=pd.DataFrame(), wells=pd.DataFrame(), table_need=pd.DataFrame(),
+                       notes=[], legend={}, columns=None)
+    fills = krs.kind_fills(data)
+    others = {fills[k] for k in (krs.KIND_ISOL, krs.KIND_COLUMN, krs.KIND_PLUG, krs.KIND_KILL, krs.KIND_OTHER)}
+    assert len(others) == 1 and fills[krs.KIND_FILTER] not in others and fills[krs.KIND_ARM] not in others

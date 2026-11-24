@@ -6,7 +6,7 @@
 
 Приоритет КР (1 — срочно) выведен из «Потребности» самой таблицы, а не задан формулой: первая ревизия КРУ с песком после
 ремонта даёт 3, каждая следующая — на единицу ниже (3 → 2 → 1); год без нового песка число не меняет; промывка и СКО счёт
-не сбрасывают, замена фильтра и закрепление ПЗП сбрасывают. Это подсказка с видимой причиной: инженер переписывает её вручную
+не сбрасывают, счёт сбрасывает только замена фильтра (ППФ; Egor 2026-11-24), в том числе в составе ремонта с другими работами. Это подсказка с видимой причиной: инженер переписывает её вручную
 (столбец «Приоритет вручную» в результате не затирается при пересчёте).
 """
 from __future__ import annotations
@@ -24,14 +24,24 @@ KIND_FILTER = "Замена фильтра"
 KIND_CT = "Колтюбинг без СКО"
 KIND_CTS = "Колтюбинг с СКО / СКО"
 KIND_ARM = "Армирование ПЗП"
-KIND_OTHER = "Тип не определён"
-RESETTING = (KIND_FILTER, KIND_ARM)
-KINDS = (KIND_FILTER, KIND_CT, KIND_CTS, KIND_ARM, KIND_OTHER)
+KIND_ISOL = "Восстановление герметичности ЦК / изоляция"
+KIND_COLUMN = "Ремонт колонны"
+KIND_PLUG = "Ликвидация пробки"
+KIND_KILL = "Глушение скважины"
+KIND_OTHER = "Тип не определён"          # вид не распознан: строка сохраняется как есть (коды и описание), в «Проверить» — пометка
+# счёт ревизий КРУ (приоритет КР) сбрасывает ТОЛЬКО замена фильтра (ППФ), какие бы работы ни шли вместе с ней (Egor 2026-11-24).
+# Основные ремонты: замена ППФ, промывка/СКО, армирование; остальные виды (герметичность ЦК, колонна, пробка, глушение, неузнанные) пишутся в БД
+# для учёта и в таблице имеют одну общую заливку.
+RESETTING = (KIND_FILTER,)
+MAIN_KINDS = (KIND_FILTER, KIND_CT, KIND_CTS, KIND_ARM)
+KINDS = (KIND_FILTER, KIND_CT, KIND_CTS, KIND_ARM, KIND_ISOL, KIND_COLUMN, KIND_PLUG, KIND_KILL, KIND_OTHER)
 
 # заливки легенды в файле, если легенда не найдена (палитра Excel 97–2003)
 DEFAULT_LEGEND: Dict[RGB, str] = {
     (255, 204, 0): KIND_FILTER, (0, 204, 255): KIND_CT, (255, 255, 0): KIND_CTS, (0, 102, 204): KIND_ARM,
 }
+# общая заливка всех прочих ремонтов (не ППФ, не промывка/СКО, не армирование), в том числе неузнанных: цвет легенды таблицы главнее
+OTHER_FILL: RGB = (204, 153, 255)
 SAND_AN_FILL: RGB = (159, 159, 159)      # «Х» серым: песок по отчётам авторского надзора
 SHLEIF_FILL: RGB = (255, 128, 128)       # «х» розовым: вероятно вынос остатков песка из шлейфа
 
@@ -197,6 +207,8 @@ def read_legend(g: Grid, cols: Columns) -> Tuple[Dict[RGB, str], Dict[RGB, str]]
                 kind = KIND_ARM
             elif "колтюбинг" in low or "ско" in low:
                 kind = KIND_CT if ("без ско" in low and "с ско" not in low.replace("без ско", "")) else KIND_CTS
+            else:
+                kind = kind_by_text(cap) if kind_by_text(cap) != KIND_OTHER else None
             if kind:
                 legend[color] = kind
                 captions[color] = cap
@@ -215,13 +227,63 @@ def split_works(text: str) -> List[Tuple[str, str]]:
     return out
 
 
-def kind_by_codes(codes: Iterable[str]) -> str:
+# номера работ (после «КР»/«ИС»), по которым вид известен однозначно
+CODE_KINDS: Dict[str, str] = {"1.094": KIND_FILTER, "2.013": KIND_ARM, "4.033": KIND_CTS, "2.022": KIND_PLUG, "7.02": KIND_KILL}
+# если в одном ремонте несколько видов, главным считается первый по порядку (замена фильтра важнее: она сбрасывает счёт)
+KIND_ORDER = (KIND_FILTER, KIND_ARM, KIND_ISOL, KIND_COLUMN, KIND_CTS, KIND_CT, KIND_PLUG, KIND_KILL)
+
+
+def kinds_in_text(text: str) -> set:
+    """Все виды работ в названии (шифры из справки, описание акта, подпись легенды); пусто — вид не распознан."""
+    low = " ".join(str(text or "").lower().split())
+    found = set()
+    if "фильтр" in low and ("замен" in low or "установ" in low):
+        found.add(KIND_FILTER)
+    if "армирован" in low or ("закреплен" in low and "пзп" in low):
+        found.add(KIND_ARM)
+    if re.search(r"герметичн|цемент|изоляц|переток|заколонн|\bрир\b", low):
+        found.add(KIND_ISOL)
+    if re.search(r"ремонт\w*\s+(?:эксплуатационной\s+)?(?:обсадн\w+\s+)?колонн|смяти|обсадн\w+\s+колонн|замен\w+\s+колонн|ремонт\s+эк\b", low):
+        found.add(KIND_COLUMN)
+    if "колтюбинг" in low:
+        found.add(KIND_CTS if re.search(r"\bско\b|кислот", low) and "без ско" not in low else KIND_CT)
+    elif re.search(r"\bско\b|кислотн", low):
+        found.add(KIND_CTS)
+    elif "промывк" in low:
+        found.add(KIND_CT)
+    if "пробк" in low and ("ликвидац" in low or "промыв" in low or "разбур" in low):
+        found.add(KIND_PLUG)
+    if "глушен" in low:
+        found.add(KIND_KILL)
+    return found
+
+
+def kind_by_text(text: str) -> str:
+    """Главный вид ремонта по названию работ; не распознано — KIND_OTHER."""
+    found = kinds_in_text(text)
+    return next((k for k in KIND_ORDER if k in found), KIND_OTHER)
+
+
+def all_kinds(codes: Iterable[str], text: str = "", main: str = "") -> List[str]:
+    """ВСЕ виды работ ремонта (а не только главный), в порядке важности; main — вид, уже выбранный по цвету таблицы. Ничего не узнано — [KIND_OTHER]."""
+    found = {CODE_KINDS[n] for n in (c.split(" ")[1] for c in codes if " " in c) if n in CODE_KINDS} | kinds_in_text(text)
+    if main and main != KIND_OTHER:
+        found.add(main)
+    return [k for k in KIND_ORDER if k in found] or [KIND_OTHER]
+
+
+def kinds_cell(kinds: Iterable[str]) -> str:
+    return "; ".join(kinds)
+
+
+def kind_by_codes(codes: Iterable[str], text: str = "") -> str:
+    """Вид ремонта по кодам работ и названиям (в ячейке нередко несколько работ): известный код главнее текста, неизвестное — KIND_OTHER."""
     nums = {c.split(" ")[1] for c in codes if " " in c}
-    if "1.094" in nums:
-        return KIND_FILTER
-    if "2.013" in nums:
-        return KIND_ARM
-    return KIND_OTHER
+    found = {CODE_KINDS[n] for n in nums if n in CODE_KINDS}
+    by_text = kind_by_text(text)
+    if by_text != KIND_OTHER:
+        found.add(by_text)
+    return next((k for k in KIND_ORDER if k in found), KIND_OTHER)
 
 
 @dataclass
@@ -270,15 +332,16 @@ def parse(path: str, sheet: Optional[str] = None) -> Tuple[KrsData, Grid]:
             if color in legend:
                 kind, how = legend[color], "цвет ячейки"
             else:
-                kind, how = kind_by_codes(codes), "коды работ"
+                kind, how = kind_by_codes(codes, text), "коды работ"
                 if kind == KIND_OTHER:
                     notes.append(("предупреждение", "Скв. %d, %d год: тип ремонта не определён (цвет %s не в легенде, кодов типа нет)" % (w, year, color)))
                 else:
                     notes.append(("заметка", "Скв. %d, %d год: цвет %s не в легенде, тип по кодам работ — «%s»" % (w, year, color, kind)))
-            by_codes = kind_by_codes(codes)
+            by_codes = kind_by_codes(codes, text)
             if how == "цвет ячейки" and by_codes not in (KIND_OTHER, kind) and kind in (KIND_CT, KIND_CTS):
                 notes.append(("предупреждение", "Скв. %d, %d год: цвет «%s», но в кодах есть работа типа «%s»" % (w, year, kind, by_codes)))
             works_rows.append({"Скважина": w, "ГСП": gsp, "Год": year, "Тип ремонта": kind, "Тип определён по": how,
+                               "Виды работ": kinds_cell(all_kinds(codes, text, kind)),
                                "Коды работ": "; ".join(codes), "Описание работ": text, "Работ": len(items)})
         for season, c in cols.rev.items():
             v = g.value(r, c)
@@ -310,7 +373,7 @@ def parse(path: str, sheet: Optional[str] = None) -> Tuple[KrsData, Grid]:
     if not wells.empty:
         wells["В плане КР"] = wells["Скважина"].map(plan_by_well)
     return KrsData(
-        works=pd.DataFrame(works_rows, columns=["Скважина", "ГСП", "Год", "Тип ремонта", "Тип определён по", "Коды работ", "Описание работ", "Работ"]),
+        works=pd.DataFrame(works_rows, columns=["Скважина", "ГСП", "Год", "Тип ремонта", "Тип определён по", "Виды работ", "Коды работ", "Описание работ", "Работ"]),
         revisions=pd.DataFrame(rev_rows, columns=["Скважина", "ГСП", "Сезон", "Источник", "Песок", "Примечание"]),
         gdi=pd.DataFrame(gdi_rows, columns=["Скважина", "ГСП", "Сезон", "Результат"]),
         wells=wells,
@@ -433,7 +496,8 @@ def compute_priorities(data: KrsData, start_year: int = 2022, end_year: Optional
     sand_by_well = rev.groupby("Скважина")["Сезон"].apply(lambda s: sorted({season_end_year(x) for x in s})).to_dict()
     reps: Dict[int, Dict[int, List[str]]] = {}
     for _, r in data.works.iterrows():
-        reps.setdefault(int(r["Скважина"]), {}).setdefault(int(r["Год"]), []).append(r["Тип ремонта"])
+        kinds = [k.strip() for k in str(r.get("Виды работ", "") or "").split(";") if k.strip()] or [r["Тип ремонта"]]
+        reps.setdefault(int(r["Скважина"]), {}).setdefault(int(r["Год"]), []).extend(kinds)      # все виды работ ремонта: фильтр в одном ремонте с ЦК сбрасывает счёт
     tbl = {(int(r["Скважина"]), int(r["Год"])): r["Потребность (таблица)"] for _, r in data.table_need.iterrows()}
     rows = []
     for w in data.wells["Скважина"]:
@@ -598,6 +662,9 @@ def kind_fills(data: KrsData) -> Dict[str, RGB]:
     for src in (data.legend, DEFAULT_LEGEND):
         for color, kind in src.items():
             out.setdefault(kind, color)
+    for kind in KINDS:
+        if kind not in MAIN_KINDS:
+            out.setdefault(kind, OTHER_FILL)
     return out
 
 
