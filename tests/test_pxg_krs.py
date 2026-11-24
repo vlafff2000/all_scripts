@@ -393,3 +393,15 @@ def test_all_kinds_of_one_repair_are_recorded():
                        table_need=pd.DataFrame(columns=["Скважина", "Год", "Потребность (таблица)"]), notes=[], legend={}, columns=None)
     why = krs.compute_priorities(data, 2024, 2024)["Причина"].iloc[0]
     assert "Замена фильтра" in why and "сбросила счёт" in why         # фильтр внутри ремонта с ЦК сбрасывает счёт, хотя главный вид — ЦК
+
+
+def test_only_filter_resets_and_other_kinds_share_one_fill():
+    """Egor 2026-11-24: счёт сбрасывает только замена ППФ; армирование и прочее — нет; все прочие виды красятся одним цветом."""
+    assert krs.RESETTING == (krs.KIND_FILTER,)
+    why = krs.priority_history([2024], {2024: [krs.KIND_ARM]}, [2024])[0][2]
+    assert "счёт не сбросила" in why
+    data = krs.KrsData(works=pd.DataFrame(), revisions=pd.DataFrame(), gdi=pd.DataFrame(), wells=pd.DataFrame(), table_need=pd.DataFrame(),
+                       notes=[], legend={}, columns=None)
+    fills = krs.kind_fills(data)
+    others = {fills[k] for k in (krs.KIND_ISOL, krs.KIND_COLUMN, krs.KIND_PLUG, krs.KIND_KILL, krs.KIND_OTHER)}
+    assert len(others) == 1 and fills[krs.KIND_FILTER] not in others and fills[krs.KIND_ARM] not in others
