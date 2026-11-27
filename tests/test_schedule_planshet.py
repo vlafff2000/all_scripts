@@ -234,3 +234,34 @@ def test_data_dir_from_manual_setting_or_atlas_base_model(tmp_path, monkeypatch)
     planshet.set_settings(p, planshet.settings(p)["folder"], "", None, "/res/X.EGRID", str(other))
     planshet.view(p, ["101"], "2025-04-10")
     assert seen[-1] == ("/res/X.EGRID", str(other))                           # ручная папка главнее
+
+
+def test_facts_api_serializes_nullable_gis_fields(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from schedule_pxg import api
+
+    folder = _folder(tmp_path)
+    tables = planshet.load_tables(folder)
+    for table, fields in {
+        "gis_observations": {"season": "string", "status": "string", "packs": "Int64"},
+        "gis_packs": {"gvk_label": "string", "gvk_abs_m": "Float64"},
+        "gis_intervals": {"status": "string", "pack": "string", "kg": "Float64"},
+    }.items():
+        for field, dtype in fields.items():
+            tables[table][field] = tables[table][field].astype(dtype)
+            tables[table].loc[0, field] = pd.NA
+    monkeypatch.setattr(planshet, "load_tables", lambda folder: tables)
+    p = Project("x")
+    planshet.set_settings(p, folder, "")
+    monkeypatch.setattr(api, "_project", lambda: p)
+
+    with TestClient(api.build_app()) as client:
+        catalog = client.get("/api/planshet/catalog").json()["observations"]
+        assert catalog[-1]["season"] == "без сезона 2025" and catalog[-1]["packs"] == 0
+        response = client.post("/api/planshet/facts", json={"picks": [["101", "2025-04-10"]]})
+    assert response.status_code == 200
+    row = response.json()["rows"][0]
+    assert row["intervals"][0] == {"top": -900.0, "bottom": -910.0, "kg": None, "kp": 0.2,
+                                    "status": "", "pack": ""}
+    assert row["packs"][0]["label"] == "" and row["packs"][0]["gvk"] is None
+    assert row["intervals"][1]["kg"] == 0.1

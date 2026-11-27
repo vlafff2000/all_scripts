@@ -131,6 +131,7 @@ export default function Results() {
             <button disabled={busy} onClick={() => dropFolder(f)} aria-label={'Убрать папку ' + f}>×</button></span>)}
           <button disabled={busy} onClick={addFolder}>Добавить папку…</button>
         </div>
+        {view.unavailable?.map(path => <p key={path} className="warn small">Файлы выбранной модели не найдены по пути {path}</p>)}
         {models.length === 0
           ? <p className="muted">{view.folders.length ? 'В выбранных папках моделей не найдено.' : 'Папки не добавлены.'}</p>
           : <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th></th><th>Модель</th><th>Папка</th><th>Период расчёта</th><th>Файлы</th></tr></thead>

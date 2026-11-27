@@ -192,7 +192,7 @@ export interface ResultsInfo {
   vectors: { keyword: string; label: string; unit: string; objects: number }[]
 }
 export interface ModelEntry { id: string; name: string; folder: string; files: string[]; summary: boolean; indicators: boolean; missing: string[]; selected: boolean }
-export interface ModelsView { folders: string[]; models: ModelEntry[] }
+export interface ModelsView { folders: string[]; models: ModelEntry[]; unavailable?: string[] }
 export interface IndicatorRow { date: string; gas_pore_volume: number; cells: number; columns: number; gwc_min: number | null; gwc_mean: number | null; gwc_mean_area: number | null; gwc_max: number | null }
 export const getModels = () => call<ModelsView>('/api/models')
 export const setModelFolders = (folders: string[]) => call<ModelsView>('/api/models/folders', post({ folders }))

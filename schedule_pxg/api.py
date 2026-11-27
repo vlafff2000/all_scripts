@@ -1046,16 +1046,28 @@ def _model_path(request: Request, p: Project) -> str:
 
 
 def _models_view(p: Project) -> dict:
-    sel = list(p.models.get("selected", []))
+    sel = p.models.get("selected", list(p.results.values()))
     folders = tnav_catalog.load_folders()
     found = tnav_catalog.scan(folders)
-    ids = {m["id"] for m in found}
-    # выбранные модели вне папок (старые привязки, файлы из другой папки) тоже показываем
-    extra = [tnav_catalog.model_entry(x, results.find_files(x)) for x in sel if x not in ids and results.find_files(x)]
-    models = found + extra
-    for m in models:
-        m["selected"] = m["id"] in sel
-    return {"folders": folders, "models": models}
+    anchors = {os.path.normcase(os.path.abspath(m["id"])) for m in found}
+    selected, unavailable = set(), []
+    for path in sel:
+        try:
+            files = results.find_files(path)
+        except OSError:
+            files = {}
+        if not files:
+            unavailable.append(path)
+            continue
+        anchor = files.get("SMSPEC") or files.get("EGRID") or next(iter(files.values()))
+        key = os.path.normcase(os.path.abspath(anchor))
+        selected.add(key)
+        if key not in anchors:
+            found.append(tnav_catalog.model_entry(anchor, files))
+            anchors.add(key)
+    for m in found:
+        m["selected"] = os.path.normcase(os.path.abspath(m["id"])) in selected
+    return {"folders": folders, "models": found, "unavailable": unavailable}
 
 
 async def models_get(request: Request):

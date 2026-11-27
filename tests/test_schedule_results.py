@@ -141,3 +141,45 @@ def test_models_catalog_and_select(tmp_path, monkeypatch):
     assert c.get("/api/results/series", params={"model": gas["id"], "keyword": "WBHP", "objects": "W1"}).json()["series"]["W1"]["values"] == [100.0, 101.0]
     assert c.get("/api/results/series", params={"model": ""}).status_code == 404
     assert catalog.scan([str(tmp_path / "нет")]) == []
+
+
+def test_well_profile_finds_tnavigator_results_from_deck(tmp_path):
+    from tests.test_tnav_indicators import SG, _egrid, _unrst
+
+    deck = tmp_path / "Base.DATA"
+    deck.touch()
+    run = tmp_path / "results" / "BASE"
+    run.mkdir(parents=True)
+    _egrid(run / "result.EGRID")
+    _unrst(run / "Result.UNRST", [SG, SG], [[100.0] * 12, [200.0] * 12], with_wells=True)
+    other = run.parent / "Other"
+    other.mkdir()
+    (other / "result.INIT").touch()
+
+    assert results.find_files(str(deck)) == {
+        "EGRID": str(run / "result.EGRID"), "UNRST": str(run / "Result.UNRST"),
+    }
+    assert results.find_files(str(run / "result.EGRID")) == results.find_files(str(deck))
+    rows, info = results.well_profile(str(deck), dt.datetime(2026, 1, 25), ["OBS1"])
+    assert info == {"step_date": "2026-02-01", "missing": []}
+    assert rows[0]["well"] == "OBS1" and any(c["sg"] > 0 for c in rows[0]["cells"])
+
+
+def test_models_view_preserves_legacy_selection_and_reports_missing_model(tmp_path, monkeypatch):
+    from schedule_pxg import api
+
+    _model(tmp_path)
+    egrid = tmp_path / "Model.EGRID"
+    egrid.touch()
+    missing = str(tmp_path / "Old.EGRID")
+    monkeypatch.setattr(api.tnav_catalog, "load_folders", lambda: [str(tmp_path)])
+    monkeypatch.setattr(api.tnav_catalog, "load_names", dict)
+    p = Project()
+    p.results = {"Базовый": str(egrid), "Старый": missing}
+    v = api._models_view(p)
+    assert [(m["id"], m["selected"]) for m in v["models"]] == [(str(tmp_path / "Model.SMSPEC"), True)]
+    assert v["unavailable"] == [missing]
+
+    p.models = {"selected": []}
+    v = api._models_view(p)
+    assert not v["models"][0]["selected"] and v["unavailable"] == []

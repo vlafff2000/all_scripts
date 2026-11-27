@@ -23,7 +23,7 @@ VECTORS = {"WBHP": "забойное давление скважины", "WBP": 
 
 
 def find_files(path: str) -> Dict[str, str]:
-    """Файлы модели по папке или по любому файлу модели (расширения без учёта регистра). Пусто — ничего не нашли."""
+    """Файлы расчёта рядом с выбранным файлом или в RESULTS/<имя .data>."""
     path = str(path or "").strip().strip('"')
     if not path:
         return {}
@@ -34,16 +34,43 @@ def find_files(path: str) -> Dict[str, str]:
         folder, base = folder or ".", os.path.splitext(name)[0]
     if not os.path.isdir(folder):
         return {}
-    found: Dict[str, Dict[str, str]] = {}
-    for n in sorted(os.listdir(folder)):
-        stem, ext = os.path.splitext(n)
-        if ext[1:].upper() in EXTS and (base is None or stem.lower() == base.lower()):
-            found.setdefault(stem, {})[ext[1:].upper()] = os.path.join(folder, n)
+    found = _result_groups(folder)
+    if base is not None:
+        found = {k: v for k, v in found.items() if k == base.casefold()}
+    if not found and base is not None and os.path.splitext(path)[1].lower() == ".data":
+        results_dir = _child_directory(folder, "RESULTS")
+        if results_dir:
+            run = _child_directory(results_dir, base)
+            found = _result_groups(run) if run else {}
+            if base.casefold() in found:
+                return found[base.casefold()]
+            if len(found) == 1:
+                return next(iter(found.values()))
+            if not found:
+                return _result_groups(results_dir).get(base.casefold(), {})
+            return {}
     if not found:
         return {}
     # при выборе папки берём модель, у которой есть сводка; из нескольких — первую по имени
     pick = sorted(found, key=lambda s: ("SMSPEC" not in found[s] or "UNSMRY" not in found[s], s))[0]
     return found[pick]
+
+
+def _result_groups(folder: str) -> Dict[str, Dict[str, str]]:
+    groups: Dict[str, Dict[str, str]] = {}
+    for name in sorted(os.listdir(folder)):
+        stem, ext = os.path.splitext(name)
+        kind = ext[1:].upper()
+        path = os.path.join(folder, name)
+        if kind in EXTS and os.path.isfile(path):
+            groups.setdefault(stem.casefold(), {})[kind] = path
+    return groups
+
+
+def _child_directory(folder: str, name: str) -> str:
+    matches = [item for item in os.listdir(folder)
+               if item.casefold() == name.casefold() and os.path.isdir(os.path.join(folder, item))]
+    return os.path.join(folder, matches[0]) if len(matches) == 1 else ""
 
 
 def load_summary(path: str) -> Summary:
