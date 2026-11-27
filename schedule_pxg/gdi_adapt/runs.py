@@ -127,10 +127,11 @@ def recompute(kit: str, snapshots: str, settings: Optional[dict] = None, well_gr
     saved = {}
     try:        # режим «все даты» задан при подготовке комплекта (в all_gdi.xlsx несколько дат), настройки экрана его могут не нести
         with open(os.path.join(kit, "config.json"), encoding="utf-8") as f:
-            saved = {k: v for k, v in json.load(f).items() if k in ("all_dates",)}
+            saved = {k: v for k, v in json.load(f).items() if k in ("all_dates", "phase_model_file", "phase_results_path")}
     except (OSError, ValueError):
         pass
-    cfg = kit_config({**saved, **(settings or {}), "make_png": False, "save_snapshots": False})
+    settings = {k: v for k, v in (settings or {}).items() if k not in ("phase_model_file", "phase_results_path") or v}
+    cfg = kit_config({**saved, **settings, "make_png": False, "save_snapshots": False})
     out = run(cfg, kit, SnapshotProvider(snaps), progress=progress,
               workers=default_workers() if workers is None else max(1, int(workers)))
     return _finish(out, well_group or {})
@@ -138,7 +139,7 @@ def recompute(kit: str, snapshots: str, settings: Optional[dict] = None, well_gr
 
 def _finish(out: RunResult, well_group: Dict[str, str]) -> dict:
     rows = [result_dict(r) for r in out.results]
-    view = dict(run_dir=out.run_dir, made=datetime.now().strftime("%Y-%m-%d %H:%M"), rows=rows,
+    view = dict(run_dir=out.run_dir, model_connections=os.path.isfile(os.path.join(out.run_dir, 'model_connections.csv')), made=datetime.now().strftime("%Y-%m-%d %H:%M"), rows=rows,
                 failures=[dict(well=w, reason=m) for w, m in out.failures], summary=summary(rows, out.failures),
                 groups=group_check(rows, well_group))
     with open(os.path.join(out.run_dir, "results.json"), "w", encoding="utf-8") as f:

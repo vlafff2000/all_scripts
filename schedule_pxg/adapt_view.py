@@ -182,6 +182,15 @@ def write_kit(p: Project, body: dict, sel: selection.Selection, cfg: Config) -> 
     if not out:
         raise ValueError("Укажите папку для комплекта.")
     conf = {k: v for k, v in (body.get("config") or {}).items() if k in _CONFIG_KEYS}
+    from .gdi_adapt.model_phases import deck_path
+
+    results_path = (p.results or {}).get(str(body.get("scenario") or ""), "")
+    explicit = conf.get("phase_model_file") or conf.get("data_file")
+    anchor = explicit or results_path
+    if anchor:
+        conf["phase_model_file"] = deck_path(str(anchor).strip().strip('"'))
+    if results_path and not explicit:
+        conf["phase_results_path"] = results_path
     chosen = selection.chosen_for_kit(sel, bool(conf.get("all_dates")))
     res = kit.write_kit(out, chosen, conf, str(body.get("pvt") or ""))
     p.adapt["kit"] = out
@@ -229,7 +238,7 @@ def check_columns(path: str, sheet: str, cols: dict) -> dict:
     return {"ok": ok, "roles": roles, "problems": problems, "rows": int(len(df))}
 
 
-FILES = {"inc": "wpimult_wdfac.inc", "xlsx": "report.xlsx", "csv": "results.csv"}
+FILES = {"inc": "wpimult_wdfac.inc", "xlsx": "report.xlsx", "csv": "results.csv", "connections": "model_connections.csv"}
 
 
 def recompute(p: Project, body: dict) -> dict:

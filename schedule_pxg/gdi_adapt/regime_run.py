@@ -181,7 +181,7 @@ def set_summary(data_text: str, summary_text: str) -> str:
 
 
 def summary_block(wells: Sequence[str], well_vectors: Sequence[str] = ('WBHP', 'WBP', 'WBP9', 'WGPR'),
-                  conn_vectors: Sequence[str] = ('CTFAC', 'CEKH', 'CDFAC', 'CDRD', 'CGPR', 'CPR')) -> str:
+                  conn_vectors: Sequence[str] = ('CTFAC', 'CEKH', 'CDFAC', 'CDRD', 'CGPR', 'CWPR', 'COPR', 'CPR')) -> str:
     """SUMMARY: скважинные векторы списком имён, соединения - по записи на скважину («'W' /»: все соединения скважины).
     Список имён в одной записи tNavigator читает как «скважина i j k» и выдаёт соединения только первой скважины
     (так в диагностике этапа 0 пропали соединения скв. 2-3)."""
@@ -210,21 +210,30 @@ def snapshot_from_rsm(series: dict, well: str, t: float, t_name: str = '') -> We
     def get(v, c):
         return val((v, well, c))
     wbhp = val(('WBHP', well))
-    rows = []
+    rows, used, phase_rates = [], [], []
     for c in conns:
         cgpr, cdrd, cekh, ctfac, cdfac = get('CGPR', c), get('CDRD', c), get('CEKH', c), get('CTFAC', c), get('CDFAC', c)
         cbp = get('CPR', c) if ('CPR', well, c) in series else cdrd + wbhp
+        if ctfac > 0:
+            phase_rates.append((cbp, cgpr, *(get(v, c) if (v, well, c) in series else np.nan for v in ('CWPR', 'COPR'))))
         if cgpr > 0 and cekh > 0 and ctfac > 0:
+            used.append(c)
             rows.append((cbp, cdrd, cgpr, cdfac, cekh, ctfac))
     if not rows:
         raise ValueError(f'скважина {well}: на шаге {t:g} нет работающих соединений')
     a = np.array(rows, float)
     denum = 2.0 * BETA * np.pi * a[:, 4] / a[:, 5]
     name = t_name or f'{t:g}'
-    return WellSnapshot(wname=well, t_name=name, t_requested=name, substituted=False,
+    snap = WellSnapshot(wname=well, t_name=name, t_requested=name, substituted=False,
                         cbp=a[:, 0], cdrd=a[:, 1], cgpr=a[:, 2], cdfac=a[:, 3], cekh=a[:, 4],
                         cdiam=np.ones(len(a)), cefr=np.exp(denum) / 2.0, ctfac=a[:, 5],
                         wbp=val(('WBP', well)), wgpr=val(('WGPR', well)), wbhp=wbhp)
+
+    snap.connections = used
+    snap.phase_rates = np.asarray(phase_rates)
+    for vector in ('CWPR', 'COPR'):
+        setattr(snap, vector.lower(), np.array([get(vector, c) if (vector, well, c) in series else np.nan for c in used]))
+    return snap
 
 
 def snapshot_with_fallback(series: dict, well: str, t0: float, later: Sequence[float]) -> WellSnapshot:

@@ -304,6 +304,7 @@ export interface AdaptResultRow {
 }
 export interface AdaptGroupRow { group: string; wells: number; q_gdi: number; q_before: number; q_after: number; err_before: number | null; err_after: number | null }
 export interface AdaptView {
+  model_connections?: boolean
   run_dir: string; made: string; rows: AdaptResultRow[]; failures: { well: string; reason: string }[]
   summary: { wells: number; ok: number; with_problems: number; skipped: number; at_bound: number; unstable: number; r2_old: number | null; r2: number | null
     mape_old: number | null; mape: number | null; pi_mult: number | null; d: number | null; improved: number }
@@ -316,7 +317,7 @@ export const adaptRun = (dir: string) => call<AdaptView>('/api/adapt/run?' + new
 export interface AdaptColCheck { ok: boolean; rows: number; problems: string[]; roles: { role: string; title: string; col: string; total: number; valid: number; examples: string[] }[] }
 export const adaptCheckColumns = (b: { db: string; sheet?: string; cols: Record<string, string> }) => call<AdaptColCheck>('/api/adapt/columns/check', post(b))
 export const adaptCode = (kit: string) => call<{ code: string; path: string }>('/api/adapt/code?' + new URLSearchParams({ kit }))
-export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv') => '/api/adapt/file?' + new URLSearchParams({ dir, kind })
+export const adaptFileUrl = (dir: string, kind: 'inc' | 'xlsx' | 'csv' | 'connections') => '/api/adapt/file?' + new URLSearchParams({ dir, kind })
 /** Оформление графика: значения по умолчанию, пределы и подписи приходят с сервера (/api/adapt/export/options); null - авто. */
 export interface AdaptChartFormat {
   font: string; font_size: number | null; x_label: string | null; y_label: string | null; title_on: boolean; title: string | null

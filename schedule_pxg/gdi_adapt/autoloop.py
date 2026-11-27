@@ -26,7 +26,7 @@ from . import case_build as cb
 from . import depression as dpm
 from . import regime_run as rr
 from .adapt import adapt_well
-from .errors import AdaptError
+from .errors import AdaptError, PhaseMismatch
 from .gdi import GDI
 from .mults import MultJournal
 from .rsm import parse_rsm
@@ -217,6 +217,10 @@ class AutoLoop:
         self.snapshots: dict = dict(snapshots or {})
         self.preset = bool(snapshots)            # снимки уже есть (комплект): базовый прогон не нужен, экономим один запуск на дату
         self.tag = tag
+        self.phase_cells = None
+        if getattr(pvt, 'source', None):
+            from .model_phases import ModelCells
+            self.phase_cells = ModelCells(model_data)
 
     # ---------- служебное ----------
     def _push(self, **kw) -> None:
@@ -300,6 +304,13 @@ class AutoLoop:
         for w, g in self.gdis.items():
             snap = self.snapshots.get(w)
             if snap is None:
+                if self.phase_cells is not None:
+                    from .model_phases import check_cells
+                    try:
+                        check_cells(*self.phase_cells.read(w, g.date, self.cfg.max_step_shift_days))
+                    except PhaseMismatch as e:
+                        self.state.setdefault('skipped', {})[w] = str(e)
+                        continue
                 # ГДИ в сезон закачки/нейтральный период или скважина в модели не работает ни на старте, ни на режимах:
                 # формуле не от чего считать, но исследование всё равно проверяем прогонами с мульта 1,0
                 why = (self.state.get('snapshot_errors') or {}).get(w) or 'нет снимка скважины'
@@ -307,13 +318,18 @@ class AutoLoop:
                 out[w] = {'inc': 1.0, 'd': None, 'source': 'старт с мульта 1,0 (скважина в модели не работает на дату ГДИ)', 'problems': [why]}
                 continue
             try:
+                if self.phase_cells is not None:
+                    self.phase_cells.attach(snap, g, self.cfg)
                 r = adapt_well(g, snap, self.pvt, self.cfg)
+            except PhaseMismatch as e:
+                self.state.setdefault('skipped', {})[w] = str(e)
+                continue
             except AdaptError as e:
                 # формула мульт не нашла: скважину всё равно настраиваем на модели, начиная с мульта 1,0 (секущая по ошибке дальше)
                 self.state.setdefault('skipped', {})[w] = 'формула не нашла мульт (%s): подбор на модели с мульта 1,0' % e
                 out[w] = {'inc': 1.0, 'd': None, 'source': 'старт с мульта 1,0 (формула не нашла мульт)', 'problems': [str(e)]}
                 continue
-            out[w] = {'inc': float(r.pi_mult), 'd': float(r.d), 'source': 'ГДМ (формула)', 'problems': list(r.problems)}
+            out[w] = {'inc': float(r.pi_mult), 'd': float(r.d), 'source': 'ГДМ (формула)', 'problems': list(r.problems), 'notes': list(r.notes)}
         return out
 
     # ---------- цикл ----------
@@ -503,6 +519,10 @@ class AutoBatch:
         self.model_data, self.workdir, self.runner, self.cfg, self.pvt = model_data, workdir, runner, cfg, pvt
         self.st, self.restart, self.journal, self.snapshots = settings or LoopSettings(), restart, journal, snapshots
         self.accept_formula, self.on_update = accept_formula, on_update
+        self.phase_cells = None
+        if accept_formula and getattr(pvt, 'source', None):
+            from .model_phases import ModelCells
+            self.phase_cells = ModelCells(model_data)
         # от поздних дат к ранним: рестарт с шага D перезаписывает результаты рабочей копии ПОСЛЕ D, ранние шаги целы
         self.groups = dict(sorted(group_by_date(gdis).items(), reverse=True))
         self.cancel = threading.Event()
@@ -608,6 +628,8 @@ class AutoBatch:
                 rest.append(g)
                 continue
             try:
+                if self.phase_cells is not None:
+                    self.phase_cells.attach(snap, g, self.cfg)
                 r = adapt_well(g, snap, self.pvt, self.cfg)
             except AdaptError:
                 rest.append(g)

@@ -195,6 +195,9 @@ export default function Adapt() {
           <button className="primary" onClick={makeKit} disabled={busy || !sel.counts.included}>Подготовить комплект для тНавигатора</button>
         </div>
         <div className="row">
+          <label className="grow">Файл модели .data для PVT и кубов
+            <input value={String(cfg.phase_model_file ?? '')} onChange={e => setConfig(c => ({ ...c, phase_model_file: e.target.value }))} placeholder="По умолчанию из выбранного сценария" />
+          </label>
           <label className="grow">Папка для комплекта (создайте или выберите пустую, например D:\PHG\gdi_kit)<input value={out} onChange={e => setOut(e.target.value)} placeholder="Куда сложить файлы для тНавигатора" /></label>
           <button onClick={() => guard(async () => { const d = await pickFolder(out); if (d) setOut(d) })} disabled={busy}>Выбрать папку…</button>
         </div>
