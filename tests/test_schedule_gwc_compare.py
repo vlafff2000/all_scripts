@@ -61,10 +61,11 @@ def test_compare_rows_overrides_and_exclusion():
     facts = [_fact("1", "2024-11-30", "осень", -921.0), _fact("2", "2025-04-10", "весна", -918.0), _fact("7", "2024-11-30", "осень", -900.0),
              _fact("3", "2025-04-10", "весна", -930.0, top=-925.0)]
     out = gc.compare(facts, _daily(PAUSES), profiles, 0.01, slices={"2|2025-04-10": "2025-04-01"}, excluded=["2|2025-04-10|верхняя"],
-                     groups={"1": "ГСП-1", "2": "ГСП-1"})
+                     groups={"1": "ГСП-1", "2": "ГСП-1"}, step_dates={D(2025, 4, 1): "2025-03-31"})
     r = {x["well"]: x for x in out["rows"]}
     assert r["1"]["slice"] == "2024-11-05" and r["1"]["delta"] == pytest.approx(1.0) and r["1"]["group"] == "ГСП-1"
     assert r["2"]["slice"] == "2025-04-01" and r["2"]["slice_why"] == "вручную" and r["2"]["excluded"]
+    assert r["2"]["step_date"] == "2025-03-31"
     assert r["7"]["status"] == "нет модели" and r["7"]["delta"] is None
     assert r["3"]["status"] == gc.NO_GAS
     assert out["all"]["n"] == 1 and out["by"]["pack"]["верхняя"]["n"] == 1             # исключённая и не сравнимые не в статистике
@@ -99,7 +100,7 @@ def test_profiles_for_slices_same_on_several_processes(tmp_path, monkeypatch):
     jobs = [(str(tmp_path), "2026-0%d-01" % (n + 1), ["OBS1"], 0.3) for n in range(5)]
     one = parallel.map_jobs(planshet._profile_job, jobs, workers=1)
     many = parallel.map_jobs(planshet._profile_job, jobs, workers=3)
-    assert many == one and all(x.get("OBS1") for x in one)
+    assert many == one and all(rows.get("OBS1") and step == job[1] for (rows, step), job in zip(one, jobs))
 
 
 def test_compare_combos_rows_series_and_share_only_for_one(monkeypatch):

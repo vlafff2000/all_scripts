@@ -3,11 +3,13 @@ import { useMemo, useState } from 'react'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 import CriterionPicker from './CriterionPicker'
+import GwcWellHistory from './GwcWellHistory'
 import { CompareResult, CompareRow, CriterionCfg, ModelEntry, comparePlanshet } from './api'
 import { Tables } from '../../../pxg_core/web-ui/table/Tables'
 import { tableOf } from '../../../pxg_core/web-ui/table/tableBuild'
 
 const MAX_COMBOS = 12
+const EMPTY_ROWS: CompareRow[] = []
 const fmt = (x: number | null | undefined, d = 1) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 
 interface Stat { n: number; mean: number; median: number; std: number; mae: number; rmse: number; min: number; max: number; share: number }
@@ -46,11 +48,12 @@ export default function GwcCompare({ models, criterion, alts }: { models: ModelE
   const toggleModel = (id: string, on: boolean) => setPicked(on ? [...modelIds.filter(x => x !== id), id] : modelIds.filter(x => x !== id))
   const setVariant = (i: number, c: CriterionCfg) => setVariants(variantList.map((x, j) => (j === i ? c : x)))
 
-  const rows = res?.rows || []
-  const used = rows.filter((r: CompareRow) => r.delta !== null && !off.includes(r.key))
-  const groups = useMemo(() => Array.from(new Set(used.map(r => r[by] || ''))).sort(), [used.length, by, off.join('|')]) // eslint-disable-line
+  const rows = res?.rows ?? EMPTY_ROWS
+  const excluded = useMemo(() => new Set(off), [off])
+  const used = useMemo(() => rows.filter(r => r.delta !== null && !r.excluded && !excluded.has(r.key)), [rows, excluded])
+  const groups = Array.from(new Set(used.map(r => r[by] || ''))).sort()
   const all = stat(used.map(r => r.delta as number))
-  const seriesNames = Array.from(new Set(used.map(r => r.series || '')))
+  const seriesNames = useMemo(() => Array.from(new Set(used.map(r => r.series || ''))), [used])
   const colour = (i: number) => `var(--chart-series-${(i % 6) + 1}, hsl(${(i * 67) % 360} 60% 45%))`
 
   const scatter = useMemo(() => {
@@ -64,14 +67,14 @@ export default function GwcCompare({ models, criterion, alts }: { models: ModelE
       return p
     })
     return mkChart('gdm-gwc-11', 'ГВК: модель против факта', mkAxis('Факт ГИС', 'м, а.о.', 'value'), mkAxis('Модель', 'м, а.о.', 'value'), [one, ...pts])
-  }, [used.map(r => r.key).join('|')]) // eslint-disable-line
+  }, [used, seriesNames])
   const bars = useMemo(() => {
     if (!used.length) return null
     const names = Array.from(new Set(used.map(r => r.well)))
     const series = seriesNames.map((name, k) => mkSeries({ name: name || 'Δ среднее по замерам', kind: 'bar', slot: k % 3, x: names,
-      y: names.map(w => { const d = used.filter(r => r.well === w && (r.series || '') === name).map(r => r.delta as number); return d.length ? d.reduce((a, b) => a + b, 0) / d.length : 0 }) }))
+      y: names.map(w => { const d = used.filter(r => r.well === w && (r.series || '') === name).map(r => r.delta as number); return d.length ? d.reduce((a, b) => a + b, 0) / d.length : null }) }))
     return mkChart('gdm-gwc-delta', 'Δ ГВК по скважинам (модель − факт)', mkAxis('Скважина', '', 'category', { categories: names }), mkAxis('Δ', 'м'), series)
-  }, [used.map(r => r.key).join('|')]) // eslint-disable-line
+  }, [used, seriesNames])
 
   if (!models.length) return <section className="card"><h2>Сравнение факта ГИС с моделью</h2><p className="muted">Отметьте модель в разделе «Результаты расчёта».</p></section>
   return (
@@ -104,6 +107,7 @@ export default function GwcCompare({ models, criterion, alts }: { models: ModelE
       {msg && <p className="note warn">{msg}</p>}
       {res?.notes.map((n, i) => <p key={i} className="note warn">{n}</p>)}
       {res && <>
+        <GwcWellHistory rows={rows} series={res.series} excluded={excluded} />
         {res.series.length > 0 && <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
           {res.series.map((s, i) => <span key={s.key} className="small" title={s.formula}><span style={{ display: 'inline-block', width: 12, height: 12, background: colour(i), marginRight: 4 }} />{s.name}</span>)}
         </div>}
@@ -117,13 +121,14 @@ export default function GwcCompare({ models, criterion, alts }: { models: ModelE
             .flatMap(([name, s]) => (s ? [[name, s.n, s.mean, s.median, s.std, s.mae, s.rmse, s.min, s.max, s.share * 100]] : [])))]} />
         {scatter && <ChartView chart={scatter} excludeMode={false} onExclude={() => {}} />}
         {bars && <ChartView chart={bars} excludeMode={false} onExclude={() => {}} />}
-        <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th>В статистике</th><th>Модель · критерий</th><th>Скважина</th><th>Группа</th><th>Замер</th><th>Сезон</th><th>Срез модели</th><th>Пачка</th><th>ГВК факт, м</th><th>ГВК модель, м</th><th>Δ, м</th><th>Статус</th></tr></thead>
+        <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th>В статистике</th><th>Модель · критерий</th><th>Скважина</th><th>Группа</th><th>Замер</th><th>Сезон</th><th>Срез модели</th><th>Шаг рестарта</th><th>Пачка</th><th>ГВК факт, м</th><th>ГВК модель, м</th><th>Δ, м</th><th>Статус</th></tr></thead>
           <tbody>{rows.map(r => <tr key={r.key} style={off.includes(r.key) ? { opacity: 0.5 } : undefined}>
             <td><input type="checkbox" disabled={r.delta === null} checked={r.delta !== null && !off.includes(r.key)} onChange={() => toggle(r.key)} aria-label="Учитывать в статистике" /></td>
             <td className="small">{r.series || '—'}</td>
             <td>{r.well}</td><td>{r.group || '—'}</td><td>{r.date}</td><td>{r.season || '—'}</td>
             <td title={r.slice_why}><PeriodDate value={r.slice} end={false} disabled={busy} onChange={v => setSlice(r, v ?? '')} />
               {slices[r.well + '|' + r.date] && <button disabled={busy} title="Вернуть подбор" onClick={() => setSlice(r, '')}>↺</button>}<span className="muted small"> {r.slice_why}</span></td>
+            <td>{r.step_date || '—'}</td>
             <td>{r.pack}{r.label && r.label !== 'ГВК' ? ' (' + r.label + ')' : ''}</td><td className="num">{fmt(r.fact)}</td><td className="num">{fmt(r.model)}</td><td className="num">{fmt(r.delta)}</td><td className="small">{r.status}</td></tr>)}</tbody></table></div>
       </>}
     </section>

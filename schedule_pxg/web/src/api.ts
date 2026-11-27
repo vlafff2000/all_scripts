@@ -407,7 +407,7 @@ export const getWellProfile = (model: string, wells: string[], date: string, sgr
   call<{ rows: WellProfile[]; step_date: string; missing: string[] }>('/api/results/wellprofile?' + new URLSearchParams({ model, wells: wells.join('|'), date, sgr, criterion: criterionParam(criterion) }))
 
 export interface CompareRow {
-  key: string; well: string; group: string; date: string; season: string; slice: string; slice_why: string; pack: string; label: string
+  key: string; well: string; group: string; date: string; season: string; slice: string; slice_why: string; step_date?: string | null; pack: string; label: string
   fact: number; model: number | null; delta: number | null; status: string; excluded: boolean; series?: string
 }
 export interface CompareSeries { key: number; name: string; model: string; criterion: CriterionCfg; formula: string }

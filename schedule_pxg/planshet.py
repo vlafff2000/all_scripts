@@ -296,8 +296,8 @@ def _profile_job(job):
     from . import results
     model_path, day, wells, thr, *rest = job
     criterion = rest[0] if rest else None
-    rows, _info = results.well_profile(model_path, dt.datetime.combine(dt.date.fromisoformat(day), dt.time()), wells, thr, criterion)
-    return {r["well"]: r["cells"] for r in rows}
+    rows, info = results.well_profile(model_path, dt.datetime.combine(dt.date.fromisoformat(day), dt.time()), wells, thr, criterion)
+    return {r["well"]: r["cells"] for r in rows}, info["step_date"]
 
 
 def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float = 0.01, slices: Optional[Dict[str, str]] = None,
@@ -321,9 +321,11 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
     if not len(daily):
         notes.append("Эталонный суточный объём не задан: срез модели взят на дату замера")
 
+    step_dates: Dict[dt.date, str] = {}
+
     def profiles(day, ws):
-        rows, _info = results.well_profile(model_path, dt.datetime.combine(day, dt.time()), ws, thr, criterion)
-        return {r["well"]: r["cells"] for r in rows}
+        rows, step_dates[day] = _profile_job((model_path, day.isoformat(), ws, thr, criterion))
+        return rows
 
     def profiles_many(by_date):
         from pxg_core.parallel import map_jobs
@@ -334,10 +336,11 @@ def compare_view(p: Project, model_path: str, wells: Sequence[str], thr: float =
             mb = 500.0
         # срезы независимы: каждая дата считается в своём процессе (сетка из дискового кэша), порядок и результат те же
         got = map_jobs(_profile_job, [(model_path, d.isoformat(), list(by_date[d]), thr, criterion) for d in days], mb)
-        return dict(zip(days, got))
+        step_dates.update((day, step) for day, (_, step) in zip(days, got))
+        return dict(zip(days, (rows for rows, _ in got)))
 
     out = gwc_compare.compare(facts, daily, profiles, thr, slices, excluded, {w: p.well_group.get(w, "") for w in names},
-                              profiles_many)
+                              profiles_many, step_dates)
     out["notes"] = notes
     if share:
         try:                                # «Карты» читают последнее сравнение; нет прав на запись — не помеха расчёту
