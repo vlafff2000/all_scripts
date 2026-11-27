@@ -348,13 +348,13 @@ export default function Planshet() {
       <section className="card">
         <h2>Источники</h2>
         <p className="muted small">Факт — папка выгрузки «Работы с исходными данными» → ГИС (файлы gis_*.csv или .parquet и gis_db_meta.json). Перфорации и альтитуды — «Глубины_перфораций.xlsx».
-          Модели берутся те, что отмечены в разделе «Результаты расчёта».</p>
+          Файл .data для модельного профиля добавляется в разделе «Результаты расчёта».</p>
         <div className="row"><span className="small" style={{ width: 120 }}>База ГИС:</span><span title={gisFolder}>{gisFolder ? tail(gisFolder) : <span className="muted">не выбрана</span>}</span>
           <button disabled={busy} onClick={pickGis}>Выбрать папку…</button></div>
         <div className="row"><span className="small" style={{ width: 120 }}>Перфорации:</span><span title={perfFile}>{perfFile ? tail(perfFile) : <span className="muted">не выбран</span>}</span>
           <button disabled={busy} onClick={pickPerf}>Выбрать файл…</button>{perfFile && <button disabled={busy} onClick={() => saveGis(gisFolder, '')}>Убрать</button>}</div>
         <div className="row"><span className="small" style={{ width: 120 }}>Из модели:</span>
-          <select disabled={busy} value={perfModel} onChange={e => savePerfModel(e.target.value)} title="Интервалы COMPDAT из входного файла модели на дату замера; по умолчанию — базовая модель проекта Атласа (раздел «Импорт»); если в модели скважины нет — берётся файл">
+          <select disabled={busy} value={allModels.find(m => m.result_id === perfModel)?.id || perfModel} onChange={e => savePerfModel(e.target.value)} title="Интервалы COMPDAT из входного файла модели на дату замера; по умолчанию — базовая модель проекта Атласа (раздел «Импорт»); если в модели скважины нет — берётся файл">
             <option value="">базовая модель проекта Атласа</option><option value="-">не брать (только файл)</option>
             {allModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
           <span className="muted small">COMPDAT из .data на дату замера; по умолчанию — базовая модель из «Импорта» Атласа; главнее файла, для скважин вне модели остаётся файл</span></div>
@@ -363,6 +363,7 @@ export default function Planshet() {
         <p className="muted small">Модели: {models.length ? models.map(m => m.name).join(', ') : 'не отмечены — планшет покажет только факт'}</p>
         {unavailable.map(path => <p key={path} className="warn small">Файлы выбранной модели не найдены по пути {path}</p>)}
         {models.map(m => {
+          if (m.problem) return <p key={m.id} className="warn small">{m.name} — {m.problem}. {m.files.length === 0 && m.data_path ? <span>{m.folder}</span> : null}</p>
           const missing = m.missing.filter(file => file === 'EGRID' || file === 'UNRST')
           return missing.length > 0 && <p key={m.id} className="warn small">Для профиля модели «{m.name}» нужны файлы {missing.join(', ')}</p>
         })}

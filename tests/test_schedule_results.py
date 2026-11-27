@@ -183,3 +183,60 @@ def test_models_view_preserves_legacy_selection_and_reports_missing_model(tmp_pa
     p.models = {"selected": []}
     v = api._models_view(p)
     assert not v["models"][0]["selected"] and v["unavailable"] == []
+
+
+def test_model_data_file_api_keeps_exact_deck_for_tablet(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from schedule_pxg import api
+    from tests.test_tnav_indicators import SG, _egrid, _unrst
+
+    project = str(tmp_path / "project")
+    monkeypatch.setattr(api, "FOLDER", project)
+    monkeypatch.setattr(api.tnav_catalog, "load_folders", lambda: [str(tmp_path / "RESULTS")])
+    monkeypatch.setattr(api.tnav_catalog, "load_names", dict)
+    deck = tmp_path / "Base.DATA"
+    deck.write_text("RUNSPEC\n", encoding="ascii")
+    pending = tmp_path / "Pending.data"
+    pending.touch()
+    (tmp_path / "Base.UNRST").touch()  # копия старого расчёта рядом с входным файлом
+    run = tmp_path / "RESULTS" / "Base"
+    run.mkdir(parents=True)
+    egrid = run / "result.EGRID"
+    _egrid(egrid)
+    _unrst(run / "result.UNRST", [SG, SG], [[100.0] * 12, [200.0] * 12], with_wells=True)
+    (run / "details.INIT").touch()
+    p = Project()
+    p.models["selected"] = [str(egrid)]
+    p.save(project)
+
+    with TestClient(api.build_app()) as client:
+        endpoint = "/api/models/data-file"
+        assert client.post(endpoint, json={"path": str(egrid)}).status_code == 400
+        assert client.post(endpoint, json={"path": str(tmp_path / "Missing.data")}).status_code == 400
+        for _ in range(2):
+            response = client.post(endpoint, json={"path": f'"{deck}"'})
+            assert response.status_code == 200
+            models = response.json()["models"]
+            selected = [m for m in models if m["selected"]]
+            assert [(m["id"], m["folder"], m["files"]) for m in selected] == [
+                (str(deck), str(run), ["EGRID", "UNRST"]),
+            ]
+            assert str(egrid) not in [m["id"] for m in models]
+        assert Project.load(project).models == {"data_files": [str(deck)], "selected": [str(deck)]}
+        model = next(m for m in client.get("/api/models").json()["models"] if m["selected"])
+        profile = client.get("/api/results/wellprofile",
+                             params={"model": model["id"], "date": "2026-01-25", "wells": "OBS1"})
+        assert profile.status_code == 200
+        assert profile.json()["step_date"] == "2026-02-01" and profile.json()["rows"][0]["cells"]
+
+        models = client.post(endpoint, json={"path": str(pending)}).json()["models"]
+        entry = next(m for m in models if m["id"] == str(pending))
+        assert entry["problem"] and entry["folder"] == str(run.parent / "Pending")
+        assert not results.find_files(str(pending))
+        client.post("/api/models/select", json={"selected": [str(deck)]})
+        models = client.get("/api/models").json()["models"]
+        assert not next(m for m in models if m["id"] == str(pending))["selected"]
+
+        models = client.post(endpoint, json={"path": str(deck), "remove": True}).json()["models"]
+        assert not any(m["id"] == str(deck) or m["selected"] for m in models)
+        assert Project.load(project).models == {"data_files": [str(pending)], "selected": []}

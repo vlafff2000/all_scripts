@@ -55,7 +55,7 @@ export const runTrial = (path: string, template: Template) => call<Trial>('/api/
 export const saveTemplate = (template: Template) => call<AppState>('/api/template', post({ template }))
 export const deleteTemplate = (name: string) => call<AppState>('/api/template/delete', post({ name }))
 // Свой проводник вместо окна Tk; результат того же вида, пустой путь — отмена.
-export const pickFile = async (start: string) => ({ path: (await openFilePicker({ start })) || '' })
+export const pickFile = async (start: string, filter?: string) => ({ path: (await openFilePicker({ start, filter })) || '' })
 export const readTechMap = (path: string, name: string, kind: string) => call<TechMapView>('/api/techmap/read', post({ path, name, kind }))
 export const getTechMap = (name: string) => call<TechMapView>('/api/techmap?name=' + encodeURIComponent(name))
 export const saveTechMap = (techmap: TechMapData, overwrite: boolean) => call<AppState>('/api/techmap/save', post({ techmap, overwrite }))
@@ -191,11 +191,12 @@ export interface ResultsInfo {
   model: string; path: string; files: Record<string, string>; missing: string[]; start: string | null; end: string | null; steps: number
   vectors: { keyword: string; label: string; unit: string; objects: number }[]
 }
-export interface ModelEntry { id: string; name: string; folder: string; files: string[]; summary: boolean; indicators: boolean; missing: string[]; selected: boolean }
+export interface ModelEntry { id: string; name: string; folder: string; files: string[]; summary: boolean; indicators: boolean; missing: string[]; selected: boolean; data_path?: string; result_id?: string; problem?: string }
 export interface ModelsView { folders: string[]; models: ModelEntry[]; unavailable?: string[] }
 export interface IndicatorRow { date: string; gas_pore_volume: number; cells: number; columns: number; gwc_min: number | null; gwc_mean: number | null; gwc_mean_area: number | null; gwc_max: number | null }
 export const getModels = () => call<ModelsView>('/api/models')
 export const setModelFolders = (folders: string[]) => call<ModelsView>('/api/models/folders', post({ folders }))
+export const setModelDataFile = (path: string, remove = false) => call<ModelsView>('/api/models/data-file', post({ path, remove }))
 export const setModelSelection = (selected: string[]) => call<ModelsView>('/api/models/select', post({ selected }))
 export const getResults = (model: string) => call<ResultsInfo>('/api/results?' + new URLSearchParams({ model }))
 /** Сравнение моделей по давлению замерного фонда (см. schedule_pxg/model_compare.py). */

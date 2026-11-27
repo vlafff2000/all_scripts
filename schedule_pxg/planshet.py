@@ -90,14 +90,18 @@ def _model_perf_source(model_path: str, data_dir: str = ""):
     """Перфорации из .data модели и её сетка; кэш по размеру и дате файлов (чтение .data на большой модели не мгновенное)."""
     from tnav_results import perforations as tp
     from tnav_results.grid_cache import read_egrid_cached
-    files = tp.find_data_files(data_dir or model_path)
+    from . import results
+    source = data_dir or model_path
+    if results.is_data_path(source):
+        files = [source] if os.path.isfile(source) else []
+    else:
+        files = tp.find_data_files(source)
     stamp = tuple((f, os.path.getmtime(f), os.path.getsize(f)) for f in files[:1])
     hit = _MODEL_CACHE.get((model_path, data_dir, stamp))
-    if hit:
+    if hit and (hit[1] is not None or not results.is_data_path(model_path)):
         return hit
-    from . import results
     egrid = results.find_files(model_path).get("EGRID")
-    res = tp.read_perforations(data_dir or model_path)
+    res = hit[0] if hit else tp.read_perforations(source)
     grid = read_egrid_cached(egrid) if egrid else None
     _MODEL_CACHE.clear()
     _MODEL_CACHE[(model_path, data_dir, stamp)] = (res, grid)

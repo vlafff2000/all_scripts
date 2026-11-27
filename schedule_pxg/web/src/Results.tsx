@@ -5,7 +5,7 @@ import PageHead from './PageHead'
 import HistModel from './HistModel'
 import ModelCompare from './ModelCompare'
 import ModelDynamics from './ModelDynamics'
-import { IndicatorRow, ModelsView, ResultsInfo, getIndicators, getModels, getResultSeries, getWellGwc, WellGwcRow, getResults, getResultsReport, pickFile, pickFolder, setModelFolders, setModelSelection } from './api'
+import { IndicatorRow, ModelsView, ResultsInfo, getIndicators, getModels, getResultSeries, getWellGwc, WellGwcRow, getResults, getResultsReport, pickFile, pickFolder, setModelDataFile, setModelFolders, setModelSelection } from './api'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
 import { Tables } from '../../../pxg_core/web-ui/table/Tables'
@@ -28,6 +28,7 @@ const tail = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).joi
 
 export default function Results() {
   const [view, setView] = useState<ModelsView>({ folders: [], models: [] })
+  const [dataPath, setDataPath] = useState('')
   const [infos, setInfos] = useState<Record<string, ResultsInfo>>({})
   const [sg, setSg] = useState('0.01')
   const [date, setDate] = useState('')
@@ -63,6 +64,15 @@ export default function Results() {
   }, [chosenKey]) // eslint-disable-line
 
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
+  const addDataFile = async (path: string) => {
+    setDataPath(path)
+    setView(await setModelDataFile(path))
+    setDataPath('')
+  }
+  const pickDataFile = () => guard(async () => {
+    const r = await pickFile(dataPath || models.find(m => m.data_path)?.data_path || '', 'data')
+    if (r.path) await addDataFile(r.path)
+  })
   const addFolder = () => guard(async () => {
     const f = await pickFolder(view.folders[view.folders.length - 1] || '')
     if (f) setView(await setModelFolders([...view.folders.filter(x => x !== f), f]))
@@ -124,21 +134,30 @@ export default function Results() {
       <PageHead title="Результаты расчёта" lede="Привяжите результаты модели к сценариям и сравните их по показателям." />
       <section className="card">
         <h2>Модели с результатами</h2>
-        <p className="muted small">Добавьте одну или несколько папок: программа найдёт модели во всех их подпапках (файлы EGRID, INIT, SMSPEC, UNSMRY, UNRST с одним именем).
-          Отметьте модели, которые показывать в таблицах и графиках. Для показателей нужны EGRID, INIT и UNRST с SGAS, для давлений — SMSPEC и UNSMRY.</p>
-        <div className="row" style={{ flexWrap: 'wrap' }}>
-          {view.folders.map(f => <span key={f} className="small" title={f} style={{ marginRight: 12 }}>{tail(f)}{' '}
-            <button disabled={busy} onClick={() => dropFolder(f)} aria-label={'Убрать папку ' + f}>×</button></span>)}
-          <button disabled={busy} onClick={addFolder}>Добавить папку…</button>
-        </div>
+        <p className="muted small">Укажите файл .data. Программа найдёт его расчёт в RESULTS рядом с входным файлом и отметит модель для таблиц, графиков и планшета.</p>
+        <form className="row" style={{ flexWrap: 'wrap' }} onSubmit={e => { e.preventDefault(); void guard(() => addDataFile(dataPath)) }}>
+          <input aria-label="Путь к файлу модели .data" placeholder="Полный путь к файлу .data" value={dataPath} onChange={e => setDataPath(e.target.value)} style={{ width: 380, maxWidth: '100%' }} />
+          <button type="submit" disabled={busy || !dataPath.trim()}>Добавить по пути</button>
+          <button type="button" disabled={busy} onClick={pickDataFile}>Выбрать .data…</button>
+        </form>
+        <details>
+          <summary>Поиск моделей по папкам</summary>
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            {view.folders.map(f => <span key={f} className="small" title={f} style={{ marginRight: 12 }}>{tail(f)}{' '}
+              <button disabled={busy} onClick={() => dropFolder(f)} aria-label={'Убрать папку ' + f}>×</button></span>)}
+            <button disabled={busy} onClick={addFolder}>Добавить папку…</button>
+          </div>
+        </details>
         {view.unavailable?.map(path => <p key={path} className="warn small">Файлы выбранной модели не найдены по пути {path}</p>)}
         {models.length === 0
-          ? <p className="muted">{view.folders.length ? 'В выбранных папках моделей не найдено.' : 'Папки не добавлены.'}</p>
+          ? <p className="muted">{view.folders.length ? 'В выбранных папках моделей не найдено.' : 'Добавьте файл модели .data.'}</p>
           : <div style={{ overflowX: 'auto' }}><table className="data-grid dense pick"><thead><tr><th></th><th>Модель</th><th>Папка</th><th>Период расчёта</th><th>Файлы</th></tr></thead>
             <tbody>{models.map(m => { const r = infos[m.id]; return <tr key={m.id}>
               <td><input type="checkbox" checked={m.selected} disabled={busy} onChange={() => toggle(m.id)} aria-label={'Показывать ' + m.name} /></td>
-              <td>{m.name}</td>
-              <td className="small" title={m.folder}>{tail(m.folder)}</td>
+              <td>{m.name}{m.data_path && <div className="small" title={m.data_path}>{tail(m.data_path)}{' '}
+                <button disabled={busy} onClick={() => guard(async () => setView(await setModelDataFile(m.id, true)))} aria-label={'Убрать модель ' + m.name}>×</button>
+              </div>}</td>
+              <td className="small" title={m.folder}>{tail(m.folder)}{m.problem && <div className="warn">{m.problem}</div>}</td>
               <td>{r && r.start ? r.start + ' — ' + r.end + ' (' + r.steps + ' шагов)' : m.selected ? '—' : <span className="muted">отметьте модель</span>}</td>
               <td className="small">{m.files.join(', ')}{m.missing.length ? ' · нет: ' + m.missing.join(', ') : ''}{!m.summary ? ' · без сводки' : ''}</td></tr> })}</tbody></table></div>}
         {msg && <p className="note warn">{msg}</p>}
