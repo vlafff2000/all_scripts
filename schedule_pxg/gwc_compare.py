@@ -88,7 +88,8 @@ def row_key(well: str, date: str, pack: str) -> str:
 def compare(facts: Sequence[dict], daily: Optional[pd.DataFrame], profiles: Callable[[dt.date, List[str]], Dict[str, List[dict]]],
             thr: float = 0.01, slices: Optional[Dict[str, str]] = None, excluded: Sequence[str] = (),
             groups: Optional[Dict[str, str]] = None,
-            profiles_many: Optional[Callable[[Dict[dt.date, List[str]]], Dict[dt.date, Dict[str, List[dict]]]]] = None) -> dict:
+            profiles_many: Optional[Callable[[Dict[dt.date, List[str]]], Dict[dt.date, Dict[str, List[dict]]]]] = None,
+            step_dates: Optional[Dict[dt.date, str]] = None) -> dict:
     """Строки сравнения и статистика. `facts` — результат planshet.fact по замеру (одна строка на скважину и дату);
     `profiles(дата, скважины)` отдаёт ячейки колонны по скважинам; `slices` — ручные даты среза по ключу «скв|дата замера»."""
     ps = pauses(daily) if daily is not None else []
@@ -116,7 +117,8 @@ def compare(facts: Sequence[dict], daily: Optional[pd.DataFrame], profiles: Call
             if p["gvk"] is None:
                 continue
             r = {"key": row_key(f["well"], f["date"], p["pack"]), "well": f["well"], "group": (groups or {}).get(f["well"], ""),
-                 "date": f["date"], "season": f.get("season") or "", "slice": str(d), "slice_why": why, "pack": p["pack"],
+                 "date": f["date"], "season": f.get("season") or "", "slice": str(d), "slice_why": why,
+                 "step_date": (step_dates or {}).get(d), "pack": p["pack"],
                  "label": p.get("label") or "", "fact": p["gvk"], "model": None, "delta": None, "status": "нет модели"}
             if cells is not None and p.get("top") is not None and p.get("bottom") is not None:
                 z, st = gwc_in_pack(cells, thr, p["top"], p["bottom"])
