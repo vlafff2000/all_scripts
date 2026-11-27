@@ -1,3 +1,4 @@
+import { indicatorMarkers } from './adaptIndicator'
 import { useMemo } from 'react'
 import { ChartView } from '../../../pxg_core/web-ui/chart/ChartView'
 import { mkAxis, mkChart, mkSeries } from '../../../pxg_core/web-ui/chart/chartBuild'
@@ -75,7 +76,8 @@ export default function AdaptDashboard({ st, well, setWell, write, busy }: { st:
     const ref = its[0]?.wells[well]
     if (!ref) return null
     const qmax = Math.max(...ref.q) / 1000 * 1.15
-    const xs = Array.from({ length: 31 }, (_, i) => (qmax * i) / 30)
+    const rates = ref.q.filter(q => Number.isFinite(q) && q > 0).map(q => q / 1000)
+    const xs = [...new Set([...Array.from({ length: 31 }, (_, i) => (qmax * i) / 30), ...rates])].sort((a, b) => a - b)
     const line = (a: number | null, b: number | null) => (a === null || b === null ? null : xs.map(x => a * x + b * x * x))
     const ser = []
     const g = line(ref.a_gdi, ref.b_gdi)
@@ -85,7 +87,7 @@ export default function AdaptDashboard({ st, well, setWell, write, busy }: { st:
       const y = w && line(w.a_model, w.b_model)
       if (y) ser.push(mkSeries({ name: it.k === 0 ? 'модель без мультов' : 'итерация ' + it.k, slot: it.k === 0 ? 5 : i - 1, dashed: it.k === 0, x: xs, y }))
     })
-    return ser.length ? mkChart('loop-ip', 'Индикаторная кривая ΔP² = A·Q + B·Q², скв. ' + well, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('ΔP²', 'бар²', 'value', { from_zero: true }), ser) : null
+    return ser.length ? mkChart('loop-ip', 'Индикаторная кривая ΔP² = A·Q + B·Q², скв. ' + well, mkAxis('Дебит', 'тыс. м³/сут'), mkAxis('ΔP²', 'бар²', 'value', { from_zero: true }), ser.flatMap(line => [line, indicatorMarkers(line, rates)])) : null
   }, [its, well])
 
   const errs = useMemo(() => {
