@@ -23,37 +23,50 @@ VECTORS = {"WBHP": "забойное давление скважины", "WBP": 
 
 
 def find_files(path: str) -> Dict[str, str]:
-    """Файлы расчёта рядом с выбранным файлом или в RESULTS/<имя .data>."""
+    """Для .data ищем его запуск в RESULTS; для файлов результатов — одноимённые файлы рядом."""
     path = str(path or "").strip().strip('"')
     if not path:
         return {}
-    if os.path.isdir(path):
-        folder, base = path, None
-    else:
+    if is_data_path(path):
+        return _deck_results(path) if os.path.isfile(path) else {}
+    if not os.path.isdir(path):
         folder, name = os.path.split(path)
-        folder, base = folder or ".", os.path.splitext(name)[0]
-    if not os.path.isdir(folder):
-        return {}
-    found = _result_groups(folder)
-    if base is not None:
-        found = {k: v for k, v in found.items() if k == base.casefold()}
-    if not found and base is not None and os.path.splitext(path)[1].lower() == ".data":
-        results_dir = _child_directory(folder, "RESULTS")
-        if results_dir:
-            run = _child_directory(results_dir, base)
-            found = _result_groups(run) if run else {}
-            if base.casefold() in found:
-                return found[base.casefold()]
-            if len(found) == 1:
-                return next(iter(found.values()))
-            if not found:
-                return _result_groups(results_dir).get(base.casefold(), {})
-            return {}
+        folder = folder or "."
+        return _result_groups(folder).get(os.path.splitext(name)[0].casefold(), {}) if os.path.isdir(folder) else {}
+    found = _result_groups(path)
     if not found:
         return {}
     # при выборе папки берём модель, у которой есть сводка; из нескольких — первую по имени
-    pick = sorted(found, key=lambda s: ("SMSPEC" not in found[s] or "UNSMRY" not in found[s], s))[0]
+    pick = min(found, key=lambda s: ("SMSPEC" not in found[s] or "UNSMRY" not in found[s], s))
     return found[pick]
+
+
+def is_data_path(path: str) -> bool:
+    return os.path.splitext(path)[1].casefold() == ".data"
+
+
+def deck_results_folder(path: str) -> str:
+    """Ожидаемый путь к папке запуска tNavigator."""
+    folder, name = os.path.split(path)
+    return os.path.join(folder, "RESULTS", os.path.splitext(name)[0])
+
+
+def _deck_results(path: str) -> Dict[str, str]:
+    expected = deck_results_folder(path)
+    output, base = os.path.split(expected)
+    results_dir = _child_directory(os.path.dirname(output) or ".", os.path.basename(output))
+    if not results_dir:
+        return {}
+    run = _child_directory(results_dir, base)
+    groups = _result_groups(run) if run else {}
+    for key in (base.casefold(), "result"):
+        if key in groups:
+            return groups[key]
+    if len(groups) == 1:
+        return next(iter(groups.values()))
+    if not groups:
+        return _result_groups(results_dir).get(base.casefold(), {})
+    return {}
 
 
 def _result_groups(folder: str) -> Dict[str, Dict[str, str]]:
@@ -184,6 +197,9 @@ def well_gwc(path: str, dates: Optional[Sequence[dt.datetime]] = None, sgr: Opti
     from tnav_results import iter_restart_steps
 
     f = find_files(path)
+    if not f and is_data_path(path):
+        raise ValueError("Входной файл модели не найден: %s" % path if not os.path.isfile(path) else
+                         "Результаты модели не найдены. Ожидаемая папка: %s" % deck_results_folder(path))
     miss = [k for k in ("EGRID", "UNRST") if k not in f]
     if miss:
         raise ValueError("Для ГВК по скважинам нужны файлы EGRID и UNRST (не найдены: %s)" % ", ".join(miss))
@@ -240,6 +256,9 @@ def well_profile(path: str, date: dt.datetime, wells: Sequence[str], sgr: Option
     from tnav_results import iter_restart_steps
 
     f = find_files(path)
+    if not f and is_data_path(path):
+        raise ValueError("Входной файл модели не найден: %s" % path if not os.path.isfile(path) else
+                         "Результаты модели не найдены. Ожидаемая папка: %s" % deck_results_folder(path))
     miss = [k for k in ("EGRID", "UNRST") if k not in f]
     if miss:
         raise ValueError("Для планшета нужны файлы EGRID и UNRST (не найдены: %s)" % ", ".join(miss))

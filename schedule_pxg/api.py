@@ -1045,29 +1045,95 @@ def _model_path(request: Request, p: Project) -> str:
     return p.results.get(name, "") if name in p.scenarios else ""
 
 
+def _model_key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _result_anchor(files: dict) -> str:
+    return files.get("SMSPEC") or files.get("EGRID") or next(iter(files.values()), "")
+
+
+def _model_files(path: str) -> dict:
+    try:
+        return results.find_files(path)
+    except OSError:
+        return {}
+
+
 def _models_view(p: Project) -> dict:
     sel = p.models.get("selected", list(p.results.values()))
     folders = tnav_catalog.load_folders()
-    found = tnav_catalog.scan(folders)
-    anchors = {os.path.normcase(os.path.abspath(m["id"])) for m in found}
+    models = {_model_key(m["id"]): m for m in tnav_catalog.scan(folders)}
+    by_result = {}
+    for path in dict.fromkeys([*p.models.get("data_files", []), *(x for x in sel if results.is_data_path(x))]):
+        key = _model_key(path)
+        files = _model_files(path)
+        anchor = _result_anchor(files)
+        if anchor:
+            result_key = _model_key(anchor)
+            models.pop(result_key, None)
+            by_result[result_key] = key
+        entry = tnav_catalog.model_entry(path, files)
+        entry["data_path"] = path
+        entry["folder"] = os.path.dirname(anchor) if anchor else results.deck_results_folder(path)
+        if not files:
+            entry["problem"] = ("Файл модели не найден" if not os.path.isfile(path) else
+                                "Результаты модели не найдены")
+        if anchor:
+            entry["result_id"] = anchor
+        models[key] = entry
+
     selected, unavailable = set(), []
     for path in sel:
-        try:
-            files = results.find_files(path)
-        except OSError:
-            files = {}
-        if not files:
+        key = _model_key(path)
+        if key in models:
+            selected.add(key)
+            continue
+        files = _model_files(path)
+        anchor = _result_anchor(files)
+        if not anchor:
             unavailable.append(path)
             continue
-        anchor = files.get("SMSPEC") or files.get("EGRID") or next(iter(files.values()))
-        key = os.path.normcase(os.path.abspath(anchor))
+        result_key = _model_key(anchor)
+        key = by_result.get(result_key, result_key)
         selected.add(key)
-        if key not in anchors:
-            found.append(tnav_catalog.model_entry(anchor, files))
-            anchors.add(key)
-    for m in found:
-        m["selected"] = os.path.normcase(os.path.abspath(m["id"])) in selected
-    return {"folders": folders, "models": found, "unavailable": unavailable}
+        if key not in models:
+            models[key] = tnav_catalog.model_entry(anchor, files)
+    for key, model in models.items():
+        model["selected"] = key in selected
+    return {"folders": folders, "models": list(models.values()), "unavailable": unavailable}
+
+
+async def models_data_file(request: Request):
+    """Добавляет и сразу выбирает входной файл расчёта либо удаляет привязку."""
+    b = await request.json()
+    path = _clean(b.get("path"))
+    if not results.is_data_path(path):
+        return _err("Укажите полный путь к файлу модели с расширением .data")
+    path = os.path.abspath(path)
+    key = _model_key(path)
+    remove = b.get("remove") is True
+
+    def update():
+        if not remove and not os.path.isfile(path):
+            return _err("Входной файл модели не найден: %s" % path)
+        p = _project()
+        sel = p.models.get("selected", list(p.results.values()))
+        data_files = p.models.get("data_files", [])
+        anchor = _result_anchor(_model_files(path)) if not remove else ""
+        keep = [x for x in sel if _model_key(x) != key]
+        if anchor:
+            anchor_key = _model_key(anchor)
+            for x in keep[:]:
+                old_anchor = _result_anchor(_model_files(x))
+                if old_anchor and _model_key(old_anchor) == anchor_key:
+                    keep.remove(x)
+        p.models["data_files"] = [x for x in data_files if _model_key(x) != key] + ([] if remove else [path])
+        p.models["selected"] = keep + ([] if remove else [path])
+        p.save(FOLDER)
+        return JSONResponse(_models_view(p))
+
+    return await run_in_threadpool(update)
 
 
 async def models_get(request: Request):
@@ -1673,6 +1739,7 @@ def build_app() -> Starlette:
         Route("/api/adapt/export/options", adapt_export_options),
         Route("/api/models", models_get),
         Route("/api/models/folders", models_folders, methods=["POST"]),
+        Route("/api/models/data-file", models_data_file, methods=["POST"]),
         Route("/api/models/select", models_select, methods=["POST"]),
         Route("/api/models/rename", models_rename, methods=["POST"]),
         Route("/api/results", results_get),
