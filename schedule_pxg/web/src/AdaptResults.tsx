@@ -1,3 +1,4 @@
+import { indicatorMarkers } from './adaptIndicator'
 import { PeriodDate } from '../../../pxg_core/web-ui/PeriodDate'
 import { useEffect, useMemo, useState } from 'react'
 import { useTabFilter } from './TabFilter'
@@ -10,7 +11,6 @@ import type { Chart } from '../../../pxg_core/web-ui/chart/chartTypes'
 
 const fmt = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toLocaleString('ru-RU', { maximumFractionDigits: d }))
 const sci = (x: number | null | undefined) => (x === null || x === undefined ? '—' : x === 0 ? '0' : x.toExponential(2))
-const nn = (a: (number | null)[]) => a.map(v => v as number)
 
 type Key = keyof AdaptResultRow
 const COLS: [Key, string, (r: AdaptResultRow) => string][] = [
@@ -149,12 +149,15 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
     const byQ = yMode === 'dp2q'
     // ΔP²/Q: где Q=0 или нет данных, точка пропускается; ось X - Q в обоих режимах
     const yv = (xs: (number | null)[], ys: (number | null)[]) => byQ ? ys.map((y, i) => { const x = xs[i]; return y === null || x === null || x === 0 ? null : y / x }) : ys
+    const model = [
+      mkSeries({ name: 'модель до', slot: 5, dashed: true, x: cur.curve_q, y: yv(cur.curve_q, cur.curve_before) }),
+      mkSeries({ name: 'модель после', slot: 0, x: cur.curve_q, y: yv(cur.curve_q, cur.curve_after) }),
+    ]
     return mkChart('adapt-ip', 'Индикаторная кривая, скв. ' + cur.well + ' от ' + cur.date, mkAxis('Дебит', 'тыс. м³/сут'),
       byQ ? mkAxis('ΔP² / Q', 'бар²/(тыс. м³/сут)', 'value', { from_zero: true }) : mkAxis('ΔP² = Pпл² − Pз²', 'бар²', 'value', { from_zero: true }), [
-      mkSeries({ name: 'ГДИ', kind: 'points', slot: 3, x: nn(cur.q_gdi), y: yv(cur.q_gdi, cur.dp2_gdi) }),
-      mkSeries({ name: 'модель до', slot: 5, dashed: true, x: nn(cur.curve_q), y: yv(cur.curve_q, cur.curve_before) }),
-      mkSeries({ name: 'модель после', slot: 0, x: nn(cur.curve_q), y: yv(cur.curve_q, cur.curve_after) }),
-    ])
+        mkSeries({ name: 'ГДИ', kind: 'points', slot: 3, x: cur.q_gdi, y: yv(cur.q_gdi, cur.dp2_gdi) }),
+        ...model.flatMap(line => [line, indicatorMarkers(line, cur.q_gdi)]),
+      ])
   }, [cur, yMode])
   const hist = useMemo(() => {
     const m = METRIC[hMetric], hr = rangeOf(hPer, anchor)
