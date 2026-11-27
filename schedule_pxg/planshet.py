@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+from math import isfinite
 from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
@@ -72,7 +73,14 @@ def _key(well) -> str:
 
 
 def _num(v) -> Optional[float]:
-    return None if v is None or v != v else float(v)
+    if pd.isna(v):
+        return None
+    n = float(v)
+    return n if isfinite(n) else None
+
+
+def _text(v) -> str:
+    return "" if pd.isna(v) else str(v)
 
 
 _MODEL_CACHE: Dict[tuple, tuple] = {}
@@ -173,8 +181,8 @@ def observations(tables: Dict[str, pd.DataFrame], well: str) -> List[dict]:
     """Замеры скважины по датам: дата, сезон, статус, сколько пачек."""
     df = tables["gis_observations"]
     df = df[df["well"].map(_key) == _key(well)].sort_values("date")
-    return [{"date": str(r.date.date()) if r.date == r.date else "", "season": r.season, "status": r.status,
-             "packs": int(r.packs) if r.packs == r.packs else 0} for r in df.itertuples(index=False)]
+    return [{"date": str(r.date.date()) if pd.notna(r.date) else "", "season": _text(r.season), "status": _text(r.status),
+             "packs": int(_num(r.packs) or 0)} for r in df.itertuples(index=False)]
 
 
 def season_key(season, date: str) -> str:
@@ -190,11 +198,11 @@ def catalog(p: Project) -> dict:
     obs = load_tables(s["folder"])["gis_observations"]
     rows = []
     for r in obs.sort_values(["date"]).itertuples(index=False):
-        if r.date != r.date:
+        if pd.isna(r.date):
             continue
         d = str(r.date.date())
         rows.append({"well": _key(r.well), "date": d, "season": season_key(r.season, d),
-                     "packs": int(r.packs) if r.packs == r.packs else 0})
+                     "packs": int(_num(r.packs) or 0)})
     return {"wells": sorted({r["well"] for r in rows}, key=lambda w: (len(w), w)), "observations": rows}
 
 
@@ -213,10 +221,11 @@ def fact(tables: Dict[str, pd.DataFrame], well: str, date: str = "", alt_overrid
     packs = packs[(packs["well"].map(_key) == k) & (packs["date"] == when)]
     ivs = tables["gis_intervals"]
     ivs = ivs[(ivs["well"].map(_key) == k) & (ivs["date"] == when)]
+    alt_override = _num(alt_override)
     alt = alt_override
     if alt is None and len(packs):
         a = packs["altitude_m"].dropna()
-        alt = float(a.iloc[0]) if len(a) else None
+        alt = _num(a.iloc[0]) if len(a) else None
     if alt is None:
         notes.append("Нет альтитуды: отметки замера не посчитать, укажите её вручную")
     intervals = []
@@ -224,12 +233,13 @@ def fact(tables: Dict[str, pd.DataFrame], well: str, date: str = "", alt_overrid
         top, bot = abs_depth(_num(r.from_m), alt), abs_depth(_num(r.to_m), alt)
         if top is None or bot is None:
             continue
-        intervals.append({"top": top, "bottom": bot, "kg": _num(r.kg), "kp": _num(r.kp), "pack": r.pack, "status": r.status})
+        intervals.append({"top": top, "bottom": bot, "kg": _num(r.kg), "kp": _num(r.kp),
+                          "pack": _text(r.pack), "status": _text(r.status)})
     gvk = []
     for r in packs.itertuples(index=False):
         g = _num(r.gvk_abs_m)
-        gvk.append({"pack": r.pack, "gvk": g if alt_override is None else abs_depth(_num(r.gvk_depth_m), alt),
-                    "label": r.gvk_label if r.gvk_label == r.gvk_label else "",
+        gvk.append({"pack": _text(r.pack), "gvk": g if alt_override is None else abs_depth(_num(r.gvk_depth_m), alt),
+                    "label": _text(r.gvk_label),
                     "top": abs_depth(_num(r.top_m), alt), "bottom": abs_depth(_num(r.bottom_m), alt)})
     return {"well": k, "date": day, "dates": dates, "season": obs[dates.index(day)]["season"] if day in dates else "",
             "altitude": alt, "intervals": intervals, "packs": gvk, "notes": notes}

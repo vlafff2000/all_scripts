@@ -213,6 +213,7 @@ export default function Planshet() {
   const [built, setBuilt] = useState<CriterionCfg | null>(null)     // критерий, с которым построен планшет (легенда показывает его, а не текущий выбор)
   const [presets, setPresets] = useState<CriterionPreset[]>([])
   const [models, setModels] = useState<ModelEntry[]>([])
+  const [unavailable, setUnavailable] = useState<string[]>([])
   const [wellsOut, setWellsOut] = useState<WellOut[]>([])
   const [zFrom, setZFrom] = useState('')
   const [zTo, setZTo] = useState('')
@@ -229,7 +230,11 @@ export default function Planshet() {
   const loadCatalog = () => getPlanshetCatalog().then(setCatalog).catch(e => { setCatalog({ wells: [], observations: [] }); setMsg((e as Error).message) })
   useEffect(() => {
     getSources().then(v => { setGisFolder(v.sources.gis?.folder || ''); setPerfFile(v.sources.gis?.perf_file || ''); setPerfModel(v.sources.gis?.perf_model || ''); setPerfDataDir(v.sources.gis?.perf_data_dir || ''); if (v.sources.gis?.folder) loadCatalog() }).catch(() => undefined)
-    getModels().then(v => { setAllModels(v.models); setModels(v.models.filter(m => m.selected)) }).catch(e => setMsg((e as Error).message))
+    getModels().then(v => {
+      setAllModels(v.models)
+      setModels(v.models.filter(m => m.selected))
+      setUnavailable(v.unavailable || [])
+    }).catch(e => setMsg((e as Error).message))
     getCriterionPresets().then(r => setPresets(r.presets)).catch(() => undefined)
   }, [])
   const guard = async (f: () => Promise<void>) => { setBusy(true); setMsg(''); try { await f() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) } }
@@ -273,7 +278,7 @@ export default function Planshet() {
   const build = () => guard(async () => {
     if (!chosen.length) throw new Error('Выберите скважины и замеры')
     const f = await getPlanshetFacts(chosen.map(o => [o.well, o.date] as [string, string]), alts)
-    setNotes(Array.from(new Set([...f.notes, ...f.rows.flatMap(r => r.notes.map(n => 'Скв. ' + r.well + ': ' + n))])))
+    const buildNotes = new Set([...f.notes, ...f.rows.flatMap(r => r.notes.map(n => 'Скв. ' + r.well + ': ' + n))])
     // профили моделей: один запрос на модель и дату среза сразу для всех скважин этой даты (сетка читается один раз)
     const items: Item[] = f.rows.map(row => ({ fact: row, perfs: {}, profiles: [] }))
     const byDate: Record<string, Item[]> = {}
@@ -283,7 +288,11 @@ export default function Planshet() {
         try {
           const r = await getWellProfile(m.id, group.map(g => g.fact.well), day, '', crit)
           group.forEach(g => g.profiles.push({ model: m, p: r.rows.find(x => x.well === g.fact.well) || null, stepDate: r.step_date }))
-        } catch (e) { group.forEach(g => g.profiles.push({ model: m, p: null, stepDate: '', err: (e as Error).message })) }
+        } catch (e) {
+          const err = (e as Error).message
+          buildNotes.add(m.name + ' · ' + day + ' — ' + err)
+          group.forEach(g => g.profiles.push({ model: m, p: null, stepDate: '', err }))
+        }
       }
     }
     // перфорации каждой модели из её входных файлов (COMPDAT) на дату замера — чтобы сравнивать модели с разными интервалами
@@ -299,6 +308,7 @@ export default function Planshet() {
       if (!w) { w = { well: it.fact.well, perf: it.fact.perforation, items: [] }; out.push(w) }
       w.items.push(it)
     })
+    setNotes([...buildNotes])
     setBuilt(crit)
     setWellsOut(out)
   })
@@ -351,6 +361,11 @@ export default function Planshet() {
         <div className="row"><span className="small" style={{ width: 120 }}>Папка с .data:</span><span title={perfDataDir}>{perfDataDir ? tail(perfDataDir) : <span className="muted">как у базовой модели проекта или рядом с результатами</span>}</span>
           <button disabled={busy} onClick={pickPerfDataDir}>Выбрать папку…</button>{perfDataDir && <button disabled={busy} onClick={() => savePerfDataDir('')}>Сбросить</button>}</div>
         <p className="muted small">Модели: {models.length ? models.map(m => m.name).join(', ') : 'не отмечены — планшет покажет только факт'}</p>
+        {unavailable.map(path => <p key={path} className="warn small">Файлы выбранной модели не найдены по пути {path}</p>)}
+        {models.map(m => {
+          const missing = m.missing.filter(file => file === 'EGRID' || file === 'UNRST')
+          return missing.length > 0 && <p key={m.id} className="warn small">Для профиля модели «{m.name}» нужны файлы {missing.join(', ')}</p>
+        })}
       </section>
       <section className="card">
         <div className="row" style={{ flexWrap: 'wrap', alignItems: 'stretch' }}>
