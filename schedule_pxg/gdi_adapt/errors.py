@@ -15,3 +15,7 @@ class ModelDataError(AdaptError):
 
 class GdiDataError(AdaptError):
     """Проблема во входных данных ГДИ (нет колонок, нет подходящих режимов...)."""
+
+
+class PhaseMismatch(AdaptError):
+    """Фазовое состояние модели исключает однофазную адаптацию газового притока."""

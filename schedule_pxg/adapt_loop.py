@@ -19,7 +19,6 @@ from .gdi_adapt.snapshot import load_snapshots
 from .gdi_adapt.config import Config
 from .gdi_adapt.data_patch import _keywords
 from .gdi_adapt.mults import MultJournal
-from .gdi_adapt.pvt import PVT
 from .gdi_adapt.selection import chosen_for_kit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -203,7 +202,9 @@ def start(p, folder: str, opts: dict, sel, cfg: Config) -> dict:
                                metric=str(opts.get('metric') or 'dp2'), well_threshold=well_thr,
                                work_min=_num(opts.get('work_min'), float, 0.0), rest_min=_num(opts.get('rest_min'), float, 30.0), work_steps=_num(opts.get('work_steps'), int, 1))
     restart = _num(opts.get('restart'), int, None)
-    pvt = PVT.from_csv(os.path.join(HERE, 'gdi_adapt', 'pvt_default.csv'), warn=lambda *_: None)
+    from .gdi_adapt.model_phases import model_pvt
+
+    pvt = model_pvt(model, warn=lambda *_: None)
     journal = MultJournal(os.path.join(work, 'mult_journal.json'))
     lid = 'loop%d' % next(_ids)
     entry = {'jobs': []}

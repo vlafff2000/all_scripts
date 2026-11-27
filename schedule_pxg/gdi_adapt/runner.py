@@ -161,7 +161,14 @@ def run(cfg, project_dir: str, provider, progress: Optional[Callable[[int, int],
     try:
         cfg.to_json(os.path.join(run_dir, 'config_used.json'))
         log(f'Запуск адаптации: стратегия={cfg.strategy}, inflow={cfg.inflow}, цель={cfg.objective}')
-        pvt = PVT.from_csv(cfg.path('pvt_file', project_dir), warn=log)
+        from .model_phases import ModelCells, model_pvt
+
+        model = cfg.path('phase_model_file', project_dir) if cfg.phase_model_file else ''
+        pvt = model_pvt(model, warn=log) if model else PVT.from_csv(cfg.path('pvt_file', project_dir), warn=log)
+        cells = ModelCells(model, cfg.path('phase_results_path', project_dir) if cfg.phase_results_path else None) if model else None
+        log(f'Источник PVT: {model or cfg.pvt_file}')
+        if cells is None:
+            log('Файл модели не указан. Используется PVT из CSV, проверка по кубам недоступна.')
         gdis, skipped = load_gdi(cfg, cfg.path('gdi_file', project_dir), log=log)
         out.failures += skipped
         for w, why in skipped:
@@ -225,6 +232,8 @@ def run(cfg, project_dir: str, provider, progress: Optional[Callable[[int, int],
                         treat = 'настроена по забракованному ГДИ (политика adapt)'
                 else:
                     snap = provider(g0)
+                if cells is not None:
+                    cells.attach(snap, g0, cfg)
                 snaps[g0.key] = snap
                 plan.append(dict(g0=g0, tag=tag, qc=qc, treat=treat, qc_row=False,
                                  snap=snap, job=(g, snap, _job_pvt(pvt), cfg, bool(cfg.ci_jackknife and g.source == 'gdi'))))
@@ -272,6 +281,11 @@ def run(cfg, project_dir: str, provider, progress: Optional[Callable[[int, int],
                 out.failures.append((g0.wname, it['fail']))
                 log(it['log'])
 
+        phase_rows = [{**row, 'study': key} for key, snap in snaps.items()
+                      for row in getattr(snap, 'model_cells', ())]
+        if phase_rows:
+            from pandas import DataFrame
+            DataFrame(phase_rows).to_csv(os.path.join(run_dir, 'model_connections.csv'), index=False, sep=';', encoding='utf-8-sig')
         if cfg.save_snapshots and getattr(provider, 'live', False) and snaps:
             save_snapshots(snaps, os.path.join(run_dir, 'snapshots.pkl'))
         if out.results:

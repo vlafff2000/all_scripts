@@ -33,6 +33,7 @@ def bind(g: dict, model_index: int = 0) -> None:
                            'Какие имена в этом окне есть (пришлите этот список разработчику): %s' % (missing, hint, ', '.join(names[:150])))
     _A.clear()
     _A.update({n: g[n] for n in FUNCS + GRAPHS})
+    _A.update({n: g[n] for n in ('cwpr', 'copr') if n in g})
     _A['MODEL'] = g['get_all_models']()[model_index]
 
 
@@ -151,10 +152,19 @@ def extract_snapshot(wname: str, date) -> WellSnapshot:
     t_dt = _to_dt(getattr(t, 'date', None))
     shift = float((t_dt - gdi_dt).total_seconds() / 86400.0) if (t_dt is not None and gdi_dt is not None) else 0.0
     perf = data['perf']
-    return WellSnapshot(
+    snap = WellSnapshot(
         wname=wname, t_name=str(t.name), t_requested=str(t_req.name), substituted=substituted, **perf,
         wbp=data['wbp'], wgpr=data['wgpr'], wbhp=data['wbhp'],
         shift_days=shift, t_date=t_dt.strftime('%d.%m.%Y') if t_dt is not None else '')
+
+
+    for name in ('cwpr', 'copr'):
+        if name in _A:
+            try:
+                setattr(snap, name, _perf_pok(well, t, name))
+            except (KeyError, ValueError, TypeError, RuntimeError):
+                pass
+    return snap
 
 
 class TnavProvider:

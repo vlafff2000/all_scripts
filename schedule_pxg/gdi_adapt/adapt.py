@@ -21,7 +21,7 @@ from scipy.optimize import minimize
 
 from . import depression as dpm
 from . import physics as ph
-from .errors import AdaptError
+from .errors import AdaptError, PhaseMismatch
 from .gdi import GDI, b_negative, fit_ab_dp2
 
 
@@ -127,7 +127,9 @@ def _depression(strategy: str, wbp_model: float, p_res: np.ndarray, pbhp: np.nda
 
 
 def adapt_well(gdi: GDI, snap, pvt, cfg) -> AdaptResult:
-    notes: List[str] = list(gdi.notes)
+    from .model_phases import assess_snapshot
+
+    notes: List[str] = list(gdi.notes) + assess_snapshot(snap, pvt)
     problems: List[str] = []
 
     pdp_all = _depression(cfg.strategy, snap.wbp, gdi.wbp, gdi.bhp)
@@ -139,6 +141,12 @@ def adapt_well(gdi: GDI, snap, pvt, cfg) -> AdaptResult:
         notes.append(f'отброшено режимов с недопустимой депрессией: {int((~valid).sum())}')
     p_res, pbhp, q_std, pdp = gdi.wbp[valid], gdi.bhp[valid], gdi.q[valid], pdp_all[valid]
     n = len(q_std)
+    # Резко разные расходы при практически одинаковой депрессии нельзя описать одной кривой притока.
+    order = np.argsort(pdp)
+    for left, right in zip(order, order[1:]):
+        if pdp[right] - pdp[left] <= 0.1 and max(q_std[left], q_std[right]) >= 5 * min(q_std[left], q_std[right]):
+            raise PhaseMismatch(f'При разнице депрессий до 0,1 бар расходы режимов различаются в 5 раз и более '
+                                f'({q_std[left]:.0f} и {q_std[right]:.0f} м³/сут). Проверьте режимы и единицы ГДИ.')
 
     # ---- данные модели, не зависящие от параметров ----
     flow = ph.Inflow(snap, pvt, cfg.inflow)

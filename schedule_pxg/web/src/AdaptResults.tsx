@@ -206,6 +206,7 @@ export default function AdaptResults({ kit, config }: { kit: string; config: Par
           <a href={adaptFileUrl(view.run_dir, 'xlsx')} download><button>Excel-отчёт</button></a>
           <a href={adaptFileUrl(view.run_dir, 'csv')} download><button>results.csv</button></a>
           <a className="btn" href="#/adapt-export" title="Word с таблицей графиков, картинки, отдельные файлы">Экспорт графиков →</a>
+          {view.model_connections && <a href={adaptFileUrl(view.run_dir, 'connections')} download><button>Насыщенность и расходы по ячейкам</button></a>}
           <span className="muted small">Запуск: {view.run_dir}</span>
         </div>
 

@@ -56,6 +56,8 @@ class Config:
     all_dates: bool = False               # настроить на все исследования скважины (динамика), а не только на последнее
     include_sequential: bool = True       # при нескольких датах WPIMULT в include - приращение к уже заданному (WPIMULT в симуляторе накопительный)
     mult_journal: str = ''                # файл журнала мультов (JSON); пусто - журнал не ведётся, include как раньше
+    phase_results_path: str = ''          # привязанные результаты выбранного сценария
+    phase_model_file: str = ''            # .data для чтения PVT, перфораций и результатов расчёта
     data_file: str = ''                   # исходный .data модели: рядом с include пишется ПРАВКА КОПИИ с мультами на даты ГДИ (оригинал не меняется)
     snapshot_state: str = 'current'       # 'current' - снимки сняты с модели, где уже стоят прежние мульты (pi_mult - поправка); 'base' - с базовой (pi_mult - итог)
     ci_jackknife: bool = True             # оценить устойчивость WPIMULT (отбрасывание режимов по одному)
